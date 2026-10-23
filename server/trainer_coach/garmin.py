@@ -1,0 +1,103 @@
+"""Garmin Connect link via the unofficial python-garminconnect package (optional extra [garmin]).
+
+Tokens live in a directory created by `trainer-coach login-garmin`. Nothing here runs unless the
+page asks for an upload or HR zones. FIT files are always saved locally first.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+
+class GarminError(Exception):
+    pass
+
+
+DISABLED_MSG = "Garmin is disabled for this server (HW_GARMIN=off, or a non-default data dir without HW_GARMIN_TOKENS)"
+
+
+class GarminLink:
+    def __init__(self, tokens: Path, enabled: bool = True):
+        self.tokens = Path(tokens)
+        self.enabled = enabled
+        self._client = None
+
+    def linked(self) -> bool:
+        return self.enabled and self.tokens.exists() and any(self.tokens.iterdir())
+
+    def client(self):
+        if not self.enabled:
+            raise GarminError(DISABLED_MSG)
+        if self._client is None:
+            try:
+                from garminconnect import Garmin
+            except ImportError as e:  # pragma: no cover - depends on install
+                raise GarminError("garminconnect not installed: pip install 'trainer-coach[garmin]'") from e
+            g = Garmin()
+            g.login(str(self.tokens))
+            self._client = g
+        return self._client
+
+    def reset(self) -> None:
+        self._client = None
+
+    def zones(self) -> dict[str, Any]:
+        zs = self.client().get_heart_rate_zones()
+        z = next((x for x in zs if x.get("sport") == "CYCLING"), zs[0])
+        return {
+            "floors": [z[f"zone{i}Floor"] for i in range(1, 6)],
+            "max": z.get("maxHeartRateUsed"),
+            "lthr": z.get("lactateThresholdHeartRateUsed"),
+        }
+
+    def upload(self, path: Path) -> dict[str, Any]:
+        """Upload a FIT file. Returns {ok, duplicate?, activityId?, error?}."""
+        if not self.enabled:
+            return {"ok": False, "disabled": True, "error": DISABLED_MSG}
+        try:
+            res = self.client().upload_activity(str(path))
+        except Exception as e:  # noqa: BLE001 - report any failure to the page
+            msg = str(e)
+            self.reset()
+            if "409" in msg or "Duplicate" in msg:
+                return {"ok": True, "duplicate": True}
+            return {"ok": False, "error": msg[:300]}
+        info: dict[str, Any] = {"ok": True}
+        try:
+            body = res.json() if hasattr(res, "json") else res
+            det = body["detailedImportResult"]
+            if det.get("failures"):
+                f = det["failures"][0]
+                if any(m.get("code") == 202 for m in f.get("messages", [])):
+                    return {"ok": True, "duplicate": True}
+                return {"ok": False, "error": json.dumps(f)[:300]}
+            ok = det.get("successes") or []
+            if ok:
+                info["activityId"] = ok[0].get("internalId")
+        except Exception:  # noqa: BLE001 - response shape varies; upload already succeeded
+            pass
+        return info
+
+
+def interactive_login(tokens: Path) -> None:
+    """One-time sign-in. Saves tokens for the server. Prompts on the terminal."""
+    from getpass import getpass
+
+    try:
+        from garminconnect import Garmin
+    except ImportError:
+        raise SystemExit("garminconnect not installed: pip install 'trainer-coach[garmin]'")
+    try:
+        g = Garmin()
+        g.login(str(tokens))
+        print("Already signed in.")
+    except Exception:  # noqa: BLE001 - no or expired tokens
+        email = input("Garmin email: ").strip()
+        password = getpass("Garmin password: ")
+        g = Garmin(email=email, password=password, prompt_mfa=lambda: input("MFA code: ").strip())
+        g.login()
+        tokens.mkdir(parents=True, exist_ok=True)
+        g.client.dump(str(tokens))
+        print(f"Signed in. Tokens saved to {tokens}")
+    print("Account:", g.get_full_name())

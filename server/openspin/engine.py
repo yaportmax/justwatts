@@ -609,6 +609,8 @@ class RideEngine:
                         r.idle = 0
                         if r.auto:
                             r.paused = r.auto = False
+                elif r.auto:  # the simulated rider always pedals (e.g. after a resume)
+                    r.paused = r.auto = False
                 if not r.paused:
                     r.el += dt
                     self._record()

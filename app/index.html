@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenSpin</title>
 <link rel="stylesheet" href="css/app.css">
+<meta name="theme-color" content="#0c0e11">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body>
 <header>
@@ -27,6 +29,9 @@
 </header>
 
 <main>
+<div id="webNotice" class="panel warnbanner webonly" style="display:none" role="note">
+  <b>This browser has no Web Bluetooth.</b> Use Chrome or Edge on a computer or Android phone. iOS Safari cannot connect to trainers; on iPhone or iPad try the Bluefy browser. <b>Sim</b> works everywhere.
+</div>
 <!-- WORKOUTS -->
 <section class="view on" id="v-workouts">
   <div class="row" style="justify-content:space-between">
@@ -35,7 +40,7 @@
       <label class="f">Weight (kg)<input id="weight" type="number" min="0" max="200" step="0.1"></label>
       <label class="f">Beeps<select id="beeps"><option value="1">On</option><option value="0">Off</option></select></label>
       <label class="f">HR zone floors<input id="hrZones" placeholder="100,120,140,160,180" title="Lower bpm of Z1..Z5, synced from Garmin"></label>
-      <label class="f">Garmin upload<select id="autoGarmin"><option value="1">Auto</option><option value="0">Manual</option></select></label>
+      <label class="f serveronly">Garmin upload<select id="autoGarmin"><option value="1">Auto</option><option value="0">Manual</option></select></label>
     </div>
     <button id="btnJust" class="pri">Just ride</button>
   </div>
@@ -125,8 +130,8 @@
       <div><b id="sName" style="font-size:16px"></b> <span id="sDate" style="color:var(--dim);margin-left:8px"></span></div>
       <div class="row" style="gap:6px">
         <button id="sCard" title="Finish card to download or share">Share card</button>
-        <button id="sStrava">Upload to Strava</button>
-        <button id="sGarmin" class="pri">Upload to Garmin</button>
+        <button id="sStrava" class="serveronly">Upload to Strava</button>
+        <button id="sGarmin" class="pri serveronly">Upload to Garmin</button>
         <button id="sFit">.fit</button>
         <button id="sTcx">.tcx</button>
         <button id="sDel" class="danger">Delete</button>
@@ -196,7 +201,9 @@
     </div>
     <div class="panel">
       <h2>Uploads</h2>
-      <div class="row"><label class="f">Garmin<select id="autoGarmin2"><option value="1">Auto upload</option><option value="0">Manual</option></select></label><span class="hint" id="garminState"></span></div>
+      <div class="row serveronly"><label class="f">Garmin<select id="autoGarmin2"><option value="1">Auto upload</option><option value="0">Manual</option></select></label><span class="hint" id="garminState"></span></div>
+      <div class="hint webonly">Garmin: download the .fit from a ride and import it in Garmin Connect, or use the local OpenSpin app for automatic Garmin upload.</div>
+      <div class="serveronly">
       <h2>Strava</h2>
       <div class="hint">Use your own Strava API app (strava.com/settings/api, callback domain <b>localhost</b>). The secret stays in this computer's data folder.</div>
       <div class="row" style="margin-top:8px">
@@ -210,15 +217,25 @@
         <span class="hint" id="stState"></span>
       </div>
       <div class="warnbox" id="stDup">If Garmin Connect already syncs your rides to Strava, uploading to both creates duplicates on Strava. Keep one: Garmin upload with Garmin's Strava sync, or direct Strava upload.</div>
-      <div class="row" style="margin-top:8px">
-        <label class="f" style="flex:1">Public base URL for share cards (optional)<input id="shareBase" placeholder="https://example.com/openspin" style="width:100%"></label>
+      <details class="adv"><summary>Advanced</summary>
+        <div class="row" style="margin-top:8px">
+          <label class="f" style="flex:1">Public base URL for share cards (optional)<input id="shareBase" placeholder="https://example.com/openspin" style="width:100%"></label>
+        </div>
+        <div class="hint">Without it, Strava gets a text summary (NP, IF, TSS, intervals). Strava's API cannot attach photos; download the card from the ride summary to post it by hand.</div>
+      </details>
       </div>
-      <div class="hint">Without it, Strava gets a text summary (NP, IF, TSS, intervals). Strava's API cannot attach photos; download the card from the ride summary to post it by hand.</div>
+      <div class="hint webonly">Strava: download the .fit and upload it on strava.com, or use the local app for direct upload.</div>
+    </div>
+    <div class="panel webonly">
+      <h2>Your data</h2>
+      <div class="hint">Everything is stored in this browser. Export a backup now and then.</div>
+      <div class="row" style="margin-top:8px"><button id="bkExport">Export all data</button><button id="bkImport">Import backup</button><input type="file" id="bkFile" accept=".json" hidden></div>
     </div>
     <div class="panel">
       <h2>AI agent (optional)</h2>
       <div class="hint" id="agentState">OpenSpin works fully without an agent.</div>
-      <div style="margin-top:8px"><a href="connect.html" target="_blank">Connect an agent (Claude Code, Codex, any MCP client)</a></div>
+      <div style="margin-top:8px" class="serveronly"><a href="connect.html" target="_blank">Connect an agent (Claude Code, Codex, any MCP client)</a></div>
+
     </div>
   </div>
 </section>
@@ -231,7 +248,7 @@
     <div class="devlist" id="devList"></div>
     <div class="row" style="justify-content:space-between">
       <button id="devScan" class="pri">Scan</button>
-      <a href="browser.html" class="hint" title="Old mode: Bluetooth inside this browser tab">Use browser Bluetooth instead</a>
+      <a href="browser.html" class="hint serveronly" title="Old mode: Bluetooth inside this browser tab">Use browser Bluetooth instead</a>
     </div>
   </div>
 </div>

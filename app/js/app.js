@@ -5,6 +5,15 @@ import {
   fmtT, esc, ZONES, zoneIdx, HRZ_COLORS, hrZone as hrZoneOf, parseWorkout, toText, compile, stepAt, stepWatts,
   estimate, toZwo as toZwoCore, PRESETS, summarize, fitEncode, toTcx,
 } from './core.js';
+import { MODE } from './mode.js';
+
+// One codebase, two backends: the local python server, or (web build) an in-page backend with the
+// ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
+const WEB = MODE === 'web';
+const WB = WEB ? await import('./web/backend.js') : null;
+const B = WB ? await WB.createWebBackend(globalThis.__openspinWeb || {}) : null;  // tests pass { tickMs: 0, store }
+const F = B ? (p, o) => B.fetch(p, o) : (p, o) => globalThis.fetch(p, o);
+const ES = B ? WB.makeEventSource(B) : globalThis.EventSource;
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -16,7 +25,7 @@ const store = {
 // Settings live on the server (agents read the athlete profile there); localStorage is only migrated once.
 const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95], voiceMode: 'all' }, store.get('hw.settings', {}));
 let garminOn = false;
-const api = (path, body) => fetch(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const api = (path, body) => F(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const apiJson = async (path, body) => { const r = await api(path, body); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
 function saveSettings(keys) {
   store.set('hw.settings', settings);
@@ -25,7 +34,7 @@ function saveSettings(keys) {
 }
 async function loadSettings() {
   try {
-    const j = await (await fetch('/api/settings')).json();
+    const j = await (await F('/api/settings')).json();
     garminOn = !!j.garmin;
     if (j.stored) Object.assign(settings, j.settings);
     else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'voiceMode']);
@@ -236,13 +245,13 @@ function setOnline(on) {
 }
 let es = null;
 function connect() {
-  if (typeof EventSource === 'undefined') return poll();
-  es = new EventSource('/api/stream');
+  if (!ES) return poll();
+  es = new ES('/api/stream');
   es.onmessage = e => { try { onLive(JSON.parse(e.data)); } catch (err) { console.warn(err); } };
   es.onerror = () => setOnline(false);  // EventSource reconnects by itself
 }
 async function poll() {  // fallback when EventSource is unavailable
-  try { onLive(await (await fetch(`/api/live?ride=${rideId || ''}&n=${samples.length}`)).json()); } catch { setOnline(false); }
+  try { onLive(await (await F(`/api/live?ride=${rideId || ''}&n=${samples.length}`)).json()); } catch { setOnline(false); }
   setTimeout(poll, 1000);
 }
 
@@ -251,12 +260,13 @@ function setStatus() {
   const d = S?.devices || {}, mode = d.trainer || 'none';
   $('#tDot').className = 'dot ' + ({ ble: 'on', wait: 'wait', sim: 'sim' }[mode] || '');
   $('#tTxt').textContent = { none: 'Trainer off', wait: 'Connecting…', ble: d.trainer_name || 'Trainer', sim: 'Simulated' }[mode] || 'Trainer off';
-  $('#btnTrainer').textContent = mode === 'ble' || mode === 'wait' ? 'Disconnect' : 'Connect trainer';
-  $('#btnTrainer').className = mode === 'ble' || mode === 'wait' ? '' : 'pri';
+  const again = d.reconnect?.trainer;  // web: after a reload the browser needs one click to reconnect
+  $('#btnTrainer').textContent = mode === 'ble' || mode === 'wait' ? 'Disconnect' : again ? `Reconnect ${d.trainer_name || 'trainer'}` : 'Connect trainer';
+  $('#btnTrainer').className = mode === 'ble' || mode === 'wait' ? '' : again ? 'pri reconnect' : 'pri';
   $('#btnSim').textContent = mode === 'sim' ? 'Stop sim' : 'Sim';
   $('#hDot').className = 'dot ' + (d.hr ? 'on' : d.hr_waiting || d.hr_name ? 'wait' : '');
   $('#hTxt').textContent = d.hr ? `HR ${d.hr}` : d.hr_state === 'waiting_heartbeat' ? 'Strap found, waiting for heartbeat (wet the contacts)' : d.hr_state === 'connecting' ? 'HR connecting…' : d.hr_waiting || d.hr_name ? 'HR waiting' : 'HR off';
-  $('#btnHR').textContent = d.hr_name ? 'Disconnect HR' : 'Connect HR';
+  $('#btnHR').textContent = d.hr_name ? 'Disconnect HR' : d.reconnect?.hr ? 'Reconnect HR' : 'Connect HR';
 }
 let devKind = 'trainer';
 function openDevices(kind) {
@@ -285,10 +295,12 @@ $('#devClose').onclick = () => $('#devModal').classList.remove('on');
 $('#btnTrainer').onclick = () => {
   const m = S?.devices?.trainer;
   if (m === 'ble' || m === 'wait') apiJson('/api/devices', { action: 'disconnect', kind: 'trainer' }).catch(e => toast(e.message));
+  else if (WEB) apiJson('/api/devices', { action: 'choose', kind: 'trainer' }).catch(e => { if (!/cancel/i.test(e.message)) toast(e.message); });  // browser chooser
   else openDevices('trainer');
 };
 $('#btnHR').onclick = () => {
   if (S?.devices?.hr_name) apiJson('/api/devices', { action: 'disconnect', kind: 'hr' }).catch(e => toast(e.message));
+  else if (WEB) apiJson('/api/devices', { action: 'choose', kind: 'hr' }).catch(e => { if (!/cancel/i.test(e.message)) toast(e.message); });
   else openDevices('hr');
 };
 $('#btnSim').onclick = () => apiJson('/api/devices', { action: 'sim', kind: 'trainer', on: S?.devices?.trainer !== 'sim' }).catch(e => toast(e.message));
@@ -462,7 +474,7 @@ $('#coachMsg').parentElement.onclick = () => $('#coach').classList.toggle('open'
 /* ---------- history (server archive is the source of truth) ---------- */
 let rows = [];
 async function renderHistory() {
-  try { rows = (await (await fetch('/api/rides')).json()).rides; } catch { return; }
+  try { rows = (await (await F('/api/rides')).json()).rides; } catch { return; }
   const tb = $('#hist'); tb.innerHTML = '';
   $('#histEmpty').style.display = rows.length ? 'none' : '';
   document.body.classList.toggle('noagent', !rows.some(r => r.agent_wakes > 0));
@@ -474,7 +486,7 @@ async function renderHistory() {
   renderTrends();
 }
 async function renderTrends() {
-  let t; try { t = await (await fetch('/api/trends?weeks=12')).json(); } catch { return; }
+  let t; try { t = await (await F('/api/trends?weeks=12')).json(); } catch { return; }
   const [c, w, h] = fit($('#trendChart')), wk = t.weeks, max = Math.max(50, ...wk.map(x => x.tss));
   const bw = w / wk.length;
   c.font = '11px system-ui'; c.textAlign = 'center'; c.textBaseline = 'bottom';
@@ -504,7 +516,7 @@ async function finishedRide(f) {
 let openId = null, openRide = null;
 async function openSummary(id) {
   let r, d;
-  try { [r, d] = await Promise.all([(await fetch('/api/rides/' + id)).json(), (await fetch('/api/rides/' + id + '/detail')).json()]); } catch { return; }
+  try { [r, d] = await Promise.all([(await F('/api/rides/' + id)).json(), (await F('/api/rides/' + id + '/detail')).json()]); } catch { return; }
   if (!r?.samples) return;
   openId = id; openRide = r; const m = d.summary;
   $('#summary').style.display = ''; $('#sName').textContent = r.name;
@@ -586,7 +598,11 @@ $('#sGarmin').onclick = () => {
 };
 $('#sClose').onclick = () => { $('#summary').style.display = 'none'; openId = null; };
 $('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); $('#summary').style.display = 'none'; openId = null; renderHistory(); toast('Deleted (kept in rides/trash)'); };
-const fileLink = ext => { if (!openId) return; const a = document.createElement('a'); a.href = `/api/rides/${openId}/${ext}`; a.download = ''; a.click(); };
+const fileLink = async ext => {
+  if (!openId) return;
+  if (WEB) { const data = await B.exportFile(openId, ext); if (data) download(fileBaseOf(openRide) + '.' + ext, data, ext === 'fit' ? 'application/octet-stream' : 'application/xml'); return; }
+  const a = document.createElement('a'); a.href = `/api/rides/${openId}/${ext}`; a.download = ''; a.click();
+};
 $('#sFit').onclick = () => fileLink('fit');
 $('#sTcx').onclick = () => fileLink('tcx');
 function download(name, data, type) {
@@ -609,7 +625,7 @@ async function renderSettings() {
   $('#gImport').style.display = garminOn ? '' : 'none';
   $('#garminState').textContent = garminOn ? '' : 'Garmin is off on this server (see README: Garmin upload)';
   $('#shareBase').value = settings.shareBaseUrl || '';
-  try { strava = await (await fetch('/api/strava/status')).json(); } catch { strava = {}; }
+  try { strava = await (await F('/api/strava/status')).json(); } catch { strava = {}; }
   $('#stId').value = strava.client_id || '';
   $('#stSecret').value = ''; $('#stSecret').placeholder = strava.has_secret ? 'saved (hidden)' : 'paste once';
   $('#stConnect').textContent = strava.connected ? 'Reconnect Strava' : 'Connect Strava';
@@ -639,7 +655,10 @@ $('#stSave').onclick = async () => {
   catch (e) { toast('Strava: ' + e.message); }
   $('#stSecret').value = ''; renderSettings();
 };
-$('#stConnect').onclick = () => { location.href = '/api/strava/connect'; };
+$('#stConnect').onclick = async () => {
+  if (!WEB) { location.href = '/api/strava/connect'; return; }
+  try { location.href = (await apiJson('/api/strava/connect', {})).url; } catch (e) { toast('Strava: ' + e.message); }
+};
 $('#gImport').onclick = async () => {
   try {
     const j = await apiJson('/api/garmin/import', { force: true });
@@ -652,7 +671,7 @@ $('#gImport').onclick = async () => {
 /* ---------- share card (rendered here; Strava's API cannot take photos) ---------- */
 async function shareCard() {
   const r = openRide; if (!r) return null;
-  const d = await (await fetch(`/api/rides/${r.id}/detail`)).json(), m = d.summary;
+  const d = await (await F(`/api/rides/${r.id}/detail`)).json(), m = d.summary;
   const W = 1080, H = 1080, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const c = cv.getContext('2d');
   c.fillStyle = '#0c0e11'; c.fillRect(0, 0, W, H);
@@ -680,10 +699,22 @@ $('#sCard').onclick = async () => {
   $('#cardDl').onclick = () => { const a = document.createElement('a'); a.href = url; a.download = fileBaseOf(openRide) + '.png'; a.click(); };
   $('#cardShare').style.display = navigator.canShare?.({ files: [new File([blob], 'ride.png', { type: 'image/png' })] }) ? '' : 'none';
   $('#cardShare').onclick = () => navigator.share({ files: [new File([blob], 'ride.png', { type: 'image/png' })], title: openRide.name }).catch(() => {});
-  fetch(`/api/rides/${openRide.id}/card`, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'image/png' }, body: blob }).catch(() => {});
+  F(`/api/rides/${openRide.id}/card`, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'image/png' }, body: blob }).catch(() => {});
 };
 $('#cardClose').onclick = () => $('#cardModal').classList.remove('on');
 const fileBaseOf = r => `${new Date(r.start || r.samples[0][0]).toISOString().slice(0, 16).replace(/[:T]/g, '-')} ${r.name.replace(/[^\w\- ]+/g, '')}`;
+
+/* ---------- web build only: backup ---------- */
+if (WEB) {
+  document.body.classList.add('web');
+  if (!navigator.bluetooth) $('#webNotice').style.display = '';
+  $('#bkExport').onclick = async () => { const j = await (await F('/api/backup')).json(); download(`openspin-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(j), 'application/json'); };
+  $('#bkImport').onclick = () => $('#bkFile').click();
+  $('#bkFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return; e.target.value = '';
+    try { const j = await apiJson('/api/restore', JSON.parse(await f.text())); toast(`Imported ${j.rides} rides`); await loadSettings(); renderHistory(); } catch (err) { toast('Import failed: ' + err.message); }
+  };
+}
 
 /* ---------- nav + settings + init ---------- */
 function show(v) {
@@ -717,7 +748,7 @@ $('#hrZones').onchange = e => {
 async function syncHrZones() {
   if (settings.hrZonesSrc === 'manual' || !garminOn) return;
   try {
-    const j = await (await fetch('/api/garmin/zones')).json();
+    const j = await (await F('/api/garmin/zones')).json();
     if (j.floors?.length === 5) { settings.hrZones = j.floors; settings.hrMax = j.max; settings.hrZonesSrc = 'garmin'; saveSettings(['hrZones', 'hrMax', 'hrZonesSrc']); showSettings(); }
   } catch {}
 }
@@ -725,9 +756,9 @@ $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3
 renderVoice(); setStatus();
 loadSettings().then(syncHrZones);
 migrateLocalRides().then(renderHistory);
-fetch('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() => {});
+F('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() => {});
 connect();
 const setHH = () => document.documentElement.style.setProperty('--hh', document.querySelector('header').offsetHeight + 'px');
 setHH();
 window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) renderLib(); if (V) renderRide(); });
-window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S };
+window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE };

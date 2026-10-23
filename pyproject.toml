@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trainer-coach"
+version = "0.1.0"
+description = "Let an AI agent coach your smart-trainer ride: web app (Web Bluetooth FTMS), local server, CLI and MCP server."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Hub Workouts contributors" }]
+keywords = ["cycling", "smart trainer", "ftms", "erg", "mcp", "ai agent", "coaching", "zwift hub"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+]
+dependencies = []
+
+[project.optional-dependencies]
+ble = ["bleak>=0.22"]
+garmin = ["garminconnect>=0.2.19"]
+mcp = ["mcp>=1.2"]
+voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.24"]
+all = ["bleak>=0.22", "garminconnect>=0.2.19", "mcp>=1.2", "faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.24"]
+dev = ["pytest>=8", "fitdecode>=0.10", "mcp>=1.2"]
+
+[project.scripts]
+trainer-coach = "trainer_coach.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["server/trainer_coach"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"app" = "trainer_coach/app"
+"docs/COACHING.md" = "trainer_coach/COACHING.md"
+
+[tool.hatch.build.targets.sdist]
+include = ["server", "app", "docs", "tests", "examples", "README.md", "LICENSE", "AGENTS.md", "start.cmd", "start.sh"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["server"]
+addopts = "-q"

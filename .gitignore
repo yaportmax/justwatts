@@ -1,0 +1,25 @@
+# ride data and coach logs (personal)
+rides/
+coach/
+*.fit
+*.tcx
+data/
+# credentials
+token
+.garminconnect/
+*.token
+.env
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

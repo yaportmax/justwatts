@@ -224,10 +224,13 @@ function usageText(wakes, cues, u) {
 }
 function renderMeter() {
   const a = S?.ride?.agent, el = $('#agentMeter');
-  el.style.display = a && S.ride.started && S.agent?.connected ? '' : 'none';
-  if (a) el.textContent = usageText(a.wakes, a.local_cues, a.usage);
+  // only once an agent has connected during this ride; built-in cues are counted in the ride summary
+  const on = !!(a?.seen && S.ride.started);
+  el.style.display = on ? '' : 'none'; el.setAttribute('aria-hidden', on ? 'false' : 'true');
+  if (a?.seen) el.textContent = usageText(a.wakes, 0, a.usage);
 }
 function setOnline(on) {
+  $('#srvState').setAttribute('aria-hidden', on ? 'true' : 'false');
   if (on === online) return; online = on;
   $('#srvState').style.display = on ? 'none' : '';
 }
@@ -438,6 +441,8 @@ function coachUpdate() {
   if (top) {
     $('#coachMsg').textContent = top.msg; $('#coachMsg').title = top.msg;
     $('#coachPrev').innerHTML = ms.slice(0, -1).reverse().map(x => `<div title="${esc(x.msg)}">${hm(x.ts)} · ${esc(x.msg)}</div>`).join('');
+  } else {  // new ride: nothing left over from the last one
+    $('#coachMsg').textContent = 'Watching'; $('#coachMsg').title = ''; $('#coachPrev').innerHTML = '';
   }
   // only speak and flash messages that arrive while the page is open, never replay old ones
   const newest = top?.seq ?? 0;
@@ -463,7 +468,7 @@ async function renderHistory() {
   document.body.classList.toggle('noagent', !rows.some(r => r.agent_wakes > 0));
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] || '–'}</td><td class="num agentcol" title="agent wakes / tokens">${r.agent_wakes ?? '–'}${r.agent_tokens ? ' · ' + kfmt(r.agent_tokens) : ''}</td>`;
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] ?? '–'}</td><td class="num agentcol" title="agent wakes / tokens">${r.agent_wakes ?? '–'}${r.agent_tokens ? ' · ' + kfmt(r.agent_tokens) : ''}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
   renderTrends();
@@ -504,7 +509,9 @@ async function openSummary(id) {
   openId = id; openRide = r; const m = d.summary;
   $('#summary').style.display = ''; $('#sName').textContent = r.name;
   $('#sDate').textContent = new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const st = [['Time', fmtT(m.time_s)], ['Avg power', m.avg_w + ' W'], ['NP', m.np + ' W'], ['Max', m.max_w + ' W'], ['IF', m.if.toFixed(2)], ['TSS', m.tss], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–'], ['Best 1/5/20', `${d.best['1m']}/${d.best['5m'] || '–'}/${d.best['20m'] || '–'}`], ['Distance', m.distance_km.toFixed(1) + ' km']];
+  const st = [['Time', fmtT(m.time_s)], ['Avg power', m.avg_w + ' W'], ['NP', m.np + ' W'], ['Max', m.max_w + ' W'], ['IF', m.if.toFixed(2)], ['TSS', m.tss], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–'], ['Best 1/5/20', ['1m', '5m', '20m'].map(k => d.best[k] ?? '–').join('/')]];
+  if (!settings.hideVirtualDistance) st.push(['Virtual distance', m.distance_km.toFixed(1) + ' km']);
+  if (d.agent?.local_cues) st.push(['Built-in coach cues', d.agent.local_cues]);
   if (d.agent?.wakes > 0) st.push(['Coach usage', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
   $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   let cw = null;
@@ -593,6 +600,9 @@ let strava = {};
 async function renderSettings() {
   const lc = { ...LC_DEFAULTS, ...(settings.localCoach || {}) }, cr = settings.cadRange || [85, 95];
   $('#cadLo').value = cr[0]; $('#cadHi').value = cr[1]; $('#hrMax').value = settings.hrMax || '';
+  $('#sFtp').value = settings.ftp; $('#sWeight').value = settings.weight || '';
+  $('#sHrZones').value = settings.hrZones ? settings.hrZones.join(',') : '';
+  $('#virtDist').value = settings.hideVirtualDistance ? '1' : '0';
   $$('[data-lc]').forEach(b => { b.checked = !!lc[b.dataset.lc]; });
   $('#lcAuto').value = lc.auto_adjust; $('#afterWk').value = settings.afterWorkout || 'hold';
   $('#autoGarmin2').value = settings.autoGarmin ? '1' : '0'; $('#autoGarmin2').disabled = !garminOn;
@@ -609,6 +619,11 @@ async function renderSettings() {
   $('#stDup').classList.toggle('hot', !!(settings.autoGarmin && settings.autoStrava));
   $('#agentState').textContent = S?.agent?.connected ? 'An agent is connected and coaching.' : 'OpenSpin works fully without an agent. The built-in coach handles cues and safe adjustments.';
 }
+// Settings > Athlete and the Workouts tab shortcuts edit the same values
+$('#sFtp').onchange = e => { $('#ftp').value = e.target.value; $('#ftp').onchange({ target: $('#ftp') }); renderSettings(); };
+$('#sWeight').onchange = e => { $('#weight').value = e.target.value; $('#weight').onchange({ target: $('#weight') }); renderSettings(); };
+$('#sHrZones').onchange = e => { $('#hrZones').value = e.target.value; $('#hrZones').onchange({ target: $('#hrZones') }); renderSettings(); };
+$('#virtDist').onchange = e => { settings.hideVirtualDistance = e.target.value === '1'; saveSettings(['hideVirtualDistance']); };
 const setLC = patch => { settings.localCoach = { ...(settings.localCoach || {}), ...patch }; saveSettings(['localCoach']); };
 $$('[data-lc]').forEach(b => b.onchange = () => setLC({ [b.dataset.lc]: b.checked }));
 $('#lcAuto').onchange = e => setLC({ auto_adjust: e.target.value });

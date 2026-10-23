@@ -18,11 +18,13 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # never 
 
 
 class CoachClient:
-    def __init__(self, cfg: Config | None = None, base_url: str | None = None, token: str | None = None, timeout: float = 5):
+    def __init__(self, cfg: Config | None = None, base_url: str | None = None, token: str | None = None, timeout: float = 5,
+                 agent: bool = False):
         self.cfg = cfg or Config()
         self.base_url = (base_url or self.cfg.base_url).rstrip("/")
         self._token = token
         self.timeout = timeout
+        self.agent = agent  # identifies the caller as a coaching agent (MCP), not a CLI user
 
     @property
     def token(self) -> str:
@@ -38,6 +40,8 @@ class CoachClient:
             req.add_header("Content-Type", "application/json")
         if auth:
             req.add_header("Authorization", f"Bearer {self.token}")
+            if self.agent:
+                req.add_header("X-OpenSpin-Client", "agent")
         try:
             with _OPENER.open(req, timeout=self.timeout) as r:
                 return json.loads(r.read() or b"null")

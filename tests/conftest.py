@@ -29,8 +29,11 @@ from openspin.config import Config  # noqa: E402
 from openspin.server import make_server  # noqa: E402
 
 
+RESERVED_PORTS = {8765, 8780}  # the live app and the reviewer's test server: never bind them
+
+
 def free_port(start=8770, end=8798) -> int:
-    for p in range(start, end):
+    for p in (x for x in range(start, end) if x not in RESERVED_PORTS):
         with socket.socket() as s:
             try:
                 s.bind(("127.0.0.1", p))

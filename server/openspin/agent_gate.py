@@ -200,7 +200,7 @@ class AgentGate:
         deadline = time.monotonic() + max(0.0, min(wait, 120))
         with self.lock:
             while True:
-                self.agent_seen = time.time()
+                self.agent_seen = time.time()  # server.mark_agent() also tags the current ride
                 got = [b for b in self.batches if b["seq"] > seq]
                 left = deadline - time.monotonic()
                 if got or left <= 0:

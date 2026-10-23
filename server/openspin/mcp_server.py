@@ -36,13 +36,15 @@ _client: CoachClient | None = None
 def client() -> CoachClient:
     global _client
     if _client is None:
-        _client = CoachClient()
+        _client = CoachClient(agent=True)
     return _client
 
 
 def set_client(c: CoachClient | None) -> None:
     """Point the tools at a specific server (tests)."""
     global _client
+    if c is not None:
+        c.agent = True
     _client = c
 
 

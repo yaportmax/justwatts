@@ -228,7 +228,8 @@ class Handler(SimpleHTTPRequestHandler):
     def trusted(self) -> bool:
         origin = self.headers.get("Origin")
         if self.token_ok():
-            self.server.agent_seen = time.time()
+            if self.headers.get("X-OpenSpin-Client") == "agent" or urlsplit(self.path).path in ("/api/agent-events", "/api/agent-usage"):
+                self.server.mark_agent()
             # a token caller is a local process, never a web page from another origin
             return origin is None or origin in self.origins()
         # The page itself: same origin plus a custom header (forces a CORS preflight we never answer).
@@ -597,7 +598,7 @@ class Handler(SimpleHTTPRequestHandler):
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
                      "hrZonesSrc": None, "cadRange": [85, 95], "voiceMode": "all", "afterWorkout": "hold",
                      "agentGate": {}, "localCoach": {}, "ftpSrc": None, "profileImported": False,
-                     "autoStrava": False, "shareBaseUrl": ""}
+                     "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False}
 AGENT_RECENT_S = 300  # an agent (or CLI tool) used the token this recently: show agent-only UI
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "turns")
 VOICE_MODES = ("all", "important", "silent")
@@ -659,6 +660,12 @@ class CoachServer(ThreadingHTTPServer):
         if getattr(self, "gate", None) is not None:
             self.gate.on_event(line[:400])
             self.local.on_event(line[:400])
+
+    def mark_agent(self) -> None:
+        self.agent_seen = time.time()
+        r = self.engine.ride
+        if r is not None and r.started:
+            r.agent_seen = True
 
     def agent_connected(self) -> bool:
         seen = max(self.agent_seen or 0, self.gate.agent_seen or 0)

@@ -58,6 +58,11 @@ def best_mean(p: list[float], w: int) -> float:
     return best / w
 
 
+def best_efforts(P: list[float]) -> dict:
+    """Best mean power for 1/5/20 min; None when the ride is shorter than the window (never 0)."""
+    return {f"{w // 60}m": (round(best_mean(P, w)) if len(P) >= w else None) for w in BEST_WINDOWS}
+
+
 def summarize(r: dict) -> dict:
     """Same numbers as core.js summarize()."""
     s = r["samples"]
@@ -145,7 +150,7 @@ def detail(r: dict, hr_floors: list | None = None, meta: dict | None = None) -> 
                     "max_w": m["maxP"], "if": round(m["IF"], 2), "tss": round(m["tss"]), "kJ": round(m["kJ"]),
                     "avg_hr": round(m["avgHR"]) or None, "max_hr": m["maxHR"] or None, "avg_cad": round(m["avgC"]),
                     "distance_km": round(m["dist"] / 1000, 2)},
-        "best": {f"{w // 60}m": round(best_mean(P, w)) for w in BEST_WINDOWS},
+        "best": best_efforts(P),
         "power_zones_s": dict(zip([z for _, z in ZONES], m["zt"])),
         "hr_zones_s": dict(zip([f"Z{i + 1}" for i in range(5)], hz)) if hr_floors else None,
         "laps": laps(r),
@@ -166,7 +171,7 @@ def ride_meta_row(r: dict, meta: dict | None = None) -> dict:
             "samples": len(r["samples"]), "source": r.get("source"), "ftp": r.get("ftp"), "test": bool(r.get("test")),
             "time_s": m["dur"], "avg_w": round(m["avgP"]), "np": round(m["np"]), "tss": round(m["tss"]),
             "if": round(m["IF"], 2), "kJ": round(m["kJ"]), "avg_hr": round(m["avgHR"]) or None,
-            "best": {f"{w // 60}m": round(best_mean(P, w)) for w in BEST_WINDOWS},
+            "best": best_efforts(P),
             "ftp_estimate": js_round(m["best60"] * 0.75) if r.get("test") and m["best60"] else None,
             "garmin": (meta or {}).get("garmin"), "strava": (meta or {}).get("strava"),
             "agent_wakes": (r.get("agent") or {}).get("wakes"), "local_cues": (r.get("agent") or {}).get("local_cues"),

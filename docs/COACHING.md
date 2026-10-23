@@ -36,7 +36,7 @@ Do not poll `get_ride_status` on a timer: that is what made a single ride cost ~
   cost_usd, model)`. The athlete sees a live meter in the ride header, and History keeps it per
   ride. Without reports the meter shows the server's wake count only.
 
-Without MCP, the same data is in `<data>/coach/events.log` (`trainer-coach tail -f`) and
+Without MCP, the same data is in `<data>/coach/events.log` (`openspin tail -f`) and
 `GET /api/state`. Commands go to `POST /api/coach` (see PROTOCOL.md).
 
 ## Reading telemetry
@@ -140,14 +140,14 @@ unless replying to a FEEL press.
 
 The MCP tools enforce these and refuse with a reason; follow the same rules over raw HTTP.
 
-- Max change per command: 15% FTP (`TC_MAX_CHANGE_PCT`). Larger moves take several commands, 60 s apart.
-- Edits: at most 30 min added per edit (`TC_MAX_INSERT_S`), steps lengthened by at most 10 min per edit
-  (`TC_MAX_EXTEND_S`), every new step under the FTP ceiling. Only the current and later steps can change.
-- Ceiling: 150% FTP (`TC_MAX_PCT`) unless the step was already planned higher.
-- Raising any step above 105% FTP (`TC_FEEL_GATE_PCT`) needs a FEEL HARDER or GOOD from the athlete
-  in the last 10 min (`TC_FEEL_WINDOW_S`). Ask for it with a message first.
+- Max change per command: 15% FTP (`OPENSPIN_MAX_CHANGE_PCT`). Larger moves take several commands, 60 s apart.
+- Edits: at most 30 min added per edit (`OPENSPIN_MAX_INSERT_S`), steps lengthened by at most 10 min per edit
+  (`OPENSPIN_MAX_EXTEND_S`), every new step under the FTP ceiling. Only the current and later steps can change.
+- Ceiling: 150% FTP (`OPENSPIN_MAX_PCT`) unless the step was already planned higher.
+- Raising any step above 105% FTP (`OPENSPIN_FEEL_GATE_PCT`) needs a FEEL HARDER or GOOD from the athlete
+  in the last 10 min (`OPENSPIN_FEEL_WINDOW_S`). Ask for it with a message first.
 - Never raise while paused. Lowering is always allowed.
-- Do not change targets if state is older than 15 s (`TC_STALE_S`): the page is closed or asleep.
+- Do not change targets if state is older than 15 s (`OPENSPIN_STALE_S`): the page is closed or asleep.
 - Ramp FTP tests (`test: true`) are not coached: do not change targets, messages only.
 - Lowering is the safe direction. When unsure, lower or do nothing.
 - Chest pain, dizziness or any athlete report of feeling unwell: tell them to stop. You are not a

@@ -13,18 +13,20 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
-# Never let a test fall back to the default port or the real data dir.
-_SCRATCH = Path(tempfile.mkdtemp(prefix="trainer-coach-tests-"))
-os.environ["HW_PORT"] = "8799"
-os.environ["HW_DATA"] = str(_SCRATCH / "default-data")
-os.environ["HW_GARMIN_TOKENS"] = str(_SCRATCH / "no-garmin")
-os.environ.pop("HW_TOKEN", None)
-os.environ["HW_GARMIN"] = "off"  # tests must never reach a real Garmin account
-os.environ["HW_BLE"] = "off"     # ...or real Bluetooth hardware
+# Never let a test fall back to the default port or the real data dir (or legacy HW_* settings).
+for _k in [k for k in os.environ if k.startswith(("HW_", "OPENSPIN_", "TC_"))]:
+    del os.environ[_k]
+_SCRATCH = Path(tempfile.mkdtemp(prefix="openspin-tests-"))
+os.environ["OPENSPIN_PORT"] = "8799"
+os.environ["OPENSPIN_DATA"] = str(_SCRATCH / "default-data")
+os.environ["OPENSPIN_GARMIN_TOKENS"] = str(_SCRATCH / "no-garmin")
+os.environ.pop("OPENSPIN_TOKEN", None)
+os.environ["OPENSPIN_GARMIN"] = "off"  # tests must never reach a real Garmin account
+os.environ["OPENSPIN_BLE"] = "off"     # ...or real Bluetooth hardware
 
-from trainer_coach.client import CoachClient  # noqa: E402
-from trainer_coach.config import Config  # noqa: E402
-from trainer_coach.server import make_server  # noqa: E402
+from openspin.client import CoachClient  # noqa: E402
+from openspin.config import Config  # noqa: E402
+from openspin.server import make_server  # noqa: E402
 
 
 def free_port(start=8770, end=8798) -> int:

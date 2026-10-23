@@ -2,7 +2,7 @@
 
 Bluetooth runs in its own asyncio thread via `bleak` (optional extra [ble]). The hub remembers the
 last devices in <data>/devices.json and reconnects to them at startup and after any drop, forever,
-until the user disconnects. Set HW_BLE=off to disable Bluetooth entirely (tests do).
+until the user disconnects. Set OPENSPIN_BLE=off to disable Bluetooth entirely (tests do).
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from . import ftms
 
 
 def ble_enabled_by_env() -> bool:
-    return os.environ.get("HW_BLE", "on").lower() not in ("off", "0", "false", "no")
+    from .config import env
+    return (env("BLE", "on") or "on").lower() not in ("off", "0", "false", "no")
 
 
 class Readings:
@@ -60,11 +61,11 @@ class DeviceHub:
     def ble_module(self):
         if self._ble is None:
             if not self.ble_enabled:
-                raise RuntimeError("Bluetooth is disabled (HW_BLE=off)")
+                raise RuntimeError("Bluetooth is disabled (OPENSPIN_BLE=off)")
             try:
                 import bleak
             except ImportError as e:
-                raise RuntimeError("bleak not installed: pip install 'trainer-coach[ble]'") from e
+                raise RuntimeError("bleak not installed: pip install 'openspin[ble]'") from e
             self._ble = bleak
         return self._ble
 
@@ -106,7 +107,7 @@ class DeviceHub:
 
     def _run(self, coro, timeout: float):
         if not self._loop:
-            raise RuntimeError("Bluetooth is disabled (HW_BLE=off)" if not self.ble_enabled else "BLE thread not started")
+            raise RuntimeError("Bluetooth is disabled (OPENSPIN_BLE=off)" if not self.ble_enabled else "BLE thread not started")
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout)
 
     # ---------- persistence ----------

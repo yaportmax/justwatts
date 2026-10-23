@@ -1,8 +1,8 @@
 """Headless simulator end to end, and the CLI subcommands, against a test server."""
 import json
 
-from trainer_coach.cli import main
-from trainer_coach.simulator import Simulator
+from openspin.cli import main
+from openspin.simulator import Simulator
 
 
 def test_simulated_ride_full_loop(srv):

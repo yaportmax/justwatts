@@ -258,7 +258,7 @@ class Handler(SimpleHTTPRequestHandler):
         p = url.path
         srv = self.server
         if p == "/api/health":
-            return self.send_json(200, {"ok": True, "app": "trainer-coach", "version": __version__,
+            return self.send_json(200, {"ok": True, "app": "openspin", "version": __version__,
                                         "garmin": srv.garmin_enabled, "ble": srv.hub.ble_enabled})
         if p == "/api/stream":
             return self.stream()
@@ -507,7 +507,7 @@ class Handler(SimpleHTTPRequestHandler):
         if getattr(g, "enabled", True) is False:
             return self.send_json(503, {"ok": False, "disabled": True, "error": DISABLED_MSG, "saved": str(path)})
         if not g.linked():
-            return self.send_json(401, {"ok": False, "error": "not signed in, run: trainer-coach login-garmin", "saved": str(path)})
+            return self.send_json(401, {"ok": False, "error": "not signed in, run: openspin login-garmin", "saved": str(path)})
         res = g.upload(path)
         code = 200 if res.get("ok") else 502
         if res.get("ok") and rid:
@@ -531,6 +531,10 @@ class CoachServer(ThreadingHTTPServer):
     def __init__(self, cfg: Config, garmin: GarminLink | None = None, quiet: bool = False,
                  ticker: bool = True, devices: bool = True, hub: DeviceHub | None = None):
         self.cfg = cfg
+        if cfg.is_default_data:
+            from .config import migrate_legacy_data
+            if migrate_legacy_data():
+                print("moved ~/.trainer-coach to ~/.openspin")
         self.token = cfg.ensure_token()
         self.garmin_enabled = cfg.garmin_enabled if garmin is None else getattr(garmin, "enabled", True)
         self.garmin = garmin or GarminLink(cfg.garmin_tokens, enabled=cfg.garmin_enabled)
@@ -813,7 +817,7 @@ def make_server(cfg: Config | None = None, garmin: GarminLink | None = None, qui
 def serve(cfg: Config | None = None) -> None:
     srv = make_server(cfg)
     c = srv.cfg
-    print(f"trainer-coach {__version__} on {c.base_url}")
+    print(f"openspin {__version__} on {c.base_url}")
     print(f"  app:    {c.app}")
     print(f"  data:   {c.data}")
     print(f"  token:  {c.token_file}")

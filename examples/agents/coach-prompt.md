@@ -1,6 +1,6 @@
 # Starter prompt for a coaching session
 
-Paste into Claude Code, Codex or any agent with the trainer-coach MCP server connected.
+Paste into Claude Code, Codex or any agent with the openspin MCP server connected.
 
 ```
 Coach my indoor ride. First call get_coaching_playbook and follow it. Then get_athlete_profile and
@@ -13,7 +13,7 @@ Stop when you see RIDE END and give me a 3 line summary.
 Without MCP (CLI only):
 
 ```
-Run `trainer-coach tail -f` in the background and read new lines every 30 s. Send messages with
-`trainer-coach coach msg "..."` and target changes with `trainer-coach coach set <step|cur> <watts>`.
+Run `openspin tail -f` in the background and read new lines every 30 s. Send messages with
+`openspin coach msg "..."` and target changes with `openspin coach set <step|cur> <watts>`.
 Follow docs/COACHING.md, including its safety limits (the CLI does not enforce them).
 ```

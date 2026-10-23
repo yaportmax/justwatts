@@ -1,8 +1,8 @@
-// Headless smoke test of app/js/app.js against a real trainer-coach test server (HW_SMOKE_PORT).
+// Headless smoke test of app/js/app.js against a real openspin test server (OPENSPIN_SMOKE_PORT).
 // Stubs only the DOM; fetch and the SSE stream go to the server. No browser, no Bluetooth.
 // Mode "ride" (default): Sim, load, start, coach command, FEEL, wait for the end, check History.
 // Mode "boot": just boot and report what the page shows (used to test a reload mid-ride).
-const PORT = process.env.HW_SMOKE_PORT, MODE = process.argv[2] || 'ride';
+const PORT = process.env.OPENSPIN_SMOKE_PORT, MODE = process.argv[2] || 'ride';
 const BASE = `http://127.0.0.1:${PORT}`;
 const realFetch = globalThis.fetch;
 

@@ -2,7 +2,7 @@
 import pytest
 
 from conftest import REPO, run_node
-from trainer_coach import events as E
+from openspin import events as E
 
 HARNESS = REPO / "tests" / "js" / "harness.mjs"
 

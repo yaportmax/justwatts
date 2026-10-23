@@ -1,5 +1,5 @@
 # Append to ~/.codex/config.toml
-[mcp_servers.trainer-coach]
-command = "trainer-coach"
+[mcp_servers.openspin]
+command = "openspin"
 args = ["mcp"]
-env = { HW_PORT = "8765" }
+env = { OPENSPIN_PORT = "8765" }

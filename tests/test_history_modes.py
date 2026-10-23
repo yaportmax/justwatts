@@ -8,10 +8,10 @@ import pytest
 
 from conftest import REPO, run_node
 from test_js_core import _ride
-from trainer_coach import ftms
-from trainer_coach import history as H
-from trainer_coach.config import Config
-from trainer_coach.server import make_server
+from openspin import ftms
+from openspin import history as H
+from openspin.config import Config
+from openspin.server import make_server
 
 HARNESS = REPO / "tests" / "js" / "harness.mjs"
 
@@ -201,7 +201,7 @@ def test_voice_mute_barge_and_important(srv):
 @pytest.fixture
 def mcp(srv):
     pytest.importorskip("mcp")
-    from trainer_coach import mcp_server as M
+    from openspin import mcp_server as M
     M.set_client(srv.client)
     yield M
     M.set_client(None)

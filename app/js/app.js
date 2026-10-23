@@ -1,4 +1,4 @@
-// Browser UI. The local server owns the trainer, HR strap and the ride (see server/trainer_coach/engine.py),
+// Browser UI. The local server owns the trainer, HR strap and the ride (see server/openspin/engine.py),
 // so this page only renders state from /api/stream and sends controls. Reloading or closing it never
 // interrupts a ride. Pure logic (workout format, summaries, FIT/TCX) lives in core.js.
 import {
@@ -542,7 +542,7 @@ async function uploadGarmin(id) {
   let g = null;
   try {
     const res = await api(`/api/rides/${id}/garmin`, {});
-    const j = await res.json().catch(() => ({ error: 'no local server (run: trainer-coach serve)' }));
+    const j = await res.json().catch(() => ({ error: 'no local server (run: openspin serve)' }));
     if (!j.ok) throw new Error(j.error || res.status);
     g = j.activityId || true; toast(j.duplicate ? 'Already on Garmin' : 'Uploaded to Garmin');
   } catch (e) { toast('Garmin upload failed: ' + e.message); }

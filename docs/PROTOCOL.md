@@ -5,14 +5,14 @@ once a second, and serves the web page, which is only a view: reloading or closi
 interrupts a ride. Agents use the same HTTP API.
 
 ```
- trainer, HR strap ── BLE (bleak) ── trainer-coach serve ── SSE /api/stream ──▶ page (any browser)
+ trainer, HR strap ── BLE (bleak) ── openspin serve ── SSE /api/stream ──▶ page (any browser)
                                        │  ride engine        ◀── /api/ride/control, /api/devices
                                        │  events.log, engine.json
                                        └── HTTP ── CLI / MCP server ── agent
- mic ── trainer-coach voice (Whisper) ── SAID events ──┘
+ mic ── openspin voice (Whisper) ── SAID events ──┘
 ```
 
-Default base URL `http://127.0.0.1:8765` (`HW_PORT`). Data dir `~/.trainer-coach` (`HW_DATA`).
+Default base URL `http://127.0.0.1:8765` (`OPENSPIN_PORT`). Data dir `~/.openspin` (`OPENSPIN_DATA`).
 
 ## Auth
 
@@ -28,7 +28,7 @@ Open endpoints (Host-checked only): `GET /api/health`, `/api/stream`, `/api/live
 them (no CORS headers). Local tools should use the token, never fake `Origin`.
 
 ```sh
-curl -s -H "Authorization: Bearer $(cat ~/.trainer-coach/token)" http://127.0.0.1:8765/api/state
+curl -s -H "Authorization: Bearer $(cat ~/.openspin/token)" http://127.0.0.1:8765/api/state
 ```
 
 ## Endpoints

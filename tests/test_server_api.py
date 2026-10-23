@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from trainer_coach.config import Config
-from trainer_coach.server import make_server
+from openspin.config import Config
+from openspin.server import make_server
 
 
 def test_health_and_static(srv):
@@ -191,7 +191,7 @@ def test_garmin_status_and_zones(srv):
 
 def test_real_garmin_link_parsing(tmp_path, monkeypatch):
     """GarminLink against a fake garminconnect client (no network)."""
-    from trainer_coach.garmin import GarminLink
+    from openspin.garmin import GarminLink
 
     class FakeClient:
         def __init__(self, resp=None, exc=None):

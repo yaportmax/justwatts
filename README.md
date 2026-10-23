@@ -1,4 +1,4 @@
-# trainer-coach
+# openspin
 
 Let an AI agent coach your smart-trainer ride.
 
@@ -14,7 +14,7 @@ lets you talk back.
 
 ## What you get
 
-- **Local server** (`trainer-coach serve`): owns the trainer and HR strap (bleak), reconnects after
+- **Local server** (`openspin serve`): owns the trainer and HR strap (bleak), reconnects after
   drops, runs the ride engine at 1 Hz, writes the ride in progress to disk and resumes it after a
   crash or restart, logs events, applies coach commands. Stdlib plus optional extras.
 - **Ride modes**: structured workouts (ERG), free ride by grade (simulation), ERG watts or FTMS
@@ -33,9 +33,9 @@ lets you talk back.
 - **Low LLM usage**: an event gate gives the agent a short stream (step summaries, FEEL, speech,
   alerts, a status every few minutes) in 5 s batches, and a local rule coach speaks routine cues
   (countdowns, recaps, recovery HR, cadence) without waking it. A live meter in the ride header
-  shows agent wakes, tokens and cost; History keeps them per ride. `trainer-coach tail --agent`
+  shows agent wakes, tokens and cost; History keeps them per ride. `openspin tail --agent`
   shows exactly what wakes the coach.
-- **MCP server** (`trainer-coach mcp`): tools for an agent to read the ride, coach it and edit the
+- **MCP server** (`openspin mcp`): tools for an agent to read the ride, coach it and edit the
   workout, with guard rails (max change per command, FTP ceiling, no raises while paused, harder
   changes need the athlete's FEEL signal).
 - **CLI**: `coach msg|set|insert|replace|delete|duration|extend`, `tail -f`, `status`, `simulate`, `voice`.
@@ -48,16 +48,16 @@ lets you talk back.
 Needs Python 3.10+ and a computer with Bluetooth LE. Any modern browser works for the page.
 
 ```sh
-git clone <repo-url> trainer-coach && cd trainer-coach
+git clone <repo-url> openspin && cd openspin
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e ".[ble,mcp]"                       # add ,voice for Whisper, ,garmin for Garmin upload
-trainer-coach serve                               # --voice to start the listener too
+openspin serve                               # --voice to start the listener too
 ```
 
 Open http://127.0.0.1:8765, press **Connect trainer**, pick it from the scan list. The server
 remembers it and reconnects by itself. A trainer accepts one controller at a time: close Zwift or any
 other app (and any browser tab using Web Bluetooth) first. Ride history lives in that origin's browser
-storage plus `~/.trainer-coach/rides/`, so keep the same URL.
+storage plus `~/.openspin/rides/`, so keep the same URL.
 
 Browser Bluetooth fallback (no bleak, Chrome or Edge only): open `/browser.html`. In that mode the
 tab owns the trainer again, so a reload reconnects instead of carrying on.
@@ -68,7 +68,7 @@ the browser.
 No trainer? Press **Sim** in the header, or run the headless simulator in a second terminal:
 
 ```sh
-trainer-coach simulate --scenario fade --speed 10
+openspin simulate --scenario fade --speed 10
 ```
 
 ## Supported hardware
@@ -86,18 +86,18 @@ Hub has been tested so far. Reports welcome.
 ## Connect an agent
 
 Start the server first. The MCP server talks to it over HTTP using the token in
-`~/.trainer-coach/token` (created on first `serve`). Use the same `HW_PORT`/`HW_DATA` for both.
+`~/.openspin/token` (created on first `serve`). Use the same `OPENSPIN_PORT`/`OPENSPIN_DATA` for both.
 
 **Claude Code**
 
 ```sh
-claude mcp add trainer-coach -- trainer-coach mcp
+claude mcp add openspin -- openspin mcp
 ```
 
 or in a project `.mcp.json`:
 
 ```json
-{ "mcpServers": { "trainer-coach": { "command": "trainer-coach", "args": ["mcp"] } } }
+{ "mcpServers": { "openspin": { "command": "openspin", "args": ["mcp"] } } }
 ```
 
 Then: *"Coach my ride. Read the playbook, check status every 30 s, keep me in zone."*
@@ -105,22 +105,22 @@ Then: *"Coach my ride. Read the playbook, check status every 30 s, keep me in zo
 **Codex** (`~/.codex/config.toml`)
 
 ```toml
-[mcp_servers.trainer-coach]
-command = "trainer-coach"
+[mcp_servers.openspin]
+command = "openspin"
 args = ["mcp"]
 ```
 
 **Anything else**: shell out to the CLI or call HTTP directly.
 
 ```sh
-trainer-coach tail -f                      # follow the event log
-trainer-coach status                       # latest ride state, JSON
-trainer-coach coach msg "HR 168. Hold 250."
-trainer-coach coach set cur 240            # override the current step (no guard rails)
-trainer-coach coach set 7 260 --msg "Last one at 260"
-trainer-coach coach insert "2x(5m 250w, 3m 50%)"   # two more reps after the current step
-trainer-coach coach extend 60                      # one more minute of this step
-trainer-coach coach delete 9                       # drop step 9
+openspin tail -f                      # follow the event log
+openspin status                       # latest ride state, JSON
+openspin coach msg "HR 168. Hold 250."
+openspin coach set cur 240            # override the current step (no guard rails)
+openspin coach set 7 260 --msg "Last one at 260"
+openspin coach insert "2x(5m 250w, 3m 50%)"   # two more reps after the current step
+openspin coach extend 60                      # one more minute of this step
+openspin coach delete 9                       # drop step 9
 ```
 
 MCP tools (anything the athlete can do in the UI, an agent can do too):
@@ -144,7 +144,7 @@ network. Details in [docs/PROTOCOL.md](docs/PROTOCOL.md#auth).
 
 ## Voice
 
-`pip install -e ".[voice]"`, then `trainer-coach serve --voice` (or `trainer-coach voice` beside a
+`pip install -e ".[voice]"`, then `openspin serve --voice` (or `openspin voice` beside a
 running server). It transcribes the default mic locally with faster-whisper `small.en` (CPU, int8)
 and posts `SAID (whisper): "..."` events that agents see in `get_ride_status`. Silence
 hallucinations ("Thank you.", "Thanks for watching!"), low-confidence segments, fragments under three
@@ -155,25 +155,25 @@ coach bar has a **Mute** button and a menu (Speak all, Important only, Silent); 
 
 ## Garmin upload
 
-Optional (`pip install -e ".[garmin]"`, then `trainer-coach login-garmin` once). Garmin is only
-active for the default data dir; a server on any other `HW_DATA` (tests, dev copies) has it off
-unless `HW_GARMIN=on`, and `HW_GARMIN=off` / `serve --no-garmin` disables it everywhere. It uses the
+Optional (`pip install -e ".[garmin]"`, then `openspin login-garmin` once). Garmin is only
+active for the default data dir; a server on any other `OPENSPIN_DATA` (tests, dev copies) has it off
+unless `OPENSPIN_GARMIN=on`, and `OPENSPIN_GARMIN=off` / `serve --no-garmin` disables it everywhere. It uses the
 unofficial [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) library, which
 signs in like the Garmin Connect app; Garmin can break it at any time. Every FIT file is saved to
-`~/.trainer-coach/rides/` before any upload is attempted, and you can always download .fit/.tcx from
+`~/.openspin/rides/` before any upload is attempted, and you can always download .fit/.tcx from
 History and upload by hand. HR zones sync from Garmin when signed in.
 
 ## Data and configuration
 
 | Env | Default | |
 |---|---|---|
-| `HW_PORT` | `8765` | server port |
-| `HW_DATA` | `~/.trainer-coach` | `rides/`, `coach/events.log`, `coach/current.json`, `token` |
-| `HW_GARMIN_TOKENS` | `~/.garminconnect` | Garmin session tokens |
-| `HW_TOKEN` | from `<data>/token` | API token for CLI/MCP |
-| `HW_GARMIN` | auto | `off` disables Garmin, `on` forces it for a non-default data dir |
-| `HW_BLE` | `on` | `off` disables Bluetooth (no bleak import) |
-| `TC_MAX_CHANGE_PCT`, `TC_MAX_PCT`, `TC_FEEL_GATE_PCT`, `TC_FEEL_WINDOW_S`, `TC_STALE_S`, `TC_MAX_INSERT_S`, `TC_MAX_EXTEND_S` | 15, 150, 105, 600, 15, 1800, 600 | MCP guard rails, see COACHING.md |
+| `OPENSPIN_PORT` | `8765` | server port |
+| `OPENSPIN_DATA` | `~/.openspin` | `rides/`, `coach/events.log`, `coach/current.json`, `token` |
+| `OPENSPIN_GARMIN_TOKENS` | `~/.garminconnect` | Garmin session tokens |
+| `OPENSPIN_TOKEN` | from `<data>/token` | API token for CLI/MCP |
+| `OPENSPIN_GARMIN` | auto | `off` disables Garmin, `on` forces it for a non-default data dir |
+| `OPENSPIN_BLE` | `on` | `off` disables Bluetooth (no bleak import) |
+| `OPENSPIN_MAX_CHANGE_PCT`, `OPENSPIN_MAX_PCT`, `OPENSPIN_FEEL_GATE_PCT`, `OPENSPIN_FEEL_WINDOW_S`, `OPENSPIN_STALE_S`, `OPENSPIN_MAX_INSERT_S`, `OPENSPIN_MAX_EXTEND_S` | 15, 150, 105, 600, 15, 1800, 600 | MCP guard rails, see COACHING.md |
 
 The server keeps settings (`settings.json`), remembered devices (`devices.json`), the ride in
 progress (`coach/engine.json`) and every finished ride (`rides/`). The browser keeps custom workouts

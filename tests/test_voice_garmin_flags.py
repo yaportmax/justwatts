@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from trainer_coach import voice as V
-from trainer_coach.config import Config
+from openspin import voice as V
+from openspin.config import Config
 
 
 def seg(text, nsp=0.05, alp=-0.3):
@@ -70,7 +70,7 @@ def test_short_blips_are_not_phrases():
 
 
 def test_said_lines_parse():
-    from trainer_coach.events import parse_line
+    from openspin.events import parse_line
     e = parse_line('[10:00:00] SAID (whisper): "make it easier"')
     assert e["type"] == "said" and e["said"] == "make it easier" and e["source"] == "whisper"
     assert parse_line('SAID: "hi"')["source"] == "browser"
@@ -79,15 +79,15 @@ def test_said_lines_parse():
 
 # ---------- Garmin / BLE switches ----------
 def test_garmin_flag_logic(monkeypatch, tmp_path):
-    monkeypatch.delenv("HW_GARMIN", raising=False)
-    monkeypatch.delenv("HW_GARMIN_TOKENS", raising=False)
+    monkeypatch.delenv("OPENSPIN_GARMIN", raising=False)
+    monkeypatch.delenv("OPENSPIN_GARMIN_TOKENS", raising=False)
     assert Config(data=tmp_path).garmin_enabled is False  # scratch data dir: off by default
-    monkeypatch.setenv("HW_GARMIN", "on")
+    monkeypatch.setenv("OPENSPIN_GARMIN", "on")
     assert Config(data=tmp_path).garmin_enabled is True
-    monkeypatch.setenv("HW_GARMIN", "off")
-    from trainer_coach.config import DEFAULT_DATA
+    monkeypatch.setenv("OPENSPIN_GARMIN", "off")
+    from openspin.config import DEFAULT_DATA
     assert Config(data=DEFAULT_DATA).garmin_enabled is False  # off wins even for the real data dir
-    monkeypatch.delenv("HW_GARMIN")
+    monkeypatch.delenv("OPENSPIN_GARMIN")
     assert Config(data=DEFAULT_DATA).garmin_enabled is True
     assert Config(data=tmp_path, garmin=False).garmin_enabled is False
 
@@ -95,7 +95,7 @@ def test_garmin_flag_logic(monkeypatch, tmp_path):
 def test_disabled_garmin_never_imports_and_refuses(tmp_path, monkeypatch):
     import builtins
     from conftest import free_port, request
-    from trainer_coach.server import make_server
+    from openspin.server import make_server
 
     real_import = builtins.__import__
 
@@ -121,3 +121,30 @@ def test_disabled_garmin_never_imports_and_refuses(tmp_path, monkeypatch):
     finally:
         s.shutdown()
         s.server_close()
+
+
+# ---------- rename: legacy env names and data dir ----------
+def test_legacy_env_names_still_work(monkeypatch, tmp_path):
+    from openspin.config import env
+    for k in ("OPENSPIN_PORT", "OPENSPIN_GARMIN", "OPENSPIN_GARMIN_TOKENS"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("HW_PORT", "8791")
+    assert Config().port == 8791
+    monkeypatch.setenv("OPENSPIN_PORT", "8792")
+    assert Config().port == 8792 and env("PORT") == "8792"
+    monkeypatch.setenv("HW_GARMIN", "on")
+    assert Config(data=tmp_path).garmin_enabled is True
+    monkeypatch.setenv("TC_MAX_PCT", "120")
+    from openspin.safety import Limits
+    assert Limits().max_pct == 120
+
+
+def test_legacy_data_dir_is_moved_once(tmp_path):
+    from openspin.config import migrate_legacy_data
+    old, new = tmp_path / ".trainer-coach", tmp_path / ".openspin"
+    (old / "rides").mkdir(parents=True)
+    (old / "rides" / "r-1.json").write_text("{}")
+    assert migrate_legacy_data(new, old) is True
+    assert (new / "rides" / "r-1.json").exists() and not old.exists()
+    old.mkdir()
+    assert migrate_legacy_data(new, old) is False and old.exists()  # never overwrites the new dir

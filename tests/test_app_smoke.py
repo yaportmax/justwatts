@@ -34,7 +34,7 @@ class FastTicker:
 
 
 def run_page(node, srv, mode="ride", timeout=60):
-    env = {**os.environ, "HW_SMOKE_PORT": str(srv.port)}
+    env = {**os.environ, "OPENSPIN_SMOKE_PORT": str(srv.port)}
     p = subprocess.run([node, str(SCRIPT), mode], capture_output=True, text=True, timeout=timeout, env=env, encoding="utf-8")
     assert p.returncode == 0, p.stderr
     return json.loads(p.stdout)

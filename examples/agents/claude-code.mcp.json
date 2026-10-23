@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "trainer-coach": {
-      "command": "trainer-coach",
+    "openspin": {
+      "command": "openspin",
       "args": ["mcp"],
-      "env": { "HW_PORT": "8765" }
+      "env": { "OPENSPIN_PORT": "8765" }
     }
   }
 }

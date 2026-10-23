@@ -111,7 +111,7 @@ export function toZwo(cw, ftp) {
   const body = cw.steps.map(s => s.free ? `    <FreeRide Duration="${s.d}"/>`
     : s.a === s.b ? `    <SteadyState Duration="${s.d}" Power="${f(s.a, s)}"/>`
     : `    <Ramp Duration="${s.d}" PowerLow="${f(s.a, s)}" PowerHigh="${f(s.b, s)}"/>`).join('\n');
-  return `<workout_file>\n  <author>Hub Workouts</author>\n  <name>${esc(cw.name)}</name>\n  <description>${esc(cw.text)}</description>\n  <sportType>bike</sportType>\n  <tags/>\n  <workout>\n${body}\n  </workout>\n</workout_file>\n`;
+  return `<workout_file>\n  <author>OpenSpin</author>\n  <name>${esc(cw.name)}</name>\n  <description>${esc(cw.text)}</description>\n  <sportType>bike</sportType>\n  <tags/>\n  <workout>\n${body}\n  </workout>\n</workout_file>\n`;
 }
 
 /* ---------- presets ---------- */

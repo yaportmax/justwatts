@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hub Workouts (browser Bluetooth)</title>
+<title>OpenSpin (browser Bluetooth)</title>
 <style>
 :root{
   --bg:#0c0e11;--panel:#151920;--panel2:#1b2029;--line:#262d38;--ink:#e9edf2;--dim:#8b95a4;--faint:#5b6574;
@@ -112,7 +112,7 @@ tbody tr:hover{background:var(--panel2)}
 </head>
 <body>
 <header>
-  <div class="brand">Hub Workouts <a href="/" style="font-weight:400;font-size:12px;color:var(--dim)" title="Bluetooth in the server: reloads never drop the trainer">browser Bluetooth. Server mode</a></div>
+  <div class="brand">OpenSpin <a href="/" style="font-weight:400;font-size:12px;color:var(--dim)" title="Bluetooth in the server: reloads never drop the trainer">browser Bluetooth. Server mode</a></div>
   <nav>
     <button data-v="workouts" class="on">Workouts</button>
     <button data-v="ride">Ride</button>
@@ -512,7 +512,7 @@ function toZwo(cw) {
   const body = cw.steps.map(s => s.free ? `    <FreeRide Duration="${s.d}"/>`
     : s.a === s.b ? `    <SteadyState Duration="${s.d}" Power="${f(s.a, s)}"/>`
     : `    <Ramp Duration="${s.d}" PowerLow="${f(s.a, s)}" PowerHigh="${f(s.b, s)}"/>`).join('\n');
-  return `<workout_file>\n  <author>Hub Workouts</author>\n  <name>${esc(cw.name)}</name>\n  <description>${esc(cw.text)}</description>\n  <sportType>bike</sportType>\n  <tags/>\n  <workout>\n${body}\n  </workout>\n</workout_file>\n`;
+  return `<workout_file>\n  <author>OpenSpin</author>\n  <name>${esc(cw.name)}</name>\n  <description>${esc(cw.text)}</description>\n  <sportType>bike</sportType>\n  <tags/>\n  <workout>\n${body}\n  </workout>\n</workout_file>\n`;
 }
 function fromZwo(xml) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
@@ -933,7 +933,7 @@ async function uploadGarmin(id) {
   if (openId === id) { $('#sGarmin').disabled = true; $('#sGarmin').textContent = 'Uploading…'; }
   try {
     const res = await fetch('/api/garmin/upload', { method: 'POST', headers: { 'X-HW': '1', 'X-Filename': fileBase(r) + '.fit', 'Content-Type': 'application/octet-stream' }, body: fitEncode(r) });
-    const j = await res.json().catch(() => ({ error: 'no local server (run: trainer-coach serve)' }));
+    const j = await res.json().catch(() => ({ error: 'no local server (run: openspin serve)' }));
     if (!j.ok) throw new Error(j.error || res.status);
     r.garmin = j.activityId || true; store.set('hw.rides', rides);
     toast(j.duplicate ? 'Already on Garmin' : 'Uploaded to Garmin');

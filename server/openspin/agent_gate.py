@@ -6,7 +6,7 @@ short agent stream: step summaries, FEEL presses, voice transcripts, alerts comp
 state, and at most one status line per few minutes in steady riding. Events arriving within a few
 seconds are coalesced into one batch, and one batch is one agent wake. Agents read it with
 GET /api/agent-events?since=N&wait=60 (long poll), the MCP tool wait_for_events, or
-`trainer-coach tail --agent`.
+`openspin tail --agent`.
 
 LocalCoach speaks routine cues itself (interval start and countdown, cadence nags, rep recaps,
 recovery HR) through the normal coach message path, so the athlete hears them without the agent

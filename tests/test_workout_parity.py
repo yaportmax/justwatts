@@ -6,7 +6,7 @@ import pytest
 
 from conftest import REPO, run_node
 from test_js_core import CASES, ERRORS
-from trainer_coach.workout import WorkoutError, compile_workout, parse_workout, step_at, step_watts, to_text
+from openspin.workout import WorkoutError, compile_workout, parse_workout, step_at, step_watts, to_text
 
 HARNESS = REPO / "tests" / "js" / "harness.mjs"
 

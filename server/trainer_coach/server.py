@@ -24,6 +24,7 @@ from .config import Config
 from .events import line_coach, parse_line, tail_lines
 from .devices import DeviceHub
 from .engine import RideEngine
+from . import history as H
 from .garmin import DISABLED_MSG, GarminLink
 
 MAX_BODY = 64 * 1024 * 1024
@@ -146,8 +147,8 @@ def validate_cmd(body: Any) -> dict:
         out["set"] = {"step": step, "w": w}
     if "edit" in body and body["edit"] is not None:
         e = body["edit"]
-        if not isinstance(e, dict) or e.get("op") not in ("insert", "replace", "delete", "duration", "extend"):
-            raise ValueError("edit must be {op: insert|replace|delete|duration|extend, ...}")
+        if not isinstance(e, dict) or e.get("op") not in ("insert", "replace", "delete", "duration", "extend", "total"):
+            raise ValueError("edit must be {op: insert|replace|delete|duration|extend|total, ...}")
         ed = {"op": e["op"]}
         for k in ("step", "after"):
             if k in e and e[k] is not None:
@@ -161,14 +162,18 @@ def validate_cmd(body: Any) -> dict:
             ed["steps"] = " ".join(e["steps"].split())[:400]
         if e["op"] == "delete" and "step" not in ed:
             raise ValueError("edit.step required")
-        if e["op"] in ("duration", "extend"):
+        if e["op"] in ("duration", "extend", "total"):
             sec = e.get("seconds")
-            if not isinstance(sec, int) or isinstance(sec, bool) or abs(sec) > 4 * 3600 or (e["op"] == "duration" and sec < 1):
-                raise ValueError("edit.seconds must be an integer (duration >= 1, |extend| <= 14400)")
+            if not isinstance(sec, int) or isinstance(sec, bool) or abs(sec) > 6 * 3600 or (e["op"] != "extend" and sec < 1):
+                raise ValueError("edit.seconds must be an integer (duration/total >= 1, |extend| <= 21600)")
             ed["seconds"] = sec
+            if e["op"] == "total":
+                ed["how"] = "scale" if e.get("how") == "scale" else "last"
         out["edit"] = ed
     if not out:
         raise ValueError("need msg, set and/or edit")
+    if "msg" in out:
+        out["important"] = bool(body.get("important")) or "set" in out or "edit" in out
     return out
 
 
@@ -266,14 +271,34 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(200, srv.hub.status())
         if p == "/api/said":
             return self.send_json(200, {"said": srv.said()})
+        if p == "/api/voice":
+            return self.send_json(200, {**srv.voice, "mode": srv.settings.get("voiceMode", "all")})
         if p == "/api/rides":
             return self.send_json(200, {"rides": srv.list_rides()})
+        if p == "/api/trends":
+            weeks = max(1, min(104, int(q.get("weeks", ["12"])[0])))
+            return self.send_json(200, H.trends(srv.list_rides(limit=None), weeks))
         if p.startswith("/api/rides/"):
-            rid = re.sub(r"[^\w\-]+", "", p.rsplit("/", 1)[1])
-            f = self.cfg.rides / f"{rid}.json"
-            if not rid or not f.exists():
+            parts = p.split("/")[3:]
+            rid = re.sub(r"[^\w\-]+", "", parts[0]) if parts else ""
+            r = srv.load_ride(rid)
+            if r is None:
                 return self.send_json(404, {"error": "no such ride"})
-            return self.send_raw_json(f.read_bytes())
+            sub = parts[1] if len(parts) > 1 else ""
+            if sub == "":
+                return self.send_raw_json(json.dumps(r).encode())
+            if sub == "detail":
+                return self.send_json(200, H.detail(r, srv.settings.get("hrZones"), srv.ride_meta(rid)))
+            if sub in ("fit", "tcx"):
+                data = H.fit_encode(r) if sub == "fit" else H.tcx(r).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream" if sub == "fit" else "application/xml")
+                self.send_header("Content-Disposition", f'attachment; filename="{H.file_base(r)}.{sub}"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return None
+            return self.send_json(404, {"error": "not found"})
         if p == "/api/garmin/status":
             return self.send_json(200, {"linked": srv.garmin.linked(), "enabled": srv.garmin_enabled})
         if p == "/api/garmin/zones":
@@ -340,12 +365,23 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(421, {"error": "bad host"})
         p = urlsplit(self.path).path
         routes = ("/api/event", "/api/coach", "/api/current", "/api/ride", "/api/state", "/api/garmin/upload",
-                  "/api/ride/control", "/api/settings", "/api/devices")
-        if p not in routes:
+                  "/api/ride/control", "/api/settings", "/api/devices", "/api/voice")
+        ride_action = re.fullmatch(r"/api/rides/([\w\-]+)/(garmin|delete)", p)
+        if p not in routes and not ride_action:
             return self.send_json(404, {"error": "not found"})
         if not self.trusted():
             return self.send_json(403, {"error": "forbidden"})
         srv = self.server
+        if ride_action:
+            rid, act = ride_action[1], ride_action[2]
+            if act == "delete":
+                return self.send_json(200 if srv.delete_ride(rid) else 404, {"ok": True})
+            r = srv.load_ride(rid)
+            if r is None:
+                return self.send_json(404, {"error": "no such ride"})
+            path = self.cfg.rides / f"{H.file_base(r)}.fit"
+            atomic_write(path, H.fit_encode(r))
+            return self.upload_file(path, rid)
         if p == "/api/garmin/upload":
             return self.garmin_upload(raw)
         try:
@@ -353,9 +389,17 @@ class Handler(SimpleHTTPRequestHandler):
         except (ValueError, UnicodeDecodeError):
             return self.send_json(400, {"error": "bad json"})
         if p == "/api/event":
-            line = str((body or {}).get("line", "")) if isinstance(body, dict) else ""
-            self.log_event(" ".join(line.splitlines()))
+            line = " ".join((str((body or {}).get("line", "")) if isinstance(body, dict) else "").splitlines())
+            self.log_event(line)
+            ev = parse_line(line)
+            if ev["type"] == "said":
+                srv.on_said(ev["said"])
             return self.send_json(200, {"ok": True})
+        if p == "/api/voice":
+            try:
+                return self.send_json(200, srv.voice_event(str((body or {}).get("event", ""))))
+            except ValueError as e:
+                return self.send_json(400, {"error": str(e)})
         if p == "/api/state":
             if not isinstance(body, dict):
                 return self.send_json(400, {"error": "state must be an object"})
@@ -431,6 +475,10 @@ class Handler(SimpleHTTPRequestHandler):
             name += ".fit"
         path = self.cfg.rides / name
         atomic_write(path, data)
+        rid = re.sub(r"[^\w\-]+", "", self.headers.get("X-Ride-Id", ""))
+        return self.upload_file(path, rid or None)
+
+    def upload_file(self, path: Path, rid: str | None):
         g = self.server.garmin
         if getattr(g, "enabled", True) is False:
             return self.send_json(503, {"ok": False, "disabled": True, "error": DISABLED_MSG, "saved": str(path)})
@@ -438,11 +486,17 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(401, {"ok": False, "error": "not signed in, run: trainer-coach login-garmin", "saved": str(path)})
         res = g.upload(path)
         code = 200 if res.get("ok") else 502
+        if res.get("ok") and rid:
+            self.server.set_ride_meta(rid, {"garmin": res.get("activityId") or True, "garmin_at": int(time.time() * 1000)})
         return self.send_json(code, {**res, "saved": str(path)})
 
 
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
-                     "hrZonesSrc": None, "cadRange": [85, 95]}
+                     "hrZonesSrc": None, "cadRange": [85, 95], "voiceMode": "all", "afterWorkout": "hold"}
+VOICE_MODES = ("all", "important", "silent")
+# spoken commands that change how much the coach talks (checked on every voice transcript)
+_UNMUTE = re.compile(r"\b(unmute|voice on|talk to me|speak again|you can talk)\b", re.I)
+_MUTE = re.compile(r"\b(mute|quiet|stop talking|shut up|silence|be silent|no talking)\b", re.I)
 
 
 class CoachServer(ThreadingHTTPServer):
@@ -461,10 +515,13 @@ class CoachServer(ThreadingHTTPServer):
         self._said_cache: tuple[float, list] = (-1.0, [])
         self._rides_cache: dict[str, tuple[float, dict]] = {}
         self.settings_lock = threading.Lock()
+        # voice: barge counts athlete speech onsets (the page stops TTS when it rises); tts = page speaking
+        self.voice = {"barge": 0, "barge_at": None, "tts": False, "tts_at": None, "listener_at": None}
         self.settings = self._load_settings()
         self.hub = hub or DeviceHub(cfg.data / "devices.json", ble_enabled=cfg.ble_enabled,
                                     log=(lambda m: None) if quiet else (lambda m: print("ble:", m, flush=True)))
         self.engine = RideEngine(self.hub, cfg.data, self.log_event, lambda: self.settings)
+        self.engine.on_finish = self._after_finish
         super().__init__(("127.0.0.1", cfg.port), Handler)
         self.engine.resume()
         if devices:
@@ -479,6 +536,9 @@ class CoachServer(ThreadingHTTPServer):
             self.cfg.events_log.parent.mkdir(parents=True, exist_ok=True)
             with self.cfg.events_log.open("a", encoding="utf-8") as f:
                 f.write(f"[{time.strftime('%H:%M:%S')}] {line[:400]}\n")
+        eng = getattr(self, "engine", None)
+        if eng is not None:
+            eng.note(line[:400])
 
     def said(self) -> list[dict]:
         """Last 8 voice transcripts, newest first (cached on log mtime)."""
@@ -529,6 +589,10 @@ class CoachServer(ThreadingHTTPServer):
                         continue
                 if k == "autoGarmin" and not self.garmin_enabled:
                     v = False
+                if k == "voiceMode" and v not in VOICE_MODES:
+                    continue
+                if k == "afterWorkout" and v not in ("hold", "grade0"):
+                    continue
                 new[k] = v
             self.settings = new
             atomic_write(self.settings_file, json.dumps(new).encode())
@@ -542,7 +606,39 @@ class CoachServer(ThreadingHTTPServer):
 
     # ---------- state ----------
     def engine_state(self) -> dict:
-        return self.engine.state(self.athlete(), self.said()[:3])
+        st = self.engine.state(self.athlete(), self.said()[:3])
+        st["voice"] = {**self.voice, "mode": self.settings.get("voiceMode", "all")}
+        return st
+
+    def voice_event(self, ev: str) -> dict:
+        now = time.time()
+        v = self.voice
+        if ev == "speech_start":  # athlete started talking: interrupt coach speech
+            v["barge"] += 1
+            v["barge_at"] = now
+        elif ev in ("tts_start", "tts_end"):
+            v["tts"], v["tts_at"] = ev == "tts_start", now
+        elif ev == "listening":
+            v["listener_at"] = now
+        else:
+            raise ValueError("event must be speech_start, tts_start, tts_end or listening")
+        with self.engine.lock:
+            self.engine._bump()
+        return dict(v)
+
+    def on_said(self, text: str) -> None:
+        """Voice commands that control the coach voice itself."""
+        if _UNMUTE.search(text):
+            self.update_settings({"voiceMode": "all"})
+            self.log_event("VOICE UNMUTED (said)")
+        elif _MUTE.search(text):
+            self.update_settings({"voiceMode": "silent"})
+            self.voice_event("speech_start")  # also cut any sentence in progress
+            self.log_event("VOICE MUTED (said)")
+        else:
+            return
+        with self.engine.lock:
+            self.engine._bump()
 
     def agent_state(self) -> dict:
         """What agents see at GET /api/state: the server ride, or a page/simulator that posts its own state."""
@@ -560,7 +656,58 @@ class CoachServer(ThreadingHTTPServer):
         total = (0 if reset else n) + len(samples)
         return {"state": self.engine_state(), "ride_id": new_rid, "reset": reset, "samples": samples, "n": total}
 
-    def list_rides(self) -> list[dict]:
+    def _after_finish(self, ride: dict) -> None:
+        """Auto-upload on the server, so it happens even with no page open."""
+        if not (self.settings.get("autoGarmin") and self.garmin_enabled):
+            return
+
+        def go():
+            try:
+                path = self.cfg.rides / f"{H.file_base(ride)}.fit"
+                atomic_write(path, H.fit_encode(ride))
+                if not self.garmin.linked():
+                    self.log_event("GARMIN skipped: not signed in")
+                    return
+                res = self.garmin.upload(path)
+                if res.get("ok"):
+                    self.set_ride_meta(ride["id"], {"garmin": res.get("activityId") or True, "garmin_at": int(time.time() * 1000)})
+                self.log_event(f"GARMIN {'uploaded' if res.get('ok') else 'failed: ' + str(res.get('error'))[:120]}")
+            except Exception as e:  # noqa: BLE001
+                self.log_event(f"GARMIN failed: {e}"[:200])
+        threading.Thread(target=go, name="garmin-upload", daemon=True).start()
+
+    def load_ride(self, rid: str) -> dict | None:
+        if not rid:
+            return None
+        f = self.cfg.rides / f"{rid}.json"
+        try:
+            r = json.loads(read_retry(f) or b"null")
+        except ValueError:
+            return None
+        return r if isinstance(r, dict) and r.get("samples") else None
+
+    def ride_meta(self, rid: str) -> dict:
+        try:
+            return json.loads((self.cfg.rides / "meta" / f"{rid}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+
+    def set_ride_meta(self, rid: str, patch: dict) -> None:
+        atomic_write(self.cfg.rides / "meta" / f"{rid}.json", json.dumps({**self.ride_meta(rid), **patch}).encode())
+        self._rides_cache.pop(f"{rid}.json", None)
+
+    def delete_ride(self, rid: str) -> bool:
+        f = self.cfg.rides / f"{re.sub(r'[^\w\-]+', '', rid)}.json"
+        if not f.exists():
+            return False
+        trash = self.cfg.rides / "trash"
+        trash.mkdir(parents=True, exist_ok=True)
+        os.replace(f, trash / f.name)  # recoverable by hand
+        self._rides_cache.pop(f.name, None)
+        return True
+
+    def list_rides(self, limit: int | None = 500) -> list[dict]:
+        """Archived rides with summary metrics, newest first (cached per file mtime)."""
         out = []
         for f in (self.cfg.rides.glob("*.json") if self.cfg.rides.exists() else []):
             mt = f.stat().st_mtime_ns
@@ -568,13 +715,15 @@ class CoachServer(ThreadingHTTPServer):
             if not hit or hit[0] != mt:
                 try:
                     r = json.loads(f.read_text(encoding="utf-8"))
-                    meta = {"id": r.get("id"), "name": r.get("name"), "start": r.get("start"),
-                            "samples": len(r.get("samples") or []), "source": r.get("source")}
-                except (OSError, ValueError):
+                    if not r.get("samples"):
+                        continue
+                    row = H.ride_meta_row(r, self.ride_meta(r.get("id") or f.stem))
+                except (OSError, ValueError, KeyError, TypeError, ZeroDivisionError):
                     continue
-                self._rides_cache[f.name] = hit = (mt, meta)
+                self._rides_cache[f.name] = hit = (mt, row)
             out.append(hit[1])
-        return sorted(out, key=lambda m: m.get("start") or 0, reverse=True)[:200]
+        out.sort(key=lambda m: m.get("start") or 0, reverse=True)
+        return out if limit is None else out[:limit]
 
     # ---------- ticker ----------
     def _tick_loop(self) -> None:

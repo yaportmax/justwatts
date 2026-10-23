@@ -14,7 +14,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
 // Settings live on the server (agents read the athlete profile there); localStorage is only migrated once.
-const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95] }, store.get('hw.settings', {}));
+const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95], voiceMode: 'all' }, store.get('hw.settings', {}));
 let garminOn = false;
 const api = (path, body) => fetch(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const apiJson = async (path, body) => { const r = await api(path, body); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
@@ -28,7 +28,7 @@ async function loadSettings() {
     const j = await (await fetch('/api/settings')).json();
     garminOn = !!j.garmin;
     if (j.stored) Object.assign(settings, j.settings);
-    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange']);
+    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'voiceMode']);
     if (!garminOn) settings.autoGarmin = false;
     store.set('hw.settings', settings);
   } catch {}
@@ -207,6 +207,7 @@ function onLive(msg) {
   if (!prev || !!prev.ride !== !!r) rideShell();
   if (S.notice && S.notice !== prev?.notice) { toast(S.notice); control('dismiss').catch(() => {}); }
   coachUpdate();
+  voiceUpdate();
   beeps();
   if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) finishedRide(S.last_finished);
   setStatus(); renderLive(); if (V) renderRide();
@@ -315,14 +316,17 @@ function renderLive() {
 function renderRide() {
   if (!V) return;
   const t = curTarget(); $('#lT').textContent = t ?? '–';
-  $('#lTs').textContent = V.cw ? (t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free ride') : V.jr.m === 'w' ? 'ERG' : `grade ${V.jr.g}%`;
+  $('#lTs').textContent = V.cw ? (t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free ride') : V.jr.m === 'w' ? 'ERG' : V.jr.m === 'r' ? `level ${V.jr.r}` : `grade ${V.jr.g}%`;
   $('#lE').textContent = fmtT(V.el);
   $('#rName').textContent = V.name;
-  const st = !V.started ? ['Ready', ''] : V.auto ? ['Start pedaling', 'warn'] : V.paused ? ['Paused', 'warn'] : ['Riding', ''];
+  const st = !V.started ? ['Ready', ''] : V.auto ? ['Start pedaling', 'warn'] : V.paused ? ['Paused', 'warn'] : S.ride.overtime ? ['Workout done · riding free', 'done'] : ['Riding', ''];
   $('#rState').textContent = st[0]; $('#rState').className = 'badge ' + st[1];
   $('#cStart').style.display = V.started ? 'none' : ''; $('#cPause').style.display = V.started ? '' : 'none';
-  $('#cPause').textContent = V.paused && !V.auto ? 'Resume' : 'Pause';
-  $('#cAdj').textContent = V.cw ? Math.round(V.k * 100) + '%' : V.jr.m === 'w' ? V.jr.w + ' W' : (+V.jr.g).toFixed(1) + '%';
+  $('#cPause').textContent = V.paused ? 'Resume' : 'Pause';
+  $('#cSave').style.display = V.started ? '' : 'none';
+  $('#lenAdj').style.display = V.cw ? '' : 'none';
+  if (V.cw) $('#cLen').textContent = fmtT(S.ride.total_s);
+  $('#cAdj').textContent = V.cw ? Math.round(V.k * 100) + '%' : V.jr.m === 'w' ? V.jr.w + ' W' : V.jr.m === 'r' ? 'Level ' + (+V.jr.r).toFixed(1) : (+V.jr.g).toFixed(1) + '%';
   $$('#jrMode button').forEach(b => b.classList.toggle('on', b.dataset.m === V.jr.m));
   const kk = V.test ? 1 : V.k;
   if (V.cw) {
@@ -336,41 +340,83 @@ function renderRide() {
     $('#ivBar').style.background = at.s.free ? css('--z1') : zoneColor(stepWatts(at.s, at.into, V.ftp, V.k) / V.ftp);
   } else {
     $('#lI').textContent = '–'; $('#lIs').textContent = ''; $('#lEs').textContent = '';
-    $('#ivNow').textContent = V.jr.m === 'w' ? `ERG ${V.jr.w} W` : `Grade ${(+V.jr.g).toFixed(1)}%`; $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
+    $('#ivNow').textContent = V.jr.m === 'w' ? `ERG ${V.jr.w} W` : V.jr.m === 'r' ? `Resistance level ${(+V.jr.r).toFixed(1)}` : `Grade ${(+V.jr.g).toFixed(1)}%`; $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
   }
   $('#rClock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  if ($('#v-ride').classList.contains('on')) drawChart($('#rideChart'), { cw: V.cw, ftp: V.ftp, samples, el: V.el, k: kk });
+  const cwDraw = V.cw && V.el > V.cw.total ? { ...V.cw, total: V.el * 1.02 } : V.cw;
+  if ($('#v-ride').classList.contains('on')) drawChart($('#rideChart'), { cw: cwDraw, ftp: V.ftp, samples, el: V.el, k: kk });
   wake(V.started);
 }
 $('#cStart').onclick = () => control('start').catch(() => {});
-$('#cPause').onclick = () => control('pause').catch(() => {});
+$('#cPause').onclick = () => control(V?.paused ? 'resume' : 'hold').catch(() => {});
+$('#cSave').onclick = () => control('save').then(j => toast(`Saved to History (${fmtT(j.samples)})`)).catch(() => {});
+$('#cShorter').onclick = () => changeLength(-300);
+$('#cLonger').onclick = () => changeLength(300);
+function changeLength(d) {
+  const r = S?.ride; if (!r?.total_s) return;
+  control('edit', { edit: { op: 'total', seconds: Math.max(1, r.total_s + d), how: 'last' } }).then(() => toast(`Workout ${d > 0 ? 'longer' : 'shorter'}: ${fmtT(Math.max(r.el, r.total_s + d))}`)).catch(() => {});
+}
 $('#cSkip').onclick = () => control('skip').catch(() => {});
 $('#cMinus').onclick = () => control('adjust', { dir: -1 }).catch(() => {});
 $('#cPlus').onclick = () => control('adjust', { dir: 1 }).catch(() => {});
-$('#cEnd').onclick = () => control('end').catch(() => {});
+// End needs a second tap within 3 s so a stray tap never ends the ride
+let endArmed = 0;
+$('#cEnd').onclick = () => {
+  if (Date.now() - endArmed < 3000) { endArmed = 0; $('#cEnd').classList.remove('confirm'); $('#cEnd').textContent = 'End ride'; control('end').catch(() => {}); return; }
+  endArmed = Date.now(); $('#cEnd').classList.add('confirm'); $('#cEnd').textContent = 'Tap again to end';
+  setTimeout(() => { if (endArmed && Date.now() - endArmed >= 3000) { endArmed = 0; $('#cEnd').classList.remove('confirm'); $('#cEnd').textContent = 'End ride'; } }, 3100);
+};
 $$('#jrMode button').forEach(b => b.onclick = () => control('mode', { m: b.dataset.m }).catch(() => {}));
 document.addEventListener('keydown', e => {
   if (!V || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
-  if (e.code === 'Space') { e.preventDefault(); control(V.started ? 'pause' : 'start').catch(() => {}); }
+  if (e.code === 'Space') { e.preventDefault(); control(!V.started ? 'start' : V.paused ? 'resume' : 'hold').catch(() => {}); }
   if (e.code === 'ArrowUp') { e.preventDefault(); control('adjust', { dir: 1 }).catch(() => {}); }
   if (e.code === 'ArrowDown') { e.preventDefault(); control('adjust', { dir: -1 }).catch(() => {}); }
 });
 $$('[data-feel]').forEach(b => b.onclick = () => control('feel', { feel: b.dataset.feel }).then(() => toast('Sent: ' + b.dataset.feel)).catch(() => {}));
 
 /* ---------- coach bar + voice (speech out; Whisper transcripts in) ---------- */
-let voiceOn = store.get('hw.voice', false), spokenSeq = null;
+// The coach voice mode lives in server settings (voiceMode: all | important | silent), so the athlete
+// can also change it by saying "mute" / "unmute" and agents can see it. Muted messages still show.
+let spokenSeq = null, lastBarge = null, speakingN = 0, lastLoud = 'all';
+const voiceMode = () => S?.voice?.mode || settings.voiceMode || 'all';
 function bestVoice() {
   const vs = (window.speechSynthesis?.getVoices() || []).filter(v => v.lang.startsWith('en'));
   for (const re of [/Google US English/, /Natural/i, /Google UK English Male/, /Online/i, /en-US/]) { const v = vs.find(x => re.test(x.name) || re.test(x.lang)); if (v) return v; }
   return vs[0] || null;
 }
-function say(text) {
-  if (!voiceOn || !window.speechSynthesis) return;
+const voicePost = event => api('/api/voice', { event }).catch(() => {});
+function say(text, important) {
+  const mode = voiceMode();
+  if (!window.speechSynthesis || mode === 'silent' || (mode === 'important' && !important)) return;
   const u = new SpeechSynthesisUtterance(text); const v = bestVoice(); if (v) u.voice = v;
+  // tell the listener the coach is talking, so its own echo is not taken as the athlete barging in
+  u.onstart = () => { if (speakingN++ === 0) voicePost('tts_start'); };
+  u.onend = u.onerror = () => { if (--speakingN <= 0) { speakingN = 0; voicePost('tts_end'); } };
   speechSynthesis.speak(u);
 }
-function renderVoiceBtn() { const b = $('#coachVoice'); b.textContent = voiceOn ? 'Voice on' : 'Voice off'; b.classList.toggle('on', voiceOn); }
-$('#coachVoice').onclick = () => { voiceOn = !voiceOn; store.set('hw.voice', voiceOn); renderVoiceBtn(); if (voiceOn) say('Voice on.'); };
+function hush() { try { window.speechSynthesis?.cancel(); } catch {} if (speakingN) { speakingN = 0; voicePost('tts_end'); } }
+function setVoiceMode(m) {
+  if (m !== 'silent') lastLoud = m;
+  settings.voiceMode = m; if (S?.voice) S.voice.mode = m;
+  saveSettings(['voiceMode']); renderVoice();
+  if (m === 'silent') hush();
+}
+function renderVoice() {
+  const m = voiceMode(), b = $('#coachMute');
+  b.textContent = m === 'silent' ? 'Unmute' : 'Mute'; b.classList.toggle('muted', m === 'silent');
+  $('#coachVerb').value = m;
+}
+$('#coachMute').onclick = () => setVoiceMode(voiceMode() === 'silent' ? lastLoud : 'silent');
+$('#coachVerb').onchange = e => setVoiceMode(e.target.value);
+// barge-in: the voice listener reports the athlete starting to speak; stop talking at once
+function voiceUpdate() {
+  const v = S.voice || {};
+  if (lastBarge !== null && v.barge > lastBarge) hush();
+  lastBarge = v.barge ?? 0;
+  if (v.mode === 'silent' && speakingN) hush();
+  renderVoice();
+}
 const hm = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 function coachUpdate() {
   const ms = S.messages || [], top = ms.at(-1);
@@ -382,7 +428,7 @@ function coachUpdate() {
   const newest = top?.seq ?? 0;
   if (spokenSeq === null) spokenSeq = newest;
   else if (newest > spokenSeq) {
-    for (const m of ms) if (m.seq > spokenSeq) say(m.msg);
+    for (const m of ms) if (m.seq > spokenSeq) say(m.msg, m.important);
     spokenSeq = newest; beep(1046, 0.12);
     $('#coach').classList.add('flash'); setTimeout(() => $('#coach').classList.remove('flash'), 4000);
   }
@@ -393,98 +439,110 @@ function coachUpdate() {
 // tap the coach text to expand clamped messages, tap again to collapse
 $('#coachMsg').parentElement.onclick = () => $('#coach').classList.toggle('open');
 
-/* ---------- history + summary ---------- */
-function renderHistory() {
-  const rides = store.get('hw.rides', []), tb = $('#hist'); tb.innerHTML = '';
-  $('#histEmpty').style.display = rides.length ? 'none' : '';
-  for (const r of rides) {
-    const m = summarize(r), tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start || r.samples[0][0]).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}</td><td class="num">${fmtT(m.dur)}</td><td class="num">${Math.round(m.avgP)}</td><td class="num">${Math.round(m.np)}</td><td class="num">${Math.round(m.tss)}</td><td class="num">${Math.round(m.kJ)}</td><td class="num">${m.avgHR ? Math.round(m.avgHR) : '–'}</td>`;
+/* ---------- history (server archive is the source of truth) ---------- */
+let rows = [];
+async function renderHistory() {
+  try { rows = (await (await fetch('/api/rides')).json()).rides; } catch { return; }
+  const tb = $('#hist'); tb.innerHTML = '';
+  $('#histEmpty').style.display = rows.length ? 'none' : '';
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] || '–'}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
+  renderTrends();
 }
-function saveRide(p) {
-  const rides = store.get('hw.rides', []); if (rides.some(x => x.id === p.id)) return;
-  rides.unshift(p); rides.sort((a, b) => (b.start || 0) - (a.start || 0));
-  while (rides.length && !store.set('hw.rides', rides)) rides.pop();
-  renderHistory();
+async function renderTrends() {
+  let t; try { t = await (await fetch('/api/trends?weeks=12')).json(); } catch { return; }
+  const [c, w, h] = fit($('#trendChart')), wk = t.weeks, max = Math.max(50, ...wk.map(x => x.tss));
+  const bw = w / wk.length;
+  c.font = '11px system-ui'; c.textAlign = 'center'; c.textBaseline = 'bottom';
+  wk.forEach((x, i) => {
+    const bh = (h - 30) * x.tss / max;
+    c.fillStyle = css('--acc'); c.fillRect(i * bw + 4, h - 16 - bh, bw - 8, bh);
+    c.fillStyle = css('--dim'); if (x.tss) c.fillText(x.tss, i * bw + bw / 2, h - 18 - bh);
+    c.fillStyle = css('--faint'); c.fillText(x.week.slice(5), i * bw + bw / 2, h);
+  });
+  const f = t.ftp_history.at(-1);
+  $('#tFtp').textContent = f ? `FTP ${f.ftp} W (${f.source}, ${f.date})` + (t.ftp_history.length > 1 ? ` · was ${t.ftp_history.at(-2).ftp}` : '') : '';
+  $('#tBest').innerHTML = ['1m', '5m', '20m'].map(k => `<div class="stat"><div class="k">Best ${k}</div><div class="v">${t.best[k] ? t.best[k].w + ' W' : '–'}</div><div class="hint">${t.best[k]?.date || ''}</div></div>`).join('')
+    + `<div class="stat"><div class="k">TSS this week</div><div class="v">${wk.at(-1).tss}</div></div>`;
 }
-// Import rides the server archived (finished while this page was closed, or in another tab).
-async function importRides() {
-  let list = []; try { list = (await (await fetch('/api/rides')).json()).rides; } catch { return []; }
-  const imported = store.get('hw.imported', []);
-  const have = new Set([...store.get('hw.rides', []).map(r => r.id), ...imported]);
-  const got = [];
-  for (const m of list) {
-    if (have.has(m.id) || m.samples < 10) continue;
-    try { const r = await (await fetch('/api/rides/' + encodeURIComponent(m.id))).json(); delete r.source; saveRide(r); got.push(r); } catch {}
-  }
-  if (got.length) store.set('hw.imported', [...imported, ...got.map(r => r.id)].slice(-500));
-  return got;
+// one-time move of rides that only exist in this browser's storage into the server archive
+async function migrateLocalRides() {
+  if (store.get('hw.migrated', false)) return;
+  const local = store.get('hw.rides', []);
+  let ok = true;
+  for (const r of local) { try { if (!(await api('/api/ride', r)).ok) ok = false; } catch { ok = false; } }
+  if (ok) store.set('hw.migrated', true);
 }
 async function finishedRide(f) {
   beep(660, 0.4);
-  const got = await importRides();
-  show('history'); openSummary(f.id);
-  if (settings.autoGarmin && got.some(r => r.id === f.id)) uploadGarmin(f.id);
+  show('history'); await renderHistory(); openSummary(f.id);
 }
-let openId = null;
-function openSummary(id) {
-  const r = store.get('hw.rides', []).find(x => x.id === id); if (!r) return;
-  openId = id; const m = summarize(r);
+let openId = null, openRide = null;
+async function openSummary(id) {
+  let r, d;
+  try { [r, d] = await Promise.all([(await fetch('/api/rides/' + id)).json(), (await fetch('/api/rides/' + id + '/detail')).json()]); } catch { return; }
+  if (!r?.samples) return;
+  openId = id; openRide = r; const m = d.summary;
   $('#summary').style.display = ''; $('#sName').textContent = r.name;
   $('#sDate').textContent = new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const st = [['Time', fmtT(m.dur)], ['Avg power', Math.round(m.avgP) + ' W'], ['NP', Math.round(m.np) + ' W'], ['Max', Math.round(m.maxP) + ' W'], ['IF', m.IF.toFixed(2)], ['TSS', Math.round(m.tss)], ['Work', Math.round(m.kJ) + ' kJ'], ['Cadence', Math.round(m.avgC) + ' rpm'], ['Avg HR', m.avgHR ? Math.round(m.avgHR) : '–'], ['Max HR', m.maxHR || '–'], ['Best 1 min', Math.round(m.best60) + ' W'], ['Distance', (m.dist / 1000).toFixed(1) + ' km']];
+  const st = [['Time', fmtT(m.time_s)], ['Avg power', m.avg_w + ' W'], ['NP', m.np + ' W'], ['Max', m.max_w + ' W'], ['IF', m.if.toFixed(2)], ['TSS', m.tss], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–'], ['Best 1/5/20', `${d.best['1m']}/${d.best['5m'] || '–'}/${d.best['20m'] || '–'}`], ['Distance', m.distance_km.toFixed(1) + ' km']];
   $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
-  let cw = null; if (r.text) { try { cw = compile(r); } catch {} }
-  if (cw) for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { s.a = s.b = w; s.u = 'w'; } }
+  let cw = null;
+  if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }
+  else if (r.text) { try { cw = compile(r); for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { s.a = s.b = w; s.u = 'w'; } } } catch {} }
+  if (cw && r.samples.at(-1)[1] > cw.total) cw.total = r.samples.at(-1)[1];  // free riding after the plan
   requestAnimationFrame(() => drawChart($('#sumChart'), { cw, ftp: r.ftp, samples: r.samples, el: null, k: 1 }));
-  const tot = m.zt.reduce((a, b) => a + b, 0) || 1;
-  $('#sZones').innerHTML = m.zt.map((t, i) => `<i style="width:${t / tot * 100}%;background:var(${ZONES[i][1]})"></i>`).join('');
-  $('#sZleg').innerHTML = m.zt.map((t, i) => `<span><b style="background:var(${ZONES[i][1]})"></b>${ZONES[i][2]} ${fmtT(t)}</span>`).join('');
+  const zt = Object.values(d.power_zones_s), tot = zt.reduce((a, b) => a + b, 0) || 1;
+  $('#sZones').innerHTML = zt.map((t, i) => `<i style="width:${t / tot * 100}%;background:var(${ZONES[i][1]})"></i>`).join('');
+  $('#sZleg').innerHTML = zt.map((t, i) => `<span><b style="background:var(${ZONES[i][1]})"></b>${ZONES[i][2]} ${fmtT(t)}</span>`).join('');
   const tb = $('#sTest');
-  if (r.test && m.best60) {
-    const est = Math.round(m.best60 * 0.75); tb.style.display = '';
+  if (d.ftp_estimate) {
+    const est = d.ftp_estimate; tb.style.display = '';
     tb.innerHTML = `<span class="badge">FTP estimate <b class="num" style="color:var(--ink)">${est} W</b></span><button id="sSetFtp">Set FTP</button>`;
     $('#sSetFtp').onclick = () => { settings.ftp = est; saveSettings(['ftp']); $('#ftp').value = est; renderLib(); renderBuilder(); toast(`FTP set to ${est} W`); };
   } else tb.style.display = 'none';
-  const hz = [0, 0, 0, 0, 0]; let hn = 0;
-  for (const x of r.samples) { const i = hrZone(x[4]); if (x[4] > 0) { hn++; if (i >= 0) hz[i]++; } }
-  $('#sHR').style.display = hn && settings.hrZones ? '' : 'none';
-  if (hn && settings.hrZones) {
+  const hz = d.hr_zones_s ? Object.values(d.hr_zones_s) : null, hn = hz ? hz.reduce((a, b) => a + b, 0) : 0;
+  $('#sHR').style.display = hn ? '' : 'none';
+  if (hn) {
     $('#sHZones').innerHTML = hz.map((t, i) => `<i style="width:${t / hn * 100}%;background:var(${HRZ_COLORS[i]})"></i>`).join('');
     $('#sHZleg').innerHTML = hz.map((t, i) => `<span><b style="background:var(${HRZ_COLORS[i]})"></b>Z${i + 1} ${settings.hrZones[i]}+ · ${fmtT(t)}</span>`).join('');
   }
-  renderGarminBtn(r);
+  $('#sLaps').innerHTML = d.laps.map(l => `<tr><td>${l.overtime ? 'free' : l.index}</td><td class="num">${fmtT(l.time_s)}</td><td class="num">${l.target_w ?? (l.free ? 'free' : '–')}</td><td class="num">${l.avg_w}</td><td class="num">${l.max_w}</td><td class="num">${l.np}</td><td class="num">${l.avg_hr ?? '–'}</td><td class="num">${l.max_hr ?? '–'}</td><td class="num">${l.avg_cad ?? '–'}</td></tr>`).join('');
+  const cls = l => /^COACH|^EDIT/.test(l) ? 'c' : /^SAID/.test(l) ? 's' : /^FEEL|^PAUSED/.test(l) ? 'f' : '';
+  $('#sEvents').innerHTML = d.events.length ? d.events.map(([ts, l]) => `<div class="${cls(l)}">${new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}  ${esc(l)}</div>`).join('') : '<div class="hint">No transcript for this ride.</div>';
+  renderGarminBtn(d.garmin);
   $('#summary').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
-function renderGarminBtn(r) {
-  const b = $('#sGarmin'); b.disabled = !garminOn && !r.garmin;
+function renderGarminBtn(g) {
+  const b = $('#sGarmin'); b.disabled = !garminOn && !g;
   b.title = garminOn ? '' : 'Garmin is disabled on this server';
-  b.textContent = r.garmin ? 'On Garmin ✓' : 'Upload to Garmin'; b.className = r.garmin ? '' : 'pri';
+  b.textContent = g ? 'On Garmin ✓' : 'Upload to Garmin'; b.className = g ? '' : 'pri'; b.dataset.g = g || '';
 }
 async function uploadGarmin(id) {
-  const rides = store.get('hw.rides', []), r = rides.find(x => x.id === id); if (!r) return;
   if (openId === id) { $('#sGarmin').disabled = true; $('#sGarmin').textContent = 'Uploading…'; }
+  let g = null;
   try {
-    const res = await fetch('/api/garmin/upload', { method: 'POST', headers: { 'X-HW': '1', 'X-Filename': fileBase(r) + '.fit', 'Content-Type': 'application/octet-stream' }, body: fitEncode(r) });
+    const res = await api(`/api/rides/${id}/garmin`, {});
     const j = await res.json().catch(() => ({ error: 'no local server (run: trainer-coach serve)' }));
     if (!j.ok) throw new Error(j.error || res.status);
-    r.garmin = j.activityId || true; store.set('hw.rides', rides);
-    toast(j.duplicate ? 'Already on Garmin' : 'Uploaded to Garmin');
+    g = j.activityId || true; toast(j.duplicate ? 'Already on Garmin' : 'Uploaded to Garmin');
   } catch (e) { toast('Garmin upload failed: ' + e.message); }
-  renderHistory(); if (openId === id) renderGarminBtn(r);
+  if (openId === id) renderGarminBtn(g);
+  renderHistory();
 }
 $('#sGarmin').onclick = () => {
-  const r = store.get('hw.rides', []).find(x => x.id === openId); if (!r) return;
-  if (r.garmin) window.open(typeof r.garmin === 'number' ? `https://connect.garmin.com/modern/activity/${r.garmin}` : 'https://connect.garmin.com/modern/activities', '_blank');
-  else uploadGarmin(openId);
+  const g = $('#sGarmin').dataset.g;
+  if (g) window.open(/^\d+$/.test(g) ? `https://connect.garmin.com/modern/activity/${g}` : 'https://connect.garmin.com/modern/activities', '_blank');
+  else if (openId) uploadGarmin(openId);
 };
 $('#sClose').onclick = () => { $('#summary').style.display = 'none'; openId = null; };
-$('#sDel').onclick = () => { store.set('hw.rides', store.get('hw.rides', []).filter(x => x.id !== openId)); $('#summary').style.display = 'none'; renderHistory(); toast('Deleted'); };
-const fileBase = r => `${new Date(r.start || r.samples[0][0]).toISOString().slice(0, 16).replace(/[:T]/g, '-')} ${r.name.replace(/[^\w\- ]+/g, '')}`;
-$('#sFit').onclick = () => { const r = store.get('hw.rides', []).find(x => x.id === openId); if (r) download(fileBase(r) + '.fit', fitEncode(r), 'application/octet-stream'); };
-$('#sTcx').onclick = () => { const r = store.get('hw.rides', []).find(x => x.id === openId); if (r) download(fileBase(r) + '.tcx', toTcx(r), 'application/xml'); };
+$('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); $('#summary').style.display = 'none'; openId = null; renderHistory(); toast('Deleted (kept in rides/trash)'); };
+const fileLink = ext => { if (!openId) return; const a = document.createElement('a'); a.href = `/api/rides/${openId}/${ext}`; a.download = ''; a.click(); };
+$('#sFit').onclick = () => fileLink('fit');
+$('#sTcx').onclick = () => fileLink('tcx');
 function download(name, data, type) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
@@ -495,6 +553,7 @@ function show(v) {
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
   if (v === 'workouts') { renderLib(); renderBuilder(); }
   if (v === 'ride' && V) renderRide();
+  if (v === 'history') renderHistory();
 }
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
@@ -523,9 +582,9 @@ async function syncHrZones() {
   } catch {}
 }
 $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3m 55%), 8m 50-40%';
-renderVoiceBtn(); renderHistory(); setStatus();
+renderVoice(); setStatus();
 loadSettings().then(syncHrZones);
-importRides();
+migrateLocalRides().then(renderHistory);
 connect();
 const setHH = () => document.documentElement.style.setProperty('--hh', document.querySelector('header').offsetHeight + 'px');
 setHH();

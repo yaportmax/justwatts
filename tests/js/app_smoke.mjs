@@ -40,7 +40,8 @@ globalThis.localStorage = { getItem: k => mem.has(k) ? mem.get(k) : null, setIte
 mem.set('hw.voice', 'true');
 const spoken = [];
 globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
-globalThis.speechSynthesis = { getVoices: () => [], speak: u => spoken.push(u.text) };
+let cancels = 0;
+globalThis.speechSynthesis = { getVoices: () => [], speak: u => { spoken.push(u.text); u.onstart?.(); }, cancel: () => { cancels++; } };
 
 const posts = [];
 globalThis.fetch = (path, opt = {}) => {
@@ -100,10 +101,32 @@ await fetch('/api/coach', { method: 'POST', headers: { 'X-HW': '1', 'Content-Typ
 await until(() => S().ride?.target_w === 230 && $('#coachMsg').textContent === 'Hold 230', 'coach applied');
 const during = { target: String($("#lT").textContent), cad: $('#lCs').textContent, cadColor: $('#cadTile').style.props['--hrc'], tiles: $('#lP').textContent, interval: String($("#lIs").textContent) };
 multi['[data-feel]'][2].click();
+// barge-in: the voice listener reports speech, the page cancels coach speech
+await fetch('/api/voice', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ event: 'speech_start' }) });
+await until(() => cancels > 0, 'speech cancelled');
+// mute: messages still show but are not spoken
+$('#coachMute').click();
+await until(() => S().voice.mode === 'silent', 'muted');
+await fetch('/api/coach', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ msg: 'Quiet message', important: true }) });
+await until(() => $('#coachMsg').textContent === 'Quiet message', 'muted message shown');
+const muteBtn = $('#coachMute').textContent;
+// the plan ends: the ride keeps going as a free ride until End (two taps)
+await until(() => S().ride?.overtime, 'workout done');
+const overBadge = $('#rState').textContent;
+$('#cSave').click();
+await until(() => S().last_saved, 'saved copy');
+$('#cEnd').click();
+await sleep(100);
+const stillRiding = !!S().ride;
+$('#cEnd').click();
 await until(() => S().last_finished, 'ride end');
 await until(() => $('#sName').textContent === 'Smoke', 'summary opened');
-const rides = JSON.parse(mem.get('hw.rides'));
+await until(() => String($('#sLaps').innerHTML).includes('<tr>') && String($('#sEvents').innerHTML).includes('COACH'), 'detail rendered');
+const rides = (await (await fetch('/api/rides')).json()).rides;
+const raw = await (await fetch('/api/rides/' + rides[0].id)).json();
 finish({
-  during, spoken, sName: $('#sName').textContent, histRides: rides.map(r => ({ id: r.id, n: r.samples.length, ov: r.ov })),
+  during, spoken, cancels, muteBtn, overBadge, stillRiding, sName: $('#sName').textContent,
+  laps: String($('#sLaps').innerHTML).split('<tr>').length - 1, events: String($('#sEvents').innerHTML).includes('FEEL'),
+  histRides: [{ id: raw.id, n: raw.samples.length, ov: raw.ov }],
   posts: posts.map(p => p.path + (p.body?.action ? ':' + p.body.action : '')), settings: JSON.parse(mem.get('hw.settings')),
 });

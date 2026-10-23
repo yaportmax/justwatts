@@ -16,6 +16,7 @@ HR_MEASUREMENT = uuid16(0x2A37)
 
 OP_REQUEST_CONTROL = 0x00
 OP_START = 0x07
+OP_TARGET_RESISTANCE = 0x04
 OP_TARGET_POWER = 0x05
 OP_SIMULATION = 0x11
 OP_RESPONSE = 0x80
@@ -79,9 +80,19 @@ def cp_simulation(grade_pct: float) -> bytes:
     return bytes([OP_SIMULATION, 0, 0, g & 255, (g >> 8) & 255, 40, 51])
 
 
+def cp_resistance(level: float) -> bytes:
+    """Set Target Resistance Level (FTMS 1.0: UINT8, unitless, resolution 0.1, so 0..25.5)."""
+    v = max(0, min(255, int(round(level * 10))))
+    return bytes([OP_TARGET_RESISTANCE, v])
+
+
 def cp_command(cmd: dict) -> bytes:
-    """{'k': 'erg', 'w': 200} or {'k': 'sim', 'g': 2.5} -> control point bytes."""
-    return cp_target_power(cmd["w"]) if cmd["k"] == "erg" else cp_simulation(cmd["g"])
+    """{'k': 'erg', 'w': 200}, {'k': 'sim', 'g': 2.5} or {'k': 'res', 'r': 8.5} -> control point bytes."""
+    if cmd["k"] == "erg":
+        return cp_target_power(cmd["w"])
+    if cmd["k"] == "res":
+        return cp_resistance(cmd["r"])
+    return cp_simulation(cmd["g"])
 
 
 def cp_response_needs_control(data: bytes) -> bool:

@@ -83,11 +83,16 @@ def test_auto_pause_with_real_trainer_mode(srv):
 
 def test_finish_archives_and_short_rides_are_dropped(srv):
     eng = ride(srv, "30s 50%")
-    ticks(eng, 31)
+    ticks(eng, 35)
+    st = state(srv)
+    assert st["ride"]["overtime"] and st["last_finished"] is None  # plan done: still riding free
+    assert st["ride"]["target_w"] == 100  # afterWorkout=hold keeps the last target
+    ctl(srv, "end")
     lf = state(srv)["last_finished"]
-    assert lf and lf["samples"] == 30
+    assert lf and lf["samples"] == 35
     got = srv.req("GET", f"/api/rides/{lf['id']}")[1]
-    assert got["name"] == "T" and len(got["samples"]) == 30 and got["steps"][0]["d"] == 30
+    assert got["name"] == "T" and len(got["samples"]) == 35 and got["steps"][0]["d"] == 30
+    assert any("WORKOUT DONE" in line for _, line in got["events"])
     assert srv.req("GET", "/api/rides")[1]["rides"][0]["id"] == lf["id"]
     assert srv.req("GET", "/api/rides/nope")[0] == 404
     eng = ride(srv, "5m 50%")

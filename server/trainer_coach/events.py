@@ -105,8 +105,9 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     ("resumed", re.compile(r"^RESUMED$")),
     ("coach", re.compile(r"^COACH (\d+)((?: \| .*)?)$")),
     ("edit", re.compile(rf"^EDIT (insert|replace|delete|end|duration) (.*) \| (\d+) steps, {T}$")),
+    ("workout_done", re.compile(rf"^WORKOUT DONE at T\+{T}, riding free until End$")),
     ("said", re.compile(r'^SAID(?: \((\w+)\))?: "(.*)"$')),
-    ("voice", re.compile(r"^VOICE (ON|OFF)(?: \((\w+)\))?$")),
+    ("voice", re.compile(r"^VOICE (ON|OFF|MUTED|UNMUTED)(?: \((\w+)\))?$")),
 ]
 _LOG_RE = re.compile(r"^\[(\d\d:\d\d:\d\d)\] ?(.*)$")
 
@@ -152,10 +153,12 @@ def parse_line(line: str) -> dict[str, Any]:
             ev.update(auto=bool(g[1]))
         elif typ == "edit":
             ev.update(op=g[1], detail=f"{g[1]} {g[2]}", steps=int(g[3]), total_s=parse_t(g[4]))
+        elif typ == "workout_done":
+            ev.update(elapsed_s=parse_t(g[1]))
         elif typ == "said":
             ev.update(source=g[1] or "browser", said=g[2])
         elif typ == "voice":
-            ev.update(on=g[1] == "ON", source=g[2])
+            ev.update(on=g[1] in ("ON", "UNMUTED"), state=g[1].lower(), source=g[2])
         elif typ == "coach":
             ev["seq"] = int(g[1])
             rest = g[2]

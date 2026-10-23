@@ -17,6 +17,12 @@ lets you talk back.
 - **Local server** (`trainer-coach serve`): owns the trainer and HR strap (bleak), reconnects after
   drops, runs the ride engine at 1 Hz, writes the ride in progress to disk and resumes it after a
   crash or restart, logs events, applies coach commands. Stdlib plus optional extras.
+- **Ride modes**: structured workouts (ERG), free ride by grade (simulation), ERG watts or FTMS
+  resistance level. When the plan ends you keep riding free until you press End. Pause, Save (to
+  History, keeps riding) and End (two taps) on the ride screen; workout length +/-5 min.
+- **History** on the server: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps
+  per interval, the coach transcript, FIT/TCX export, Garmin status; weekly TSS, FTP history and
+  best-effort trends.
 - **Web app** (`app/`): a view over the server stream. Workout builder with a text format
   (`10m 45-75%, 5x(3m 115%, 3m 50%), 10m free`), .zwo import/export, one-screen ride view with power,
   HR (zones, right-hand axis) and cadence target tiles, coach bar with the last 3 messages and your
@@ -112,9 +118,16 @@ trainer-coach coach extend 60                      # one more minute of this ste
 trainer-coach coach delete 9                       # drop step 9
 ```
 
-MCP tools: `get_ride_status`, `get_recent_events`, `get_workout`, `get_telemetry_history`,
-`get_athlete_profile`, `set_step_target`, `set_current_target`, `insert_steps`, `replace_step`,
-`delete_step`, `set_step_duration`, `extend_current_step`, `send_message`, `get_coaching_playbook`. More examples in [examples/](examples/).
+MCP tools (anything the athlete can do in the UI, an agent can do too):
+
+| Area | Tools |
+|---|---|
+| Read | `get_ride_status`, `get_workout`, `get_recent_events`, `get_telemetry_history`, `get_athlete_profile`, `get_coaching_playbook` |
+| Coach | `send_message`, `set_step_target`, `set_current_target`, `set_intensity`, `set_voice_mode` |
+| Edit the workout | `insert_steps`, `replace_step`, `delete_step`, `set_step_duration`, `extend_current_step`, `set_workout_length` |
+| Ride | `load_workout`, `ride_control` (start, pause, resume, skip, save, end), `free_ride` (grade, ERG, resistance) |
+| Devices, settings | `devices` (status, scan, connect, disconnect, sim), `update_settings` |
+| History | `list_rides`, `get_ride_detail`, `get_trends`, `upload_ride_to_garmin` | More examples in [examples/](examples/).
 
 ## Security model
 
@@ -130,8 +143,9 @@ running server). It transcribes the default mic locally with faster-whisper `sma
 and posts `SAID (whisper): "..."` events that agents see in `get_ride_status`. Silence
 hallucinations ("Thank you.", "Thanks for watching!"), low-confidence segments, fragments under three
 words without a command word (easier, harder, stop, pause, skip, help) and echoes of the coach's
-own messages are dropped. Press **Voice** in the coach bar to hear coach messages read aloud with
-the best voice the browser has.
+own messages are dropped. Coach messages are read aloud with the best voice the browser has. The
+coach bar has a **Mute** button and a menu (Speak all, Important only, Silent); saying "mute" or
+"quiet" mutes too ("unmute" to undo). When you start talking, the coach stops mid-sentence.
 
 ## Garmin upload
 

@@ -80,10 +80,25 @@ live list from `get_workout` (they shift after inserts and deletes, so re-read b
 | End this step now | `delete_step(<current>)` |
 | Longer recovery | `extend_current_step(60)` |
 | Set any step's length | `set_step_duration(6, 240)` |
+| Shorter or longer session | `set_workout_length(3600)` (last block) or `how="scale"` |
 
 Workout text: `10m 50%`, ramp `5m 50-90%`, watts `1m 300w`, `free`, repeats `Nx(...)`, durations
 `1h`, `10m`, `30s`, `1m30s`. Edits that make the session harder (more time above 105% FTP, higher
 watts, shorter or removed recoveries) need a recent FEEL HARDER or GOOD, like target raises.
+
+## Voice etiquette
+
+- If the athlete mutes you (button, menu, or saying "mute"), stay muted: keep messages on screen,
+  do not call `set_voice_mode` to unmute yourself.
+- In "important only" mode, mark safety notes, interval changes and answers to the athlete with
+  `send_message(text, important=True)`; target changes and edits are important automatically.
+- When the athlete starts talking the page stops your speech mid-sentence (barge-in). Do not repeat
+  the cut message; answer what they said.
+
+## After the plan
+
+The ride does not end when the workout does: the athlete keeps riding free until they press End.
+Offer a cooldown or an extra block (`insert_steps`), never `ride_control("end")` without asking.
 
 ## Messages
 

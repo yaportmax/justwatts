@@ -143,7 +143,7 @@ def check_edit(st: dict, age_s: float | None, events: list[dict], edit: dict, li
         raise GuardError("workout finished")
     op = edit.get("op")
     ref = edit.get("after" if op == "insert" else "step", "cur")
-    idx = cur if ref in ("cur", None) else int(ref)
+    idx = cur if ref in ("cur", None) or op in ("total", "extend") else int(ref)
     if not 1 <= idx <= len(steps):
         raise GuardError(f"step {idx} out of range 1..{len(steps)}")
     if idx < cur:
@@ -179,6 +179,13 @@ def check_edit(st: dict, age_s: float | None, events: list[dict], edit: dict, li
         info["deleted_w"] = step_w(s)
         # removing a recovery makes the session harder
         harder = not s.get("free") and step_w(s) <= lim.recovery_pct / 100 * ftp
+    elif op == "total":
+        delta = int(edit["seconds"]) - int(ride.get("total_s") or 0)
+        if delta > lim.max_insert_s:
+            raise GuardError(f"adds {delta // 60} min; more than {lim.max_insert_s / 60:g} min per edit")
+        last = steps[-1]
+        harder = delta > 0 and step_w(last) > lim.feel_gate_pct / 100 * ftp
+        info.update(delta_s=delta, last_w=step_w(last))
     elif op in ("duration", "extend"):
         s = steps[idx - 1] if op == "duration" else steps[cur - 1]
         delta = (int(edit["seconds"]) - s["duration_s"]) if op == "duration" else int(edit["seconds"])
@@ -189,7 +196,7 @@ def check_edit(st: dict, age_s: float | None, events: list[dict], edit: dict, li
         harder = (delta > 0 and w > lim.feel_gate_pct / 100 * ftp) or (delta < 0 and is_recovery)
         info.update(delta_s=delta, step_w=w)
     else:
-        raise GuardError("op must be insert, replace, delete, duration or extend")
+        raise GuardError("op must be insert, replace, delete, duration, extend or total")
     if harder:
         if ride.get("paused"):
             raise GuardError("ride is paused: never make the workout harder while the athlete is stopped")

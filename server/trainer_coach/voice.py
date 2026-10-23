@@ -25,7 +25,9 @@ HALLUCINATIONS = {
     "so", "oh", "uh", "um", "hmm", "mm", "ah", "i", "a", "the",
 }
 # short utterances are kept only when they carry a command
-COMMAND_WORDS = {"easier", "harder", "stop", "pause", "skip", "help"}
+COMMAND_WORDS = {"easier", "harder", "stop", "pause", "skip", "help", "mute", "unmute", "quiet"}
+# while the page is speaking, only a clearly louder voice counts as barge-in (speaker echo is quieter)
+BARGE_FACTOR_DURING_TTS = 2.5
 MIN_WORDS = 3
 # per-segment confidence gates (faster-whisper Segment fields)
 MAX_NO_SPEECH_PROB = 0.5
@@ -78,6 +80,15 @@ def accept(segments, echo: "CoachEcho | None" = None) -> str | None:
     return text
 
 
+def should_barge(gate: "PhraseGate", tts_active: bool) -> bool:
+    """Interrupt coach speech when the athlete starts talking. During TTS, require a louder onset."""
+    if not gate.started:
+        return False
+    if not tts_active:
+        return True
+    return gate.start_rms > gate.noise * gate.START_FACTOR * BARGE_FACTOR_DURING_TTS
+
+
 class CoachEcho:
     """Remembers recent coach messages; a transcript sharing 60%+ of its words with one is echo."""
 
@@ -126,13 +137,17 @@ class PhraseGate:
         self.voiced = False
         self.phrase: list = []
         self.silence = 0
+        self.started = False  # True for the one block where a phrase begins
+        self.start_rms = 0.0
 
     def feed(self, blk, rms: float):
+        self.started = False
         if not self.voiced:
             if rms < self.noise * self.START_FACTOR:
                 self.noise = 0.98 * self.noise + 0.02 * rms
             if rms > max(self.noise * self.START_FACTOR, 0.006):
                 self.voiced, self.phrase, self.silence = True, [blk], 0
+                self.started, self.start_rms = True, rms
             return None
         self.phrase.append(blk)
         self.silence = self.silence + 1 if rms < self.noise * 2.2 else 0
@@ -183,11 +198,24 @@ def main(argv: list[str] | None = None) -> int:
     with sd.InputStream(samplerate=RATE, channels=1, dtype="float32", blocksize=BLOCK, callback=cb, device=dev):
         print("voice: listening", flush=True)
         post("VOICE ON (whisper)")
+        tts = {"on": False, "next": 0.0}
         try:
             while True:
                 blk = audio.get()
                 echo.poll()
+                now = time.time()
+                if now >= tts["next"]:  # is the page speaking right now? (cheap local GET)
+                    tts["next"] = now + 0.5
+                    try:
+                        tts["on"] = bool(c.voice().get("tts"))
+                    except Exception:  # noqa: BLE001
+                        pass
                 phrase = gate.feed(blk, float(np.sqrt(np.mean(blk ** 2))))
+                if should_barge(gate, tts["on"]):
+                    try:
+                        c.voice("speech_start")  # the page cancels coach speech at once
+                    except Exception:  # noqa: BLE001
+                        pass
                 if phrase is None:
                     continue
                 segs, _ = model.transcribe(np.concatenate(phrase), language="en", beam_size=1, vad_filter=True,

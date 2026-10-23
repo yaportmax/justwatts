@@ -104,7 +104,9 @@ tbody tr:hover{background:var(--panel2)}
 /* server mode additions */
 #coachSaid{font-size:13px;color:var(--dim);margin-top:4px}
 #coachSaid b{color:var(--ink);font-weight:500}
-#coachVoice.on{border-color:var(--acc);color:var(--acc)}
+#coachMute{font-weight:700;min-width:84px}
+#coachMute.muted{background:var(--warn);border-color:var(--warn);color:#1a1204}
+#coachVerb{padding:6px 8px}
 .pill.off{color:var(--bad)}
 .modal{position:fixed;inset:0;z-index:20;display:none;align-items:flex-start;justify-content:center;padding:70px 16px 16px;background:rgba(0,0,0,.55)}
 .modal.on{display:flex}
@@ -122,3 +124,14 @@ tbody tr:hover{background:var(--panel2)}
 #coachPrev div{max-width:100%}
 .coach.open #coachMsg,.coach.open #coachSaid{-webkit-line-clamp:unset;line-clamp:unset}
 @media (max-width:640px){.coach{flex-wrap:wrap}.coach>.row{width:100%}}
+/* ride controls */
+.controls button.big{padding:9px 18px;font-weight:700}
+#cEnd.confirm{background:var(--bad);border-color:var(--bad);color:#fff}
+.badge.done{color:var(--good);border-color:#14532d}
+/* history */
+#trendChart{width:100%;height:120px;display:block;margin-top:8px}
+table.laps td,table.laps th{padding:6px 8px}
+table.laps tbody tr{cursor:default}
+.transcript{max-height:260px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--dim)}
+.transcript div{white-space:pre-wrap;overflow-wrap:anywhere}
+.transcript .c{color:var(--acc)}.transcript .s{color:var(--ink)}.transcript .f{color:var(--warn)}

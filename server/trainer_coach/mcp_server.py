@@ -213,12 +213,174 @@ def extend_current_step(seconds: int, message: str | None = None) -> dict[str, A
 
 
 @mcp.tool()
-def send_message(text: str) -> dict[str, Any]:
-    """Show a short message on the athlete's screen (with a beep). Keep it under ~60 characters,
-    numbers first. Max 280 characters."""
+def set_workout_length(total_seconds: int, how: str = "last", message: str | None = None) -> dict[str, Any]:
+    """Change the total planned workout length. how="last" changes the last block (dropping trailing
+    steps when shortening past them); how="scale" stretches or squeezes every remaining step."""
+    return _edit({"op": "total", "seconds": int(total_seconds), "how": "scale" if how == "scale" else "last"}, message)
+
+
+# ---------- everything the athlete can do in the UI ----------
+def _control(action: str, **kw) -> dict[str, Any]:
+    return _call(client().request, "POST", "/api/ride/control", {"action": action, **kw})
+
+
+@mcp.tool()
+def load_workout(text: str | None = None, name: str = "Coach workout", test: bool = False,
+                 end_current: bool = False) -> dict[str, Any]:
+    """Load a workout (workout text format) or, with text=None, a free ride. Refuses to replace a ride
+    in progress unless end_current=True (that ends and saves it). Then call ride_control("start")."""
+    st, _ = _state()
+    ride = (st or {}).get("ride")
+    if ride and ride.get("started") and not end_current:
+        raise ToolError("a ride is in progress; pass end_current=True to end and save it first")
+    wk = {"name": name, "text": text, "test": test} if text else None
+    if wk:
+        from .workout import WorkoutError, parse_workout
+        try:
+            parse_workout(text)
+        except WorkoutError as e:
+            raise ToolError(f"bad workout text: {e}") from None
+    return _control("load", workout=wk)
+
+
+@mcp.tool()
+def ride_control(action: str, confirm: bool = False) -> dict[str, Any]:
+    """start | pause | resume | skip | save | end. "save" stores the ride so far in History without
+    ending it. "end" finishes and saves the ride and needs confirm=True (ask the athlete first)."""
+    m = {"start": "start", "pause": "hold", "resume": "resume", "skip": "skip", "save": "save", "end": "end"}
+    if action not in m:
+        raise ToolError(f"action must be one of {sorted(m)}")
+    if action == "end" and not confirm:
+        raise ToolError("ending the ride needs confirm=True; ask the athlete first")
+    return _control(m[action])
+
+
+@mcp.tool()
+def set_intensity(percent: int) -> dict[str, Any]:
+    """Scale every workout target (the athlete's +/- control), 50..150 %. Changes above the guard
+    limits need the same care as target changes: at most +/-15 % at once, raises need a feel signal."""
+    st, age = _state()
+    ride = (st or {}).get("ride")
+    if not ride:
+        raise ToolError("no ride loaded")
+    cur = round((ride.get("intensity") or 1) * 100)
+    lim = Limits()
+    if abs(percent - cur) > lim.max_change_pct:
+        raise ToolError(f"refused: {percent - cur:+d} % at once exceeds {lim.max_change_pct:g} %")
+    if percent > cur and percent > 100:
+        from .safety import recent_feel
+        feel = recent_feel(_call(client().events, 300), lim.feel_window_s)
+        if feel not in ("harder", "good"):
+            raise ToolError("refused: raising intensity above 100 % needs a recent FEEL HARDER or GOOD")
+    return _control("intensity", percent=percent)
+
+
+@mcp.tool()
+def free_ride(mode: str, value: float) -> dict[str, Any]:
+    """In a free ride (load_workout(None)): mode "grade" (sim slope %, -10..20), "erg" (watts) or
+    "resistance" (FTMS level 0..25). ERG watts are capped at the FTP ceiling; grades above 8 % need
+    a recent FEEL HARDER or GOOD."""
+    m = {"grade": "g", "erg": "w", "resistance": "r"}.get(mode)
+    if not m:
+        raise ToolError("mode must be grade, erg or resistance")
+    st, _ = _state()
+    ftp = float(((st or {}).get("athlete") or {}).get("ftp") or 200)
+    lim = Limits()
+    if m == "w" and value > lim.max_pct / 100 * ftp:
+        raise ToolError(f"refused: {value:g} W is above the {lim.max_pct:g}% FTP ceiling")
+    if m == "g" and value > 8:
+        from .safety import recent_feel
+        if recent_feel(_call(client().events, 300), lim.feel_window_s) not in ("harder", "good"):
+            raise ToolError("refused: grades above 8 % need a recent FEEL HARDER or GOOD")
+    return _control("free", m=m, value=value)
+
+
+@mcp.tool()
+def set_voice_mode(mode: str) -> dict[str, Any]:
+    """How much the coach speaks aloud: "all", "important" (only important messages) or "silent"
+    (messages still show on screen). Respect the athlete: if they muted you, stay muted."""
+    if mode not in ("all", "important", "silent"):
+        raise ToolError("mode must be all, important or silent")
+    return _call(client().request, "POST", "/api/settings", {"voiceMode": mode})["settings"]
+
+
+@mcp.tool()
+def update_settings(ftp: int | None = None, weight_kg: float | None = None, hr_zone_floors: list[int] | None = None,
+                    hr_max: int | None = None, cadence_range: list[int] | None = None,
+                    after_workout: str | None = None, beeps: bool | None = None) -> dict[str, Any]:
+    """Athlete settings. hr_zone_floors = lower bpm of Z1..Z5 (5 rising numbers). after_workout:
+    "hold" keeps the last target when the plan ends, "grade0" switches to a flat free ride."""
+    body: dict[str, Any] = {}
+    if ftp is not None:
+        body["ftp"] = ftp
+    if weight_kg is not None:
+        body["weight"] = weight_kg
+    if hr_zone_floors is not None:
+        if len(hr_zone_floors) != 5 or any(b <= a for a, b in zip(hr_zone_floors, hr_zone_floors[1:])):
+            raise ToolError("hr_zone_floors must be 5 rising numbers")
+        body.update(hrZones=hr_zone_floors, hrZonesSrc="manual")
+    if hr_max is not None:
+        body["hrMax"] = hr_max
+    if cadence_range is not None:
+        body["cadRange"] = cadence_range[:2]
+    if after_workout is not None:
+        body["afterWorkout"] = after_workout
+    if beeps is not None:
+        body["beeps"] = beeps
+    return _call(client().request, "POST", "/api/settings", body)["settings"]
+
+
+@mcp.tool()
+def devices(action: str = "status", kind: str = "trainer", address: str | None = None,
+            name: str | None = None) -> Any:
+    """Bluetooth devices owned by the server. action: status | scan | connect | disconnect | sim.
+    kind: trainer | hr. scan returns [{address, name, rssi}]; connect needs an address from scan.
+    sim toggles the simulated trainer (for testing without hardware)."""
+    if action == "status":
+        return _call(client().request, "GET", "/api/devices", auth=False)
+    body = {"action": action, "kind": kind}
+    if action == "connect":
+        if not address:
+            raise ToolError("connect needs an address (scan first)")
+        body.update(address=address, name=name)
+    return _call(client().request, "POST", "/api/devices", body)
+
+
+@mcp.tool()
+def list_rides(limit: int = 20) -> list[dict[str, Any]]:
+    """Ride history, newest first: date, time, avg W, NP, IF, TSS, kJ, avg HR, best 1/5/20 min,
+    Garmin upload status."""
+    return _call(client().request, "GET", "/api/rides", auth=False)["rides"][:max(1, limit)]
+
+
+@mcp.tool()
+def get_ride_detail(ride_id: str) -> dict[str, Any]:
+    """One ride: summary, best efforts, power and HR zone times, laps per interval (avg/max W, HR,
+    cadence), FTP test estimate, the coach transcript, Garmin status."""
+    return _call(client().request, "GET", f"/api/rides/{ride_id}/detail", auth=False)
+
+
+@mcp.tool()
+def get_trends(weeks: int = 12) -> dict[str, Any]:
+    """Weekly TSS/time/kJ, FTP history and all-time best 1/5/20 min efforts."""
+    return _call(client().request, "GET", f"/api/trends?weeks={int(weeks)}", auth=False)
+
+
+@mcp.tool()
+def upload_ride_to_garmin(ride_id: str) -> dict[str, Any]:
+    """Upload an archived ride to Garmin Connect (only when Garmin is enabled on this server)."""
+    return _call(client().request, "POST", f"/api/rides/{ride_id}/garmin", {})
+
+
+@mcp.tool()
+def send_message(text: str, important: bool = False) -> dict[str, Any]:
+    """Show a short message on the athlete's screen (with a beep) and read it aloud unless the athlete
+    muted the coach. With voice set to "important only", only important messages are spoken: use
+    important=True for safety, interval changes and answers to the athlete. Messages sent with a
+    target change or workout edit are always important. Under ~60 characters, numbers first."""
     if not text.strip():
         raise ToolError("empty message")
-    return {"sent": _call(client().coach, msg=text)}
+    return {"sent": _call(client().coach, msg=text, important=important)}
 
 
 @mcp.tool()

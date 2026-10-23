@@ -46,17 +46,22 @@ def test_page_rides_a_workout_on_the_server_engine(node, srv):
     d = out["during"]
     assert d["target"] == "230" and d["interval"] == "2 / 2"
     assert d["cad"] == "target 85-95 rpm" and d["cadColor"] in ("var(--good)", "var(--warn)")
-    assert out["spoken"] == ["Hold 230"]  # TTS reads new coach messages only
+    assert out["spoken"] == ["Hold 230"]  # TTS reads new coach messages only; muted ones are not spoken
+    assert out["cancels"] >= 1  # barge-in cancelled speech
+    assert out["muteBtn"] == "Unmute"
+    assert out["overBadge"].startswith("Workout done") and out["stillRiding"]  # first End tap only arms
+    assert out["laps"] == 3 and out["events"]  # 2 steps + the free-ride lap; transcript has the FEEL press
     assert out["sName"] == "Smoke"
     ride = out["histRides"][0]
-    assert ride["n"] >= 115 and ride["ov"] == {"1": 230}
+    assert ride["n"] >= 120 and ride["ov"] == {"1": 230}
     assert "/api/ride/control:load" in out["posts"] and "/api/ride/control:start" in out["posts"]
     assert "/api/ride/control:feel" in out["posts"] and "/api/devices:sim" in out["posts"]
+    assert "/api/ride/control:save" in out["posts"] and "/api/settings" in out["posts"]
     assert "/api/garmin/upload" not in out["posts"]  # Garmin off on test servers, so no auto upload
     assert out["settings"]["autoGarmin"] is False
     evs = srv.client.events(100)
     types = [e["type"] for e in evs]
-    assert types.count("step_start") == 2 and "feel" in types and types[-1] == "ride_end"
+    assert types.count("step_start") == 2 and "feel" in types and "workout_done" in types and types[-1] == "ride_end"
     assert (srv.cfg.rides / f"{ride['id']}.json").exists()
 
 

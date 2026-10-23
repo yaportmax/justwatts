@@ -48,8 +48,14 @@ curl -s -H "Authorization: Bearer $(cat ~/.trainer-coach/token)" http://127.0.0.
 | GET/POST | `/api/settings` | none / page/token | partial settings | `{settings, stored, garmin}` |
 | GET | `/api/devices` | none | | device status |
 | POST | `/api/devices` | page/token | `{action: scan\|connect\|disconnect\|sim, kind: trainer\|hr, address?, name?, on?, timeout?}` | status, or `{devices: [{address, name, rssi}]}` for scan; `503` when Bluetooth is off |
-| GET | `/api/rides` | none | | `{rides: [{id, name, start, samples, source}]}` archived rides, newest first |
+| GET | `/api/rides` | none | | `{rides: [{id, name, start, time_s, avg_w, np, if, tss, kJ, avg_hr, best: {1m, 5m, 20m}, ftp, ftp_estimate, garmin, ...}]}` newest first |
 | GET | `/api/rides/<id>` | none | | ride payload |
+| GET | `/api/rides/<id>/detail` | none | | `{summary, best, power_zones_s, hr_zones_s, laps: [...], events: [[ms, line]], garmin, ftp_estimate?}` |
+| GET | `/api/rides/<id>/fit`, `/tcx` | none | | file download (encoded on the server) |
+| POST | `/api/rides/<id>/garmin` | page/token | | upload that ride; records Garmin status |
+| POST | `/api/rides/<id>/delete` | page/token | | moves it to `rides/trash/` |
+| GET | `/api/trends` | none | `?weeks=12` | `{weeks: [{week, tss, time_s, kJ, rides}], ftp_history: [...], best: {1m, 5m, 20m}}` |
+| GET/POST | `/api/voice` | none / page/token | `{event: speech_start\|tts_start\|tts_end\|listening}` | `{barge, barge_at, tts, tts_at, mode}`; `speech_start` makes the page stop speaking |
 | GET | `/api/said` | none | | `{said: [{time, text, source}]}` last 8 voice transcripts, newest first |
 | POST | `/api/state` | page/token | state object | `{ok}`; for pages or simulators that run their own ride (browser Bluetooth mode, headless simulator) |
 | POST/GET | `/api/current` | page/token / none | ride payload, `{}` clears | browser-mode backup of the ride in progress |
@@ -60,9 +66,17 @@ curl -s -H "Authorization: Bearer $(cat ~/.trainer-coach/token)" http://127.0.0.
 ### Ride control actions
 
 `load {workout: {name, text, test?} | null}` (null = free ride; finishes a started ride first),
-`start`, `pause` (toggles), `skip`, `end`, `adjust {dir: 1|-1}` (intensity 1%, or grade 0.5% /
-5 W in free ride), `mode {m: g|w}` (free ride grade or ERG), `feel {feel: easier|good|harder}`,
+`start`, `hold` (pause), `resume`, `pause` (toggle), `skip`, `save` (archive the ride so far, keep
+riding), `end` (finish and save), `adjust {dir: 1|-1}` (intensity 1 %, or grade 0.5 % / 5 W /
+level 0.5 in free ride), `intensity {percent: 50..150}`, `mode {m: g|w|r}`,
+`free {m: g|w|r, value}` (free ride grade %, ERG watts or FTMS resistance level 0..25),
+`edit {edit: {...}}` (same edits as the coach API), `feel {feel: easier|good|harder}`,
 `dismiss` (clears `notice`).
+
+When the planned workout ends the ride does not stop: it writes `WORKOUT DONE`, sets
+`ride.overtime`, keeps recording and holds the last target (`afterWorkout: hold`) or rides flat at
+grade 0 (`afterWorkout: grade0`) until `end`. Inserting steps in overtime turns the time ridden
+since into a free step and starts the new steps now.
 
 ## Coach commands
 
@@ -71,7 +85,11 @@ curl -s -H "Authorization: Bearer $(cat ~/.trainer-coach/token)" http://127.0.0.
 {"msg": "HR 171. Dropping to 275.", "set": {"step": 7, "w": 275}}
 ```
 
-- `msg`: shown in the coach bar, read aloud when the page has Voice on. Whitespace collapsed, max 280.
+- `msg`: shown in the coach bar and read aloud unless muted. Whitespace collapsed, max 280.
+- `important`: spoken even in "important only" voice mode. Messages sent with `set` or `edit` are
+  always important. Voice mode (`settings.voiceMode`: all, important, silent) is changed by the Mute
+  button, the verbosity menu, an agent, or saying "mute" / "quiet" / "stop talking" ("unmute",
+  "you can talk" to undo).
 - `set {step, w}`: step is 1-based or `"cur"`; `w` integer 0..2000. Flattens the step to `w` watts. The
   athlete's intensity multiplier still applies. Free steps ignore it.
 - `edit`: changes the workout itself; the timeline, totals, later step numbers and the chart update.
@@ -83,6 +101,7 @@ curl -s -H "Authorization: Bearer $(cat ~/.trainer-coach/token)" http://127.0.0.
 | `delete` | `step` | removes an upcoming step; `"cur"` ends the current step now |
 | `duration` | `step`, `seconds` | sets a step's length (the current step never ends in the past) |
 | `extend` | `seconds` (+/-) | lengthens or shortens the current step |
+| `total` | `seconds`, `how` (`last` or `scale`) | sets the planned total: `last` changes the last block (dropping trailing steps when needed), `scale` stretches every remaining step |
 
 Edits apply to the server ride before the command is queued, so errors return `400` and nothing is
 stored. Only the current and later steps can be edited. Overrides move with their steps. Each edit
@@ -150,8 +169,9 @@ writes an `EDIT ...` event line.
 | `ride_end` | `RIDE END <el>` | elapsed_s |
 | `edit` | `EDIT <insert\|replace\|delete\|end\|duration> ... \| <n> steps, <total>` | op, detail, steps, total_s |
 | `coach` | `COACH <seq> \| set <step> <w>W \| edit ... \| msg <text>` | seq, set, msg |
+| `workout_done` | `WORKOUT DONE at T+<el>, riding free until End` | elapsed_s |
 | `said` | `SAID (whisper): "<text>"` | said, source |
-| `voice` | `VOICE ON (whisper)` / `VOICE OFF (whisper)` | on, source |
+| `voice` | `VOICE ON\|OFF (whisper)`, `VOICE MUTED\|UNMUTED (said)` | on, state, source |
 
 `-` means no data. Tick lines are written during structured workouts every 30 s of ride time.
 
@@ -171,9 +191,13 @@ Sample: `[epoch_ms, elapsed_s, watts, cadence, hr (0 = none), speed_kmh, target_
 
 ## Persistence and recovery
 
-- `coach/engine.json` is rewritten atomically every 5 samples and after every control, command and
-  edit. On start the server resumes it paused (auto-resume when pedaling); rides older than 6 h are
-  archived as "(recovered)".
+- Every sample is appended to `coach/engine.journal` (flushed each second). `coach/engine.json` is a
+  full atomic snapshot every 30 samples and after every control, command and edit; the journal is
+  restarted after each snapshot. On start the server resumes snapshot plus journal (a torn last line
+  is skipped), paused until pedaling; rides older than 6 h are archived as "(recovered)".
+- Each ride carries its own event transcript (`events`) into the archive.
+- Garmin upload status lives in `rides/meta/<id>.json`. With auto-upload on, the server uploads when
+  the ride ends, even with no page open.
 - `devices.json` remembers the trainer and strap; the server reconnects at start and after every
   drop, until you press Disconnect.
 - `settings.json` holds FTP, weight, HR zones, cadence range and Garmin auto-upload.

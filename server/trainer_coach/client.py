@@ -67,8 +67,10 @@ class CoachClient:
         return self.request("GET", f"/api/coach?since={int(since)}", auth=False)["cmds"]
 
     def coach(self, msg: str | None = None, step: int | str | None = None, watts: int | None = None,
-              edit: dict | None = None) -> dict:
+              edit: dict | None = None, important: bool = False) -> dict:
         body: dict[str, Any] = {}
+        if important:
+            body["important"] = True
         if edit:
             body["edit"] = edit
         if msg:
@@ -76,6 +78,11 @@ class CoachClient:
         if watts is not None:
             body["set"] = {"step": step if step is not None else "cur", "w": int(watts)}
         return self.request("POST", "/api/coach", body)
+
+    def voice(self, event: str | None = None) -> dict:
+        if event:
+            return self.request("POST", "/api/voice", {"event": event})
+        return self.request("GET", "/api/voice", auth=False)
 
     def event(self, line: str) -> None:
         self.request("POST", "/api/event", {"line": line})

@@ -42,12 +42,14 @@ class Ride:
         self.idle = 0
         self.k = 1.0
         self.samples: list[list] = []
-        self.jr = {"m": "g", "g": 0.0, "w": round(ftp * 0.6)}
+        self.jr = {"m": "g", "g": 0.0, "w": round(ftp * 0.6), "r": 5.0}  # grade %, ERG watts, resistance level
         self.start_ts: int | None = None
         self.ov: dict[int, int] = {}
         self.last_step = -1
         self.acc: dict | None = None
         self.last_line = 0.0
+        self.events: list[list] = []  # [epoch_ms, line] for this ride's transcript
+        self.overtime = False  # the plan ended; riding free until the athlete ends the ride
 
     @property
     def id(self) -> str:
@@ -76,6 +78,7 @@ class Ride:
 
     def payload(self) -> dict:
         return {"id": self.id, "name": self.name, "text": self.text, "steps": self.plain_steps(), "test": self.test, "ftp": self.ftp,
+                "events": self.events, "overtime": self.overtime,
                 "start": self.start_ts, "samples": self.samples, "el": self.el, "k": self.k, "jr": self.jr,
                 "ov": {str(k): v for k, v in self.ov.items()}, "source": "server"}
 
@@ -95,9 +98,12 @@ class RideEngine:
         self.p_hist: list[float] = []
         self.messages: list[dict] = []  # newest last: {seq, msg, ts}
         self.last_finished: dict | None = None  # {id, name, samples, ts, saved}
+        self.last_saved: dict | None = None
+        self.on_finish: Callable[[dict], None] | None = None  # server hook (auto Garmin upload)
         self.notice: str | None = None
         self.version = 0
         self._last_tick = clock()
+        self._jf = None
         self.sim_t = 0
         self.rng = random.Random()
 
@@ -107,8 +113,20 @@ class RideEngine:
         return self.data / "coach" / "engine.json"
 
     @property
+    def journal_file(self) -> Path:
+        """One JSON sample per line, appended every second; folded into engine.json on each snapshot."""
+        return self.data / "coach" / "engine.journal"
+
+    @property
     def rides_dir(self) -> Path:
         return self.data / "rides"
+
+    def note(self, line: str) -> None:
+        """Called for every event line: keep a per-ride transcript (archived with the ride)."""
+        with self.lock:
+            r = self.ride
+            if r is not None and (r.started or line.startswith("RIDE START")):
+                r.events.append([int(self.wall() * 1000), line])
 
     def _bump(self):
         self.version += 1
@@ -116,13 +134,36 @@ class RideEngine:
 
     # ---------- persistence ----------
     def save(self) -> None:
+        """Full snapshot (atomic), then start a fresh journal."""
         from .server import atomic_write
         r = self.ride
         if r and r.started and r.samples:
             atomic_write(self.current_file, json.dumps(r.payload()).encode("utf-8"))
+            self._close_journal()
+            self.journal_file.write_text("", encoding="utf-8")
+
+    def _journal(self, sample: list) -> None:
+        try:
+            if self._jf is None:
+                self.journal_file.parent.mkdir(parents=True, exist_ok=True)
+                self._jf = self.journal_file.open("a", encoding="utf-8")
+            self._jf.write(json.dumps(sample) + "\n")
+            self._jf.flush()
+        except OSError:
+            self._jf = None
+
+    def _close_journal(self) -> None:
+        if self._jf is not None:
+            try:
+                self._jf.close()
+            except OSError:
+                pass
+            self._jf = None
 
     def clear_saved(self) -> None:
+        self._close_journal()
         self.current_file.unlink(missing_ok=True)
+        self.journal_file.unlink(missing_ok=True)
 
     def resume(self) -> bool:
         """Restore an unfinished ride from disk after a server restart."""
@@ -145,12 +186,28 @@ class RideEngine:
                 r.retime()
             for i, w in (cur.get("ov") or {}).items():
                 r.apply_override(int(i), w)
-            r.el = cur.get("el", cur["samples"][-1][1])
+            r.el = max(cur.get("el", 0), cur["samples"][-1][1])
             r.started, r.paused, r.auto, r.pp = True, True, True, True
             r.k = cur.get("k") or 1
             r.samples = cur["samples"]
-            r.jr = cur.get("jr") or r.jr
+            try:  # samples recorded after the last snapshot
+                last_el = r.samples[-1][1]  # elapsed is strictly increasing while recording
+                for ln in self.journal_file.read_text(encoding="utf-8").splitlines():
+                    try:
+                        x = json.loads(ln)
+                    except ValueError:
+                        continue  # a torn last line after a crash
+                    if isinstance(x, list) and len(x) == 7 and x[1] > last_el:
+                        r.samples.append(x)
+                        last_el = x[1]
+                if r.samples[-1][1] > r.el:
+                    r.el = r.samples[-1][1]
+            except OSError:
+                pass
+            r.jr = {**r.jr, **(cur.get("jr") or {})}
             r.start_ts = cur.get("start")
+            r.events = cur.get("events") or []
+            r.overtime = bool(cur.get("overtime"))
             r.ov = {int(k): v for k, v in (cur.get("ov") or {}).items()}
             self.ride = r
             self.log_event(f"RIDE RESUMED after restart at T+{E.fmt_t(r.el)} ({len(r.samples)} samples kept)")
@@ -175,6 +232,9 @@ class RideEngine:
             return r.jr["w"] if r.jr["m"] == "w" else None
         at = step_at(r.steps, r.el)
         if not at:
+            if r.overtime and self.settings().get("afterWorkout", "hold") == "hold":
+                last = r.steps[-1]
+                return step_watts(last, last["d"], r.ftp, 1 if r.test else r.k)
             return None
         return step_watts(at[1], at[2], r.ftp, 1 if r.test else r.k)
 
@@ -183,7 +243,9 @@ class RideEngine:
         if not r:
             return
         if not r.steps:
-            self.hub.want({"k": "erg", "w": r.jr["w"]} if r.jr["m"] == "w" else {"k": "sim", "g": r.jr["g"]})
+            m = r.jr["m"]
+            self.hub.want({"k": "erg", "w": r.jr["w"]} if m == "w" else {"k": "res", "r": r.jr["r"]} if m == "r"
+                          else {"k": "sim", "g": r.jr["g"]})
             return
         t = self.cur_target()
         self.hub.want({"k": "sim", "g": 0} if t is None else {"k": "erg", "w": t})
@@ -193,7 +255,9 @@ class RideEngine:
         with self.lock:
             fn = {"load": self.load, "start": self.start, "pause": self.toggle_pause, "skip": self.skip,
                   "end": self.finish, "adjust": self.adjust, "mode": self.set_mode, "feel": self.feel,
-                  "dismiss": self.dismiss}.get(action)
+                  "dismiss": self.dismiss, "resume": self.resume_ride, "hold": self.hold,
+                  "intensity": self.set_intensity, "free": self.set_free, "save": self.save_copy,
+                  "edit": lambda b: self.edit(b.get("edit") or {})}.get(action)
             if not fn:
                 raise ValueError(f"unknown action {action!r}")
             res = fn(body) or {}
@@ -235,6 +299,47 @@ class RideEngine:
         r.paused = not r.paused
         r.auto = False
 
+    def hold(self, body: dict | None = None):
+        """Pause (not a toggle)."""
+        r = self.ride
+        if r and r.started and not r.paused:
+            r.paused, r.auto = True, False
+
+    def resume_ride(self, body: dict | None = None):
+        """Resume (not a toggle); starts the ride if it was only loaded."""
+        r = self.ride
+        if not r:
+            return
+        if not r.started:
+            return self.start()
+        r.paused = r.auto = False
+
+    def set_intensity(self, body: dict):
+        r = self.ride
+        if not r:
+            raise ValueError("no ride loaded")
+        pct = float(body.get("percent", 100))
+        if not 50 <= pct <= 150:
+            raise ValueError("percent must be 50..150")
+        r.k = round(pct / 100, 2)
+        self.apply_target()
+
+    def set_free(self, body: dict):
+        """Free ride target: {m: g|w|r, value}: grade %, ERG watts or resistance level."""
+        r = self.ride
+        if not r or r.steps:
+            raise ValueError("free-ride targets need a free ride (load with workout null)")
+        m = body.get("m")
+        if m not in ("g", "w", "r"):
+            raise ValueError("m must be g (grade), w (ERG watts) or r (resistance level)")
+        v = float(body["value"]) if body.get("value") is not None else r.jr[m]
+        lim = {"g": (-10, 20), "w": (30, 1500), "r": (0, 25)}[m]
+        if not lim[0] <= v <= lim[1]:
+            raise ValueError(f"value out of range {lim[0]}..{lim[1]}")
+        r.jr["m"] = m
+        r.jr[m] = round(v) if m == "w" else round(v, 1)
+        self.apply_target()
+
     def skip(self, body: dict | None = None):
         r = self.ride
         if not r or not r.steps:
@@ -253,13 +358,15 @@ class RideEngine:
             r.k = max(0.5, min(1.5, round(r.k + d * 0.01, 2)))
         elif r.jr["m"] == "g":
             r.jr["g"] = max(-10, min(20, round(r.jr["g"] + d * 0.5, 1)))
+        elif r.jr["m"] == "r":
+            r.jr["r"] = max(0, min(25, round(r.jr.get("r", 5) + d * 0.5, 1)))
         else:
             r.jr["w"] = max(30, min(1500, r.jr["w"] + d * 5))
         self.apply_target()
 
     def set_mode(self, body: dict):
         r = self.ride
-        if r and body.get("m") in ("g", "w"):
+        if r and body.get("m") in ("g", "w", "r"):
             r.jr["m"] = body["m"]
             self.apply_target()
 
@@ -273,6 +380,16 @@ class RideEngine:
         hr = self.hub.r.hr
         self.log_event(E.line_feel(f, at[0] + 1 if at else None, l30, hr))
 
+    def save_copy(self, body: dict | None = None):
+        """Save the ride so far to History without ending it (the final save overwrites it)."""
+        r = self.ride
+        if not r or not r.started or len(r.samples) < 10:
+            raise ValueError("nothing to save yet")
+        p = r.payload()
+        self._archive(p)
+        self.last_saved = {"id": p["id"], "samples": len(r.samples), "ts": int(self.wall() * 1000)}
+        return {"saved": True, "id": p["id"], "samples": len(r.samples)}
+
     def dismiss(self, body: dict | None = None):
         self.notice = None
 
@@ -280,10 +397,11 @@ class RideEngine:
         r = self.ride
         if not r:
             return
-        self.ride = None
         if r.acc and r.acc["p"]:
             self.log_event(E.line_step_end(**r.acc))
+            r.acc = None
         self.log_event(E.line_ride_end(r.el))
+        self.ride = None
         self.hub.want({"k": "sim", "g": 0})
         self.clear_saved()
         if len(r.samples) < 10:
@@ -293,6 +411,8 @@ class RideEngine:
         p = r.payload()
         self._archive(p)
         self.last_finished = {"id": p["id"], "name": r.name, "samples": len(r.samples), "ts": int(self.wall() * 1000)}
+        if self.on_finish:
+            self.on_finish(p)
         return {"saved": True, "id": p["id"]}
 
     # ---------- workout edits (coach API) ----------
@@ -303,8 +423,20 @@ class RideEngine:
             if not r or not r.steps:
                 raise ValueError("no structured workout loaded on the server")
             at = step_at(r.steps, r.el)
-            cur = at[0] if at else len(r.steps)
-            into = at[2] if at else 0
+            if not at and e.get("op") == "insert":
+                # plan already ended: the time ridden since becomes a free step, new steps start now
+                gap = math.ceil(r.el - r.total)
+                if gap > 0:
+                    r.steps.append({"d": gap, "free": True})
+                    r.retime()
+                r.overtime = False
+                at = None
+                cur = len(r.steps)
+                e = {**e, "after": len(r.steps)}
+                into = 0
+            else:
+                cur = at[0] if at else len(r.steps)
+                into = at[2] if at else 0
 
             def index(v, name):
                 if v == "cur" or v is None:
@@ -314,7 +446,7 @@ class RideEngine:
                 i = int(v) - 1
                 if not 0 <= i < len(r.steps):
                     raise ValueError(f"{name} {v} out of range 1..{len(r.steps)}")
-                if i < cur:
+                if i < cur and not (name == "after step" and i == cur - 1 and at is None):
                     raise ValueError(f"{name} {v} is already done (current step {cur + 1})")
                 return i
 
@@ -352,6 +484,33 @@ class RideEngine:
                     del r.steps[i]
                     r.ov = {(k - 1 if k > i else k): v for k, v in r.ov.items() if k != i}
                     desc = f"delete step {i + 1}"
+            elif op == "total":
+                if not at:
+                    raise ValueError("workout finished: insert steps instead")
+                want = int(e["seconds"])
+                minimum = math.ceil(r.el)
+                if want < minimum:
+                    want = minimum  # ends the plan now
+                delta = want - r.total
+                how = e.get("how", "last")
+                if how == "scale" and delta:
+                    # stretch or squeeze the remaining time of every step left, proportionally
+                    left = [(i, (r.steps[i]["d"] - (into if i == cur else 0))) for i in range(cur, len(r.steps))]
+                    rem = sum(d for _, d in left) or 1
+                    for i, d in left:
+                        base = into if i == cur else 0
+                        r.steps[i]["d"] = max(1 if i != cur else math.ceil(into), round(base + d * (rem + delta) / rem))
+                else:  # change the last block; drop trailing steps if shortening past them
+                    while delta < 0 and len(r.steps) - 1 > cur and r.steps[-1]["d"] <= -delta:
+                        delta += r.steps[-1]["d"]
+                        r.ov.pop(len(r.steps) - 1, None)
+                        r.steps.pop()
+                    last = r.steps[-1]
+                    floor = math.ceil(into) if len(r.steps) - 1 == cur else 1
+                    last["d"] = max(floor, last["d"] + delta)
+                old_total = r.total
+                r.retime()
+                desc = f"duration total {E.fmt_t(old_total)} -> {E.fmt_t(r.total)}"
             elif op in ("duration", "extend"):
                 i = index(e.get("step", "cur") if op == "duration" else "cur", "step")
                 s = r.steps[i]
@@ -363,7 +522,7 @@ class RideEngine:
                 s["d"] = d
                 desc = f"duration step {i + 1} {E.fmt_t(old)} -> {E.fmt_t(d)}"
             else:
-                raise ValueError("edit.op must be insert, replace, delete, duration or extend")
+                raise ValueError("edit.op must be insert, replace, delete, duration, extend or total")
             r.retime()
             r.text = to_text(r.plain_steps())
             self.log_event(f"EDIT {desc} | {len(r.steps)} steps, {E.fmt_t(r.total)}")
@@ -376,7 +535,8 @@ class RideEngine:
     def coach(self, cmd: dict) -> None:
         with self.lock:
             if cmd.get("msg"):
-                self.messages.append({"seq": cmd["seq"], "msg": cmd["msg"], "ts": int(self.wall() * 1000)})
+                self.messages.append({"seq": cmd["seq"], "msg": cmd["msg"], "ts": int(self.wall() * 1000),
+                                      "important": bool(cmd.get("important"))})
                 del self.messages[:-10]
             s = cmd.get("set")
             r = self.ride
@@ -393,7 +553,8 @@ class RideEngine:
         h, r = self.hub, self.hub.r
         self.sim_t += 1
         want = h.wanted_cmd or {}
-        tgt = want.get("w", 0) if want.get("k") == "erg" else 150 + (want.get("g") or 0) * 25
+        k = want.get("k")
+        tgt = want.get("w", 0) if k == "erg" else 60 + (want.get("r") or 0) * 12 if k == "res" else 150 + (want.get("g") or 0) * 25
         r.power = max(0, round(r.power + (tgt - r.power) * 0.5 + (self.rng.random() - 0.5) * 18))
         r.cadence = round(88 + math.sin(self.sim_t / 40) * 4 + (self.rng.random() - 0.5) * 3)
         r.speed = round((r.power / 0.0055) ** (1 / 3) * 0.1 * 3.6 / 1.6, 1)
@@ -430,10 +591,14 @@ class RideEngine:
                     r.el += dt
                     self._record()
                     self._coach_tick()
-                    if r.steps and r.el >= r.total:
-                        self.finish()
-                        self._bump()
-                        return
+                    if r.steps and r.el >= r.total and not r.overtime:
+                        r.overtime = True
+                        if r.acc and r.acc["p"]:
+                            self.log_event(E.line_step_end(**r.acc))
+                        r.acc, r.last_step = None, -1
+                        self.log_event(f"WORKOUT DONE at T+{E.fmt_t(r.el)}, riding free until End")
+                        self.notice = "Workout done. Keep riding or press End ride."
+                        self.save()
                 if r.paused != r.pp:
                     r.pp = r.paused
                     self.log_event(("PAUSED (stopped pedaling)" if r.auto else "PAUSED") if r.paused else "RESUMED")
@@ -448,7 +613,8 @@ class RideEngine:
         r, d = self.ride, self.hub.r
         r.samples.append([int(self.wall() * 1000), round(r.el, 1), round(d.power), round(d.cadence), self._hr_now(),
                           round(d.speed, 2), self.cur_target() or 0])
-        if len(r.samples) % 5 == 0:
+        self._journal(r.samples[-1])  # every sample hits the disk
+        if len(r.samples) % 30 == 0:
             self.save()
 
     def _coach_tick(self):
@@ -485,7 +651,8 @@ class RideEngine:
                 "live": {"power": round(d.power), "power_3s": round(_mean(self.p_hist)) if self.p_hist else 0,
                          "cadence": round(d.cadence), "hr": self._hr_now() or None, "speed_kmh": round(d.speed, 1)},
                 "ride": None, "messages": self.messages[-3:], "said": said or [],
-                "last_finished": self.last_finished, "notice": self.notice, "version": self.version,
+                "last_finished": self.last_finished, "last_saved": self.last_saved, "notice": self.notice,
+                "version": self.version,
             }
             r = self.ride
             if not r:
@@ -494,10 +661,13 @@ class RideEngine:
             h = [x[4] for x in l30 if x[4]]
             kk = 1 if r.test else r.k
             ride = st["ride"] = {
-                "id": r.id, "name": r.name, "text": r.text, "mode": "workout" if r.steps else "erg" if r.jr["m"] == "w" else "grade",
+                "id": r.id, "name": r.name, "text": r.text,
+                "mode": "workout" if r.steps else {"w": "erg", "r": "resistance"}.get(r.jr["m"], "grade"),
                 "started": r.started, "paused": r.paused, "auto_paused": r.auto, "elapsed_s": round(r.el), "el": r.el,
                 "ftp": r.ftp, "intensity": r.k, "test": r.test, "target_w": self.cur_target(),
-                "grade": None if r.steps else r.jr["g"], "jr": r.jr, "samples": len(r.samples),
+                "grade": None if r.steps else r.jr["g"], "level": None if r.steps else r.jr.get("r"),
+                "overtime": r.overtime, "after_workout": self.settings().get("afterWorkout", "hold"),
+                "jr": r.jr, "samples": len(r.samples),
                 "ov": {str(k): v for k, v in r.ov.items()},
                 "last30": {"power": E.js_round(_mean([x[2] for x in l30])), "cadence": E.js_round(_mean([x[3] for x in l30])),
                            "hr": h[-1] if h else None, "hr_delta": (h[-1] - h[0]) if h else None},

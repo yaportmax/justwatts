@@ -93,17 +93,19 @@
     </div>
     <div class="panel coach" id="coach">
       <div><span class="k">Coach</span><span id="coachMsg">Watching</span><div id="coachPrev"></div><div id="coachSaid"></div></div>
-      <div class="row" style="gap:6px"><button id="coachVoice" title="Read coach messages aloud">Voice off</button><button data-feel="easier">Easier</button><button data-feel="good">Good</button><button data-feel="harder">Harder</button></div>
+      <div class="row" style="gap:6px"><button id="coachMute" class="mute" title="Mute or unmute the coach voice (or say &quot;mute&quot;)">Mute</button><select id="coachVerb" title="What the coach reads aloud"><option value="all">Speak all</option><option value="important">Important only</option><option value="silent">Silent</option></select><button data-feel="easier">Easier</button><button data-feel="good">Good</button><button data-feel="harder">Harder</button></div>
     </div>
     <div class="panel" style="padding:8px"><canvas id="rideChart"></canvas></div>
     <div class="controls">
       <button id="cStart" class="pri">Start</button>
-      <button id="cPause">Pause</button>
+      <button id="cPause" class="big">Pause</button>
       <button id="cSkip">Skip</button>
-      <span class="seg" id="jrMode" style="display:none"><button data-m="g" class="on">Grade</button><button data-m="w">Watts</button></span>
+      <span class="seg" id="jrMode" style="display:none"><button data-m="g" class="on">Grade</button><button data-m="w">Watts</button><button data-m="r">Level</button></span>
       <div class="adj"><button id="cMinus">−</button><span class="num" id="cAdj">100%</span><button id="cPlus">+</button></div>
+      <div class="adj" id="lenAdj" title="Workout length: changes the last block"><button id="cShorter">−5m</button><span class="num" id="cLen">Length</span><button id="cLonger">+5m</button></div>
       <span style="flex:1"></span>
-      <button id="cEnd" class="danger">End ride</button>
+      <button id="cSave" title="Save the ride so far to History (keeps riding)">Save</button>
+      <button id="cEnd" class="danger big">End ride</button>
     </div>
     <div class="hint" style="margin-top:8px">Space pause · ↑↓ adjust · auto-pauses when you stop pedaling</div>
   </div>
@@ -111,6 +113,11 @@
 
 <!-- HISTORY -->
 <section class="view" id="v-history">
+  <div id="trends" class="panel" style="margin-bottom:16px">
+    <div class="row" style="justify-content:space-between"><b>Last 12 weeks</b><span class="hint" id="tFtp"></span></div>
+    <canvas id="trendChart"></canvas>
+    <div class="stats" id="tBest"></div>
+  </div>
   <div id="summary" class="panel" style="display:none;margin-bottom:16px">
     <div class="row" style="justify-content:space-between">
       <div><b id="sName" style="font-size:16px"></b> <span id="sDate" style="color:var(--dim);margin-left:8px"></span></div>
@@ -132,10 +139,14 @@
       <div class="zones" id="sHZones"></div>
       <div class="zlegend" id="sHZleg"></div>
     </div>
+    <h2>Intervals</h2>
+    <div class="tablewrap"><table class="laps"><thead><tr><th>#</th><th>Time</th><th>Target</th><th>Avg W</th><th>Max W</th><th>NP</th><th>Avg HR</th><th>Max HR</th><th>Cad</th></tr></thead><tbody id="sLaps"></tbody></table></div>
+    <h2>Coach transcript</h2>
+    <div id="sEvents" class="transcript"></div>
   </div>
   <div class="tablewrap panel" style="padding:0">
     <table>
-      <thead><tr><th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>kJ</th><th>Avg HR</th></tr></thead>
+      <thead><tr><th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>kJ</th><th>Avg HR</th><th>Best 5m</th></tr></thead>
       <tbody id="hist"></tbody>
     </table>
     <div id="histEmpty" class="empty">No rides yet.</div>

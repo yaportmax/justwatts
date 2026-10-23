@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hub Workouts</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header>
+  <div class="brand">Hub Workouts</div>
+  <nav>
+    <button data-v="workouts" class="on">Workouts</button>
+    <button data-v="ride">Ride</button>
+    <button data-v="history">History</button>
+  </nav>
+  <div class="conn">
+    <span class="pill off" id="srvState" style="display:none">Server offline</span>
+    <span class="pill"><i class="dot" id="tDot"></i><span id="tTxt">Trainer off</span></span>
+    <span class="pill"><i class="dot" id="hDot"></i><span id="hTxt">HR off</span></span>
+    <button id="btnTrainer" class="pri">Connect trainer</button>
+    <button id="btnHR">Connect HR</button>
+    <button id="btnSim" title="Fake trainer data for trying the app">Sim</button>
+  </div>
+</header>
+
+<main>
+<!-- WORKOUTS -->
+<section class="view on" id="v-workouts">
+  <div class="row" style="justify-content:space-between">
+    <div class="row">
+      <label class="f">FTP (W)<input id="ftp" type="number" min="50" max="600" step="1"></label>
+      <label class="f">Weight (kg)<input id="weight" type="number" min="0" max="200" step="0.1"></label>
+      <label class="f">Beeps<select id="beeps"><option value="1">On</option><option value="0">Off</option></select></label>
+      <label class="f">HR zone floors<input id="hrZones" placeholder="100,120,140,160,180" title="Lower bpm of Z1..Z5, synced from Garmin"></label>
+      <label class="f">Garmin upload<select id="autoGarmin"><option value="1">Auto</option><option value="0">Manual</option></select></label>
+    </div>
+    <button id="btnJust" class="pri">Just ride</button>
+  </div>
+
+  <h2>Library</h2>
+  <div class="grid" id="lib"></div>
+
+  <h2>Builder</h2>
+  <div class="panel builder">
+    <div>
+      <div class="row" style="margin-bottom:8px">
+        <input id="bName" placeholder="Name" style="flex:1;min-width:140px">
+      </div>
+      <textarea id="bText" spellcheck="false"></textarea>
+      <div class="err" id="bErr"></div>
+      <div class="hint">10m 50% · 5m 50-90% · 5x(3m 115%, 3m 50%) · 1m 300w · 10m free</div>
+    </div>
+    <div>
+      <canvas id="bChart"></canvas>
+      <div class="row" style="margin-top:8px;justify-content:space-between">
+        <span class="num" id="bStats" style="color:var(--dim)"></span>
+        <div class="row" style="gap:6px">
+          <button id="bImport">Import .zwo</button>
+          <button id="bZwo">.zwo</button>
+          <button id="bDel" class="danger" style="display:none">Delete</button>
+          <button id="bSave">Save</button>
+          <button id="bRide" class="pri">Ride</button>
+        </div>
+      </div>
+      <input type="file" id="zwoFile" accept=".zwo,.xml" hidden>
+    </div>
+  </div>
+</section>
+
+<!-- RIDE -->
+<section class="view" id="v-ride">
+  <div id="rideEmpty" class="empty">
+    <p>No ride loaded.</p>
+    <div class="row" style="justify-content:center"><button id="btnJust2" class="pri">Just ride</button><button data-go="workouts">Workouts</button></div>
+  </div>
+  <div id="rideOn" style="display:none">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <div class="row"><b id="rName" style="font-size:16px"></b><span class="badge" id="rState"></span></div>
+      <span class="num" id="rClock" style="color:var(--dim)"></span>
+    </div>
+    <div class="tiles">
+      <div class="tile big"><div class="k">Power 3s</div><div class="v" id="lP">0</div><div class="s" id="lPs"></div></div>
+      <div class="tile big"><div class="k">Target</div><div class="v" id="lT">–</div><div class="s" id="lTs"></div></div>
+      <div class="tile hrz" id="cadTile"><div class="k">Cadence</div><div class="v" id="lC">0</div><div class="s" id="lCs">rpm</div></div>
+      <div class="tile hrz" id="hrTile"><div class="k">Heart rate</div><div class="v" id="lH">–</div><div class="s" id="lHs">bpm</div></div>
+      <div class="tile"><div class="k">Interval</div><div class="v" id="lI">–</div><div class="s" id="lIs"></div></div>
+      <div class="tile"><div class="k">Elapsed</div><div class="v" id="lE">0:00</div><div class="s" id="lEs"></div></div>
+    </div>
+    <div class="iv">
+      <span id="ivNow"></span><span class="num" id="ivNext" style="color:var(--dim)"></span>
+      <div class="bar"><i id="ivBar"></i></div>
+    </div>
+    <div class="panel coach" id="coach">
+      <div><span class="k">Coach</span><span id="coachMsg">Watching</span><div id="coachPrev"></div><div id="coachSaid"></div></div>
+      <div class="row" style="gap:6px"><button id="coachVoice" title="Read coach messages aloud">Voice off</button><button data-feel="easier">Easier</button><button data-feel="good">Good</button><button data-feel="harder">Harder</button></div>
+    </div>
+    <div class="panel" style="padding:8px"><canvas id="rideChart"></canvas></div>
+    <div class="controls">
+      <button id="cStart" class="pri">Start</button>
+      <button id="cPause">Pause</button>
+      <button id="cSkip">Skip</button>
+      <span class="seg" id="jrMode" style="display:none"><button data-m="g" class="on">Grade</button><button data-m="w">Watts</button></span>
+      <div class="adj"><button id="cMinus">−</button><span class="num" id="cAdj">100%</span><button id="cPlus">+</button></div>
+      <span style="flex:1"></span>
+      <button id="cEnd" class="danger">End ride</button>
+    </div>
+    <div class="hint" style="margin-top:8px">Space pause · ↑↓ adjust · auto-pauses when you stop pedaling</div>
+  </div>
+</section>
+
+<!-- HISTORY -->
+<section class="view" id="v-history">
+  <div id="summary" class="panel" style="display:none;margin-bottom:16px">
+    <div class="row" style="justify-content:space-between">
+      <div><b id="sName" style="font-size:16px"></b> <span id="sDate" style="color:var(--dim);margin-left:8px"></span></div>
+      <div class="row" style="gap:6px">
+        <button id="sGarmin" class="pri">Upload to Garmin</button>
+        <button id="sFit">.fit</button>
+        <button id="sTcx">.tcx</button>
+        <button id="sDel" class="danger">Delete</button>
+        <button id="sClose">Close</button>
+      </div>
+    </div>
+    <div id="sTest" class="row" style="margin-top:10px;display:none"></div>
+    <div class="stats" id="sStats"></div>
+    <canvas id="sumChart"></canvas>
+    <div class="zones" id="sZones"></div>
+    <div class="zlegend" id="sZleg"></div>
+    <div id="sHR" style="display:none;margin-top:14px">
+      <div class="k" style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px">Heart rate zones</div>
+      <div class="zones" id="sHZones"></div>
+      <div class="zlegend" id="sHZleg"></div>
+    </div>
+  </div>
+  <div class="tablewrap panel" style="padding:0">
+    <table>
+      <thead><tr><th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>kJ</th><th>Avg HR</th></tr></thead>
+      <tbody id="hist"></tbody>
+    </table>
+    <div id="histEmpty" class="empty">No rides yet.</div>
+  </div>
+</section>
+</main>
+<div class="modal" id="devModal">
+  <div class="panel">
+    <div class="row" style="justify-content:space-between"><b id="devTitle">Trainer</b><button id="devClose">Close</button></div>
+    <div class="hint" id="devHint">The server keeps the connection, so reloading or closing this page never drops it.</div>
+    <div class="devlist" id="devList"></div>
+    <div class="row" style="justify-content:space-between">
+      <button id="devScan" class="pri">Scan</button>
+      <a href="browser.html" class="hint" title="Old mode: Bluetooth inside this browser tab">Use browser Bluetooth instead</a>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

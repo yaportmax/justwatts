@@ -1,0 +1,197 @@
+# Protocol
+
+The local server owns the ride. It talks Bluetooth to the trainer and HR strap, runs the ride engine
+once a second, and serves the web page, which is only a view: reloading or closing the page never
+interrupts a ride. Agents use the same HTTP API.
+
+```
+ trainer, HR strap ── BLE (bleak) ── trainer-coach serve ── SSE /api/stream ──▶ page (any browser)
+                                       │  ride engine        ◀── /api/ride/control, /api/devices
+                                       │  events.log, engine.json
+                                       └── HTTP ── CLI / MCP server ── agent
+ mic ── trainer-coach voice (Whisper) ── SAID events ──┘
+```
+
+Default base URL `http://127.0.0.1:8765` (`HW_PORT`). Data dir `~/.trainer-coach` (`HW_DATA`).
+
+## Auth
+
+| Check | Applies to | Rule |
+|---|---|---|
+| Host | every request | `Host` must be `127.0.0.1:<port>` or `localhost:<port>`, else `421`. Blocks DNS rebinding. |
+| Page | write endpoints, state/event reads | `Origin` equals the app origin and header `X-HW: 1`. The custom header forces a CORS preflight that the server never answers, so other sites cannot send it. |
+| Token | same | `Authorization: Bearer <token>`. Created at first `serve` in `<data>/token` (mode 0600). A token request with a foreign `Origin` is refused. |
+
+Open endpoints (Host-checked only): `GET /api/health`, `/api/stream`, `/api/live`, `/api/settings`,
+`/api/devices`, `/api/said`, `/api/rides`, `/api/rides/<id>`, `/api/coach`, `/api/current`,
+`/api/garmin/status`, `/api/garmin/zones`, static files. Browsers block other origins from reading
+them (no CORS headers). Local tools should use the token, never fake `Origin`.
+
+```sh
+curl -s -H "Authorization: Bearer $(cat ~/.trainer-coach/token)" http://127.0.0.1:8765/api/state
+```
+
+## Endpoints
+
+| Method | Path | Auth | Body / query | Response |
+|---|---|---|---|---|
+| GET | `/api/health` | none | | `{ok, app, version, garmin, ble}` |
+| GET | `/api/stream` | none | | Server-sent events: one `data:` live message per engine change, at least 1/s |
+| GET | `/api/live` | none | `?ride=<id>&n=<count>` | one live message (polling fallback) |
+| GET | `/api/state` | page/token | | `{state, age_s, received_at}` (state object below) |
+| GET | `/api/state/history` | page/token | `?seconds=300` | `{samples: [{t, elapsed_s, step, target_w, power, power_3s, cadence, hr, paused}]}` |
+| GET | `/api/events` | page/token | `?n=50` (1..2000) | `{events: [parsed]}` |
+| POST | `/api/event` | page/token | `{line}` | appends `[HH:MM:SS] line` to `coach/events.log`; newlines flattened, max 400 chars |
+| POST | `/api/coach` | page/token | `{msg?, set?, edit?}` | the stored command `{seq, ..., result?}`; `400` invalid, `409` edit without a server ride |
+| GET | `/api/coach` | none | `?since=<seq>` | `{cmds}` with `seq > since` (last 500, in memory) |
+| POST | `/api/ride/control` | page/token | `{action, ...}` | `{ok, ...}`; actions below |
+| GET/POST | `/api/settings` | none / page/token | partial settings | `{settings, stored, garmin}` |
+| GET | `/api/devices` | none | | device status |
+| POST | `/api/devices` | page/token | `{action: scan\|connect\|disconnect\|sim, kind: trainer\|hr, address?, name?, on?, timeout?}` | status, or `{devices: [{address, name, rssi}]}` for scan; `503` when Bluetooth is off |
+| GET | `/api/rides` | none | | `{rides: [{id, name, start, samples, source}]}` archived rides, newest first |
+| GET | `/api/rides/<id>` | none | | ride payload |
+| GET | `/api/said` | none | | `{said: [{time, text, source}]}` last 8 voice transcripts, newest first |
+| POST | `/api/state` | page/token | state object | `{ok}`; for pages or simulators that run their own ride (browser Bluetooth mode, headless simulator) |
+| POST/GET | `/api/current` | page/token / none | ride payload, `{}` clears | browser-mode backup of the ride in progress |
+| POST | `/api/ride` | page/token | ride payload | archive to `rides/<id>.json` |
+| POST | `/api/garmin/upload` | page/token | FIT bytes, header `X-Filename` | `{ok, saved, activityId?, duplicate?, disabled?, error?}`. Always saved to `rides/` first. `503` when Garmin is disabled, `401` when not signed in. |
+| GET | `/api/garmin/status`, `/api/garmin/zones` | none | | `{linked, enabled}`, `{floors, max, lthr}` or `502` |
+
+### Ride control actions
+
+`load {workout: {name, text, test?} | null}` (null = free ride; finishes a started ride first),
+`start`, `pause` (toggles), `skip`, `end`, `adjust {dir: 1|-1}` (intensity 1%, or grade 0.5% /
+5 W in free ride), `mode {m: g|w}` (free ride grade or ERG), `feel {feel: easier|good|harder}`,
+`dismiss` (clears `notice`).
+
+## Coach commands
+
+```json
+{"msg": "Two more reps.", "edit": {"op": "insert", "after": "cur", "steps": "2x(5m 250w, 3m 50%)"}}
+{"msg": "HR 171. Dropping to 275.", "set": {"step": 7, "w": 275}}
+```
+
+- `msg`: shown in the coach bar, read aloud when the page has Voice on. Whitespace collapsed, max 280.
+- `set {step, w}`: step is 1-based or `"cur"`; `w` integer 0..2000. Flattens the step to `w` watts. The
+  athlete's intensity multiplier still applies. Free steps ignore it.
+- `edit`: changes the workout itself; the timeline, totals, later step numbers and the chart update.
+
+| op | Fields | Effect |
+|---|---|---|
+| `insert` | `steps` (workout text), `after` (`"cur"` or n, default cur) | inserts any number of steps after step n |
+| `replace` | `step`, `steps` | replaces step n; for the current step, keeps what was ridden and starts the replacement now |
+| `delete` | `step` | removes an upcoming step; `"cur"` ends the current step now |
+| `duration` | `step`, `seconds` | sets a step's length (the current step never ends in the past) |
+| `extend` | `seconds` (+/-) | lengthens or shortens the current step |
+
+Edits apply to the server ride before the command is queued, so errors return `400` and nothing is
+stored. Only the current and later steps can be edited. Overrides move with their steps. Each edit
+writes an `EDIT ...` event line.
+
+- `seq`: milliseconds since epoch, strictly increasing across restarts.
+- Each command is logged: `COACH <seq> | set <step> <w>W | edit op=... | msg <text>`.
+- The HTTP API only bounds-checks. Coaching guard rails live in the MCP tools (see COACHING.md).
+
+## Live message (`/api/stream`, `/api/live`)
+
+```json
+{"state": {...}, "ride_id": "r-1767250800000", "reset": false, "samples": [[...]], "n": 1834}
+```
+
+`samples` holds only the samples after the client's count `n`; `reset: true` means a new ride, and
+`samples` is then the full list.
+
+## State object
+
+```json
+{
+  "v": 1, "source": "server", "ts": 1767250881000, "version": 1834,
+  "athlete": {"ftp": 200, "weight_kg": 75, "hr_zones": [100, 120, 140, 160, 180], "hr_max": 190, "hr_zones_source": "garmin", "cadence_range": [85, 95]},
+  "devices": {"trainer": "ble", "trainer_name": "Zwift Hub", "trainer_address": "...", "hr": "HRM-Pro", "hr_name": "HRM-Pro", "hr_connected": true, "hr_waiting": false, "ble": true, "error": null},
+  "live": {"power": 251, "power_3s": 248, "cadence": 89, "hr": 158, "speed_kmh": 31.2},
+  "messages": [{"seq": 1767250870000, "msg": "Hold 250", "ts": 1767250870000}],
+  "said": [{"time": "07:31:02", "text": "a bit too hard", "source": "whisper"}],
+  "last_finished": {"id": "r-...", "name": "...", "samples": 3600, "ts": 1767254400000},
+  "notice": null,
+  "ride": {
+    "id": "r-1767250800000", "name": "VO2 5x3", "text": "12m 40-75%, ...", "mode": "workout",
+    "started": true, "paused": false, "auto_paused": false, "elapsed_s": 1834, "el": 1834.0,
+    "ftp": 200, "intensity": 1.0, "test": false, "target_w": 230, "grade": null, "jr": {"m": "g", "g": 0, "w": 120},
+    "samples": 1834, "ov": {"6": 275},
+    "last30": {"power": 229, "cadence": 88, "hr": 158, "hr_delta": 6},
+    "total_s": 3180,
+    "step": {"index": 7, "count": 15, "duration_s": 180, "into_s": 61, "left_s": 119, "free": false},
+    "steps": [{"index": 1, "start_s": 0, "duration_s": 720, "free": false, "start_w": 80, "end_w": 150,
+               "planned": {"a": 0.4, "b": 0.75, "unit": "%"}, "override_w": null}]
+  }
+}
+```
+
+- `devices.trainer`: `none`, `wait` (connecting or reconnecting), `ble`, `sim`.
+- `ride` is null when nothing is loaded. `mode`: `workout`, `erg` or `grade` (free ride).
+- `steps` is the live list after overrides and edits; `start_w`/`end_w` are resolved watts.
+- `source` is `server`, or `page`/`sim` when a browser-mode page or the headless simulator posts state.
+
+## Event lines
+
+`coach/events.log`, one per line, `[HH:MM:SS]` server local time. `GET /api/events` parses each into
+`{time, type, raw, text, ...fields}`.
+
+| type | Line | Fields |
+|---|---|---|
+| `ride_start` | `RIDE START <name> \| FTP <ftp> \| <n> steps, <total>` or `\| free` | name, ftp, steps, total_s |
+| `step_start` | `START step <i>/<n> <dur> @<w\|free>W` | step, steps, duration_s, target_w |
+| `tick` | `T+<el> step <i>/<n> <into> in, <left> left \| tgt <w\|free> \| 30s <w>W \| step avg <w>W \| HR <bpm\|-> (<+d\|-d\|?>/30s) \| cad <rpm>` | elapsed_s, step, steps, into_s, left_s, target_w, power_30s, step_avg_w, hr, hr_delta_30s, cadence_30s |
+| `step_end` | `END step <i>: avg <w>W (tgt <w>) \| HR avg <bpm> max <bpm> end <bpm> \| cad <rpm>` | step, avg_w, target_w, hr_avg, hr_max, hr_end, cadence |
+| `feel` | `FEEL <EASIER\|GOOD\|HARDER> \| step <i\|-> \| 30s <w>W \| HR <bpm\|->` | feel, step, power_30s, hr |
+| `paused` | `PAUSED` or `PAUSED (stopped pedaling)` | auto |
+| `resumed` | `RESUMED` | |
+| `ride_resumed` | `RIDE RESUMED after <reload\|restart> at T+<el> (<n> samples kept)` | after, elapsed_s, samples |
+| `ride_end` | `RIDE END <el>` | elapsed_s |
+| `edit` | `EDIT <insert\|replace\|delete\|end\|duration> ... \| <n> steps, <total>` | op, detail, steps, total_s |
+| `coach` | `COACH <seq> \| set <step> <w>W \| edit ... \| msg <text>` | seq, set, msg |
+| `said` | `SAID (whisper): "<text>"` | said, source |
+| `voice` | `VOICE ON (whisper)` / `VOICE OFF (whisper)` | on, source |
+
+`-` means no data. Tick lines are written during structured workouts every 30 s of ride time.
+
+## Ride payload
+
+`/api/rides/<id>`, `engine.json` (server ride in progress), and the page's `localStorage`
+(`hw.rides`).
+
+```json
+{"id": "r-1767250800000", "name": "VO2 5x3", "text": "12m 40-75%, ...", "steps": [{"d": 720, "a": 0.4, "b": 0.75, "u": "%"}],
+ "test": false, "ftp": 200, "start": 1767250800000, "el": 1834.2, "k": 1, "jr": {"m": "g", "g": 0, "w": 120},
+ "ov": {"6": 275}, "samples": [[1767250801000, 1.0, 152, 88, 121, 29.4, 150]], "source": "server"}
+```
+
+Sample: `[epoch_ms, elapsed_s, watts, cadence, hr (0 = none), speed_kmh, target_w (0 = none)]`, 1 Hz.
+`steps` is the final step list (edits included); `text` is regenerated from it.
+
+## Persistence and recovery
+
+- `coach/engine.json` is rewritten atomically every 5 samples and after every control, command and
+  edit. On start the server resumes it paused (auto-resume when pedaling); rides older than 6 h are
+  archived as "(recovered)".
+- `devices.json` remembers the trainer and strap; the server reconnects at start and after every
+  drop, until you press Disconnect.
+- `settings.json` holds FTP, weight, HR zones, cadence range and Garmin auto-upload.
+
+## Workout text
+
+```
+10m 45-75%, 5x(3m 115%, 3m 50%), 1m 300w, 10m free
+```
+
+Steady `10m 50%`, ramp `5m 50-90%`, absolute `1m 300w`, free `10m free`, repeats `5x(...)`
+(nestable). Durations `1h`, `10m`, `10min`, `30s`, `30sec`, combined `1m30s`. `.zwo` import/export
+maps SteadyState, Ramp/Warmup/Cooldown, IntervalsT, FreeRide/MaxEffort.
+
+## FTMS (trainer side)
+
+- Indoor Bike Data `0x2AD2` notifications: speed, cadence, power, HR (if the trainer relays it).
+- Control Point `0x2AD9`: request control `0x00`, start `0x07`, ERG target `0x05 <u16 W>`,
+  simulation `0x11 <wind s16> <grade s16 0.01%> <crr 0.0001> <cw 0.01>`. Only the latest wanted
+  command is sent. A "control not permitted" response triggers a new control request and a resend.
+- Heart Rate service `0x180D`, measurement `0x2A37`.

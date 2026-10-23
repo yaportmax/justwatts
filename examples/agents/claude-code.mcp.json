@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "trainer-coach": {
+      "command": "trainer-coach",
+      "args": ["mcp"],
+      "env": { "HW_PORT": "8765" }
+    }
+  }
+}

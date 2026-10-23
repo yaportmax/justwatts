@@ -1,0 +1,5 @@
+# Append to ~/.codex/config.toml
+[mcp_servers.trainer-coach]
+command = "trainer-coach"
+args = ["mcp"]
+env = { HW_PORT = "8765" }

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "openspin"
 version = "0.1.0"
-description = "Let an AI agent coach your smart-trainer ride: web app (Web Bluetooth FTMS), local server, CLI and MCP server."
+description = "A free, open-source smart-trainer app: ERG workouts, free ride, history, built-in coach. Optional AI agent coaching over MCP."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -17,10 +17,11 @@ classifiers = [
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Human Machine Interfaces",
 ]
-dependencies = []
+# bleak drives real trainers; everything else (voice, agents, Garmin) is an optional extra
+dependencies = ["bleak>=0.22"]
 
 [project.optional-dependencies]
-ble = ["bleak>=0.22"]
+ble = []  # kept for older install commands; bleak is a core dependency now
 garmin = ["garminconnect>=0.2.19"]
 mcp = ["mcp>=1.2"]
 voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.24"]

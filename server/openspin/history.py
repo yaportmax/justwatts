@@ -150,7 +150,8 @@ def detail(r: dict, hr_floors: list | None = None, meta: dict | None = None) -> 
         "hr_zones_s": dict(zip([f"Z{i + 1}" for i in range(5)], hz)) if hr_floors else None,
         "laps": laps(r),
         "events": r.get("events") or [],
-        "garmin": (meta or {}).get("garmin"),
+        "garmin": (meta or {}).get("garmin"), "strava": (meta or {}).get("strava"),
+        "description": (meta or {}).get("description"),
         "agent": r.get("agent") or {"wakes": None, "local_cues": None, "usage": {}},
     }
     if r.get("test") and m["best60"]:
@@ -167,7 +168,7 @@ def ride_meta_row(r: dict, meta: dict | None = None) -> dict:
             "if": round(m["IF"], 2), "kJ": round(m["kJ"]), "avg_hr": round(m["avgHR"]) or None,
             "best": {f"{w // 60}m": round(best_mean(P, w)) for w in BEST_WINDOWS},
             "ftp_estimate": js_round(m["best60"] * 0.75) if r.get("test") and m["best60"] else None,
-            "garmin": (meta or {}).get("garmin"),
+            "garmin": (meta or {}).get("garmin"), "strava": (meta or {}).get("strava"),
             "agent_wakes": (r.get("agent") or {}).get("wakes"), "local_cues": (r.get("agent") or {}).get("local_cues"),
             "agent_tokens": _tokens((r.get("agent") or {}).get("usage") or {}),
             "agent_cost_usd": ((r.get("agent") or {}).get("usage") or {}).get("cost_usd")}

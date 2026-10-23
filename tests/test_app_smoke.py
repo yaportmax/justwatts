@@ -44,7 +44,7 @@ def test_page_rides_a_workout_on_the_server_engine(node, srv):
     with FastTicker(srv.server.engine):
         out = run_page(node, srv)
     d = out["during"]
-    assert d["meter"].startswith("Agent ") and "local cues" in d["meter"]  # live usage meter in the header
+    assert d["meter"] == "none"  # no agent connected: agent-only UI stays hidden
     assert d["target"] == "230" and d["interval"] == "2 / 2"
     assert d["cad"] == "target 85-95 rpm" and d["cadColor"] in ("var(--good)", "var(--warn)")
     # TTS reads new messages: local-coach cues plus the agent message; nothing after mute

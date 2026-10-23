@@ -51,6 +51,41 @@ class GarminLink:
             "lthr": z.get("lactateThresholdHeartRateUsed"),
         }
 
+    def profile(self) -> dict[str, Any]:
+        """FTP, weight and HR zones from the Garmin account, as far as the account has them.
+        python-garminconnect exposes these through different calls across versions, so each piece
+        is optional."""
+        g = self.client()
+        out: dict[str, Any] = {}
+        try:
+            out.update(self.zones())
+        except Exception:  # noqa: BLE001
+            pass
+        data: dict = {}
+        for fn in ("get_userprofile_settings", "get_user_profile"):
+            if hasattr(g, fn):
+                try:
+                    res = getattr(g, fn)() or {}
+                    data.update(res.get("userData") or res)
+                except Exception:  # noqa: BLE001
+                    pass
+        w = data.get("weight")
+        if isinstance(w, (int, float)) and w > 0:
+            out["weight_kg"] = round(w / 1000, 1) if w > 1000 else round(float(w), 1)  # grams in the profile
+        ftp = None
+        for fn in ("get_cycling_ftp",):
+            if hasattr(g, fn):
+                try:
+                    res = getattr(g, fn)()
+                    res = res[0] if isinstance(res, list) and res else res
+                    ftp = (res or {}).get("functionalThresholdPower") if isinstance(res, dict) else None
+                except Exception:  # noqa: BLE001
+                    pass
+        ftp = ftp or data.get("functionalThresholdPower") or data.get("ftp")
+        if isinstance(ftp, (int, float)) and 50 <= ftp <= 600:
+            out["ftp"] = round(ftp)
+        return out
+
     def upload(self, path: Path) -> dict[str, Any]:
         """Upload a FIT file. Returns {ok, duplicate?, activityId?, error?}."""
         if not self.enabled:

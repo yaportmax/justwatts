@@ -70,7 +70,7 @@ def test_firehose_ride_wakes_far_less():
     g.flush(clk.t)
     assert "tick" not in kinds(g)                    # 30 s telemetry never wakes the agent
     assert kinds(g).count("said") == len(said_at)    # transcripts all pass...
-    assert g.ride_wakes < 0.6 * lines                # ...but coalescing and gating cut wakes a lot
+    assert len(g.batches) < 0.6 * lines              # ...but coalescing and gating cut wakes a lot
     assert kinds(g).count("status") == 0             # never quiet for 3 min here
 
 
@@ -86,7 +86,11 @@ def test_coalescing_window():
     clk.t += 10
     g.on_event("PAUSED (stopped pedaling)", clk.t)
     g.tick(clk.t + 6)
-    assert len(g.batches) == 2 and g.ride_wakes == 2
+    assert len(g.batches) == 2 and g.ride_wakes == 0  # nothing delivered yet: no agent, no wakes
+    g.since(0)
+    assert g.ride_wakes == 2
+    g.since(0)
+    assert g.ride_wakes == 2  # re-reading the same batches is not a new wake
 
 
 def test_dropped_lines():

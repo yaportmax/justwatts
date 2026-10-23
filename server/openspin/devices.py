@@ -22,6 +22,10 @@ def ble_enabled_by_env() -> bool:
     return (env("BLE", "on") or "on").lower() not in ("off", "0", "false", "no")
 
 
+class HRNotReady(Exception):
+    """The strap is connected but does not offer the heart rate service yet."""
+
+
 class Readings:
     def __init__(self):
         self.power = 0.0
@@ -46,6 +50,7 @@ class DeviceHub:
         self.trainer: dict | None = None  # {address, name}
         self.hr: dict | None = None
         self.hr_connected = False
+        self.hr_state: str | None = None  # connecting | waiting_heartbeat | connected
         self.error: str | None = None
         self._want: dict | None = None
         self._sent: str | None = None
@@ -81,9 +86,11 @@ class DeviceHub:
             if saved.get(kind):
                 setattr(self, kind, saved[kind])
                 self._wanted[kind] = True
+                if kind == "trainer":
+                    self.mode = "wait"  # before spawning: a fast connect must not be overwritten
+                else:
+                    self.hr_state = "connecting"
                 self._spawn(kind)
-        if self.trainer and self._wanted["trainer"]:
-            self.mode = "wait"
 
     def stop(self) -> None:
         if self._loop:
@@ -134,6 +141,7 @@ class DeviceHub:
                 "trainer_address": (self.trainer or {}).get("address"),
                 "hr": self.r.hr_src if hr_on else None, "hr_name": (self.hr or {}).get("name"),
                 "hr_connected": self.hr_connected, "hr_waiting": bool(self.r.hr_src) and not hr_on,
+                "hr_state": self.hr_state if self.hr else None,
                 "ble": self.ble_enabled, "error": self.error}
 
     def scan(self, kind: str = "trainer", timeout: float = 5.0) -> list[dict]:
@@ -161,6 +169,8 @@ class DeviceHub:
         self._save()
         if kind == "trainer":
             self.mode = "wait"
+        else:
+            self.hr_state = "connecting"
         self.error = None
         self._spawn(kind)
 
@@ -193,6 +203,7 @@ class DeviceHub:
         else:
             self._hclient = None
             self.hr_connected = False
+            self.hr_state = None
             if self.r.hr_src not in ("hub", "sim"):
                 self.r.hr_src = None
 
@@ -246,11 +257,16 @@ class DeviceHub:
                 self.error = None
             except asyncio.CancelledError:
                 raise
+            except HRNotReady:
+                self.error = None
+                await asyncio.sleep(3)  # rediscover services every few seconds
             except Exception as e:  # noqa: BLE001 - keep trying, report the reason
                 tries += 1
                 self.error = f"{kind}: {e}"[:200]
                 if kind == "trainer" and self.mode != "sim":
                     self.mode = "wait"
+                if kind == "hr":
+                    self.hr_state = "connecting"
                 await asyncio.sleep(min(10, 1 + tries))
 
     def _lost(self, kind: str):
@@ -262,6 +278,8 @@ class DeviceHub:
                     self.mode = "wait" if self._wanted["trainer"] else "none"
             else:
                 self.hr_connected = False
+                if self._wanted["hr"]:
+                    self.hr_state = "connecting"
         return cb
 
     async def _connect_trainer(self) -> None:
@@ -314,8 +332,21 @@ class DeviceHub:
             if self.r.hr_src in (None, "hub", name):
                 self.r.hr_src = name
 
-        await c.start_notify(ftms.HR_MEASUREMENT, on_hr)
+        self.hr_state = "connecting"
+        try:
+            await c.start_notify(ftms.HR_MEASUREMENT, on_hr)
+        except Exception as e:  # noqa: BLE001
+            # Some straps (seen on a Wahoo TRACKR) only expose the HR service once they detect a
+            # heartbeat. Drop the link and rediscover in a few seconds instead of failing.
+            self.hr_state = "waiting_heartbeat"
+            try:
+                await c.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+            self._hclient = None
+            raise HRNotReady(f"strap found, waiting for heartbeat ({e})") from None
         self.hr_connected = True
+        self.hr_state = "connected"
         self.r.hr_src = name
         self.log(f"HR connected: {name}")
 

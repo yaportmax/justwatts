@@ -57,6 +57,16 @@ curl -s -H "Authorization: Bearer $(cat ~/.openspin/token)" http://127.0.0.1:876
 | GET | `/api/trends` | none | `?weeks=12` | `{weeks: [{week, tss, time_s, kJ, rides}], ftp_history: [...], best: {1m, 5m, 20m}}` |
 | GET | `/api/agent-events` | page/token | `?since=<seq>&wait=<s>` (long poll, max 120) | `{batches: [{seq, ts, events: [{ts, kind, text, data}]}], next, ride_wakes, seen}`: the gated agent stream |
 | POST | `/api/agent-usage` | page/token | `{input_tokens?, output_tokens?, cache_read_tokens?, cache_write_tokens?, cost_usd?, turns?, model?, total?}` | adds to the ride's usage meter (`total: true` replaces instead) |
+| POST | `/api/garmin/import` | page/token | `{force?}` | copies FTP, weight, HR zones from Garmin into settings |
+| GET | `/api/strava/status` | none | | `{client_id, has_secret, configured, connected, athlete, scope, auto}` (never the secret) |
+| POST | `/api/strava/config` | **page only** | `{client_id, client_secret?}` | stores the user's Strava API app; a bearer token is refused, so agents cannot set it |
+| GET | `/api/strava/connect` | none (navigation) | | 302 to Strava OAuth, scope `activity:write,activity:read`, redirect `http://localhost:<port>/api/strava/callback` |
+| GET | `/api/strava/callback` | state check | `code, state, scope` | stores tokens in `<data>/strava_token.json`, 302 back to the app |
+| POST | `/api/strava/disconnect` | page/token | | forgets the tokens |
+| POST | `/api/rides/<id>/strava` | page/token | | upload (FIT, `external_id` = ride id), poll status, store the activity id |
+| POST | `/api/rides/<id>/description` | page/token | `{text}` | coach note that leads the Strava description |
+| POST | `/api/rides/<id>/card` | page/token | PNG bytes | stores the share card |
+| GET | `/share/<id>.png` | any Host | | the share card, only when `settings.shareBaseUrl` is set |
 | GET/POST | `/api/voice` | none / page/token | `{event: speech_start\|tts_start\|tts_end\|listening}` | `{barge, barge_at, tts, tts_at, mode}`; `speech_start` makes the page stop speaking |
 | GET | `/api/said` | none | | `{said: [{time, text, source}]}` last 8 voice transcripts, newest first |
 | POST | `/api/state` | page/token | state object | `{ok}`; for pages or simulators that run their own ride (browser Bluetooth mode, headless simulator) |
@@ -79,6 +89,10 @@ When the planned workout ends the ride does not stop: it writes `WORKOUT DONE`, 
 `ride.overtime`, keeps recording and holds the last target (`afterWorkout: hold`) or rides flat at
 grade 0 (`afterWorkout: grade0`) until `end`. Inserting steps in overtime turns the time ridden
 since into a free step and starts the new steps now.
+
+Agent presence: any bearer-token request marks an agent as connected for 5 min
+(`state.agent.connected`); the page shows agent-only UI only then. Wakes count batches actually
+delivered by `/api/agent-events`, so with no agent there are no wakes.
 
 ## Agent stream (event gate)
 

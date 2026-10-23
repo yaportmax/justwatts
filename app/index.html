@@ -13,6 +13,7 @@
     <button data-v="workouts" class="on">Workouts</button>
     <button data-v="ride">Ride</button>
     <button data-v="history">History</button>
+    <button data-v="settings">Settings</button>
   </nav>
   <div class="conn">
     <span class="pill off" id="srvState" style="display:none">Server offline</span>
@@ -123,6 +124,8 @@
     <div class="row" style="justify-content:space-between">
       <div><b id="sName" style="font-size:16px"></b> <span id="sDate" style="color:var(--dim);margin-left:8px"></span></div>
       <div class="row" style="gap:6px">
+        <button id="sCard" title="Finish card to download or share">Share card</button>
+        <button id="sStrava">Upload to Strava</button>
         <button id="sGarmin" class="pri">Upload to Garmin</button>
         <button id="sFit">.fit</button>
         <button id="sTcx">.tcx</button>
@@ -147,12 +150,71 @@
   </div>
   <div class="tablewrap panel" style="padding:0">
     <table>
-      <thead><tr><th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>kJ</th><th>Avg HR</th><th>Best 5m</th><th>Agent</th></tr></thead>
+      <thead><tr><th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>kJ</th><th>Avg HR</th><th>Best 5m</th><th class="agentcol">Agent</th></tr></thead>
       <tbody id="hist"></tbody>
     </table>
     <div id="histEmpty" class="empty">No rides yet.</div>
   </div>
 </section>
+<!-- SETTINGS -->
+<section class="view" id="v-settings">
+  <div class="setgrid">
+    <div class="panel">
+      <h2>Athlete</h2>
+      <div class="row">
+        <label class="f">Cadence low<input id="cadLo" type="number" min="40" max="120"></label>
+        <label class="f">Cadence high<input id="cadHi" type="number" min="40" max="130"></label>
+        <label class="f">Max HR<input id="hrMax" type="number" min="100" max="230"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="gImport" title="Copy FTP, weight and HR zones from your Garmin account">Import from Garmin</button>
+        <span class="hint" id="gImportHint"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Built-in coach</h2>
+      <div class="checks" id="lcChecks">
+        <label><input type="checkbox" data-lc="enabled"> On</label>
+        <label><input type="checkbox" data-lc="countdown"> Interval start and countdown</label>
+        <label><input type="checkbox" data-lc="cadence"> Cadence reminders</label>
+        <label><input type="checkbox" data-lc="recap"> Rep recaps</label>
+        <label><input type="checkbox" data-lc="recovery"> Recovery heart rate</label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Auto-adjust targets<select id="lcAuto"><option value="no_agent">When no agent coaches</option><option value="always">Always</option><option value="off">Off</option></select></label>
+        <label class="f">When the plan ends<select id="afterWk"><option value="hold">Hold last target</option><option value="grade0">Free ride, flat</option></select></label>
+      </div>
+      <div class="hint" style="margin-top:6px">Auto-adjust: Easier lowers the step 5% FTP, Harder raises it 3% (not in HR zone 5), and 30 s over the HR cap eases 5%.</div>
+    </div>
+    <div class="panel">
+      <h2>Uploads</h2>
+      <div class="row"><label class="f">Garmin<select id="autoGarmin2"><option value="1">Auto upload</option><option value="0">Manual</option></select></label><span class="hint" id="garminState"></span></div>
+      <h2>Strava</h2>
+      <div class="hint">Use your own Strava API app (strava.com/settings/api, callback domain <b>localhost</b>). The secret stays in this computer's data folder.</div>
+      <div class="row" style="margin-top:8px">
+        <label class="f">Client ID<input id="stId" style="width:110px"></label>
+        <label class="f">Client secret<input id="stSecret" type="password" autocomplete="off" style="width:220px"></label>
+        <button id="stSave">Save</button>
+        <button id="stConnect" class="pri">Connect Strava</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="f">Strava<select id="autoStrava"><option value="1">Auto upload</option><option value="0">Manual</option></select></label>
+        <span class="hint" id="stState"></span>
+      </div>
+      <div class="warnbox" id="stDup">If Garmin Connect already syncs your rides to Strava, uploading to both creates duplicates on Strava. Keep one: Garmin upload with Garmin's Strava sync, or direct Strava upload.</div>
+      <div class="row" style="margin-top:8px">
+        <label class="f" style="flex:1">Public base URL for share cards (optional)<input id="shareBase" placeholder="https://example.com/openspin" style="width:100%"></label>
+      </div>
+      <div class="hint">Without it, Strava gets a text summary (NP, IF, TSS, intervals). Strava's API cannot attach photos; download the card from the ride summary to post it by hand.</div>
+    </div>
+    <div class="panel">
+      <h2>AI agent (optional)</h2>
+      <div class="hint" id="agentState">OpenSpin works fully without an agent.</div>
+      <div style="margin-top:8px"><a href="connect.html" target="_blank">Connect an agent (Claude Code, Codex, any MCP client)</a></div>
+    </div>
+  </div>
+</section>
+
 </main>
 <div class="modal" id="devModal">
   <div class="panel">
@@ -163,6 +225,16 @@
       <button id="devScan" class="pri">Scan</button>
       <a href="browser.html" class="hint" title="Old mode: Bluetooth inside this browser tab">Use browser Bluetooth instead</a>
     </div>
+  </div>
+</div>
+<div class="modal" id="cardModal">
+  <div class="panel" style="width:min(560px,100%)">
+    <img id="cardImg" alt="Ride card" style="width:100%;border-radius:10px;border:1px solid var(--line)">
+    <div class="row" style="justify-content:space-between">
+      <div class="row" style="gap:6px"><button id="cardDl" class="pri">Download</button><button id="cardShare">Share</button></div>
+      <button id="cardClose">Close</button>
+    </div>
+    <div class="hint">Strava's API cannot attach photos: add the card to your activity by hand.</div>
   </div>
 </div>
 <div class="toast" id="toast"></div>

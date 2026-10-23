@@ -17,7 +17,7 @@ from collections import deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from . import __version__
 from .config import Config
@@ -26,6 +26,7 @@ from .devices import DeviceHub
 from .engine import RideEngine
 from . import history as H
 from .agent_gate import AgentGate, LocalCoach
+from .strava import StravaError, StravaLink, summary_text
 from .garmin import DISABLED_MSG, GarminLink
 
 MAX_BODY = 64 * 1024 * 1024
@@ -227,6 +228,7 @@ class Handler(SimpleHTTPRequestHandler):
     def trusted(self) -> bool:
         origin = self.headers.get("Origin")
         if self.token_ok():
+            self.server.agent_seen = time.time()
             # a token caller is a local process, never a web page from another origin
             return origin is None or origin in self.origins()
         # The page itself: same origin plus a custom header (forces a CORS preflight we never answer).
@@ -251,9 +253,21 @@ class Handler(SimpleHTTPRequestHandler):
 
     # ---------- routes ----------
     def do_GET(self):
+        url = urlsplit(self.path)
+        share = re.fullmatch(r"/share/([\w\-]+)\.png", url.path)
+        if share:  # the only path served for any Host: finished-ride cards, for a public base URL
+            f = self.cfg.rides / "cards" / f"{share[1]}.png"
+            if not f.exists() or not self.server.settings.get("shareBaseUrl"):
+                return self.send_json(404, {"error": "not found"})
+            data = f.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return None
         if not self.host_ok():
             return self.send_json(421, {"error": "bad host"})
-        url = urlsplit(self.path)
         q = parse_qs(url.query)
         p = url.path
         srv = self.server
@@ -262,6 +276,23 @@ class Handler(SimpleHTTPRequestHandler):
                                         "garmin": srv.garmin_enabled, "ble": srv.hub.ble_enabled})
         if p == "/api/stream":
             return self.stream()
+        if p == "/api/strava/status":
+            return self.send_json(200, {**srv.strava.status(), "auto": bool(srv.settings.get("autoStrava"))})
+        if p == "/api/strava/connect":
+            try:
+                return self.redirect(srv.strava.authorize_url(f"http://localhost:{srv.server_address[1]}/api/strava/callback"))
+            except StravaError as e:
+                return self.redirect(f"http://127.0.0.1:{srv.server_address[1]}/?strava_error={quote(str(e))}#settings")
+        if p == "/api/strava/callback":
+            home = f"http://127.0.0.1:{srv.server_address[1]}/"
+            if q.get("error"):
+                return self.redirect(home + f"?strava_error={quote(q['error'][0])}#settings")
+            try:
+                srv.strava.callback(q.get("code", [""])[0], q.get("state", [""])[0], q.get("scope", [""])[0])
+            except StravaError as e:
+                return self.redirect(home + f"?strava_error={quote(str(e))}#settings")
+            srv.log_event("STRAVA connected")
+            return self.redirect(home + "?strava=connected#settings")
         if p == "/api/live":
             rid = q.get("ride", [None])[0]
             n = int(q.get("n", ["0"])[0] or 0)
@@ -335,6 +366,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(404, {"error": "not found"})
         return super().do_GET()
 
+    def redirect(self, url: str):
+        self.send_response(302)
+        self.send_header("Location", url)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def stream(self):
         """Server-sent events: one `data:` JSON message per engine change (at least once a second)."""
         srv = self.server
@@ -372,13 +409,48 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(421, {"error": "bad host"})
         p = urlsplit(self.path).path
         routes = ("/api/event", "/api/coach", "/api/current", "/api/ride", "/api/state", "/api/garmin/upload",
-                  "/api/ride/control", "/api/settings", "/api/devices", "/api/voice", "/api/agent-usage")
-        ride_action = re.fullmatch(r"/api/rides/([\w\-]+)/(garmin|delete)", p)
+                  "/api/ride/control", "/api/settings", "/api/devices", "/api/voice", "/api/agent-usage",
+                  "/api/garmin/import", "/api/strava/config", "/api/strava/disconnect")
+        ride_action = re.fullmatch(r"/api/rides/([\w\-]+)/(garmin|delete|strava|card|description)", p)
         if p not in routes and not ride_action:
             return self.send_json(404, {"error": "not found"})
         if not self.trusted():
             return self.send_json(403, {"error": "forbidden"})
         srv = self.server
+        if p == "/api/strava/config":
+            # the client secret is the user's: only the page may set it, never an agent's token
+            if self.token_ok() or self.headers.get("X-HW") != "1":
+                return self.send_json(403, {"error": "enter the Strava client secret yourself in Settings"})
+            try:
+                b = json.loads(raw or b"{}")
+                srv.strava.configure(str(b.get("client_id", "")), b.get("client_secret") or None)
+            except (ValueError, StravaError) as e:
+                return self.send_json(400, {"error": str(e)})
+            return self.send_json(200, srv.strava.status())
+        if p == "/api/strava/disconnect":
+            srv.strava.disconnect()
+            return self.send_json(200, srv.strava.status())
+        if ride_action and ride_action[2] == "card":
+            if not raw.startswith(b"\x89PNG"):
+                return self.send_json(400, {"error": "PNG expected"})
+            atomic_write(self.cfg.rides / "cards" / f"{ride_action[1]}.png", raw)
+            return self.send_json(200, {"ok": True, "url": srv.card_url(ride_action[1])})
+        if ride_action and ride_action[2] == "description":
+            try:
+                text = str(json.loads(raw or b"{}").get("text", ""))[:2000]
+            except ValueError:
+                return self.send_json(400, {"error": "bad json"})
+            srv.set_ride_meta(ride_action[1], {"description": text})
+            return self.send_json(200, {"ok": True})
+        if ride_action and ride_action[2] == "strava":
+            r = srv.load_ride(ride_action[1])
+            if r is None:
+                return self.send_json(404, {"error": "no such ride"})
+            try:
+                res = srv.upload_strava(r)
+            except StravaError as e:
+                return self.send_json(502, {"ok": False, "error": str(e)})
+            return self.send_json(200 if res.get("ok") else 502, res)
         if ride_action:
             rid, act = ride_action[1], ride_action[2]
             if act == "delete":
@@ -402,6 +474,13 @@ class Handler(SimpleHTTPRequestHandler):
             if ev["type"] == "said":
                 srv.on_said(ev["said"])
             return self.send_json(200, {"ok": True})
+        if p == "/api/garmin/import":
+            if not srv.garmin_enabled or not srv.garmin.linked():
+                return self.send_json(503, {"error": DISABLED_MSG if not srv.garmin_enabled else "not signed in"})
+            try:
+                return self.send_json(200, srv.import_garmin_profile(force=bool(body.get("force"))))
+            except Exception as e:  # noqa: BLE001
+                return self.send_json(502, {"error": str(e)[:200]})
         if p == "/api/agent-usage":
             if not isinstance(body, dict):
                 return self.send_json(400, {"error": "body must be an object"})
@@ -517,7 +596,9 @@ class Handler(SimpleHTTPRequestHandler):
 
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
                      "hrZonesSrc": None, "cadRange": [85, 95], "voiceMode": "all", "afterWorkout": "hold",
-                     "agentGate": {}, "localCoach": {}}
+                     "agentGate": {}, "localCoach": {}, "ftpSrc": None, "profileImported": False,
+                     "autoStrava": False, "shareBaseUrl": ""}
+AGENT_RECENT_S = 300  # an agent (or CLI tool) used the token this recently: show agent-only UI
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "turns")
 VOICE_MODES = ("all", "important", "silent")
 # spoken commands that change how much the coach talks (checked on every voice transcript)
@@ -529,7 +610,7 @@ class CoachServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, cfg: Config, garmin: GarminLink | None = None, quiet: bool = False,
-                 ticker: bool = True, devices: bool = True, hub: DeviceHub | None = None):
+                 ticker: bool = True, devices: bool = True, hub: DeviceHub | None = None, strava_http=None):
         self.cfg = cfg
         if cfg.is_default_data:
             from .config import migrate_legacy_data
@@ -552,12 +633,16 @@ class CoachServer(ThreadingHTTPServer):
                                     log=(lambda m: None) if quiet else (lambda m: print("ble:", m, flush=True)))
         self.engine = RideEngine(self.hub, cfg.data, self.log_event, lambda: self.settings)
         self.engine.on_finish = self._after_finish
+        self.agent_seen: float | None = None
+        self.strava = StravaLink(cfg.data, http=strava_http) if strava_http else StravaLink(cfg.data)
         self.gate = AgentGate(lambda: self.settings, on_wake=lambda b: self.engine.count_agent(wakes=1))
-        self.local = LocalCoach(lambda: self.settings, self._local_say)
+        self.local = LocalCoach(lambda: self.settings, self._local_say, adjust=self._local_adjust,
+                                agent_connected=self.agent_connected)
         super().__init__(("127.0.0.1", cfg.port), Handler)
         self.engine.resume()
         if devices:
             self.hub.start()
+            self._first_run_garmin()
         self._ticker = threading.Thread(target=self._tick_loop, name="ride-tick", daemon=True) if ticker else None
         if self._ticker:
             self._ticker.start()
@@ -574,6 +659,43 @@ class CoachServer(ThreadingHTTPServer):
         if getattr(self, "gate", None) is not None:
             self.gate.on_event(line[:400])
             self.local.on_event(line[:400])
+
+    def agent_connected(self) -> bool:
+        seen = max(self.agent_seen or 0, self.gate.agent_seen or 0)
+        return bool(seen) and time.time() - seen < AGENT_RECENT_S
+
+    def _local_adjust(self, step: int, watts: int, why: str) -> None:
+        """The built-in coach changes a target (FEEL press or HR cap) when no agent is coaching."""
+        cmd = self.coach.add_cmd({"set": {"step": step, "w": watts}, "msg": why, "important": True, "local": True})
+        self.engine.coach(cmd)
+        self.engine.count_agent(cues=1)
+        self.log_event(f"CUE set step {step} {watts}W | {why}")
+
+    def import_garmin_profile(self, force: bool = False) -> dict:
+        """Copy FTP, weight and HR zones from Garmin into settings (only fields the athlete did not set)."""
+        prof = self.garmin.profile()
+        s, patch = self.settings, {}
+        if prof.get("floors") and (force or s.get("hrZonesSrc") != "manual"):
+            patch.update(hrZones=prof["floors"], hrMax=prof.get("max"), hrZonesSrc="garmin")
+        if prof.get("ftp") and (force or s.get("ftpSrc") != "manual"):
+            patch.update(ftp=prof["ftp"], ftpSrc="garmin")
+        if prof.get("weight_kg") and (force or not s.get("weight")):
+            patch["weight"] = prof["weight_kg"]
+        patch["profileImported"] = True
+        self.update_settings(patch)
+        return {"imported": {k: v for k, v in patch.items() if k != "profileImported"}, "profile": prof}
+
+    def _first_run_garmin(self) -> None:
+        if self.settings.get("profileImported") or not (self.garmin_enabled and self.garmin.linked()):
+            return
+
+        def go():
+            try:
+                res = self.import_garmin_profile()
+                self.log_event("GARMIN profile imported: " + ", ".join(f"{k}={v}" for k, v in res["imported"].items()))
+            except Exception as e:  # noqa: BLE001
+                self.log_event(f"GARMIN profile import failed: {e}"[:200])
+        threading.Thread(target=go, name="garmin-profile", daemon=True).start()
 
     def _local_say(self, text: str, important: bool = False) -> None:
         """A routine cue from the local coach: shown and spoken like a coach message, no agent wake."""
@@ -662,6 +784,7 @@ class CoachServer(ThreadingHTTPServer):
     def engine_state(self) -> dict:
         st = self.engine.state(self.athlete(), self.said()[:3])
         st["voice"] = {**self.voice, "mode": self.settings.get("voiceMode", "all")}
+        st["agent"] = {"connected": self.agent_connected(), "last_seen": max(self.agent_seen or 0, self.gate.agent_seen or 0) or None}
         return st
 
     def voice_event(self, ev: str) -> dict:
@@ -710,8 +833,30 @@ class CoachServer(ThreadingHTTPServer):
         total = (0 if reset else n) + len(samples)
         return {"state": self.engine_state(), "ride_id": new_rid, "reset": reset, "samples": samples, "n": total}
 
+    def card_url(self, rid: str) -> str | None:
+        base = (self.settings.get("shareBaseUrl") or "").rstrip("/")
+        return f"{base}/share/{rid}.png" if base else None
+
+    def upload_strava(self, ride: dict) -> dict:
+        rid = ride["id"]
+        meta = self.ride_meta(rid)
+        d = H.detail(ride, self.settings.get("hrZones"), meta)
+        desc = summary_text(d, self.card_url(rid), meta.get("description"))
+        res = self.strava.upload(H.fit_encode(ride), ride.get("name") or "OpenSpin ride", desc, rid)
+        if res.get("activity_id"):
+            self.set_ride_meta(rid, {"strava": res["activity_id"], "strava_at": int(time.time() * 1000)})
+        self.log_event(f"STRAVA {'uploaded' if res.get('ok') else 'failed: ' + str(res.get('error'))[:120]}")
+        return res
+
     def _after_finish(self, ride: dict) -> None:
-        """Auto-upload on the server, so it happens even with no page open."""
+        """Auto-uploads on the server, so they happen even with no page open."""
+        if self.settings.get("autoStrava") and self.strava.status()["connected"]:
+            def strava():
+                try:
+                    self.upload_strava(ride)
+                except Exception as e:  # noqa: BLE001
+                    self.log_event(f"STRAVA failed: {e}"[:200])
+            threading.Thread(target=strava, name="strava-upload", daemon=True).start()
         if not (self.settings.get("autoGarmin") and self.garmin_enabled):
             return
 
@@ -810,8 +955,8 @@ class CoachServer(ThreadingHTTPServer):
 
 
 def make_server(cfg: Config | None = None, garmin: GarminLink | None = None, quiet: bool = False,
-                ticker: bool = True, devices: bool = True, hub: DeviceHub | None = None) -> CoachServer:
-    return CoachServer(cfg or Config(), garmin, quiet, ticker=ticker, devices=devices, hub=hub)
+                ticker: bool = True, devices: bool = True, hub: DeviceHub | None = None, strava_http=None) -> CoachServer:
+    return CoachServer(cfg or Config(), garmin, quiet, ticker=ticker, devices=devices, hub=hub, strava_http=strava_http)
 
 
 def serve(cfg: Config | None = None) -> None:

@@ -29,7 +29,9 @@ GATE_DEFAULTS = {
     "cadence_low_s": 20,      # cadence under the athlete's range for this long raises an alert
     "hr_cap": None,           # bpm; default 95 % of max HR, else the Z5 floor
 }
-LOCAL_DEFAULTS = {"enabled": True, "countdown": True, "cadence": True, "recap": True, "recovery": True}
+LOCAL_DEFAULTS = {"enabled": True, "countdown": True, "cadence": True, "recap": True, "recovery": True,
+                  # target changes from FEEL presses and the HR cap: "no_agent" (default), "always", "off"
+                  "auto_adjust": "no_agent", "easier_pct": 5, "harder_pct": 3, "hr_cap_pct": 5}
 
 PASS_TYPES = {"step_start", "step_end", "feel", "said", "paused", "resumed", "ride_start", "ride_end",
               "ride_resumed", "workout_done", "edit"}
@@ -51,6 +53,8 @@ class AgentGate:
         self.suppress_edits = 0  # edits the agent made itself (it already knows)
         self.seen = 0            # every event line offered to the gate
         self.ride_wakes = 0
+        self.delivered = 0       # highest batch seq handed to an agent
+        self.agent_seen: float | None = None
         self._a: dict[str, Any] = {}  # alert trackers
 
     def cfg(self) -> dict:
@@ -180,10 +184,7 @@ class AgentGate:
         self.batches.append(b)
         self.pending, self.first_pending = [], None
         self.last_emit = now
-        self.ride_wakes += 1
         self.lock.notify_all()
-        if self.on_wake:
-            self.on_wake(b)
 
     def flush(self, now: float | None = None) -> None:
         with self.lock:
@@ -199,9 +200,17 @@ class AgentGate:
         deadline = time.monotonic() + max(0.0, min(wait, 120))
         with self.lock:
             while True:
+                self.agent_seen = time.time()
                 got = [b for b in self.batches if b["seq"] > seq]
                 left = deadline - time.monotonic()
                 if got or left <= 0:
+                    new = [b for b in got if b["seq"] > self.delivered]
+                    if new:  # only batches an agent really received count as wakes
+                        self.delivered = max(b["seq"] for b in new)
+                        self.ride_wakes += len(new)
+                        if self.on_wake:
+                            for b in new:
+                                self.on_wake(b)
                     return {"batches": got, "next": self.seq, "ride_wakes": self.ride_wakes, "seen": self.seen}
                 self.lock.wait(min(left, 5))
 
@@ -210,9 +219,15 @@ class LocalCoach:
     """Routine cues spoken without the agent. Settings: localCoach {enabled, countdown, cadence, recap, recovery}."""
 
     def __init__(self, settings: Callable[[], dict], say: Callable[[str, bool], None],
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, adjust: Callable[[int, int, str], None] | None = None,
+                 agent_connected: Callable[[], bool] = lambda: False):
         self.settings = settings
         self.say = say
+        self.adjust = adjust
+        self.agent_connected = agent_connected
+        self.last_st: dict | None = None
+        self.hr_over_since: float | None = None
+        self.hr_adjusted_steps: set = set()
         self.clock = clock
         self.lock = threading.RLock()  # cues re-enter through the event log
         self.ftp = 200
@@ -240,6 +255,8 @@ class LocalCoach:
                 self.ftp = ev.get("ftp") or self.ftp
                 self.countdown_done.clear()
                 self.last_work_hr = None
+            elif t == "feel":
+                self._feel(ev["feel"], c)
             elif t == "step_start" and c["countdown"] and ev.get("target_w"):
                 self._say(f"{_spoken_dur(ev['duration_s'])} at {ev['target_w']} watts")
             elif t == "step_end" and ev.get("target_w"):
@@ -254,10 +271,63 @@ class LocalCoach:
                     self._say(f"Recovery heart rate {ev['hr_end']}, down {drop}.")
                     self.last_work_hr = None
 
+    # ---------- safe automatic target changes ----------
+    def _may_adjust(self, c: dict) -> bool:
+        mode = c.get("auto_adjust", "no_agent")
+        return bool(self.adjust) and (mode == "always" or (mode == "no_agent" and not self.agent_connected()))
+
+    def _current(self):
+        st = self.last_st or {}
+        ride = st.get("ride") or {}
+        step = ride.get("step")
+        if not ride.get("started") or not step or step.get("free") or not ride.get("target_w") or ride.get("test"):
+            return None
+        return st, ride, step
+
+    def _feel(self, feel: str, c: dict) -> None:
+        cur = self._current()
+        if not cur or not self._may_adjust(c) or feel == "good":
+            return
+        st, ride, step = cur
+        ftp, tgt = ride.get("ftp") or self.ftp, ride["target_w"]
+        if feel == "easier":
+            new = max(round(0.3 * ftp), round((tgt - c["easier_pct"] / 100 * ftp) / 5) * 5)
+            self.adjust(step["index"], new, f"Easier: {new} watts.")
+        elif feel == "harder":
+            floors = (st.get("athlete") or {}).get("hr_zones")
+            hr = (st.get("live") or {}).get("hr") or 0
+            if floors and hr >= floors[4]:
+                self._say("Heart rate is in zone 5. Holding the target.")
+                return
+            new = min(round(1.5 * ftp), round((tgt + c["harder_pct"] / 100 * ftp) / 5) * 5)
+            if ride.get("paused") or new <= tgt:
+                return
+            self.adjust(step["index"], new, f"Harder: {new} watts.")
+
+    def _hr_guard(self, st: dict, c: dict, now: float) -> None:
+        cur = self._current()
+        ath, live = st.get("athlete") or {}, st.get("live") or {}
+        hmax, floors, hr = ath.get("hr_max"), ath.get("hr_zones"), live.get("hr") or 0
+        cap = round(hmax * 0.95) if hmax else (floors[4] if floors else None)
+        if not cur or not cap or not self._may_adjust(c) or hr < cap:
+            self.hr_over_since = None
+            return
+        _, ride, step = cur
+        self.hr_over_since = self.hr_over_since or now
+        if now - self.hr_over_since >= 30 and step["index"] not in self.hr_adjusted_steps:
+            self.hr_adjusted_steps.add(step["index"])
+            ftp, tgt = ride.get("ftp") or self.ftp, ride["target_w"]
+            new = max(round(0.3 * ftp), round((tgt - c["hr_cap_pct"] / 100 * ftp) / 5) * 5)
+            self.adjust(step["index"], new, f"Heart rate {hr}. Easing to {new} watts.")
+
     def observe(self, st: dict) -> None:
         c = self.cfg()
+        self.last_st = st
         if not c["enabled"]:
             return
+        if st.get("ride"):
+            # ride time, not wall time: pauses do not count and tests can run fast
+            self._hr_guard(st, c, float(st["ride"].get("elapsed_s") or 0))
         ride = st.get("ride")
         if not ride or not ride.get("started") or ride.get("paused"):
             self.cad_low_since = None

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect an agent</title>
+<link rel="stylesheet" href="css/app.css">
+<style>main{max-width:760px}pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;font-size:13px}code{font-family:ui-monospace,Consolas,monospace}p,li{color:var(--dim)}</style>
+</head>
+<body>
+<header><div class="brand">OpenSpin</div><nav><a href="/" style="color:var(--dim)">Back to the app</a></nav></header>
+<main>
+<h2>Optional: let an AI agent coach you live</h2>
+<p>OpenSpin is complete without an agent: the built-in coach calls the intervals, recaps reps and adjusts targets from your Easier and Harder presses. An agent adds judgment: it reads your heart rate trend and what you say, edits the workout mid-ride and explains why.</p>
+<ol>
+<li>Install the extra: <code>pip install "openspin[mcp]"</code></li>
+<li>Keep <code>openspin serve</code> running.</li>
+<li>Add the MCP server to your agent.</li>
+</ol>
+<p>Claude Code:</p>
+<pre><code>claude mcp add openspin -- openspin mcp</code></pre>
+<p>Codex (<code>~/.codex/config.toml</code>):</p>
+<pre><code>[mcp_servers.openspin]
+command = "openspin"
+args = ["mcp"]</code></pre>
+<p>Any other MCP client: run <code>openspin mcp</code> over stdio. Without MCP, any tool can use the HTTP API with the token in <code>~/.openspin/token</code>.</p>
+<p>Then ask: <i>"Coach my ride. Read the playbook, wait for events, keep me in zone."</i> The agent should loop on <code>wait_for_events</code>, which wakes it only for step summaries, your presses and speech, and alerts. The ride header shows how often it woke and what it cost.</p>
+<p>The coaching playbook and safety limits are in <code>docs/COACHING.md</code>; the API is in <code>docs/PROTOCOL.md</code>.</p>
+</main>
+</body>
+</html>

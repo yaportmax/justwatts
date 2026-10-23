@@ -28,7 +28,7 @@ globalThis.document = {
   querySelector: s => els[s] ??= new El(s),
   querySelectorAll: s => multi[s] || [],
   createElement: () => new El('new'),
-  addEventListener() {}, documentElement: new El('html'), activeElement: { tagName: 'BODY' }, hidden: false,
+  addEventListener() {}, documentElement: new El('html'), body: new El('body'), activeElement: { tagName: 'BODY' }, hidden: false,
 };
 globalThis.window = globalThis;
 globalThis.addEventListener = () => {};
@@ -99,7 +99,7 @@ await until(() => S().ride?.started, 'started');
 await until(() => S().ride && S().ride.el > 70, 'into step 2');
 await fetch('/api/coach', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ msg: 'Hold 230', set: { step: 'cur', w: 230 } }) });
 await until(() => S().ride?.target_w === 230 && $('#coachMsg').textContent === 'Hold 230', 'coach applied');
-const meter = String($('#agentMeter').textContent);
+const meter = $('#agentMeter').style.display;
 const during = { meter, target: String($("#lT").textContent), cad: $('#lCs').textContent, cadColor: $('#cadTile').style.props['--hrc'], tiles: $('#lP').textContent, interval: String($("#lIs").textContent) };
 multi['[data-feel]'][2].click();
 // barge-in: the voice listener reports speech, the page cancels coach speech

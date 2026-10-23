@@ -77,8 +77,8 @@ function drawThumb(cv, cw, ftp) {
   c.strokeStyle = 'rgba(255,255,255,.18)'; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(0, h - ftp / yMax * h); c.lineTo(w, h - ftp / yMax * h); c.stroke(); c.setLineDash([]);
 }
 // full chart: profile + power + HR (right-hand axis)
-function drawChart(cv, o) {
-  const [c, w, h] = fit(cv); const ftp = o.ftp, L = 40, B = 20, T = 8, R = 32, pw = w - L - R, ph = h - B - T;
+function drawChart(cv, o, box) {
+  const [c, w, h] = box || fit(cv); const ftp = o.ftp, L = 40, B = 20, T = 8, R = 32, pw = w - L - R, ph = h - B - T;
   const smp = o.samples || [];
   const total = o.cw ? o.cw.total : Math.max(600, (o.el || 0) * 1.08, smp.length ? smp[smp.length - 1][1] : 0);
   let mp = 0; for (const s of smp) mp = Math.max(mp, s[2]);
@@ -224,7 +224,7 @@ function usageText(wakes, cues, u) {
 }
 function renderMeter() {
   const a = S?.ride?.agent, el = $('#agentMeter');
-  el.style.display = a && S.ride.started ? '' : 'none';
+  el.style.display = a && S.ride.started && S.agent?.connected ? '' : 'none';
   if (a) el.textContent = usageText(a.wakes, a.local_cues, a.usage);
 }
 function setOnline(on) {
@@ -252,7 +252,7 @@ function setStatus() {
   $('#btnTrainer').className = mode === 'ble' || mode === 'wait' ? '' : 'pri';
   $('#btnSim').textContent = mode === 'sim' ? 'Stop sim' : 'Sim';
   $('#hDot').className = 'dot ' + (d.hr ? 'on' : d.hr_waiting || d.hr_name ? 'wait' : '');
-  $('#hTxt').textContent = d.hr ? `HR ${d.hr}` : d.hr_waiting || d.hr_name ? 'HR waiting' : 'HR off';
+  $('#hTxt').textContent = d.hr ? `HR ${d.hr}` : d.hr_state === 'waiting_heartbeat' ? 'Strap found, waiting for heartbeat (wet the contacts)' : d.hr_state === 'connecting' ? 'HR connecting…' : d.hr_waiting || d.hr_name ? 'HR waiting' : 'HR off';
   $('#btnHR').textContent = d.hr_name ? 'Disconnect HR' : 'Connect HR';
 }
 let devKind = 'trainer';
@@ -460,9 +460,10 @@ async function renderHistory() {
   try { rows = (await (await fetch('/api/rides')).json()).rides; } catch { return; }
   const tb = $('#hist'); tb.innerHTML = '';
   $('#histEmpty').style.display = rows.length ? 'none' : '';
+  document.body.classList.toggle('noagent', !rows.some(r => r.agent_wakes > 0));
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] || '–'}</td><td class="num" title="agent wakes / tokens">${r.agent_wakes ?? '–'}${r.agent_tokens ? ' · ' + kfmt(r.agent_tokens) : ''}</td>`;
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] || '–'}</td><td class="num agentcol" title="agent wakes / tokens">${r.agent_wakes ?? '–'}${r.agent_tokens ? ' · ' + kfmt(r.agent_tokens) : ''}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
   renderTrends();
@@ -504,7 +505,7 @@ async function openSummary(id) {
   $('#summary').style.display = ''; $('#sName').textContent = r.name;
   $('#sDate').textContent = new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const st = [['Time', fmtT(m.time_s)], ['Avg power', m.avg_w + ' W'], ['NP', m.np + ' W'], ['Max', m.max_w + ' W'], ['IF', m.if.toFixed(2)], ['TSS', m.tss], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–'], ['Best 1/5/20', `${d.best['1m']}/${d.best['5m'] || '–'}/${d.best['20m'] || '–'}`], ['Distance', m.distance_km.toFixed(1) + ' km']];
-  if (d.agent?.wakes != null) st.push(['Coach usage', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
+  if (d.agent?.wakes > 0) st.push(['Coach usage', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
   $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }
@@ -530,12 +531,34 @@ async function openSummary(id) {
   const cls = l => /^COACH|^EDIT/.test(l) ? 'c' : /^SAID/.test(l) ? 's' : /^FEEL|^PAUSED/.test(l) ? 'f' : '';
   $('#sEvents').innerHTML = d.events.length ? d.events.map(([ts, l]) => `<div class="${cls(l)}">${new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}  ${esc(l)}</div>`).join('') : '<div class="hint">No transcript for this ride.</div>';
   renderGarminBtn(d.garmin);
+  renderStravaBtn(d.strava);
   $('#summary').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 function renderGarminBtn(g) {
   const b = $('#sGarmin'); b.disabled = !garminOn && !g;
   b.title = garminOn ? '' : 'Garmin is disabled on this server';
   b.textContent = g ? 'On Garmin ✓' : 'Upload to Garmin'; b.className = g ? '' : 'pri'; b.dataset.g = g || '';
+}
+function renderStravaBtn(sid) {
+  const b = $('#sStrava'); b.dataset.s = sid || '';
+  b.textContent = sid ? 'On Strava ✓' : 'Upload to Strava';
+  b.disabled = !sid && !strava.connected; b.title = strava.connected || sid ? '' : 'Connect Strava in Settings';
+}
+$('#sStrava').onclick = async () => {
+  const sid = $('#sStrava').dataset.s;
+  if (sid) { window.open(`https://www.strava.com/activities/${sid}`, '_blank'); return; }
+  if (!openId) return;
+  if (settings.autoGarmin && !confirmDup()) return;
+  $('#sStrava').disabled = true; $('#sStrava').textContent = 'Uploading…';
+  try { const j = await apiJson(`/api/rides/${openId}/strava`, {}); toast(j.duplicate ? 'Already on Strava' : 'Uploaded to Strava'); renderStravaBtn(j.activity_id); }
+  catch (e) { toast('Strava upload failed: ' + e.message); renderStravaBtn(null); }
+  renderHistory();
+};
+let dupWarned = false;
+function confirmDup() {  // Garmin auto-sync to Strava + direct upload = duplicate activity
+  if (dupWarned) return true;
+  dupWarned = true; toast('Garmin may already sync this ride to Strava. Tap Upload again to send it directly anyway.');
+  return false;
 }
 async function uploadGarmin(id) {
   if (openId === id) { $('#sGarmin').disabled = true; $('#sGarmin').textContent = 'Uploading…'; }
@@ -563,6 +586,90 @@ function download(name, data, type) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
+
+/* ---------- settings tab ---------- */
+const LC_DEFAULTS = { enabled: true, countdown: true, cadence: true, recap: true, recovery: true, auto_adjust: 'no_agent' };
+let strava = {};
+async function renderSettings() {
+  const lc = { ...LC_DEFAULTS, ...(settings.localCoach || {}) }, cr = settings.cadRange || [85, 95];
+  $('#cadLo').value = cr[0]; $('#cadHi').value = cr[1]; $('#hrMax').value = settings.hrMax || '';
+  $$('[data-lc]').forEach(b => { b.checked = !!lc[b.dataset.lc]; });
+  $('#lcAuto').value = lc.auto_adjust; $('#afterWk').value = settings.afterWorkout || 'hold';
+  $('#autoGarmin2').value = settings.autoGarmin ? '1' : '0'; $('#autoGarmin2').disabled = !garminOn;
+  $('#gImport').style.display = garminOn ? '' : 'none';
+  $('#garminState').textContent = garminOn ? '' : 'Garmin is off on this server (see README: Garmin upload)';
+  $('#shareBase').value = settings.shareBaseUrl || '';
+  try { strava = await (await fetch('/api/strava/status')).json(); } catch { strava = {}; }
+  $('#stId').value = strava.client_id || '';
+  $('#stSecret').value = ''; $('#stSecret').placeholder = strava.has_secret ? 'saved (hidden)' : 'paste once';
+  $('#stConnect').textContent = strava.connected ? 'Reconnect Strava' : 'Connect Strava';
+  $('#stConnect').disabled = !strava.configured;
+  $('#stState').textContent = strava.connected ? `Connected${strava.athlete?.name ? ' as ' + strava.athlete.name : ''}` : strava.configured ? 'Not connected yet' : 'Enter your API app first';
+  $('#autoStrava').value = settings.autoStrava ? '1' : '0'; $('#autoStrava').disabled = !strava.connected;
+  $('#stDup').classList.toggle('hot', !!(settings.autoGarmin && settings.autoStrava));
+  $('#agentState').textContent = S?.agent?.connected ? 'An agent is connected and coaching.' : 'OpenSpin works fully without an agent. The built-in coach handles cues and safe adjustments.';
+}
+const setLC = patch => { settings.localCoach = { ...(settings.localCoach || {}), ...patch }; saveSettings(['localCoach']); };
+$$('[data-lc]').forEach(b => b.onchange = () => setLC({ [b.dataset.lc]: b.checked }));
+$('#lcAuto').onchange = e => setLC({ auto_adjust: e.target.value });
+$('#afterWk').onchange = e => { settings.afterWorkout = e.target.value; saveSettings(['afterWorkout']); };
+const cadSave = () => { const lo = +$('#cadLo').value, hi = +$('#cadHi').value; if (lo >= 40 && hi > lo && hi <= 130) { settings.cadRange = [lo, hi]; saveSettings(['cadRange']); } else toast('Cadence range: low < high'); };
+$('#cadLo').onchange = cadSave; $('#cadHi').onchange = cadSave;
+$('#hrMax').onchange = e => { const v = +e.target.value; if (v >= 100 && v <= 230) { settings.hrMax = v; saveSettings(['hrMax']); } };
+$('#autoGarmin2').onchange = e => { settings.autoGarmin = e.target.value === '1'; $('#autoGarmin').value = e.target.value; saveSettings(['autoGarmin']); renderSettings(); };
+$('#autoStrava').onchange = e => { settings.autoStrava = e.target.value === '1'; saveSettings(['autoStrava']); renderSettings(); };
+$('#shareBase').onchange = e => { settings.shareBaseUrl = e.target.value.trim(); saveSettings(['shareBaseUrl']); };
+$('#stSave').onclick = async () => {
+  try { await apiJson('/api/strava/config', { client_id: $('#stId').value.trim(), client_secret: $('#stSecret').value.trim() }); toast('Strava app saved'); }
+  catch (e) { toast('Strava: ' + e.message); }
+  $('#stSecret').value = ''; renderSettings();
+};
+$('#stConnect').onclick = () => { location.href = '/api/strava/connect'; };
+$('#gImport').onclick = async () => {
+  try {
+    const j = await apiJson('/api/garmin/import', { force: true });
+    const got = Object.keys(j.imported); toast(got.length ? 'Imported from Garmin: ' + got.join(', ') : 'Garmin had nothing new');
+    await loadSettings(); renderSettings();
+  } catch (e) { toast('Garmin import failed: ' + e.message); }
+};
+{ const u = new URLSearchParams(globalThis.location?.search || ''); if (u.get('strava') === 'connected') toast('Strava connected'); if (u.get('strava_error')) toast('Strava: ' + u.get('strava_error')); }
+
+/* ---------- share card (rendered here; Strava's API cannot take photos) ---------- */
+async function shareCard() {
+  const r = openRide; if (!r) return null;
+  const d = await (await fetch(`/api/rides/${r.id}/detail`)).json(), m = d.summary;
+  const W = 1080, H = 1080, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#0c0e11'; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#38bdf8'; c.font = '700 40px system-ui'; c.textBaseline = 'top'; c.fillText('OpenSpin', 60, 52);
+  c.fillStyle = '#e9edf2'; c.font = '700 64px system-ui'; c.fillText(r.name.slice(0, 28), 60, 120);
+  c.fillStyle = '#8b95a4'; c.font = '30px system-ui';
+  c.fillText(new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }), 60, 200);
+  const st = [['Time', fmtT(m.time_s)], ['NP', m.np + ' W'], ['Avg', m.avg_w + ' W'], ['TSS', m.tss], ['IF', m.if.toFixed(2)], ['Work', m.kJ + ' kJ'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–']];
+  st.forEach(([k, v], i) => {
+    const x = 60 + (i % 4) * 245, y = 270 + Math.floor(i / 4) * 130;
+    c.fillStyle = '#8b95a4'; c.font = '600 24px system-ui'; c.fillText(k.toUpperCase(), x, y);
+    c.fillStyle = '#e9edf2'; c.font = '700 54px system-ui'; c.fillText(String(v), x, y + 34);
+  });
+  let cw = null;
+  if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = Math.max(t, r.samples.at(-1)[1]); }
+  c.save(); c.translate(40, 560); c.font = '22px system-ui';
+  drawChart(null, { cw, ftp: r.ftp, samples: r.samples, el: null, k: 1 }, [c, W - 80, 460]);
+  c.restore();
+  return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
+}
+$('#sCard').onclick = async () => {
+  const blob = await shareCard(); if (!blob) return;
+  const url = URL.createObjectURL(blob);
+  $('#cardImg').src = url; $('#cardModal').classList.add('on');
+  $('#cardDl').onclick = () => { const a = document.createElement('a'); a.href = url; a.download = fileBaseOf(openRide) + '.png'; a.click(); };
+  $('#cardShare').style.display = navigator.canShare?.({ files: [new File([blob], 'ride.png', { type: 'image/png' })] }) ? '' : 'none';
+  $('#cardShare').onclick = () => navigator.share({ files: [new File([blob], 'ride.png', { type: 'image/png' })], title: openRide.name }).catch(() => {});
+  fetch(`/api/rides/${openRide.id}/card`, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'image/png' }, body: blob }).catch(() => {});
+};
+$('#cardClose').onclick = () => $('#cardModal').classList.remove('on');
+const fileBaseOf = r => `${new Date(r.start || r.samples[0][0]).toISOString().slice(0, 16).replace(/[:T]/g, '-')} ${r.name.replace(/[^\w\- ]+/g, '')}`;
+
 /* ---------- nav + settings + init ---------- */
 function show(v) {
   $$('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
@@ -570,6 +677,7 @@ function show(v) {
   if (v === 'workouts') { renderLib(); renderBuilder(); }
   if (v === 'ride' && V) renderRide();
   if (v === 'history') renderHistory();
+  if (v === 'settings') renderSettings();
 }
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
@@ -581,10 +689,11 @@ function showSettings() {
   $('#hrZones').value = settings.hrZones ? settings.hrZones.join(',') : '';
   renderLib(); renderBuilder();
 }
-$('#ftp').onchange = e => { const v = +e.target.value; if (v >= 50 && v <= 600) { settings.ftp = Math.round(v); saveSettings(['ftp']); renderLib(); renderBuilder(); } };
+$('#ftp').onchange = e => { const v = +e.target.value; if (v >= 50 && v <= 600) { settings.ftp = Math.round(v); settings.ftpSrc = 'manual'; saveSettings(['ftp', 'ftpSrc']); renderLib(); renderBuilder(); } };
 $('#weight').onchange = e => { settings.weight = +e.target.value || 0; saveSettings(['weight']); };
 $('#beeps').onchange = e => { settings.beeps = e.target.value === '1'; saveSettings(['beeps']); };
 $('#autoGarmin').onchange = e => { settings.autoGarmin = e.target.value === '1'; saveSettings(['autoGarmin']); };
+if (globalThis.location?.hash === '#settings') setTimeout(() => show('settings'), 0);
 $('#hrZones').onchange = e => {
   const v = e.target.value.split(/[,\s]+/).map(Number).filter(n => n > 30 && n < 230);
   if (v.length === 5 && v.every((x, i) => !i || x > v[i - 1])) { settings.hrZones = v; settings.hrZonesSrc = 'manual'; saveSettings(['hrZones', 'hrZonesSrc']); toast('HR zones saved'); }
@@ -601,6 +710,7 @@ $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3
 renderVoice(); setStatus();
 loadSettings().then(syncHrZones);
 migrateLocalRides().then(renderHistory);
+fetch('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() => {});
 connect();
 const setHH = () => document.documentElement.style.setProperty('--hh', document.querySelector('header').offsetHeight + 'px');
 setHH();

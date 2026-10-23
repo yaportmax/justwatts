@@ -16,6 +16,12 @@ facts, change little, and say less.
 
 Do not poll `get_ride_status` on a timer: that is what made a single ride cost ~340 agent turns.
 
+## The built-in coach is the baseline
+
+OpenSpin coaches without you: cues and safe adjustments (Easier -5% FTP, Harder +3% unless HR is in
+Z5, 30 s over the HR cap -5%). While you are connected (`auto_adjust: no_agent`, the default), it
+stops changing targets and leaves those decisions to you; its spoken cues continue.
+
 ## Keeping it cheap
 
 - The local coach (on by default, `settings.localCoach`) already speaks routine cues without you:

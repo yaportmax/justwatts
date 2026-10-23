@@ -398,6 +398,20 @@ def upload_ride_to_garmin(ride_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def upload_ride_to_strava(ride_id: str) -> dict[str, Any]:
+    """Upload an archived ride to Strava (only after the athlete connected Strava in Settings).
+    If Garmin Connect already syncs to Strava for this athlete, this creates a duplicate: check
+    with the athlete first."""
+    return _call(client().request, "POST", f"/api/rides/{ride_id}/strava", {})
+
+
+@mcp.tool()
+def set_ride_description(ride_id: str, text: str) -> dict[str, Any]:
+    """A short coach-written note for the ride; it leads the Strava description on upload."""
+    return _call(client().request, "POST", f"/api/rides/{ride_id}/description", {"text": text})
+
+
+@mcp.tool()
 def send_message(text: str, important: bool = False) -> dict[str, Any]:
     """Show a short message on the athlete's screen (with a beep) and read it aloud unless the athlete
     muted the coach. With voice set to "important only", only important messages are spoken: use

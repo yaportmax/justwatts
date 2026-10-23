@@ -69,6 +69,9 @@ class Config:
     garmin: bool | None = None  # None = decide from env + data dir (see garmin_enabled)
     ble: bool | None = None
 
+    def __post_init__(self):
+        self.data, self.garmin_tokens, self.app = Path(self.data), Path(self.garmin_tokens), Path(self.app)
+
     @property
     def is_default_data(self) -> bool:
         try:

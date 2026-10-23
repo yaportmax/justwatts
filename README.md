@@ -1,108 +1,102 @@
-# openspin
+# OpenSpin
 
-Let an AI agent coach your smart-trainer ride.
+A free, open-source smart-trainer app.
 
-A local server connects to any FTMS smart trainer and HR strap over Bluetooth, runs the workout
-(ERG targets, grade, auto-pause) and saves it to disk every few seconds. A dependency-free web page
-shows the ride; reloading or closing it never drops the trainer or the ride. An agent (Claude Code,
-Codex, any MCP client) reads the same live state and coaches: messages read aloud, target changes,
-and real workout edits mid-ride (add reps, drop a rep, lengthen a recovery). Optional local Whisper
-lets you talk back.
+OpenSpin connects to any Bluetooth FTMS smart trainer and heart rate strap, runs your workouts in
+ERG mode or lets you ride free by grade, watts or resistance level, coaches you with a built-in
+rule-based coach, and keeps your history: NP, TSS, zones, intervals, trends. It runs on your own
+computer, with no account and no API keys. The trainer connection lives in a small local server,
+so reloading or closing the browser never drops the trainer or the ride.
 
 ![demo](docs/demo.gif)
-<!-- placeholder: record a 20 s GIF of a coached interval and save it as docs/demo.gif -->
-
-## What you get
-
-- **Local server** (`openspin serve`): owns the trainer and HR strap (bleak), reconnects after
-  drops, runs the ride engine at 1 Hz, writes the ride in progress to disk and resumes it after a
-  crash or restart, logs events, applies coach commands. Stdlib plus optional extras.
-- **Ride modes**: structured workouts (ERG), free ride by grade (simulation), ERG watts or FTMS
-  resistance level. When the plan ends you keep riding free until you press End. Pause, Save (to
-  History, keeps riding) and End (two taps) on the ride screen; workout length +/-5 min.
-- **History** on the server: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps
-  per interval, the coach transcript, FIT/TCX export, Garmin status; weekly TSS, FTP history and
-  best-effort trends.
-- **Web app** (`app/`): a view over the server stream. Workout builder with a text format
-  (`10m 45-75%, 5x(3m 115%, 3m 50%), 10m free`), .zwo import/export, one-screen ride view with power,
-  HR (zones, right-hand axis) and cadence target tiles, coach bar with the last 3 messages and your
-  voice transcripts, read-aloud coach (Voice button), history with power and HR zones, FIT and TCX
-  export, a simulated trainer (Sim). `browser.html` keeps the old in-tab Web Bluetooth mode as a fallback.
-- **Voice** (`serve --voice`): local faster-whisper transcription with an adaptive noise gate and
-  filters for silence hallucinations, fragments and the coach's own voice.
-- **Low LLM usage**: an event gate gives the agent a short stream (step summaries, FEEL, speech,
-  alerts, a status every few minutes) in 5 s batches, and a local rule coach speaks routine cues
-  (countdowns, recaps, recovery HR, cadence) without waking it. A live meter in the ride header
-  shows agent wakes, tokens and cost; History keeps them per ride. `openspin tail --agent`
-  shows exactly what wakes the coach.
-- **MCP server** (`openspin mcp`): tools for an agent to read the ride, coach it and edit the
-  workout, with guard rails (max change per command, FTP ceiling, no raises while paused, harder
-  changes need the athlete's FEEL signal).
-- **CLI**: `coach msg|set|insert|replace|delete|duration|extend`, `tail -f`, `status`, `simulate`, `voice`.
-- **Headless simulator**: drives a fake ride through the API so agents and tests can run the coach
-  loop with no browser or trainer.
-- **Playbook** for agents: [docs/COACHING.md](docs/COACHING.md). Protocol: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+<!-- placeholder: record a 20 s GIF of a ride and save it as docs/demo.gif -->
 
 ## Quick start
 
 Needs Python 3.10+ and a computer with Bluetooth LE. Any modern browser works for the page.
 
 ```sh
-git clone <repo-url> openspin && cd openspin
-python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[ble,mcp]"                       # add ,voice for Whisper, ,garmin for Garmin upload
-openspin serve                               # --voice to start the listener too
+pipx install openspin            # or: pip install openspin
+openspin serve
 ```
 
-Open http://127.0.0.1:8765, press **Connect trainer**, pick it from the scan list. The server
-remembers it and reconnects by itself. A trainer accepts one controller at a time: close Zwift or any
-other app (and any browser tab using Web Bluetooth) first. Ride history lives in that origin's browser
-storage plus `~/.openspin/rides/`, so keep the same URL.
+From a clone: `pip install -e .` in the repo. Open http://127.0.0.1:8765, press **Connect trainer**,
+pick it from the scan list. The server remembers it and reconnects by itself. A trainer accepts one
+controller at a time: close Zwift or any other app using it first. `start.cmd` (Windows) or
+`./start.sh` (macOS, Linux) starts the server and opens the browser.
 
-Browser Bluetooth fallback (no bleak, Chrome or Edge only): open `/browser.html`. In that mode the
-tab owns the trainer again, so a reload reconnects instead of carrying on.
+No trainer? Press **Sim** in the header.
 
-Or run `start.cmd` (Windows) / `./start.sh` (macOS, Linux): starts the server if needed and opens
-the browser.
+## What you get
 
-No trainer? Press **Sim** in the header, or run the headless simulator in a second terminal:
-
-```sh
-openspin simulate --scenario fade --speed 10
-```
+- **Workouts**: library, a builder with a text format (`10m 45-75%, 5x(3m 115%, 3m 50%), 10m free`),
+  .zwo import and export, an FTP ramp test.
+- **Ride modes**: structured ERG workouts, free ride by grade (simulation), ERG watts or FTMS
+  resistance level. When the plan ends you keep riding free until you press End. Pause, Save (to
+  History, keeps riding), End (two taps), intensity +/-, workout length +/-5 min, skip.
+- **Change the workout while riding**: add reps, drop a rep, lengthen a recovery, change the total
+  length.
+- **Built-in coach** (no agent needed): interval start and 10 s countdown, rep recaps, recovery heart
+  rate, cadence reminders, and safe automatic adjustments: Easier lowers the step 5% FTP, Harder
+  raises it 3% (not in HR zone 5), 30 s over your HR cap eases it 5%. Each cue can be turned off in
+  Settings.
+- **Ride screen** on one page: power, target, cadence against your target range, HR with zones,
+  interval timer, the chart with a right-hand HR axis.
+- **Voice** (optional): coach messages read aloud with Mute and an "important only" mode; with the
+  `[voice]` extra, talk back through local Whisper, and the coach stops talking when you start.
+- **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
+  FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
+  efforts.
+- **Uploads** (optional): Garmin Connect, and Strava direct through your own Strava API app.
+- **Robust**: every second of the ride is written to disk; a crash or restart resumes the ride.
+- `browser.html` keeps an older single-tab Web Bluetooth mode as a fallback (Chrome or Edge).
 
 ## Supported hardware
 
 | Device | Support |
 |---|---|
-| Smart trainers with Bluetooth FTMS (service `0x1826`) | ERG (target watts) and grade simulation |
-| Tested | Zwift Hub, in browser Bluetooth mode. The server Bluetooth path (bleak) is covered by tests against a fake BLE stack but not yet ridden on hardware. |
-| HR straps, Bluetooth Heart Rate service `0x180D` | Yes; trainer-relayed HR is used if no strap |
+| Smart trainers with Bluetooth FTMS (service `0x1826`) | ERG, grade simulation, resistance level |
+| Tested | Zwift Hub (server Bluetooth, survives page reloads) |
+| HR straps, Bluetooth Heart Rate service `0x180D` | Yes; trainer-relayed HR is used if no strap. Straps that hide the HR service until they feel a heartbeat (seen on a Wahoo TRACKR) show "waiting for heartbeat" and connect once you wet the contacts. |
 | ANT+ only devices | No |
 
-Most current trainers (Wahoo, Tacx, Elite, Saris, JetBlack, Zwift Hub) expose FTMS; only the Zwift
-Hub has been tested so far. Reports welcome.
+Most current trainers (Wahoo, Tacx, Elite, Saris, JetBlack) expose FTMS; only the Zwift Hub has been
+tested so far. Resistance-level mode follows FTMS 1.0 and is untested on hardware. Reports welcome.
 
-## Connect an agent
+## Uploads
 
-Start the server first. The MCP server talks to it over HTTP using the token in
-`~/.openspin/token` (created on first `serve`). Use the same `OPENSPIN_PORT`/`OPENSPIN_DATA` for both.
+**Garmin** (`pip install "openspin[garmin]"`, then `openspin login-garmin` once). On first start with
+Garmin linked, OpenSpin imports your FTP, weight and HR zones (only the ones you have not set
+yourself; **Import from Garmin** in Settings redoes it). It uses the unofficial
+[python-garminconnect](https://github.com/cyberjunky/python-garminconnect) library, which Garmin can
+break at any time. Garmin is only active for the default data dir; `OPENSPIN_GARMIN=off` or
+`serve --no-garmin` disables it, and any other `OPENSPIN_DATA` has it off unless `OPENSPIN_GARMIN=on`.
 
-**Claude Code**
+**Strava** (no extra needed). Create an API app at strava.com/settings/api with Authorization Callback
+Domain `localhost`. In Settings, enter its Client ID and Client Secret (kept only in your data folder,
+never shown again) and press **Connect Strava**. Uploads go through the official API with the FIT file,
+the ride name and a text summary (NP, IF, TSS, intervals, "Recorded with OpenSpin"). If Garmin
+Connect already syncs to Strava for you, uploading to both makes duplicates: pick one.
+
+**Share card**: the ride summary renders a PNG card to download or share. Strava's API cannot attach
+photos, so add it by hand. If you set a public base URL in Settings (your own proxy or host), the
+Strava description links the card.
+
+Every FIT file is saved to `~/.openspin/rides/` before any upload, and History can always export
+.fit and .tcx.
+
+## Optional: let an AI agent coach you live
+
+OpenSpin is complete without one. An agent adds judgment: it reads your heart rate trend and what
+you say, edits the workout mid-ride and explains why. Agent features in the UI (the usage meter,
+the History agent column) only appear when an agent is connected.
 
 ```sh
-claude mcp add openspin -- openspin mcp
+pip install "openspin[mcp]"
+claude mcp add openspin -- openspin mcp           # Claude Code
 ```
 
-or in a project `.mcp.json`:
-
-```json
-{ "mcpServers": { "openspin": { "command": "openspin", "args": ["mcp"] } } }
-```
-
-Then: *"Coach my ride. Read the playbook, check status every 30 s, keep me in zone."*
-
-**Codex** (`~/.codex/config.toml`)
+Codex (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.openspin]
@@ -110,74 +104,58 @@ command = "openspin"
 args = ["mcp"]
 ```
 
-**Anything else**: shell out to the CLI or call HTTP directly.
+Then: *"Coach my ride. Read the playbook, wait for events, keep me in zone."*
 
-```sh
-openspin tail -f                      # follow the event log
-openspin status                       # latest ride state, JSON
-openspin coach msg "HR 168. Hold 250."
-openspin coach set cur 240            # override the current step (no guard rails)
-openspin coach set 7 260 --msg "Last one at 260"
-openspin coach insert "2x(5m 250w, 3m 50%)"   # two more reps after the current step
-openspin coach extend 60                      # one more minute of this step
-openspin coach delete 9                       # drop step 9
-```
+Agents stay cheap: an event gate wakes them only for step summaries, FEEL presses, speech, alerts
+(HR cap, zone jump, low cadence, power off target, pause, device lost) and a status every few
+minutes, in 5 s batches, while the built-in coach handles countdowns and recaps. The ride header
+shows wakes, tokens and cost; `openspin tail --agent` shows what wakes the coach. Guard rails limit
+changes per command, cap watts at 150% FTP, and require your FEEL HARDER or GOOD before anything
+harder. Playbook: [docs/COACHING.md](docs/COACHING.md). API: [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
-MCP tools (anything the athlete can do in the UI, an agent can do too):
-
-| Area | Tools |
+| Area | MCP tools |
 |---|---|
-| Wait (use this, do not poll) | `wait_for_events`, `report_usage` |
+| Wait (do not poll) | `wait_for_events`, `report_usage` |
 | Read | `get_ride_status`, `get_workout`, `get_recent_events`, `get_telemetry_history`, `get_athlete_profile`, `get_coaching_playbook` |
 | Coach | `send_message`, `set_step_target`, `set_current_target`, `set_intensity`, `set_voice_mode` |
 | Edit the workout | `insert_steps`, `replace_step`, `delete_step`, `set_step_duration`, `extend_current_step`, `set_workout_length` |
-| Ride | `load_workout`, `ride_control` (start, pause, resume, skip, save, end), `free_ride` (grade, ERG, resistance) |
-| Devices, settings | `devices` (status, scan, connect, disconnect, sim), `update_settings` |
-| History | `list_rides`, `get_ride_detail`, `get_trends`, `upload_ride_to_garmin` | More examples in [examples/](examples/).
+| Ride | `load_workout`, `ride_control`, `free_ride` |
+| Devices, settings | `devices`, `update_settings` |
+| History | `list_rides`, `get_ride_detail`, `get_trends`, `upload_ride_to_garmin`, `upload_ride_to_strava`, `set_ride_description` |
 
-## Security model
-
-The server binds `127.0.0.1` and rejects any non-localhost `Host` header. The page proves itself
-with its own `Origin` plus an `X-HW: 1` header; local tools use a bearer token from a 0600 file.
-Any local process that can read your home directory can coach your ride; nothing is exposed to the
-network. Details in [docs/PROTOCOL.md](docs/PROTOCOL.md#auth).
+Without MCP, use the CLI (`openspin coach msg|set|insert|replace|delete|duration|extend`,
+`openspin tail -f`, `openspin status`) or the HTTP API with the token in `~/.openspin/token`. Agents
+can never set the Strava secret.
 
 ## Voice
 
-`pip install -e ".[voice]"`, then `openspin serve --voice` (or `openspin voice` beside a
-running server). It transcribes the default mic locally with faster-whisper `small.en` (CPU, int8)
-and posts `SAID (whisper): "..."` events that agents see in `get_ride_status`. Silence
-hallucinations ("Thank you.", "Thanks for watching!"), low-confidence segments, fragments under three
-words without a command word (easier, harder, stop, pause, skip, help) and echoes of the coach's
-own messages are dropped. Coach messages are read aloud with the best voice the browser has. The
-coach bar has a **Mute** button and a menu (Speak all, Important only, Silent); saying "mute" or
-"quiet" mutes too ("unmute" to undo). When you start talking, the coach stops mid-sentence.
+`pip install "openspin[voice]"`, then `openspin serve --voice`. It transcribes the default mic
+locally with faster-whisper `small.en` (CPU, int8). Silence hallucinations ("Thank you."),
+low-confidence segments, fragments under three words without a command word (easier, harder, stop,
+pause, skip, help, mute) and echoes of the coach are dropped. Say "mute" or "quiet" to silence the
+coach, "unmute" to bring it back.
 
-## Garmin upload
+## Security model
 
-Optional (`pip install -e ".[garmin]"`, then `openspin login-garmin` once). Garmin is only
-active for the default data dir; a server on any other `OPENSPIN_DATA` (tests, dev copies) has it off
-unless `OPENSPIN_GARMIN=on`, and `OPENSPIN_GARMIN=off` / `serve --no-garmin` disables it everywhere. It uses the
-unofficial [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) library, which
-signs in like the Garmin Connect app; Garmin can break it at any time. Every FIT file is saved to
-`~/.openspin/rides/` before any upload is attempted, and you can always download .fit/.tcx from
-History and upload by hand. HR zones sync from Garmin when signed in.
+The server binds `127.0.0.1` and rejects any non-localhost `Host` header (the only exception is
+`/share/<ride>.png` when you set a public base URL). The page proves itself with its own `Origin`
+plus an `X-HW: 1` header; local tools use a bearer token from a 0600 file. Details in
+[docs/PROTOCOL.md](docs/PROTOCOL.md#auth).
 
 ## Data and configuration
 
 | Env | Default | |
 |---|---|---|
 | `OPENSPIN_PORT` | `8765` | server port |
-| `OPENSPIN_DATA` | `~/.openspin` | `rides/`, `coach/events.log`, `coach/current.json`, `token` |
+| `OPENSPIN_DATA` | `~/.openspin` | settings, devices, rides, the ride in progress, logs, token, Strava tokens |
 | `OPENSPIN_GARMIN_TOKENS` | `~/.garminconnect` | Garmin session tokens |
 | `OPENSPIN_TOKEN` | from `<data>/token` | API token for CLI/MCP |
 | `OPENSPIN_GARMIN` | auto | `off` disables Garmin, `on` forces it for a non-default data dir |
-| `OPENSPIN_BLE` | `on` | `off` disables Bluetooth (no bleak import) |
-| `OPENSPIN_MAX_CHANGE_PCT`, `OPENSPIN_MAX_PCT`, `OPENSPIN_FEEL_GATE_PCT`, `OPENSPIN_FEEL_WINDOW_S`, `OPENSPIN_STALE_S`, `OPENSPIN_MAX_INSERT_S`, `OPENSPIN_MAX_EXTEND_S` | 15, 150, 105, 600, 15, 1800, 600 | MCP guard rails, see COACHING.md |
+| `OPENSPIN_BLE` | `on` | `off` disables Bluetooth |
+| `OPENSPIN_MAX_CHANGE_PCT`, `OPENSPIN_MAX_PCT`, `OPENSPIN_FEEL_GATE_PCT`, `OPENSPIN_FEEL_WINDOW_S`, `OPENSPIN_STALE_S`, `OPENSPIN_MAX_INSERT_S`, `OPENSPIN_MAX_EXTEND_S` | 15, 150, 105, 600, 15, 1800, 600 | agent guard rails |
 
-The server keeps settings (`settings.json`), remembered devices (`devices.json`), the ride in
-progress (`coach/engine.json`) and every finished ride (`rides/`). The browser keeps custom workouts
-and its history list, and imports rides that finished while it was closed.
+Older `HW_*` and `TC_*` names still work, and a `~/.trainer-coach` data dir from earlier versions
+moves to `~/.openspin` on first start.
 
 ## Development
 
@@ -186,17 +164,15 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Tests run the browser code under Node (`node` 18+ on PATH): the workout parser, the FIT encoder
-(decoded and CRC-checked with `fitdecode`), and the full app booted with a stubbed DOM against a real
-test server. BLE runs against a fake bleak module, Garmin and Bluetooth are forced off, and every test
-server binds a throwaway port from 8770 up. See
-[AGENTS.md](AGENTS.md) for repo conventions.
+Tests run the browser code under Node (`node` 18+ on PATH), boot the full page against a real test
+server, drive BLE through a fake bleak module, mock Garmin and Strava, force Garmin and Bluetooth
+off, and check that a full ride works with none of the optional extras installed. See
+[AGENTS.md](AGENTS.md).
 
 ## Roadmap
 
-- Strava upload via the official API (OAuth)
+- Import past rides from Garmin and Strava
 - Push planned workouts to a calendar (Garmin, intervals.icu, TrainingPeaks)
-- Coach-initiated grade/resistance changes in free rides
 - ANT+ FE-C via a USB bridge
 
 ## License

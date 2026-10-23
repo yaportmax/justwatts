@@ -125,6 +125,13 @@ tbody tr:hover{background:var(--panel2)}
 .coach.open #coachMsg,.coach.open #coachSaid{-webkit-line-clamp:unset;line-clamp:unset}
 @media (max-width:640px){.coach{flex-wrap:wrap}.coach>.row{width:100%}}
 .pill.meter{font-variant-numeric:tabular-nums;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+/* settings */
+.setgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
+.checks{display:flex;flex-direction:column;gap:6px}
+.checks label{display:flex;gap:8px;align-items:center}
+.warnbox{margin-top:8px;font-size:12px;color:var(--dim);border-left:3px solid var(--line);padding:4px 8px}
+.warnbox.hot{color:var(--warn);border-color:var(--warn)}
+.noagent .agentcol{display:none}
 /* ride controls */
 .controls button.big{padding:9px 18px;font-weight:700}
 #cEnd.confirm{background:var(--bad);border-color:var(--bad);color:#fff}

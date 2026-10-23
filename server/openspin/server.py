@@ -32,7 +32,19 @@ from .garmin import DISABLED_MSG, GarminLink
 MAX_BODY = 64 * 1024 * 1024
 MAX_CMDS = 500
 HISTORY_LEN = 1200  # state snapshots kept (~1 h at one per 3 s)
-QUIET_PATHS = ("/api/state", "/api/event", "/api/current", "/api/coach?", "/api/health")
+QUIET_PATHS = ("/api/state", "/api/event", "/api/current", "/api/coach?", "/api/health",
+               "/api/strava/callback")  # the callback query carries the OAuth code: keep it out of logs
+# A page served from here may never be framed (clickjacking) and runs only its own scripts.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+       "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+CSP_INLINE = CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")  # browser.html is one inline page
+# headers a reverse proxy or tunnel adds: such a request came from the network, not this computer
+PROXY_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "Forwarded", "CF-Connecting-IP", "True-Client-IP")
+
+
+def safe_id(rid: Any) -> str:
+    """A ride id as used in file names: word characters and dashes only."""
+    return re.sub(r"[^\w\-]+", "", str(rid or ""))
 
 
 def atomic_write(dest: Path, data: bytes) -> None:
@@ -205,6 +217,14 @@ class Handler(SimpleHTTPRequestHandler):
         if "/api/" in p and not p.startswith(QUIET_PATHS):
             super().log_message(fmt, *args)
 
+    def end_headers(self):
+        path = urlsplit(self.path or "").path
+        self.send_header("Content-Security-Policy", CSP_INLINE if path.endswith("/browser.html") else CSP)
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
+
     def send_json(self, code: int, obj: Any) -> None:
         body = json.dumps(obj).encode()
         self.send_response(code)
@@ -216,6 +236,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def host_ok(self) -> bool:
         port = self.server.server_address[1]
+        if any(h in self.headers for h in PROXY_HEADERS):  # a proxy that rewrites Host must not expose the API
+            return False
         return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")
 
     def origins(self) -> tuple[str, str]:
@@ -239,8 +261,11 @@ class Handler(SimpleHTTPRequestHandler):
         return origin in self.origins() and self.headers.get("X-HW") == "1"
 
     def read_body(self) -> bytes:
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > MAX_BODY:
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n > MAX_BODY or n < 0:  # a negative length would read until the client hangs up
             raise OverflowError
         return self.rfile.read(n) if n else b""
 
@@ -545,7 +570,8 @@ class Handler(SimpleHTTPRequestHandler):
         if p == "/api/devices":
             return self.devices(body)
         if p == "/api/ride":
-            dest = self.cfg.rides / ((re.sub(r"[^\w\-]+", "", str(body.get("id", "ride"))) or "ride") + ".json")
+            body["id"] = safe_id(body.get("id", "ride")) or "ride"  # the stored id is the file name: meta paths use it
+            dest = self.cfg.rides / (body["id"] + ".json")
         elif not body.get("samples"):
             self.cfg.current.unlink(missing_ok=True)
             return self.send_json(200, {"ok": True})
@@ -778,6 +804,8 @@ class CoachServer(ThreadingHTTPServer):
                     continue
                 if k == "afterWorkout" and v not in ("hold", "grade0"):
                     continue
+                if k == "shareBaseUrl" and not (isinstance(v, str) and (v == "" or re.match(r"https?://", v))):
+                    continue
                 if k in ("agentGate", "localCoach"):
                     if not isinstance(v, dict):
                         continue
@@ -900,11 +928,12 @@ class CoachServer(ThreadingHTTPServer):
 
     def ride_meta(self, rid: str) -> dict:
         try:
-            return json.loads((self.cfg.rides / "meta" / f"{rid}.json").read_text(encoding="utf-8"))
+            return json.loads((self.cfg.rides / "meta" / f"{safe_id(rid)}.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
 
     def set_ride_meta(self, rid: str, patch: dict) -> None:
+        rid = safe_id(rid)
         atomic_write(self.cfg.rides / "meta" / f"{rid}.json", json.dumps({**self.ride_meta(rid), **patch}).encode())
         self._rides_cache.pop(f"{rid}.json", None)
 

@@ -18,7 +18,7 @@ Default base URL `http://127.0.0.1:8765` (`OPENSPIN_PORT`). Data dir `~/.openspi
 
 | Check | Applies to | Rule |
 |---|---|---|
-| Host | every request | `Host` must be `127.0.0.1:<port>` or `localhost:<port>`, else `421`. Blocks DNS rebinding. |
+| Host | every request | `Host` must be `127.0.0.1:<port>` or `localhost:<port>` and no proxy header (`X-Forwarded-For`, `Forwarded`, ...) may be present, else `421`. Blocks DNS rebinding and accidental exposure through a proxy. |
 | Page | write endpoints, state/event reads | `Origin` equals the app origin and header `X-HW: 1`. The custom header forces a CORS preflight that the server never answers, so other sites cannot send it. |
 | Token | same | `Authorization: Bearer <token>`. Created at first `serve` in `<data>/token` (mode 0600). A token request with a foreign `Origin` is refused. |
 

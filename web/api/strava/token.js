@@ -13,6 +13,12 @@ function send(res, code, obj) {
 }
 
 function readJson(req) {
+  // Vercel may hand over the body already read: parsed (JSON), or as a string/Buffer (other types)
+  if (typeof req.body === 'string' || Buffer.isBuffer(req.body)) {
+    const text = req.body.toString('utf8');
+    if (text.length > MAX_BODY) return Promise.reject(new Error('too large'));
+    try { return Promise.resolve(JSON.parse(text || '{}')); } catch (e) { return Promise.reject(e); }
+  }
   if (req.body && typeof req.body === 'object') return Promise.resolve(req.body);
   return new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
@@ -36,6 +42,7 @@ async function handler(req, res) {
   if (!id || !secret) return send(res, 503, { message: 'Strava is not set up on this server' });
   let b;
   try { b = await readJson(req); } catch { return send(res, 400, { message: 'bad request' }); }
+  if (!b || typeof b !== 'object') return send(res, 400, { message: 'bad grant' });
   const form = new URLSearchParams({ client_id: id, client_secret: secret });
   if (b.grant_type === 'authorization_code' && TOKEN_RE.test(String(b.code || ''))) {
     form.set('grant_type', 'authorization_code'); form.set('code', b.code);
@@ -51,7 +58,7 @@ async function handler(req, res) {
   } catch {
     return send(res, 502, { message: 'Strava did not answer' });
   }
-  if (!r.ok || !body.access_token) return send(res, r.status === 200 ? 502 : r.status, { message: body.message || 'Strava refused the token request' });
+  if (!r.ok || !body || !body.access_token) return send(res, r.ok ? 502 : r.status, { message: String((body && body.message) || 'Strava refused the token request').slice(0, 200) });
   return send(res, 200, pick(body));
 }
 

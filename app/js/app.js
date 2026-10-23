@@ -232,7 +232,7 @@ async function scanDevices() {
     list.innerHTML = j.devices.length ? '' : '<div class="hint">Nothing found. Wake the device (pedal, wet the strap) and scan again.</div>';
     for (const d of j.devices) {
       const b = document.createElement('button');
-      b.innerHTML = `<span>${esc(d.name)}</span><span class="m">${d.rssi ?? ''} dBm</span>`;
+      b.innerHTML = `<span>${esc(d.name)}</span><span class="m">${esc(d.rssi ?? '')} dBm</span>`;
       b.onclick = async () => {
         try { await apiJson('/api/devices', { action: 'connect', kind: devKind, address: d.address, name: d.name }); $('#devModal').classList.remove('on'); toast('Connecting ' + d.name); }
         catch (e) { toast('Connect failed: ' + e.message); }
@@ -432,7 +432,7 @@ async function renderHistory() {
   document.body.classList.toggle('noagent', !rows.some(r => r.agent_wakes > 0));
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] ?? '–'}</td><td class="num agentcol" title="agent wakes / tokens">${r.agent_wakes ?? '–'}${r.agent_tokens ? ' · ' + kfmt(r.agent_tokens) : ''}</td>`;
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${esc(fmtT(r.time_s))}</td><td class="num">${esc(r.avg_w)}</td><td class="num">${esc(r.np)}</td><td class="num">${esc(r.tss)}</td><td class="num">${esc(r.kJ)}</td><td class="num">${esc(r.avg_hr ?? '–')}</td><td class="num">${esc(r.best?.['5m'] ?? '–')}</td><td class="num agentcol" title="agent wakes / tokens">${esc(r.agent_wakes ?? '–')}${r.agent_tokens ? ' · ' + esc(kfmt(r.agent_tokens)) : ''}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
   renderTrends();
@@ -450,8 +450,8 @@ async function renderTrends() {
   });
   const f = t.ftp_history.at(-1);
   $('#tFtp').textContent = f ? `FTP ${f.ftp} W (${f.source}, ${f.date})` + (t.ftp_history.length > 1 ? ` · was ${t.ftp_history.at(-2).ftp}` : '') : '';
-  $('#tBest').innerHTML = ['1m', '5m', '20m'].map(k => `<div class="stat"><div class="k">Best ${k}</div><div class="v">${t.best[k] ? t.best[k].w + ' W' : '–'}</div><div class="hint">${t.best[k]?.date || ''}</div></div>`).join('')
-    + `<div class="stat"><div class="k">TSS this week</div><div class="v">${wk.at(-1).tss}</div></div>`;
+  $('#tBest').innerHTML = ['1m', '5m', '20m'].map(k => `<div class="stat"><div class="k">Best ${k}</div><div class="v">${esc(t.best[k] ? t.best[k].w + ' W' : '–')}</div><div class="hint">${esc(t.best[k]?.date || '')}</div></div>`).join('')
+    + `<div class="stat"><div class="k">TSS this week</div><div class="v">${esc(wk.at(-1).tss)}</div></div>`;
 }
 // one-time move of rides that only exist in this browser's storage into the server archive
 async function migrateLocalRides() {
@@ -477,7 +477,7 @@ async function openSummary(id) {
   if (!settings.hideVirtualDistance) st.push(['Virtual distance', m.distance_km.toFixed(1) + ' km']);
   if (d.agent?.local_cues) st.push(['Built-in coach cues', d.agent.local_cues]);
   if (d.agent?.wakes > 0) st.push(['Coach usage', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
-  $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }
   else if (r.text) { try { cw = compile(r); for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { s.a = s.b = w; s.u = 'w'; } } } catch {} }
@@ -489,16 +489,16 @@ async function openSummary(id) {
   const tb = $('#sTest');
   if (d.ftp_estimate) {
     const est = d.ftp_estimate; tb.style.display = '';
-    tb.innerHTML = `<span class="badge">FTP estimate <b class="num" style="color:var(--ink)">${est} W</b></span><button id="sSetFtp">Set FTP</button>`;
+    tb.innerHTML = `<span class="badge">FTP estimate <b class="num" style="color:var(--ink)">${esc(est)} W</b></span><button id="sSetFtp">Set FTP</button>`;
     $('#sSetFtp').onclick = () => { settings.ftp = est; saveSettings(['ftp']); $('#ftp').value = est; renderLib(); renderBuilder(); toast(`FTP set to ${est} W`); };
   } else tb.style.display = 'none';
   const hz = d.hr_zones_s ? Object.values(d.hr_zones_s) : null, hn = hz ? hz.reduce((a, b) => a + b, 0) : 0;
   $('#sHR').style.display = hn ? '' : 'none';
   if (hn) {
     $('#sHZones').innerHTML = hz.map((t, i) => `<i style="width:${t / hn * 100}%;background:var(${HRZ_COLORS[i]})"></i>`).join('');
-    $('#sHZleg').innerHTML = hz.map((t, i) => `<span><b style="background:var(${HRZ_COLORS[i]})"></b>Z${i + 1} ${settings.hrZones[i]}+ · ${fmtT(t)}</span>`).join('');
+    $('#sHZleg').innerHTML = hz.map((t, i) => `<span><b style="background:var(${HRZ_COLORS[i]})"></b>Z${i + 1} ${esc(settings.hrZones[i])}+ · ${esc(fmtT(t))}</span>`).join('');
   }
-  $('#sLaps').innerHTML = d.laps.map(l => `<tr><td>${l.overtime ? 'free' : l.index}</td><td class="num">${fmtT(l.time_s)}</td><td class="num">${l.target_w ?? (l.free ? 'free' : '–')}</td><td class="num">${l.avg_w}</td><td class="num">${l.max_w}</td><td class="num">${l.np}</td><td class="num">${l.avg_hr ?? '–'}</td><td class="num">${l.max_hr ?? '–'}</td><td class="num">${l.avg_cad ?? '–'}</td></tr>`).join('');
+  $('#sLaps').innerHTML = d.laps.map(l => `<tr><td>${esc(l.overtime ? 'free' : l.index)}</td><td class="num">${esc(fmtT(l.time_s))}</td><td class="num">${esc(l.target_w ?? (l.free ? 'free' : '–'))}</td><td class="num">${esc(l.avg_w)}</td><td class="num">${esc(l.max_w)}</td><td class="num">${esc(l.np)}</td><td class="num">${esc(l.avg_hr ?? '–')}</td><td class="num">${esc(l.max_hr ?? '–')}</td><td class="num">${esc(l.avg_cad ?? '–')}</td></tr>`).join('');
   const cls = l => /^COACH|^EDIT/.test(l) ? 'c' : /^SAID/.test(l) ? 's' : /^FEEL|^PAUSED/.test(l) ? 'f' : '';
   $('#sEvents').innerHTML = d.events.length ? d.events.map(([ts, l]) => `<div class="${cls(l)}">${new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}  ${esc(l)}</div>`).join('') : '<div class="hint">No transcript for this ride.</div>';
   renderGarminBtn(d.garmin);

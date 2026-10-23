@@ -29,6 +29,8 @@ API = "https://www.strava.com/api/v3"
 SCOPE = "activity:write,activity:read"
 SHARED_CLIENT_ID = os.environ.get("OPENSPIN_STRAVA_CLIENT_ID", "168528")
 RELAY_URL = os.environ.get("OPENSPIN_STRAVA_RELAY", "https://openspin.maxyaport.com/api/strava/token")
+STATE_TTL_S = 900  # an OAuth state is good for 15 minutes
+MAX_STATES = 8
 
 
 class StravaError(Exception):
@@ -134,16 +136,18 @@ class StravaLink:
         if not cid:
             raise StravaError("set up your own Strava API app in Settings first")
         state = secrets.token_urlsafe(16)
-        self._states = {k: v for k, v in self._states.items() if time.time() - v < 900}
+        # any web page can make the browser open /connect: keep only the newest few, unexpired states
+        live = sorted(((k, v) for k, v in self._states.items() if time.time() - v < STATE_TTL_S), key=lambda kv: kv[1])
+        self._states = dict(live[-(MAX_STATES - 1):])
         self._states[state] = time.time()
         q = {"client_id": cid, "redirect_uri": redirect_uri, "response_type": "code",
              "approval_prompt": "auto", "scope": SCOPE, "state": state}
         return AUTH_URL + "?" + urllib.parse.urlencode(q)
 
     def callback(self, code: str, state: str, scope: str = "") -> dict:
-        if state not in self._states:
+        made = self._states.pop(state, None) if state else None
+        if made is None or time.time() - made >= STATE_TTL_S:
             raise StravaError("unknown or expired OAuth state; press Connect Strava again")
-        del self._states[state]
         if "activity:write" not in (scope or ""):
             raise StravaError("Strava did not grant activity:write; allow uploads on the Strava page")
         code_, body = self._token({"code": code, "grant_type": "authorization_code"})

@@ -158,7 +158,7 @@ def test_ride_archive_sanitizes_id(srv):
     assert srv.req("POST", "/api/ride", {"id": "../../etc/r-1", "samples": [[1]]}, headers=srv.page)[0] == 200
     files = list(srv.cfg.rides.iterdir())
     assert [f.name for f in files] == ["etcr-1.json"]
-    assert json.loads(files[0].read_text())["id"] == "../../etc/r-1"
+    assert json.loads(files[0].read_text())["id"] == "etcr-1"  # stored id = file name (meta paths use it)
 
 
 def test_bad_json(srv):

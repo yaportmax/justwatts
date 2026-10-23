@@ -82,6 +82,12 @@ await import('../../app/js/app.js');
 const S = () => window.__hw.state();
 await until(() => S(), 'first state');
 
+if (MODE === 'state') {  // boot at any moment: report what the page shows, touch nothing
+  await sleep(300);
+  finish({ ride: S().ride ? { name: S().ride.name, started: S().ride.started, paused: S().ride.paused, overtime: S().ride.overtime } : null,
+           rideOn: $('#rideOn').style.display, rideEmpty: $('#rideEmpty').style.display, badge: String($('#rState').textContent),
+           pause: String($('#cPause').textContent), start: $('#cStart').style.display, posts: posts.map(p => p.path + (p.body?.action ? ':' + p.body.action : '')) });
+}
 if (MODE === 'boot') {
   await until(() => S().ride && $('#rName').textContent, 'ride shown');
   await sleep(200);

@@ -47,11 +47,14 @@ def test_kill_minus_nine_loses_nothing(tmp_path, kill_at):
             break
     p.kill()  # TerminateProcess on Windows, SIGKILL elsewhere: no cleanup, no atexit
     p.wait(10)
+    for line in p.stdout.read().split():  # the child may have run ahead of our reading
+        seen = max(seen, int(line))
     s2 = make_server(Config(port=0, data=data), quiet=True, ticker=False, devices=False)
     try:
         r = s2.engine.ride
         assert r is not None and r.started and r.paused
-        assert seen <= len(r.samples) <= seen + 2, f"saw {seen}, resumed {len(r.samples)}"
+        # every sample the child reported (written and fsync'd) survived; at most one more was in flight
+        assert seen <= len(r.samples) <= seen + 1, f"saw {seen}, resumed {len(r.samples)}"
         els = [x[1] for x in r.samples]
         assert els == sorted(set(els)) and els[0] == 1.0
         assert r.el == els[-1]

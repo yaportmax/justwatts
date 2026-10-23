@@ -107,12 +107,23 @@ class RideEngine:
         self.last_finished: dict | None = None  # {id, name, samples, ts, saved}
         self.last_saved: dict | None = None
         self.on_finish: Callable[[dict], None] | None = None  # server hook (auto Garmin upload)
-        self.notice: str | None = None
+        self._notice: str | None = None
+        self.notice_id = 0  # increases with every new notice: pages show each one once, nobody has to dismiss it
         self.version = 0
         self._last_tick = clock()
         self._jf = None
         self.sim_t = 0
         self.rng = random.Random()
+
+    @property
+    def notice(self) -> str | None:
+        return self._notice
+
+    @notice.setter
+    def notice(self, text: str | None) -> None:
+        if text and text != self._notice:
+            self.notice_id = max(self.notice_id + 1, int(self.wall() * 1000))  # unique across restarts
+        self._notice = text
 
     # ---------- paths ----------
     @property
@@ -699,7 +710,7 @@ class RideEngine:
                 "live": {"power": round(d.power), "power_3s": round(_mean(self.p_hist)) if self.p_hist else 0,
                          "cadence": round(d.cadence), "hr": self._hr_now() or None, "speed_kmh": round(d.speed, 1)},
                 "ride": None, "messages": self.messages[-3:], "said": said or [],
-                "last_finished": self.last_finished, "last_saved": self.last_saved, "notice": self.notice,
+                "last_finished": self.last_finished, "last_saved": self.last_saved, "notice": self.notice, "notice_id": self.notice_id,
                 "version": self.version,
             }
             r = self.ride

@@ -30,9 +30,11 @@ export class Ride {
 export class Engine {
   constructor({ hub, logEvent, settings, save, archive, clock = () => performance.now() / 1000, wall = () => Date.now() }) {
     Object.assign(this, { hub, logEvent, settings, saveFn: save, archiveFn: archive, clock, wall });
-    this.ride = null; this.pHist = []; this.messages = []; this.lastFinished = null; this.lastSaved = null; this.notice = null;
+    this.ride = null; this.pHist = []; this.messages = []; this.lastFinished = null; this.lastSaved = null; this._notice = null; this.noticeId = 0;
     this.version = 0; this.simT = 0; this.listeners = new Set(); this.onFinish = null;
   }
+  get notice() { return this._notice; }
+  set notice(t) { if (t && t !== this._notice) this.noticeId = Math.max(this.noticeId + 1, Date.now()); this._notice = t; }
   bump() { this.version++; for (const f of this.listeners) f(); }
   note(line) { const r = this.ride; if (r && (r.started || line.startsWith('RIDE START'))) r.events.push([this.wall(), line]); }
   log(line) { this.logEvent(line); }
@@ -252,7 +254,7 @@ export class Engine {
   state(athlete, extra = {}) {
     const d = this.hub.r, st = { v: 1, source: 'web', ts: this.wall(), athlete, devices: this.hub.status(),
       live: { power: jsr(d.power), power_3s: this.pHist.length ? jsr(mean(this.pHist)) : 0, cadence: jsr(d.cadence), hr: this.hrNow() || null, speed_kmh: +(+d.speed).toFixed(1) },
-      ride: null, messages: this.messages.slice(-3), said: [], last_finished: this.lastFinished, last_saved: this.lastSaved, notice: this.notice, version: this.version, ...extra };
+      ride: null, messages: this.messages.slice(-3), said: [], last_finished: this.lastFinished, last_saved: this.lastSaved, notice: this.notice, notice_id: this.noticeId, version: this.version, ...extra };
     const r = this.ride; if (!r) return st;
     const l30 = r.samples.slice(-30), h = l30.map(x => x[4]).filter(Boolean), kk = r.test ? 1 : r.k;
     const ride = st.ride = { id: r.id, name: r.name, text: r.text, mode: r.steps ? 'workout' : { w: 'erg', r: 'resistance' }[r.jr.m] || 'grade',

@@ -48,7 +48,7 @@ No trainer? Press **Sim** in the header.
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.
 - **Uploads** (optional): Garmin Connect, and Strava direct through your own Strava API app.
-- **Robust**: every second of the ride is written to disk; a crash or restart resumes the ride.
+- **Robust**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
 - `browser.html` keeps an older single-tab Web Bluetooth mode as a fallback (Chrome or Edge).
 
 ## Supported hardware

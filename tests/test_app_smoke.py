@@ -86,3 +86,41 @@ def test_reload_mid_ride_keeps_riding(node, srv):
     assert "a bit hard" in out["said"]
     assert not [p for p in out["posts"] if "control" in p]  # booting never touches the ride
     assert eng.ride and eng.ride.started and len(eng.ride.samples) == 90
+
+
+@pytest.mark.parametrize("moment", ["nothing", "loaded", "riding", "paused", "auto_paused", "overtime", "finished"])
+def test_page_reload_at_any_moment(node, srv, moment):
+    """A fresh page load shows exactly the server's state and never changes the ride."""
+    eng = srv.server.engine
+    ctl = lambda a, **kw: srv.req("POST", "/api/ride/control", {"action": a, **kw}, headers=srv.bearer)  # noqa: E731
+    srv.req("POST", "/api/devices", {"action": "sim", "kind": "trainer"}, headers=srv.bearer)
+    if moment != "nothing":
+        ctl("load", workout={"name": "Any", "text": "1m 50%, 1m 80%"})
+    if moment not in ("nothing", "loaded"):
+        ctl("start")
+        for _ in range(150 if moment in ("overtime", "finished") else 30):
+            eng.tick(1.0)
+    if moment == "paused":
+        ctl("hold")
+    if moment == "auto_paused":
+        srv.req("POST", "/api/devices", {"action": "sim", "kind": "trainer", "on": False}, headers=srv.bearer)
+        eng.hub.mode = "ble"
+        for _ in range(6):
+            eng.tick(1.0)
+    if moment == "finished":
+        ctl("end")
+    before = json.dumps(eng.state({}, [])["ride"], sort_keys=True, default=str)
+    out = run_page(node, srv, "state")
+    assert not [p for p in out["posts"] if "control" in p or "devices" in p]
+    ride = out["ride"]
+    if moment in ("nothing", "finished"):
+        assert ride is None and out["rideOn"] == "none" and out["rideEmpty"] == ""
+    else:
+        assert out["rideOn"] == "" and ride["name"] == "Any"
+        badge = {"loaded": "Ready", "riding": "Riding", "paused": "Paused", "auto_paused": "Start pedaling",
+                 "overtime": "Workout done · riding free"}[moment]
+        assert out["badge"] == badge
+        assert out["start"] == ("" if moment == "loaded" else "none")
+        assert out["pause"] == ("Resume" if moment in ("paused", "auto_paused") else "Pause")
+    after = json.dumps(eng.state({}, [])["ride"], sort_keys=True, default=str)
+    assert before == after, "booting a page must not change the ride"

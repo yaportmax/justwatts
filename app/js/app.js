@@ -6,6 +6,7 @@ import {
   estimate, toZwo as toZwoCore, PRESETS, summarize, fitEncode, toTcx,
 } from './core.js';
 import { MODE } from './mode.js';
+import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -60,65 +61,15 @@ function fit(cv) {
   const c = cv.getContext('2d'); c.setTransform(d, 0, 0, d, 0, 0); c.clearRect(0, 0, r.width, r.height);
   return [c, r.width, r.height];
 }
-function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
-// draws the target profile as zone-colored blocks
-function drawBlocks(c, cw, ftp, X, Y, alpha, k = 1) {
-  for (const s of cw.steps) {
-    if (s.free) {
-      c.fillStyle = hexA(css('--z1'), alpha * 0.5);
-      c.fillRect(X(s.t0), Y(0.5 * ftp), X(s.t0 + s.d) - X(s.t0), Y(0) - Y(0.5 * ftp));
-      continue;
-    }
-    const n = s.a === s.b ? 1 : Math.max(2, Math.min(40, Math.round(s.d / 15)));
-    for (let j = 0; j < n; j++) {
-      const t0 = s.d * j / n, t1 = s.d * (j + 1) / n;
-      const w0 = stepWatts(s, t0, ftp, k), w1 = stepWatts(s, t1, ftp, k);
-      c.fillStyle = hexA(zoneColor(((w0 + w1) / 2) / ftp), alpha);
-      const ov = j < n - 1 ? 0.6 : 0;  // overlap neighbours so antialiasing leaves no seams
-      c.beginPath(); c.moveTo(X(s.t0 + t0), Y(0)); c.lineTo(X(s.t0 + t0), Y(w0)); c.lineTo(X(s.t0 + t1) + ov, Y(w1)); c.lineTo(X(s.t0 + t1) + ov, Y(0)); c.closePath(); c.fill();
-    }
-  }
-}
-function maxTarget(cw, ftp, k = 1) { let m = 0; for (const s of cw.steps) if (!s.free) m = Math.max(m, stepWatts(s, 0, ftp, k), stepWatts(s, s.d, ftp, k)); return m; }
+// charts live in chart.js (pure canvas drawing, decimated for long rides)
 function drawThumb(cv, cw, ftp) {
   const [c, w, h] = fit(cv); const yMax = Math.max(maxTarget(cw, ftp) * 1.08, ftp * 1.2);
-  drawBlocks(c, cw, ftp, t => t / cw.total * w, v => h - v / yMax * h, 0.9);
+  drawBlocks(c, cw, ftp, t => t / cw.total * w, v => h - v / yMax * h, 0.9, 1, css);
   c.strokeStyle = 'rgba(255,255,255,.18)'; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(0, h - ftp / yMax * h); c.lineTo(w, h - ftp / yMax * h); c.stroke(); c.setLineDash([]);
 }
-// full chart: profile + power + HR (right-hand axis)
 function drawChart(cv, o, box) {
-  const [c, w, h] = box || fit(cv); const ftp = o.ftp, L = 40, B = 20, T = 8, R = 32, pw = w - L - R, ph = h - B - T;
-  const smp = o.samples || [];
-  const total = o.cw ? o.cw.total : Math.max(600, (o.el || 0) * 1.08, smp.length ? smp[smp.length - 1][1] : 0);
-  let mp = 0; for (const s of smp) mp = Math.max(mp, s[2]);
-  const yMax = Math.max(ftp * 1.3, (o.cw ? maxTarget(o.cw, ftp, o.k) : 0) * 1.12, Math.min(mp, ftp * 2.5) * 1.05);
-  const X = t => L + t / total * pw, Y = v => T + ph - Math.max(0, v) / yMax * ph;
-  c.font = '11px system-ui'; c.fillStyle = css('--faint'); c.textAlign = 'right'; c.textBaseline = 'middle';
-  for (const f of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
-    const v = f * ftp; if (v > yMax) break;
-    c.strokeStyle = f === 1 ? 'rgba(255,255,255,.28)' : 'rgba(255,255,255,.07)'; c.setLineDash(f === 1 ? [4, 4] : []);
-    c.beginPath(); c.moveTo(L, Y(v)); c.lineTo(w - R, Y(v)); c.stroke(); c.setLineDash([]);
-    c.fillText(Math.round(v), L - 6, Y(v));
-  }
-  c.textAlign = 'center'; c.textBaseline = 'top';
-  const stepT = [60, 300, 600, 900, 1800, 3600].find(s => total / s <= 8) || 3600;
-  for (let t = 0; t <= total; t += stepT) c.fillText(fmtT(t), X(t), h - B + 5);
-  if (o.cw) {
-    c.save(); drawBlocks(c, o.cw, ftp, X, Y, 0.22, o.k); c.restore();
-    if (o.el != null) { c.save(); c.beginPath(); c.rect(L, 0, X(o.el) - L, h); c.clip(); drawBlocks(c, o.cw, ftp, X, Y, 0.5, o.k); c.restore(); }
-  }
-  if (smp.some(s => s[4] > 0)) {
-    const HY = v => T + ph - (v - 40) / 170 * ph;
-    c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = hexA('#ef4444', 0.8);
-    for (let v = 80; v <= 200; v += 20) c.fillText(v, w - R + 4, HY(v));
-    c.strokeStyle = hexA('#ef4444', 0.75); c.lineWidth = 1.2; c.beginPath(); let on = false;
-    for (const s of smp) { if (!(s[4] > 0)) { on = false; continue; } on ? c.lineTo(X(s[1]), HY(s[4])) : c.moveTo(X(s[1]), HY(s[4])); on = true; }
-    c.stroke();
-  }
-  c.strokeStyle = '#e9edf2'; c.lineWidth = 1.5; c.lineJoin = 'round'; c.beginPath();
-  let acc = []; smp.forEach((s, i) => { acc.push(s[2]); if (acc.length > 3) acc.shift(); const v = acc.reduce((a, b) => a + b, 0) / acc.length; i ? c.lineTo(X(s[1]), Y(v)) : c.moveTo(X(s[1]), Y(v)); });
-  c.stroke(); c.lineWidth = 1;
-  if (o.el != null && o.cw) { c.strokeStyle = css('--acc'); c.beginPath(); c.moveTo(X(o.el), T); c.lineTo(X(o.el), T + ph); c.stroke(); }
+  const [c, w, h] = box || fit(cv);
+  return drawChartOn(c, w, h, o, css);
 }
 
 /* ---------- library + builder ---------- */
@@ -214,7 +165,8 @@ function onLive(msg) {
     Object.assign(V, { name: r.name, ftp: r.ftp, el: r.el, k: r.intensity, test: r.test, started: r.started, paused: r.paused, auto: r.auto_paused, jr: r.jr, samples });
   } else { V = null; cwKey = ''; }
   if (!prev || !!prev.ride !== !!r) rideShell();
-  if (S.notice && S.notice !== prev?.notice) { toast(S.notice); control('dismiss').catch(() => {}); }
+  // each server notice is shown once per browser; viewing never changes server state
+  if (S.notice && S.notice_id && S.notice_id !== store.get('hw.noticeId', 0)) { toast(S.notice); store.set('hw.noticeId', S.notice_id); }
   coachUpdate();
   voiceUpdate();
   beeps();
@@ -628,6 +580,7 @@ async function renderSettings() {
   try { strava = await (await F('/api/strava/status')).json(); } catch { strava = {}; }
   $('#stId').value = strava.client_id || '';
   $('#stSecret').value = ''; $('#stSecret').placeholder = strava.has_secret ? 'saved (hidden)' : 'paste once';
+  $('#stBox').open = !!strava.configured && !strava.connected;  // collapsed unless set up but not connected
   $('#stConnect').textContent = strava.connected ? 'Reconnect Strava' : 'Connect Strava';
   $('#stConnect').disabled = !strava.configured;
   $('#stState').textContent = strava.connected ? `Connected${strava.athlete?.name ? ' as ' + strava.athlete.name : ''}` : strava.configured ? 'Not connected yet' : 'Enter your API app first';
@@ -638,7 +591,12 @@ async function renderSettings() {
 // Settings > Athlete and the Workouts tab shortcuts edit the same values
 $('#sFtp').onchange = e => { $('#ftp').value = e.target.value; $('#ftp').onchange({ target: $('#ftp') }); renderSettings(); };
 $('#sWeight').onchange = e => { $('#weight').value = e.target.value; $('#weight').onchange({ target: $('#weight') }); renderSettings(); };
-$('#sHrZones').onchange = e => { $('#hrZones').value = e.target.value; $('#hrZones').onchange({ target: $('#hrZones') }); renderSettings(); };
+$('#sHrZones').onchange = e => {
+  const v = e.target.value.split(/[,\s]+/).map(Number).filter(n => n > 30 && n < 230);
+  if (v.length === 5 && v.every((x, i) => !i || x > v[i - 1])) { settings.hrZones = v; settings.hrZonesSrc = 'manual'; saveSettings(['hrZones', 'hrZonesSrc']); toast('HR zones saved'); }
+  else toast('Enter 5 rising numbers');
+  renderSettings();
+};
 $('#virtDist').onchange = e => { settings.hideVirtualDistance = e.target.value === '1'; saveSettings(['hideVirtualDistance']); };
 const setLC = patch => { settings.localCoach = { ...(settings.localCoach || {}), ...patch }; saveSettings(['localCoach']); };
 $$('[data-lc]').forEach(b => b.onchange = () => setLC({ [b.dataset.lc]: b.checked }));
@@ -647,7 +605,7 @@ $('#afterWk').onchange = e => { settings.afterWorkout = e.target.value; saveSett
 const cadSave = () => { const lo = +$('#cadLo').value, hi = +$('#cadHi').value; if (lo >= 40 && hi > lo && hi <= 130) { settings.cadRange = [lo, hi]; saveSettings(['cadRange']); } else toast('Cadence range: low < high'); };
 $('#cadLo').onchange = cadSave; $('#cadHi').onchange = cadSave;
 $('#hrMax').onchange = e => { const v = +e.target.value; if (v >= 100 && v <= 230) { settings.hrMax = v; saveSettings(['hrMax']); } };
-$('#autoGarmin2').onchange = e => { settings.autoGarmin = e.target.value === '1'; $('#autoGarmin').value = e.target.value; saveSettings(['autoGarmin']); renderSettings(); };
+$('#autoGarmin2').onchange = e => { settings.autoGarmin = e.target.value === '1'; saveSettings(['autoGarmin']); renderSettings(); };
 $('#autoStrava').onchange = e => { settings.autoStrava = e.target.value === '1'; saveSettings(['autoStrava']); renderSettings(); };
 $('#shareBase').onchange = e => { settings.shareBaseUrl = e.target.value.trim(); saveSettings(['shareBaseUrl']); };
 $('#stSave').onclick = async () => {
@@ -730,21 +688,13 @@ $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
 $('#btnJust').onclick = $('#btnJust2').onclick = () => loadRide(null);
 function showSettings() {
   $('#ftp').value = settings.ftp; $('#weight').value = settings.weight || ''; $('#beeps').value = settings.beeps ? '1' : '0';
-  $('#autoGarmin').value = settings.autoGarmin ? '1' : '0'; $('#autoGarmin').disabled = !garminOn;
-  $('#autoGarmin').title = garminOn ? '' : 'Garmin is disabled on this server';
-  $('#hrZones').value = settings.hrZones ? settings.hrZones.join(',') : '';
   renderLib(); renderBuilder();
 }
 $('#ftp').onchange = e => { const v = +e.target.value; if (v >= 50 && v <= 600) { settings.ftp = Math.round(v); settings.ftpSrc = 'manual'; saveSettings(['ftp', 'ftpSrc']); renderLib(); renderBuilder(); } };
 $('#weight').onchange = e => { settings.weight = +e.target.value || 0; saveSettings(['weight']); };
 $('#beeps').onchange = e => { settings.beeps = e.target.value === '1'; saveSettings(['beeps']); };
-$('#autoGarmin').onchange = e => { settings.autoGarmin = e.target.value === '1'; saveSettings(['autoGarmin']); };
 if (globalThis.location?.hash === '#settings') setTimeout(() => show('settings'), 0);
-$('#hrZones').onchange = e => {
-  const v = e.target.value.split(/[,\s]+/).map(Number).filter(n => n > 30 && n < 230);
-  if (v.length === 5 && v.every((x, i) => !i || x > v[i - 1])) { settings.hrZones = v; settings.hrZonesSrc = 'manual'; saveSettings(['hrZones', 'hrZonesSrc']); toast('HR zones saved'); }
-  else { toast('Enter 5 rising numbers'); showSettings(); }
-};
+
 async function syncHrZones() {
   if (settings.hrZonesSrc === 'manual' || !garminOn) return;
   try {

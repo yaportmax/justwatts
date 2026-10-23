@@ -132,6 +132,8 @@ body.web .serveronly{display:none !important}
 #btnTrainer.reconnect{animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 6px rgba(56,189,248,.25)}}
 /* settings */
+details.adv>summary{cursor:pointer;color:var(--dim);font-size:13px;margin-top:10px}
+details.panel.adv>summary{margin-top:0;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.8px}
 .setgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
 .checks{display:flex;flex-direction:column;gap:6px}
 .checks label{display:flex;gap:8px;align-items:center}

@@ -38,9 +38,6 @@
     <div class="row">
       <label class="f">FTP (W)<input id="ftp" type="number" min="50" max="600" step="1"></label>
       <label class="f">Weight (kg)<input id="weight" type="number" min="0" max="200" step="0.1"></label>
-      <label class="f">Beeps<select id="beeps"><option value="1">On</option><option value="0">Off</option></select></label>
-      <label class="f">HR zone floors<input id="hrZones" placeholder="100,120,140,160,180" title="Lower bpm of Z1..Z5, synced from Garmin"></label>
-      <label class="f serveronly">Garmin upload<select id="autoGarmin"><option value="1">Auto</option><option value="0">Manual</option></select></label>
     </div>
     <button id="btnJust" class="pri">Just ride</button>
   </div>
@@ -183,28 +180,29 @@
     </div>
     <div class="panel">
       <h2>Built-in coach</h2>
-      <div class="checks" id="lcChecks">
-        <label><input type="checkbox" data-lc="enabled"> On</label>
-        <label><input type="checkbox" data-lc="countdown"> Interval start and countdown</label>
-        <label><input type="checkbox" data-lc="cadence"> Cadence reminders</label>
-        <label><input type="checkbox" data-lc="recap"> Rep recaps</label>
-        <label><input type="checkbox" data-lc="recovery"> Recovery heart rate</label>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <label class="f">Auto-adjust targets<select id="lcAuto"><option value="no_agent">When no agent coaches</option><option value="always">Always</option><option value="off">Off</option></select></label>
-        <label class="f">When the plan ends<select id="afterWk"><option value="hold">Hold last target</option><option value="grade0">Free ride, flat</option></select></label>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <label class="f">Distance in History<select id="virtDist"><option value="0">Show as virtual distance</option><option value="1">Hide</option></select></label>
-      </div>
-      <div class="hint" style="margin-top:6px">Indoor distance comes from the trainer's virtual speed. FIT files keep it, as Garmin expects. Auto-adjust: Easier lowers the step 5% FTP, Harder raises it 3% (not in HR zone 5), and 30 s over the HR cap eases 5%.</div>
+      <div class="checks"><label><input type="checkbox" data-lc="enabled"> Spoken cues and safe target adjustments</label></div>
+      <details class="adv"><summary>Advanced</summary>
+        <div class="checks" id="lcChecks" style="margin-top:8px">
+          <label><input type="checkbox" data-lc="countdown"> Interval start and countdown</label>
+          <label><input type="checkbox" data-lc="cadence"> Cadence reminders</label>
+          <label><input type="checkbox" data-lc="recap"> Rep recaps</label>
+          <label><input type="checkbox" data-lc="recovery"> Recovery heart rate</label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label class="f">Auto-adjust targets<select id="lcAuto"><option value="no_agent">When no agent coaches</option><option value="always">Always</option><option value="off">Off</option></select></label>
+          <label class="f">When the plan ends<select id="afterWk"><option value="hold">Hold last target</option><option value="grade0">Free ride, flat</option></select></label>
+          <label class="f">Beeps<select id="beeps"><option value="1">On</option><option value="0">Off</option></select></label>
+          <label class="f">Distance in History<select id="virtDist"><option value="0">Virtual distance</option><option value="1">Hide</option></select></label>
+        </div>
+        <div class="hint" style="margin-top:6px">Auto-adjust: Easier lowers the step 5% FTP, Harder raises it 3% (not in HR zone 5), 30 s over the HR cap eases 5%. Indoor distance comes from the trainer's virtual speed; FIT files keep it.</div>
+      </details>
     </div>
     <div class="panel">
       <h2>Uploads</h2>
       <div class="row serveronly"><label class="f">Garmin<select id="autoGarmin2"><option value="1">Auto upload</option><option value="0">Manual</option></select></label><span class="hint" id="garminState"></span></div>
       <div class="hint webonly">Garmin: download the .fit from a ride and import it in Garmin Connect, or use the local OpenSpin app for automatic Garmin upload.</div>
-      <div class="serveronly">
-      <h2>Strava</h2>
+      <details class="serveronly adv" id="stBox">
+      <summary>Strava upload (optional)</summary>
       <div class="hint">Use your own Strava API app (strava.com/settings/api, callback domain <b>localhost</b>). The secret stays in this computer's data folder.</div>
       <div class="row" style="margin-top:8px">
         <label class="f">Client ID<input id="stId" style="width:110px"></label>
@@ -223,7 +221,7 @@
         </div>
         <div class="hint">Without it, Strava gets a text summary (NP, IF, TSS, intervals). Strava's API cannot attach photos; download the card from the ride summary to post it by hand.</div>
       </details>
-      </div>
+      </details>
       <div class="hint webonly">Strava: download the .fit and upload it on strava.com, or use the local app for direct upload.</div>
     </div>
     <div class="panel webonly">
@@ -231,12 +229,12 @@
       <div class="hint">Everything is stored in this browser. Export a backup now and then.</div>
       <div class="row" style="margin-top:8px"><button id="bkExport">Export all data</button><button id="bkImport">Import backup</button><input type="file" id="bkFile" accept=".json" hidden></div>
     </div>
-    <div class="panel">
-      <h2>AI agent (optional)</h2>
+    <details class="panel adv serveronly">
+      <summary>AI agent (optional)</summary>
       <div class="hint" id="agentState">OpenSpin works fully without an agent.</div>
       <div style="margin-top:8px" class="serveronly"><a href="connect.html" target="_blank">Connect an agent (Claude Code, Codex, any MCP client)</a></div>
 
-    </div>
+    </details>
   </div>
 </section>
 

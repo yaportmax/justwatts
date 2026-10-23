@@ -6,10 +6,35 @@ facts, change little, and say less.
 ## The loop
 
 1. At ride start: `get_athlete_profile`, `get_workout`, read this file once.
-2. Every ~30 s: `get_ride_status` (it includes the last 30 s telemetry lines). Poll every 5 to 10 s in
-   the last 30 s of a hard step and the first 60 s of the next one.
-3. Decide: nothing (most of the time), a message, or a target change.
-4. After any change, watch the next two 30 s lines before changing again.
+2. Call `wait_for_events(since)` and block. It returns only what needs a coach: step summaries,
+   FEEL presses, what the athlete said, alerts (HR cap, zone jump, cadence under range for 20 s,
+   power more than 8 % off target for 15 s, pause/resume, device lost) and at most one status per
+   3 min of steady riding. Events within 5 s arrive as one batch: one batch, one turn.
+3. Decide: nothing (most of the time), a message, a target change or an edit. Call
+   `get_ride_status` only when the batch is not enough to decide.
+4. Pass the returned `next` back as `since` and wait again.
+
+Do not poll `get_ride_status` on a timer: that is what made a single ride cost ~340 agent turns.
+
+## Keeping it cheap
+
+- The local coach (on by default, `settings.localCoach`) already speaks routine cues without you:
+  interval start ("3 minutes at 250 watts"), the 10 s countdown, rep recaps, recovery HR, cadence
+  nags. Do not repeat them. Turn single cues off with
+  the setting `{"localCoach": {"recap": false}}` (POST /api/settings); tune the gate with
+  `{"agentGate": {"status_every_s": 300, "power_dev": 0.1}}`.
+- Run the coach as a fresh, short session per ride: start it when the ride starts with this
+  playbook and the athlete's goal for the day, end it after `RIDE END`. Do not carry yesterday's
+  ride in the context; history is one `list_rides` call away.
+- Use a small, fast model for routine turns (a status batch, a FEEL GOOD, an on-plan step end:
+  usually no action or a five-word message) and escalate to a larger model only for decisions:
+  repeated alerts, a FEEL EASIER/HARDER with workout edits, a safety concern, or the end-of-ride
+  summary. A simple way: the small model handles every batch and calls the large one when it would
+  change targets or edit the workout.
+- Keep turns small: answer from the batch; read `get_workout` once per ride and after edits.
+- Report usage after each turn with `report_usage(input_tokens, output_tokens, cache_read_tokens,
+  cost_usd, model)`. The athlete sees a live meter in the ride header, and History keeps it per
+  ride. Without reports the meter shows the server's wake count only.
 
 Without MCP, the same data is in `<data>/coach/events.log` (`trainer-coach tail -f`) and
 `GET /api/state`. Commands go to `POST /api/coach` (see PROTOCOL.md).

@@ -124,6 +124,7 @@ tbody tr:hover{background:var(--panel2)}
 #coachPrev div{max-width:100%}
 .coach.open #coachMsg,.coach.open #coachSaid{-webkit-line-clamp:unset;line-clamp:unset}
 @media (max-width:640px){.coach{flex-wrap:wrap}.coach>.row{width:100%}}
+.pill.meter{font-variant-numeric:tabular-nums;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
 /* ride controls */
 .controls button.big{padding:9px 18px;font-weight:700}
 #cEnd.confirm{background:var(--bad);border-color:var(--bad);color:#fff}

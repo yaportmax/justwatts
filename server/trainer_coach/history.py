@@ -151,6 +151,7 @@ def detail(r: dict, hr_floors: list | None = None, meta: dict | None = None) -> 
         "laps": laps(r),
         "events": r.get("events") or [],
         "garmin": (meta or {}).get("garmin"),
+        "agent": r.get("agent") or {"wakes": None, "local_cues": None, "usage": {}},
     }
     if r.get("test") and m["best60"]:
         out["ftp_estimate"] = js_round(m["best60"] * 0.75)
@@ -166,7 +167,15 @@ def ride_meta_row(r: dict, meta: dict | None = None) -> dict:
             "if": round(m["IF"], 2), "kJ": round(m["kJ"]), "avg_hr": round(m["avgHR"]) or None,
             "best": {f"{w // 60}m": round(best_mean(P, w)) for w in BEST_WINDOWS},
             "ftp_estimate": js_round(m["best60"] * 0.75) if r.get("test") and m["best60"] else None,
-            "garmin": (meta or {}).get("garmin")}
+            "garmin": (meta or {}).get("garmin"),
+            "agent_wakes": (r.get("agent") or {}).get("wakes"), "local_cues": (r.get("agent") or {}).get("local_cues"),
+            "agent_tokens": _tokens((r.get("agent") or {}).get("usage") or {}),
+            "agent_cost_usd": ((r.get("agent") or {}).get("usage") or {}).get("cost_usd")}
+
+
+def _tokens(u: dict) -> int | None:
+    keys = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+    return sum(int(u.get(k) or 0) for k in keys) if any(k in u for k in keys) else None
 
 
 def trends(rows: list[dict], weeks: int = 12, today: dt.date | None = None) -> dict:

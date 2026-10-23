@@ -55,6 +55,8 @@ curl -s -H "Authorization: Bearer $(cat ~/.trainer-coach/token)" http://127.0.0.
 | POST | `/api/rides/<id>/garmin` | page/token | | upload that ride; records Garmin status |
 | POST | `/api/rides/<id>/delete` | page/token | | moves it to `rides/trash/` |
 | GET | `/api/trends` | none | `?weeks=12` | `{weeks: [{week, tss, time_s, kJ, rides}], ftp_history: [...], best: {1m, 5m, 20m}}` |
+| GET | `/api/agent-events` | page/token | `?since=<seq>&wait=<s>` (long poll, max 120) | `{batches: [{seq, ts, events: [{ts, kind, text, data}]}], next, ride_wakes, seen}`: the gated agent stream |
+| POST | `/api/agent-usage` | page/token | `{input_tokens?, output_tokens?, cache_read_tokens?, cache_write_tokens?, cost_usd?, turns?, model?, total?}` | adds to the ride's usage meter (`total: true` replaces instead) |
 | GET/POST | `/api/voice` | none / page/token | `{event: speech_start\|tts_start\|tts_end\|listening}` | `{barge, barge_at, tts, tts_at, mode}`; `speech_start` makes the page stop speaking |
 | GET | `/api/said` | none | | `{said: [{time, text, source}]}` last 8 voice transcripts, newest first |
 | POST | `/api/state` | page/token | state object | `{ok}`; for pages or simulators that run their own ride (browser Bluetooth mode, headless simulator) |
@@ -77,6 +79,21 @@ When the planned workout ends the ride does not stop: it writes `WORKOUT DONE`, 
 `ride.overtime`, keeps recording and holds the last target (`afterWorkout: hold`) or rides flat at
 grade 0 (`afterWorkout: grade0`) until `end`. Inserting steps in overtime turns the time ridden
 since into a free step and starts the new steps now.
+
+## Agent stream (event gate)
+
+Every event line still goes to `events.log`. The agent stream keeps only: `step_start`, `step_end`,
+`feel`, `said`, `paused`, `resumed`, `ride_start`, `ride_end`, `ride_resumed`, `workout_done`,
+`edit` (not the agent's own edits), `alert` (`hr_cap`, `zone_jump`, `cadence_low`, `power_dev`,
+`trainer_lost`, `trainer_back`, `hr_lost`) and `status` (at most one per `status_every_s` of quiet
+riding). Events within `coalesce_s` form one batch; each batch counts as one agent wake in
+`ride.agent.wakes`. Tunables in `settings.agentGate`: `coalesce_s` 5, `status_every_s` 180,
+`power_dev` 0.08, `power_dev_s` 15, `cadence_low_s` 20, `hr_cap` (default 95 % of max HR, else the
+Z5 floor). Power alerts ignore the first 10 s of each step.
+
+The local coach (`settings.localCoach`: `enabled`, `countdown`, `cadence`, `recap`, `recovery`)
+speaks routine cues as normal coach messages with `local: true` and logs them as `CUE <text>`
+lines, which the gate drops.
 
 ## Coach commands
 
@@ -169,6 +186,7 @@ writes an `EDIT ...` event line.
 | `ride_end` | `RIDE END <el>` | elapsed_s |
 | `edit` | `EDIT <insert\|replace\|delete\|end\|duration> ... \| <n> steps, <total>` | op, detail, steps, total_s |
 | `coach` | `COACH <seq> \| set <step> <w>W \| edit ... \| msg <text>` | seq, set, msg |
+| `cue` (type `other`) | `CUE <text>` (local coach) | |
 | `workout_done` | `WORKOUT DONE at T+<el>, riding free until End` | elapsed_s |
 | `said` | `SAID (whisper): "<text>"` | said, source |
 | `voice` | `VOICE ON\|OFF (whisper)`, `VOICE MUTED\|UNMUTED (said)` | on, state, source |

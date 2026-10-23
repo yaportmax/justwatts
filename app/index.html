@@ -16,6 +16,7 @@
   </nav>
   <div class="conn">
     <span class="pill off" id="srvState" style="display:none">Server offline</span>
+    <span class="pill meter" id="agentMeter" style="display:none" title="Agent wakes this ride (local cues spoken without the agent)"></span>
     <span class="pill"><i class="dot" id="tDot"></i><span id="tTxt">Trainer off</span></span>
     <span class="pill"><i class="dot" id="hDot"></i><span id="hTxt">HR off</span></span>
     <button id="btnTrainer" class="pri">Connect trainer</button>
@@ -146,7 +147,7 @@
   </div>
   <div class="tablewrap panel" style="padding:0">
     <table>
-      <thead><tr><th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>kJ</th><th>Avg HR</th><th>Best 5m</th></tr></thead>
+      <thead><tr><th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>kJ</th><th>Avg HR</th><th>Best 5m</th><th>Agent</th></tr></thead>
       <tbody id="hist"></tbody>
     </table>
     <div id="histEmpty" class="empty">No rides yet.</div>

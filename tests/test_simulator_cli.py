@@ -6,6 +6,7 @@ from trainer_coach.simulator import Simulator
 
 
 def test_simulated_ride_full_loop(srv):
+    srv.server.update_settings({"localCoach": {"enabled": False}})
     srv.client.coach(msg="go", step=2, watts=210)  # queued before start, like a command sent during load
     sim = Simulator(srv.client, "1m 50%, 2m 110%, 1m 50%", ftp=200, speed=0, scenarios="fade,pause,harder", log=None)
     res = sim.run()

@@ -44,9 +44,12 @@ def test_page_rides_a_workout_on_the_server_engine(node, srv):
     with FastTicker(srv.server.engine):
         out = run_page(node, srv)
     d = out["during"]
+    assert d["meter"].startswith("Agent ") and "local cues" in d["meter"]  # live usage meter in the header
     assert d["target"] == "230" and d["interval"] == "2 / 2"
     assert d["cad"] == "target 85-95 rpm" and d["cadColor"] in ("var(--good)", "var(--warn)")
-    assert out["spoken"] == ["Hold 230"]  # TTS reads new coach messages only; muted ones are not spoken
+    # TTS reads new messages: local-coach cues plus the agent message; nothing after mute
+    assert "Hold 230" in out["spoken"] and "1 minute at 100 watts" in out["spoken"]
+    assert "Quiet message" not in out["spoken"]
     assert out["cancels"] >= 1  # barge-in cancelled speech
     assert out["muteBtn"] == "Unmute"
     assert out["overBadge"].startswith("Workout done") and out["stillRiding"]  # first End tap only arms

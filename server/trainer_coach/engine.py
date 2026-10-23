@@ -50,6 +50,9 @@ class Ride:
         self.last_line = 0.0
         self.events: list[list] = []  # [epoch_ms, line] for this ride's transcript
         self.overtime = False  # the plan ended; riding free until the athlete ends the ride
+        self.agent_wakes = 0   # agent-stream batches during this ride (one batch = one agent turn)
+        self.local_cues = 0    # cues the local rule coach spoke instead of waking the agent
+        self.usage: dict = {}  # token usage the agent reported for this ride
 
     @property
     def id(self) -> str:
@@ -79,6 +82,7 @@ class Ride:
     def payload(self) -> dict:
         return {"id": self.id, "name": self.name, "text": self.text, "steps": self.plain_steps(), "test": self.test, "ftp": self.ftp,
                 "events": self.events, "overtime": self.overtime,
+                "agent": {"wakes": self.agent_wakes, "local_cues": self.local_cues, "usage": self.usage},
                 "start": self.start_ts, "samples": self.samples, "el": self.el, "k": self.k, "jr": self.jr,
                 "ov": {str(k): v for k, v in self.ov.items()}, "source": "server"}
 
@@ -127,6 +131,19 @@ class RideEngine:
             r = self.ride
             if r is not None and (r.started or line.startswith("RIDE START")):
                 r.events.append([int(self.wall() * 1000), line])
+
+    def count_agent(self, wakes: int = 0, cues: int = 0, usage: dict | None = None, total: bool = False) -> None:
+        with self.lock:
+            r = self.ride
+            if r is None:
+                return
+            r.agent_wakes += wakes
+            r.local_cues += cues
+            if usage:
+                for k, v in usage.items():
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        r.usage[k] = v if total else round(r.usage.get(k, 0) + v, 6)
+                r.usage["reports"] = r.usage.get("reports", 0) + 1
 
     def _bump(self):
         self.version += 1
@@ -208,6 +225,8 @@ class RideEngine:
             r.start_ts = cur.get("start")
             r.events = cur.get("events") or []
             r.overtime = bool(cur.get("overtime"))
+            ag = cur.get("agent") or {}
+            r.agent_wakes, r.local_cues, r.usage = ag.get("wakes", 0), ag.get("local_cues", 0), ag.get("usage") or {}
             r.ov = {int(k): v for k, v in (cur.get("ov") or {}).items()}
             self.ride = r
             self.log_event(f"RIDE RESUMED after restart at T+{E.fmt_t(r.el)} ({len(r.samples)} samples kept)")
@@ -667,6 +686,7 @@ class RideEngine:
                 "ftp": r.ftp, "intensity": r.k, "test": r.test, "target_w": self.cur_target(),
                 "grade": None if r.steps else r.jr["g"], "level": None if r.steps else r.jr.get("r"),
                 "overtime": r.overtime, "after_workout": self.settings().get("afterWorkout", "hold"),
+                "agent": {"wakes": r.agent_wakes, "local_cues": r.local_cues, "usage": r.usage},
                 "jr": r.jr, "samples": len(r.samples),
                 "ov": {str(k): v for k, v in r.ov.items()},
                 "last30": {"power": E.js_round(_mean([x[2] for x in l30])), "cadence": E.js_round(_mean([x[3] for x in l30])),

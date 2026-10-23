@@ -81,8 +81,21 @@ def cmd_coach(args) -> int:
 
 
 def cmd_tail(args) -> int:
-    """Follow the event log file directly (it lives in the local data dir), like `tail -f`."""
+    """Follow the event log file directly (it lives in the local data dir), like `tail -f`.
+    With --agent: follow the gated agent stream instead (one line per batch = one agent wake)."""
     from .events import parse_line, tail_lines
+    if args.agent:
+        c = CoachClient(_cfg(args))
+        since = c.agent_events(0)["next"] if args.follow else max(0, c.agent_events(0)["next"] - args.n)
+        if not args.follow:
+            for b in c.agent_events(since)["batches"]:
+                print(json.dumps(b) if args.json else _batch_line(b), flush=True)
+            return 0
+        while True:
+            res = c.agent_events(since, wait=60)
+            for b in res["batches"]:
+                print(json.dumps(b) if args.json else _batch_line(b), flush=True)
+            since = res["next"]
     log = _cfg(args).events_log
     out = (lambda ln: print(json.dumps(parse_line(ln)), flush=True)) if args.json else (lambda ln: print(ln, flush=True))
     for ln in tail_lines(log, args.n):
@@ -106,6 +119,11 @@ def cmd_tail(args) -> int:
             *lines, buf = buf.split(b"\n")
             for ln in lines:
                 out(ln.decode("utf-8", "replace").rstrip("\r"))
+
+
+def _batch_line(b: dict) -> str:
+    t = time.strftime("%H:%M:%S", time.localtime(b["ts"]))
+    return f"[{t}] #{b['seq']} " + " || ".join(f"{e['kind']}: {e['text']}" for e in b["events"])
 
 
 def cmd_status(args) -> int:
@@ -196,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("-n", type=int, default=20)
     t.add_argument("-f", "--follow", action="store_true")
     t.add_argument("--json", action="store_true", help="print parsed events as JSON lines")
+    t.add_argument("--agent", action="store_true", help="follow the gated agent stream (what wakes the coach)")
     t.set_defaults(fn=cmd_tail)
 
     sub.add_parser("status", parents=[common], help="print the latest ride state JSON").set_defaults(fn=cmd_status)

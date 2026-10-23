@@ -30,6 +30,11 @@ lets you talk back.
   export, a simulated trainer (Sim). `browser.html` keeps the old in-tab Web Bluetooth mode as a fallback.
 - **Voice** (`serve --voice`): local faster-whisper transcription with an adaptive noise gate and
   filters for silence hallucinations, fragments and the coach's own voice.
+- **Low LLM usage**: an event gate gives the agent a short stream (step summaries, FEEL, speech,
+  alerts, a status every few minutes) in 5 s batches, and a local rule coach speaks routine cues
+  (countdowns, recaps, recovery HR, cadence) without waking it. A live meter in the ride header
+  shows agent wakes, tokens and cost; History keeps them per ride. `trainer-coach tail --agent`
+  shows exactly what wakes the coach.
 - **MCP server** (`trainer-coach mcp`): tools for an agent to read the ride, coach it and edit the
   workout, with guard rails (max change per command, FTP ceiling, no raises while paused, harder
   changes need the athlete's FEEL signal).
@@ -122,6 +127,7 @@ MCP tools (anything the athlete can do in the UI, an agent can do too):
 
 | Area | Tools |
 |---|---|
+| Wait (use this, do not poll) | `wait_for_events`, `report_usage` |
 | Read | `get_ride_status`, `get_workout`, `get_recent_events`, `get_telemetry_history`, `get_athlete_profile`, `get_coaching_playbook` |
 | Coach | `send_message`, `set_step_target`, `set_current_target`, `set_intensity`, `set_voice_mode` |
 | Edit the workout | `insert_steps`, `replace_step`, `delete_step`, `set_step_duration`, `extend_current_step`, `set_workout_length` |

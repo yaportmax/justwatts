@@ -19,8 +19,8 @@ from .client import ClientError, CoachClient
 from .safety import GuardError, Limits, check_edit, check_target
 
 INSTRUCTIONS = """\
-You are coaching a live indoor bike workout on a smart trainer. Poll get_ride_status about every
-30 s (more often near interval changes). Read docs/COACHING.md via get_coaching_playbook before
+You are coaching a live indoor bike workout on a smart trainer. Do not poll: call wait_for_events
+in a loop and act only on what it returns (the local coach handles countdowns and recaps). Read docs/COACHING.md via get_coaching_playbook before
 the first change. Messages: short, numbers first (e.g. "HR 168, +6/30s. Holding 250."). Change
 targets in small steps, never raise while paused, back off on FEEL EASIER, HR drift or cadence
 collapse. FEEL buttons are requests from the athlete: EASIER = less, HARDER = more, GOOD = keep.
@@ -93,6 +93,31 @@ def get_ride_status(telemetry_lines: int = 6) -> dict[str, Any]:
     else:
         out["ride"] = None
     return out
+
+
+@mcp.tool()
+def wait_for_events(since: int | None = None, timeout_s: int = 120) -> dict[str, Any]:
+    """Block until the coach needs to look (the cheap way to coach): returns batches from the gated
+    agent stream. A batch holds what happened within ~5 s: step summaries, FEEL presses, what the
+    athlete said, alerts (HR cap, zone jump, low cadence, power off target, pause, device lost) and
+    at most one status per ~3 min of steady riding. Routine cues (countdowns, recaps, cadence
+    nags) are spoken by the local coach and never show up here. Pass the returned `next` as
+    `since` on the following call; since=None starts from now."""
+    if since is None:
+        since = _call(client().agent_events, 0)["next"]
+    return _call(client().agent_events, int(since), float(max(0, min(timeout_s, 120))))
+
+
+@mcp.tool()
+def report_usage(input_tokens: int = 0, output_tokens: int = 0, cache_read_tokens: int = 0,
+                 cache_write_tokens: int = 0, cost_usd: float = 0.0, model: str | None = None) -> dict[str, Any]:
+    """Add this turn's token usage to the live meter on the athlete's screen and the ride history."""
+    body: dict[str, Any] = {"input_tokens": input_tokens, "output_tokens": output_tokens,
+                            "cache_read_tokens": cache_read_tokens, "cache_write_tokens": cache_write_tokens,
+                            "cost_usd": cost_usd, "turns": 1}
+    if model:
+        body["model"] = model
+    return _call(client().report_usage, **body)
 
 
 @mcp.tool()

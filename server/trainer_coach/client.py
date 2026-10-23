@@ -84,6 +84,17 @@ class CoachClient:
             return self.request("POST", "/api/voice", {"event": event})
         return self.request("GET", "/api/voice", auth=False)
 
+    def agent_events(self, since: int = 0, wait: float = 0) -> dict:
+        old = self.timeout
+        self.timeout = max(old, wait + 10)
+        try:
+            return self.request("GET", f"/api/agent-events?since={int(since)}&wait={wait:g}")
+        finally:
+            self.timeout = old
+
+    def report_usage(self, **usage) -> dict:
+        return self.request("POST", "/api/agent-usage", usage)
+
     def event(self, line: str) -> None:
         self.request("POST", "/api/event", {"line": line})
 

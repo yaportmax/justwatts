@@ -21,6 +21,7 @@ def ride(srv, monkeypatch):
     for k in ("TC_MAX_CHANGE_PCT", "TC_MAX_PCT", "TC_FEEL_GATE_PCT", "TC_FEEL_WINDOW_S", "TC_STALE_S"):
         monkeypatch.delenv(k, raising=False)
     M.set_client(srv.client)
+    srv.server.update_settings({"localCoach": {"enabled": False}})  # only agent messages in these tests
     sim = Simulator(srv.client, WORKOUT, ftp=200, speed=0, log=None)
     sim.start()
     for _ in range(150):  # 30 s into step 2

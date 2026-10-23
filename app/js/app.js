@@ -210,7 +210,22 @@ function onLive(msg) {
   voiceUpdate();
   beeps();
   if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) finishedRide(S.last_finished);
-  setStatus(); renderLive(); if (V) renderRide();
+  setStatus(); renderLive(); renderMeter(); if (V) renderRide();
+}
+// live LLM usage: wakes counted by the server; tokens and cost when the agent reports them
+const kfmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
+function usageText(wakes, cues, u) {
+  const tok = ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens'].reduce((a, k) => a + (u?.[k] || 0), 0);
+  let t = `Agent ${wakes ?? 0} wake${wakes === 1 ? '' : 's'}`;
+  if (tok) t += ` · ${kfmt(tok)} tok`;
+  if (u?.cost_usd) t += ` · $${u.cost_usd.toFixed(2)}`;
+  if (cues) t += ` · ${cues} local cues`;
+  return t;
+}
+function renderMeter() {
+  const a = S?.ride?.agent, el = $('#agentMeter');
+  el.style.display = a && S.ride.started ? '' : 'none';
+  if (a) el.textContent = usageText(a.wakes, a.local_cues, a.usage);
 }
 function setOnline(on) {
   if (on === online) return; online = on;
@@ -447,7 +462,7 @@ async function renderHistory() {
   $('#histEmpty').style.display = rows.length ? 'none' : '';
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] || '–'}</td>`;
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${fmtT(r.time_s)}</td><td class="num">${r.avg_w}</td><td class="num">${r.np}</td><td class="num">${r.tss}</td><td class="num">${r.kJ}</td><td class="num">${r.avg_hr ?? '–'}</td><td class="num">${r.best?.['5m'] || '–'}</td><td class="num" title="agent wakes / tokens">${r.agent_wakes ?? '–'}${r.agent_tokens ? ' · ' + kfmt(r.agent_tokens) : ''}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
   renderTrends();
@@ -489,6 +504,7 @@ async function openSummary(id) {
   $('#summary').style.display = ''; $('#sName').textContent = r.name;
   $('#sDate').textContent = new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const st = [['Time', fmtT(m.time_s)], ['Avg power', m.avg_w + ' W'], ['NP', m.np + ' W'], ['Max', m.max_w + ' W'], ['IF', m.if.toFixed(2)], ['TSS', m.tss], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–'], ['Best 1/5/20', `${d.best['1m']}/${d.best['5m'] || '–'}/${d.best['20m'] || '–'}`], ['Distance', m.distance_km.toFixed(1) + ' km']];
+  if (d.agent?.wakes != null) st.push(['Coach usage', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
   $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }

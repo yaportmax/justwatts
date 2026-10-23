@@ -92,7 +92,7 @@ export function stepAt(cw, el) {
 }
 export function stepWatts(s, into, ftp, k = 1) {
   if (s.free) return null;
-  const x = s.a + (s.b - s.a) * Math.min(1, into / s.d);
+  const x = s.a + (s.b - s.a) * (s.d > 0 ? Math.min(1, into / s.d) : 1);
   return Math.round((s.u === 'w' ? x : x * ftp) * k);
 }
 export function normPower(p) {

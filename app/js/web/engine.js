@@ -166,13 +166,13 @@ export class Engine {
       r.steps.splice(pos, 0, ...nw); remap(k => k >= pos ? k + nw.length : k); desc = `insert ${nw.length} after step ${after + 1}: ${toText(nw)}`;
     } else if (op === 'replace') {
       const i = index(e.step ?? 'cur', 'step'), nw = parse(e.steps);
-      if (i === cur) { r.steps[i].d = Math.max(1, Math.ceil(into)); r.steps.splice(i + 1, 0, ...nw); remap(k => k > i ? k + nw.length : k); }
-      else { r.steps.splice(i, 1, ...nw); remap(k => k > i ? k + nw.length - 1 : k, i); }
+      if (i === cur && into >= 1) { r.steps[i].d = Math.max(1, Math.ceil(into)); r.steps.splice(i + 1, 0, ...nw); remap(k => k > i ? k + nw.length : k); }
+      else { if (i === cur) { r.acc = null; r.lastStep = -1; } r.steps.splice(i, 1, ...nw); remap(k => k > i ? k + nw.length - 1 : k, i); }
       desc = `replace step ${i + 1} with ${nw.length}: ${toText(nw)}`;
     } else if (op === 'delete') {
       const i = index(e.step, 'step');
-      if (i === cur) { r.steps[i].d = Math.max(1, Math.ceil(into)); desc = `end step ${i + 1} now`; }
-      else { r.steps.splice(i, 1); remap(k => k > i ? k - 1 : k, i); desc = `delete step ${i + 1}`; }
+      if (i === cur && (into >= 1 || r.steps.length === 1)) { r.steps[i].d = Math.max(1, Math.ceil(into)); desc = `end step ${i + 1} now`; }
+      else { if (i === cur) { r.acc = null; r.lastStep = -1; } r.steps.splice(i, 1); remap(k => k > i ? k - 1 : k, i); desc = `delete step ${i + 1}`; }
     } else if (op === 'total') {
       if (!at) throw new Error('workout finished: insert steps instead');
       let want = Math.max(+e.seconds, Math.ceil(r.el)), delta = want - r.total;
@@ -182,7 +182,7 @@ export class Engine {
         for (const [i, d] of left) { const base = i === cur ? into : 0; r.steps[i].d = Math.max(i !== cur ? 1 : Math.ceil(into), jsr(base + d * (rem + delta) / rem)); }
       } else {
         while (delta < 0 && r.steps.length - 1 > cur && r.steps.at(-1).d <= -delta) { delta += r.steps.at(-1).d; delete r.ov[r.steps.length - 1]; r.steps.pop(); }
-        const last = r.steps.at(-1), floor = r.steps.length - 1 === cur ? Math.ceil(into) : 1; last.d = Math.max(floor, last.d + delta);
+        const last = r.steps.at(-1), floor = r.steps.length - 1 === cur ? Math.max(1, Math.ceil(into)) : 1; last.d = Math.max(floor, last.d + delta);
       }
       const old = r.total; r.retime(); desc = `duration total ${fmtT(old)} -> ${fmtT(r.total)}`;
     } else if (op === 'duration' || op === 'extend') {

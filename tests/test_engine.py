@@ -158,7 +158,7 @@ def test_delete_duration_extend_replace(srv):
     assert st["steps"][2]["duration_s"] == 1 and st["steps"][3]["start_w"] == 120
     assert edit(srv, op="delete", step="cur")[0] == 200
     types = [e["op"] for e in srv.client.events(30) if e["type"] == "edit"]
-    assert types == ["delete", "duration", "duration", "duration", "replace", "replace", "end"]
+    assert types == ["delete", "duration", "duration", "duration", "replace", "replace", "delete"]  # at into 0: removed, not ended
 
 
 def test_edit_validation(srv):

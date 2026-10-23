@@ -8,6 +8,7 @@ lines, applies ERG/grade targets and coach overrides. The ride in progress is wr
 from __future__ import annotations
 
 import json
+import os
 import math
 import random
 import re
@@ -49,6 +50,7 @@ class Ride:
         self.acc: dict | None = None
         self.last_line = 0.0
         self.events: list[list] = []  # [epoch_ms, line] for this ride's transcript
+        self.last_mono: float | None = None  # monotonic time of the last sample (None after a restart)
         self.overtime = False  # the plan ended; riding free until the athlete ends the ride
         self.agent_wakes = 0   # agent-stream batches during this ride (one batch = one agent turn)
         self.agent_seen = False  # an agent connected during this ride (shows the usage meter)
@@ -167,6 +169,7 @@ class RideEngine:
                 self._jf = self.journal_file.open("a", encoding="utf-8")
             self._jf.write(json.dumps(sample) + "\n")
             self._jf.flush()
+            os.fsync(self._jf.fileno())  # each second is on disk before the next one is recorded
         except OSError:
             self._jf = None
 
@@ -489,20 +492,24 @@ class RideEngine:
                     new = parse_workout(str(e.get("steps", "")))
                 except WorkoutError as err:
                     raise ValueError(f"bad steps: {err}") from None
-                if i == cur:  # keep what was ridden of the current step, the replacement starts now
+                if i == cur and into >= 1:  # keep what was ridden of the current step, the replacement starts now
                     r.steps[i]["d"] = max(1, math.ceil(into))
                     r.steps[i + 1:i + 1] = new
                     r.ov = {(k + len(new) if k > i else k): v for k, v in r.ov.items()}
-                else:
+                else:  # an upcoming step, or the current one before anything of it was ridden
+                    if i == cur:
+                        r.acc, r.last_step = None, -1
                     r.steps[i:i + 1] = new
                     r.ov = {(k + len(new) - 1 if k > i else k): v for k, v in r.ov.items() if k != i}
                 desc = f"replace step {i + 1} with {len(new)}: {to_text(new)}"
             elif op == "delete":
                 i = index(e.get("step"), "step")
-                if i == cur:  # the step being ridden ends now; the next one starts fresh
+                if i == cur and (into >= 1 or len(r.steps) == 1):  # the step being ridden ends now
                     r.steps[i]["d"] = max(1, math.ceil(into))
                     desc = f"end step {i + 1} now"
-                else:
+                else:  # an upcoming step, or the current one at its very start: remove it
+                    if i == cur:
+                        r.acc, r.last_step = None, -1
                     del r.steps[i]
                     r.ov = {(k - 1 if k > i else k): v for k, v in r.ov.items() if k != i}
                     desc = f"delete step {i + 1}"
@@ -528,7 +535,7 @@ class RideEngine:
                         r.ov.pop(len(r.steps) - 1, None)
                         r.steps.pop()
                     last = r.steps[-1]
-                    floor = math.ceil(into) if len(r.steps) - 1 == cur else 1
+                    floor = max(1, math.ceil(into)) if len(r.steps) - 1 == cur else 1
                     last["d"] = max(floor, last["d"] + delta)
                 old_total = r.total
                 r.retime()
@@ -633,13 +640,30 @@ class RideEngine:
         d = self.hub.r
         return d.hr if d.hr and self.clock() - d.hr_last < 5 else 0
 
+    def _timestamp(self, r: "Ride") -> int:
+        """Sample time in ms: wall clock, but strictly increasing and immune to clock jumps.
+        If the wall clock disagrees with the monotonic clock by more than 5 s since the last
+        sample (NTP step, manual change, DST bug), keep counting from the monotonic clock."""
+        wall_ms, mono = int(self.wall() * 1000), self.clock()
+        prev, prev_mono = (r.samples[-1][0], r.last_mono) if r.samples else (None, None)
+        if prev is None or prev_mono is None:
+            ts = wall_ms if prev is None else max(wall_ms, prev + 1)
+        else:
+            expected = prev + (mono - prev_mono) * 1000
+            ts = wall_ms if abs(wall_ms - expected) <= 5000 else int(expected)
+            ts = max(ts, prev + 1)
+        r.last_mono = mono
+        return ts
+
     def _record(self):
         r, d = self.ride, self.hub.r
-        r.samples.append([int(self.wall() * 1000), round(r.el, 1), round(d.power), round(d.cadence), self._hr_now(),
+        r.samples.append([self._timestamp(r), round(r.el, 1), round(d.power), round(d.cadence), self._hr_now(),
                           round(d.speed, 2), self.cur_target() or 0])
-        self._journal(r.samples[-1])  # every sample hits the disk
-        if len(r.samples) % 30 == 0:
-            self.save()
+        n = len(r.samples)
+        if n == 1 or n % 30 == 0:
+            self.save()  # snapshot (the first one at once: the journal needs it to resume from)
+        else:
+            self._journal(r.samples[-1])  # every other sample: one fsync'd line
 
     def _coach_tick(self):
         r = self.ride

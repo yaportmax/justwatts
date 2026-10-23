@@ -46,11 +46,11 @@ export class WebBackend {
   tick() {
     this.engine.tick(1);
     const st = this.state(); this.coach.observe(st);
-    // crash safety: a journal of samples every 5 s, a full snapshot every 30 s
+    // crash safety: a snapshot at the first sample and every 30 s, the samples since then every second
     const r = this.engine.ride;
     if (r?.started && r.samples.length) {
-      if (r.samples.length - this.lastSnap >= 30 || this.lastSnap > r.samples.length) { this.persist(r.payload()); }
-      else if (r.samples.length % 5 === 0) this.store.set('journal', r.samples.slice(this.lastSnap));
+      if (!this.lastSnap || r.samples.length - this.lastSnap >= 30 || this.lastSnap > r.samples.length) this.persist(r.payload());
+      else this.store.set('journal', r.samples.slice(this.lastSnap));
     }
   }
   persist(p) {

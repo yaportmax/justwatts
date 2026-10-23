@@ -39,7 +39,10 @@ def atomic_write(dest: Path, data: bytes) -> None:
     """Write via a unique temp file + rename, so readers never see a half-written file."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.tmp")
-    tmp.write_bytes(data)
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())  # on disk before it replaces the old file: a power cut leaves old or new, never empty
     for attempt in range(50):
         try:
             os.replace(tmp, dest)

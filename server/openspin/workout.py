@@ -153,5 +153,5 @@ def step_at(steps: list[dict], el: float):
 def step_watts(s: dict, into: float, ftp: float, k: float = 1) -> int | None:
     if s.get("free"):
         return None
-    x = s["a"] + (s["b"] - s["a"]) * min(1, into / s["d"])
+    x = s["a"] + (s["b"] - s["a"]) * (min(1, into / s["d"]) if s["d"] > 0 else 1)
     return js_round((x if s["u"] == "w" else x * ftp) * k)

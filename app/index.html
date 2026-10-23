@@ -203,17 +203,20 @@
       <div class="hint webonly">Garmin: download the .fit from a ride and import it in Garmin Connect, or use the local OpenSpin app for automatic Garmin upload.</div>
       <details class="serveronly adv" id="stBox">
       <summary>Strava upload (optional)</summary>
-      <div class="hint">Use your own Strava API app (strava.com/settings/api, callback domain <b>localhost</b>). The secret stays in this computer's data folder.</div>
       <div class="row" style="margin-top:8px">
-        <label class="f">Client ID<input id="stId" style="width:110px"></label>
-        <label class="f">Client secret<input id="stSecret" type="password" autocomplete="off" style="width:220px"></label>
-        <button id="stSave">Save</button>
         <button id="stConnect" class="pri">Connect Strava</button>
-      </div>
-      <div class="row" style="margin-top:8px">
         <label class="f">Strava<select id="autoStrava"><option value="1">Auto upload</option><option value="0">Manual</option></select></label>
         <span class="hint" id="stState"></span>
       </div>
+      <details class="adv" id="stOwnBox"><summary>Use your own Strava API app</summary>
+        <div class="hint">Optional. Create one at strava.com/settings/api (callback domain <b>localhost</b>). The secret stays in this computer's data folder and OpenSpin's token service is not used.</div>
+        <div class="row" style="margin-top:8px">
+          <label class="f">Client ID<input id="stId" style="width:110px"></label>
+          <label class="f">Client secret<input id="stSecret" type="password" autocomplete="off" style="width:220px"></label>
+          <button id="stSave">Save</button>
+          <button id="stShared">Use OpenSpin's app</button>
+        </div>
+      </details>
       <div class="warnbox" id="stDup">If Garmin Connect already syncs your rides to Strava, uploading to both creates duplicates on Strava. Keep one: Garmin upload with Garmin's Strava sync, or direct Strava upload.</div>
       <details class="adv"><summary>Advanced</summary>
         <div class="row" style="margin-top:8px">

@@ -1,10 +1,14 @@
-"""Optional direct upload to Strava through the official API, with the user's own API app.
+"""Optional direct upload to Strava through the official API.
 
-The user enters Client ID and Client Secret in Settings (the page only; the API refuses to take
-the secret from a token caller such as an agent). Both live in <data>/strava_app.json, tokens in
-<data>/strava_token.json (mode 0600). The secret is never returned, logged or sent anywhere
-except to Strava's token endpoint. OAuth uses http://localhost:<port>/api/strava/callback, so the
-Strava app's Authorization Callback Domain must be "localhost".
+Default: OpenSpin's shared Strava app. Its client secret never ships with the app; a small token
+service (web/api/strava/token.js, at OPENSPIN_STRAVA_RELAY) holds it and only swaps OAuth codes and
+refresh tokens for access tokens. Uploads go straight from this computer to Strava.
+
+Advanced: the user's own API app. Client ID and secret are entered in Settings (the page only; the
+API refuses to take the secret from a token caller such as an agent) and live in
+<data>/strava_app.json; then the token service is not used at all. Tokens are in
+<data>/strava_token.json (mode 0600). OAuth returns to http://localhost:<port>/api/strava/callback
+(Strava always allows localhost callbacks).
 """
 from __future__ import annotations
 
@@ -23,6 +27,8 @@ AUTH_URL = "https://www.strava.com/oauth/authorize"
 TOKEN_URL = "https://www.strava.com/oauth/token"
 API = "https://www.strava.com/api/v3"
 SCOPE = "activity:write,activity:read"
+SHARED_CLIENT_ID = os.environ.get("OPENSPIN_STRAVA_CLIENT_ID", "168528")
+RELAY_URL = os.environ.get("OPENSPIN_STRAVA_RELAY", "https://openspin.maxyaport.com/api/strava/token")
 
 
 class StravaError(Exception):
@@ -51,8 +57,10 @@ def _http(method: str, url: str, data: bytes | None = None, headers: dict | None
 
 
 class StravaLink:
-    def __init__(self, data: Path, http: Callable[..., tuple[int, dict]] = _http, sleep=time.sleep):
+    def __init__(self, data: Path, http: Callable[..., tuple[int, dict]] = _http, sleep=time.sleep,
+                 relay: str | None = RELAY_URL):
         self.data = Path(data)
+        self.relay = None if (relay or "").lower() in ("", "off", "0") else relay
         self.http = http
         self.sleep = sleep
         self._states: dict[str, float] = {}
@@ -84,25 +92,51 @@ class StravaLink:
             app["client_secret"] = client_secret.strip()
         _write_private(self.app_file, app)
 
+    def _own(self) -> dict | None:
+        app = self._read(self.app_file)
+        return app if app.get("client_id") and app.get("client_secret") else None
+
+    def _client_id(self) -> str | None:
+        own = self._own()
+        return own["client_id"] if own else (SHARED_CLIENT_ID if self.relay else None)
+
+    def _token(self, grant: dict) -> tuple[int, dict]:
+        """Strava token call: directly with the user's own app, else through the shared app's token service."""
+        own = self._own()
+        if own:
+            return self.http("POST", TOKEN_URL, urllib.parse.urlencode({
+                "client_id": own["client_id"], "client_secret": own["client_secret"], **grant}).encode(),
+                {"Content-Type": "application/x-www-form-urlencoded"})
+        if not self.relay:
+            raise StravaError("set up your own Strava API app in Settings (the shared app is off)")
+        return self.http("POST", self.relay, json.dumps(grant).encode(), {"Content-Type": "application/json"})
+
     def status(self) -> dict:
         app, tok = self._read(self.app_file), self._read(self.token_file)
+        own = self._own()
         return {"client_id": app.get("client_id"), "has_secret": bool(app.get("client_secret")),
-                "configured": bool(app.get("client_id") and app.get("client_secret")),
+                "mode": "own" if own else ("shared" if self.relay else None),
+                "configured": bool(own or self.relay),
                 "connected": bool(tok.get("refresh_token")), "athlete": tok.get("athlete"),
                 "scope": tok.get("scope")}
 
     def disconnect(self) -> None:
         self.token_file.unlink(missing_ok=True)
 
+    def use_shared(self) -> None:
+        """Forget the user's own API app (and its tokens) and go back to OpenSpin's shared app."""
+        self.app_file.unlink(missing_ok=True)
+        self.token_file.unlink(missing_ok=True)
+
     # ---------- OAuth ----------
     def authorize_url(self, redirect_uri: str) -> str:
-        app = self._read(self.app_file)
-        if not (app.get("client_id") and app.get("client_secret")):
-            raise StravaError("enter Client ID and Client Secret in Settings first")
+        cid = self._client_id()
+        if not cid:
+            raise StravaError("set up your own Strava API app in Settings first")
         state = secrets.token_urlsafe(16)
         self._states = {k: v for k, v in self._states.items() if time.time() - v < 900}
         self._states[state] = time.time()
-        q = {"client_id": app["client_id"], "redirect_uri": redirect_uri, "response_type": "code",
+        q = {"client_id": cid, "redirect_uri": redirect_uri, "response_type": "code",
              "approval_prompt": "auto", "scope": SCOPE, "state": state}
         return AUTH_URL + "?" + urllib.parse.urlencode(q)
 
@@ -112,11 +146,7 @@ class StravaLink:
         del self._states[state]
         if "activity:write" not in (scope or ""):
             raise StravaError("Strava did not grant activity:write; allow uploads on the Strava page")
-        app = self._read(self.app_file)
-        code_, body = self.http("POST", TOKEN_URL, urllib.parse.urlencode({
-            "client_id": app.get("client_id"), "client_secret": app.get("client_secret"),
-            "code": code, "grant_type": "authorization_code"}).encode(),
-            {"Content-Type": "application/x-www-form-urlencoded"})
+        code_, body = self._token({"code": code, "grant_type": "authorization_code"})
         if code_ != 200 or "refresh_token" not in body:
             raise StravaError(f"token exchange failed ({code_}): {body.get('message', '')}")
         ath = body.get("athlete") or {}
@@ -131,11 +161,7 @@ class StravaLink:
             raise StravaError("Strava not connected")
         if tok.get("expires_at", 0) - 120 > time.time():
             return tok["access_token"]
-        app = self._read(self.app_file)
-        code, body = self.http("POST", TOKEN_URL, urllib.parse.urlencode({
-            "client_id": app.get("client_id"), "client_secret": app.get("client_secret"),
-            "grant_type": "refresh_token", "refresh_token": tok["refresh_token"]}).encode(),
-            {"Content-Type": "application/x-www-form-urlencoded"})
+        code, body = self._token({"grant_type": "refresh_token", "refresh_token": tok["refresh_token"]})
         if code != 200 or "access_token" not in body:
             raise StravaError(f"token refresh failed ({code}): {body.get('message', '')}")
         tok.update(access_token=body["access_token"], refresh_token=body.get("refresh_token", tok["refresh_token"]),

@@ -414,7 +414,7 @@ class Handler(SimpleHTTPRequestHandler):
         p = urlsplit(self.path).path
         routes = ("/api/event", "/api/coach", "/api/current", "/api/ride", "/api/state", "/api/garmin/upload",
                   "/api/ride/control", "/api/settings", "/api/devices", "/api/voice", "/api/agent-usage",
-                  "/api/garmin/import", "/api/strava/config", "/api/strava/disconnect")
+                  "/api/garmin/import", "/api/strava/config", "/api/strava/disconnect", "/api/strava/shared")
         ride_action = re.fullmatch(r"/api/rides/([\w\-]+)/(garmin|delete|strava|card|description)", p)
         if p not in routes and not ride_action:
             return self.send_json(404, {"error": "not found"})
@@ -433,6 +433,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(200, srv.strava.status())
         if p == "/api/strava/disconnect":
             srv.strava.disconnect()
+            return self.send_json(200, srv.strava.status())
+        if p == "/api/strava/shared":
+            srv.strava.use_shared()
             return self.send_json(200, srv.strava.status())
         if ride_action and ride_action[2] == "card":
             if not raw.startswith(b"\x89PNG"):

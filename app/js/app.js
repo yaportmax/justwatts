@@ -578,12 +578,13 @@ async function renderSettings() {
   $('#garminState').textContent = garminOn ? '' : 'Garmin is off on this server (see README: Garmin upload)';
   $('#shareBase').value = settings.shareBaseUrl || '';
   try { strava = await (await F('/api/strava/status')).json(); } catch { strava = {}; }
-  $('#stId').value = strava.client_id || '';
+  const own = strava.mode === 'own';
+  $('#stId').value = own ? strava.client_id || '' : '';
   $('#stSecret').value = ''; $('#stSecret').placeholder = strava.has_secret ? 'saved (hidden)' : 'paste once';
-  $('#stBox').open = !!strava.configured && !strava.connected;  // collapsed unless set up but not connected
+  $('#stOwnBox').open = own; $('#stShared').style.display = own ? '' : 'none';
   $('#stConnect').textContent = strava.connected ? 'Reconnect Strava' : 'Connect Strava';
   $('#stConnect').disabled = !strava.configured;
-  $('#stState').textContent = strava.connected ? `Connected${strava.athlete?.name ? ' as ' + strava.athlete.name : ''}` : strava.configured ? 'Not connected yet' : 'Enter your API app first';
+  $('#stState').textContent = strava.connected ? `Connected${strava.athlete?.name ? ' as ' + strava.athlete.name : ''}` : strava.configured ? 'Not connected' : 'Set up your own Strava API app below';
   $('#autoStrava').value = settings.autoStrava ? '1' : '0'; $('#autoStrava').disabled = !strava.connected;
   $('#stDup').classList.toggle('hot', !!(settings.autoGarmin && settings.autoStrava));
   $('#agentState').textContent = S?.agent?.connected ? 'An agent is connected and coaching.' : 'OpenSpin works fully without an agent. The built-in coach handles cues and safe adjustments.';
@@ -612,6 +613,10 @@ $('#stSave').onclick = async () => {
   try { await apiJson('/api/strava/config', { client_id: $('#stId').value.trim(), client_secret: $('#stSecret').value.trim() }); toast('Strava app saved'); }
   catch (e) { toast('Strava: ' + e.message); }
   $('#stSecret').value = ''; renderSettings();
+};
+$('#stShared').onclick = async () => {
+  try { await apiJson('/api/strava/shared', {}); toast("Using OpenSpin's Strava app. Connect again."); } catch (e) { toast('Strava: ' + e.message); }
+  renderSettings();
 };
 $('#stConnect').onclick = async () => {
   if (!WEB) { location.href = '/api/strava/connect'; return; }

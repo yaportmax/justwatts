@@ -333,3 +333,35 @@ def test_share_card_hosting(ssrv):
     assert code == 200 and body == png and ctype == "image/png"
     assert t.req("POST", "/api/rides/r-1/card", png, headers=t.page)[1]["url"] == "https://cards.example.com/os/share/r-1.png"
     assert t.req("GET", "/api/rides", host="cards.example.com")[0] == 421  # nothing else is exposed
+
+
+def test_strava_shared_app_by_default_never_sends_a_secret(tmp_path):
+    from openspin.strava import StravaLink
+    calls = []
+
+    def relay(method, url, data=None, headers=None):
+        calls.append((url, json.loads(data)))
+        if json.loads(data)["grant_type"] == "authorization_code":
+            return 200, {"access_token": "AT1", "refresh_token": "RT1", "expires_at": time.time() - 1,
+                         "athlete": {"id": 9, "firstname": "Test", "lastname": "Rider"}}
+        return 200, {"access_token": "AT2", "refresh_token": "RT2", "expires_at": time.time() + 3600}
+
+    s = StravaLink(tmp_path, http=relay, relay="https://relay.example/api/strava/token")
+    st = s.status()
+    assert st["configured"] and st["mode"] == "shared" and not st["connected"]
+    q = urllib.parse.parse_qs(urllib.parse.urlsplit(s.authorize_url("http://localhost:1/cb")).query)
+    assert q["client_id"] == ["168528"]
+    s.callback("abc12345", q["state"][0], "read,activity:write")
+    assert s.status()["athlete"]["name"] == "Test Rider"
+    assert s.access_token() == "AT2"  # expired, refreshed through the relay
+    assert [c[0] for c in calls] == ["https://relay.example/api/strava/token"] * 2
+    assert all("client_secret" not in c[1] and "client_id" not in c[1] for c in calls)
+    # the user's own app takes over and never touches the relay; going back forgets it
+    s.configure("12345", "own-secret")
+    assert s.status()["mode"] == "own" and not s.status()["connected"]
+    s.use_shared()
+    assert s.status()["mode"] == "shared" and not (tmp_path / "strava_app.json").exists()
+    off = StravaLink(tmp_path / "x", http=relay, relay="off")
+    assert not off.status()["configured"]
+    with pytest.raises(Exception):
+        off.authorize_url("http://localhost:1/cb")

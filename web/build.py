@@ -22,8 +22,10 @@ SERVER_ONLY = {"browser.html", "connect.html", "js/package.json"}
 
 
 def build(out: Path) -> dict:
-    if out.exists():
-        shutil.rmtree(out)
+    if out.exists():  # keep the Vercel project link (.vercel) so deploys from out/ stay on one project
+        for child in out.iterdir():
+            if child.name != ".vercel":
+                shutil.rmtree(child) if child.is_dir() else child.unlink()
     files = []
     for src in sorted(APP.rglob("*")):
         rel = src.relative_to(APP).as_posix()

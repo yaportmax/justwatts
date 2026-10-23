@@ -8,19 +8,22 @@ rule-based coach, and keeps your history: NP, TSS, zones, intervals, trends. It 
 computer, with no account and no API keys. The trainer connection lives in a small local server,
 so reloading or closing the browser never drops the trainer or the ride.
 
-![demo](docs/demo.gif)
-<!-- placeholder: record a 20 s GIF of a ride and save it as docs/demo.gif -->
+Try it in the browser, no install: **[openspin.maxyaport.com](https://openspin.maxyaport.com)** (Chrome or
+Edge, Web Bluetooth; rides stay in the browser, no uploads). The local app below adds Garmin and Strava
+upload, voice, agent coaching, and a trainer connection that survives closing the tab.
 
 ## Quick start
 
 Needs Python 3.10+ and a computer with Bluetooth LE. Any modern browser works for the page.
 
 ```sh
-pipx install openspin            # or: pip install openspin
+git clone https://github.com/yaportmax/openspin
+cd openspin
+pip install -e .
 openspin serve
 ```
 
-From a clone: `pip install -e .` in the repo. Open http://127.0.0.1:8765, press **Connect trainer**,
+Open http://127.0.0.1:8765, press **Connect trainer**,
 pick it from the scan list. The server remembers it and reconnects by itself. A trainer accepts one
 controller at a time: close Zwift or any other app using it first. `start.cmd` (Windows) or
 `./start.sh` (macOS, Linux) starts the server and opens the browser.
@@ -47,7 +50,7 @@ No trainer? Press **Sim** in the header.
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.
-- **Uploads** (optional): Garmin Connect, and Strava direct through your own Strava API app.
+- **Uploads** (optional): Garmin Connect, and Strava direct with one click.
 - **Robust**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
 - `browser.html` keeps an older single-tab Web Bluetooth mode as a fallback (Chrome or Edge).
 
@@ -72,9 +75,13 @@ yourself; **Import from Garmin** in Settings redoes it). It uses the unofficial
 break at any time. Garmin is only active for the default data dir; `OPENSPIN_GARMIN=off` or
 `serve --no-garmin` disables it, and any other `OPENSPIN_DATA` has it off unless `OPENSPIN_GARMIN=on`.
 
-**Strava** (no extra needed). Create an API app at strava.com/settings/api with Authorization Callback
-Domain `localhost`. In Settings, enter its Client ID and Client Secret (kept only in your data folder,
-never shown again) and press **Connect Strava**. Uploads go through the official API with the FIT file,
+**Strava** (no extra needed). Press **Connect Strava** in Settings and approve on Strava. This uses
+OpenSpin's Strava app: its client secret is not in this repo, it lives only in a tiny stateless token
+service ([web/api/strava/token.js](web/api/strava/token.js)) that swaps the sign-in code and refresh
+tokens for access tokens. Uploads go straight from your computer to Strava; tokens stay in your data
+folder. To skip the token service, open **Use your own Strava API app** in Settings and enter your own
+Client ID and secret (strava.com/settings/api, callback domain `localhost`), or host the function
+yourself and set `OPENSPIN_STRAVA_RELAY` and `OPENSPIN_STRAVA_CLIENT_ID`. Uploads go through the official API with the FIT file,
 the ride name and a text summary (NP, IF, TSS, intervals, "Recorded with OpenSpin"). If Garmin
 Connect already syncs to Strava for you, uploading to both makes duplicates: pick one.
 
@@ -152,6 +159,8 @@ plus an `X-HW: 1` header; local tools use a bearer token from a 0600 file. Detai
 | `OPENSPIN_TOKEN` | from `<data>/token` | API token for CLI/MCP |
 | `OPENSPIN_GARMIN` | auto | `off` disables Garmin, `on` forces it for a non-default data dir |
 | `OPENSPIN_BLE` | `on` | `off` disables Bluetooth |
+| `OPENSPIN_STRAVA_RELAY` | openspin.maxyaport.com | Strava token service for the shared app; `off` allows only your own API app |
+| `OPENSPIN_STRAVA_CLIENT_ID` | `168528` | Strava client ID used with that token service |
 | `OPENSPIN_MAX_CHANGE_PCT`, `OPENSPIN_MAX_PCT`, `OPENSPIN_FEEL_GATE_PCT`, `OPENSPIN_FEEL_WINDOW_S`, `OPENSPIN_STALE_S`, `OPENSPIN_MAX_INSERT_S`, `OPENSPIN_MAX_EXTEND_S` | 15, 150, 105, 600, 15, 1800, 600 | agent guard rails |
 
 Older `HW_*` and `TC_*` names still work, and a `~/.trainer-coach` data dir from earlier versions
@@ -174,6 +183,10 @@ off, and check that a full ride works with none of the optional extras installed
 - Import past rides from Garmin and Strava
 - Push planned workouts to a calendar (Garmin, intervals.icu, TrainingPeaks)
 - ANT+ FE-C via a USB bridge
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the threat model and how to report a vulnerability.
 
 ## License
 

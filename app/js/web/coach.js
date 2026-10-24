@@ -1,7 +1,7 @@
 // Built-in rule coach for the web build: a port of LocalCoach in server/openspin/agent_gate.py.
 import { parseLine } from './lines.js';
 
-const DEFAULTS = { enabled: true, countdown: true, cadence: true, recap: true, recovery: true, auto_adjust: 'no_agent', easier_pct: 5, harder_pct: 3, hr_cap_pct: 5 };
+const DEFAULTS = { enabled: false, countdown: true, cadence: true, recap: true, recovery: true, auto_adjust: 'no_agent', easier_pct: 5, harder_pct: 3, hr_cap_pct: 5 };
 const spokenDur = s => { const m = Math.floor(s / 60), x = s % 60; return m && x ? `${m} minute${m !== 1 ? 's' : ''} ${x} seconds` : m ? `${m} minute${m !== 1 ? 's' : ''}` : `${x} seconds`; };
 
 export class LocalCoach {

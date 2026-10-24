@@ -563,7 +563,8 @@ function download(name, data, type) {
 
 
 /* ---------- settings tab ---------- */
-const LC_DEFAULTS = { enabled: true, countdown: true, cadence: true, recap: true, recovery: true, auto_adjust: 'no_agent' };
+const LC_DEFAULTS = { enabled: !WEB,  // the web build starts with the coach off
+  countdown: true, cadence: true, recap: true, recovery: true, auto_adjust: 'no_agent' };
 let strava = {};
 async function renderSettings() {
   const lc = { ...LC_DEFAULTS, ...(settings.localCoach || {}) }, cr = settings.cadRange || [85, 95];

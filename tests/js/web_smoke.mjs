@@ -83,6 +83,8 @@ const out = {};
 let hw = await boot(1);
 out.mode = hw.mode; out.webClass = document.body.classList.contains('web');
 out.notice = $('#webNotice').style.display;            // no navigator.bluetooth in node
+out.coachDefault = hw.backend.coach.cfg().enabled;  // the web build starts with the coach off
+hw.backend.updateSettings({ localCoach: { enabled: true } });
 $('#btnSim').click();
 await until(() => hw.state().devices.trainer === 'sim', 'sim');
 $('#bText').value = '1m 50%, 2m 100%'; $('#bName').value = 'Web ride';

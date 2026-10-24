@@ -78,12 +78,24 @@ curl -s -H "Authorization: Bearer $(cat ~/.openspin/token)" http://127.0.0.1:876
 ### Ride control actions
 
 `load {workout: {name, text, test?} | null}` (null = free ride; finishes a started ride first),
-`start`, `hold` (pause), `resume`, `pause` (toggle), `skip`, `save` (archive the ride so far, keep
-riding), `end` (finish and save), `adjust {dir: 1|-1}` (intensity 1 %, or grade 0.5 % / 5 W /
-level 0.5 in free ride), `intensity {percent: 50..150}`, `mode {m: g|w|r}`,
-`free {m: g|w|r, value}` (free ride grade %, ERG watts or FTMS resistance level 0..25),
-`edit {edit: {...}}` (same edits as the coach API), `feel {feel: easier|good|harder}`,
-`dismiss` (clears `notice`).
+`start`, `hold` (pause; during an auto-pause it makes the pause stick), `resume`, `pause` (toggle),
+`skip`, `back` (restart the current step, or in its first 10 s ride the previous one again; inserts
+copies, time only moves forward; after the plan it rides the last step again), `save` (archive the
+ride so far, keep riding), `end` (finish and save), `adjust {dir: 1|-1, big?}` (intensity 1 %, or
+grade 0.5 % / 5 W / level 0.5 when the trainer is not following the plan in ERG; `big` is 5 times
+that), `intensity {percent: 50..150}`, `target {w | delta, step?}` (a step's watts as the trainer
+gets them now, default the current step; free ride: ERG watts), `mode {m}` (free ride `g|w|r`;
+workout `e` = ERG follows the plan, `g` or `r` = ERG off, the rider sets grade or level and the plan
+still shows and records its target), `free {m: g|w|r, value}` (grade %, ERG watts or FTMS level
+0..25; in a workout `g` or `r` only), `edit {edit: {...}}` (the coach API edits plus `rest`),
+`feel {feel: easier|good|harder}`, `dismiss` (clears `notice`).
+
+Free steps and a flat finish (`afterWorkout: grade0`) ride by grade, and +/- moves that grade.
+FTP tests refuse `adjust` and `intensity` in ERG (their targets are fixed).
+
+Controls from the page are the rider's: each target or plan change writes a `MANUAL <what>` line
+(edits write their `EDIT` line), sets `ride.manual` and is echoed as `did` in the response. Token
+holders (CLI, agents) get the same controls without `MANUAL` lines.
 
 When the planned workout ends the ride does not stop: it writes `WORKOUT DONE`, sets
 `ride.overtime`, keeps recording and holds the last target (`afterWorkout: hold`) or rides flat at
@@ -98,7 +110,8 @@ delivered by `/api/agent-events`, so with no agent there are no wakes.
 
 Every event line still goes to `events.log`. The agent stream keeps only: `step_start`, `step_end`,
 `feel`, `said`, `paused`, `resumed`, `ride_start`, `ride_end`, `ride_resumed`, `workout_done`,
-`edit` (not the agent's own edits), `alert` (`hr_cap`, `zone_jump`, `cadence_low`, `power_dev`,
+`edit` (not the agent's own edits), `manual` (the rider's changes; repeated presses of one control in a
+batch become one event with the final value), `alert` (`hr_cap`, `zone_jump`, `cadence_low`, `power_dev`,
 `trainer_lost`, `trainer_back`, `hr_lost`) and `status` (at most one per `status_every_s` of quiet
 riding). Events within `coalesce_s` form one batch; each batch counts as one agent wake in
 `ride.agent.wakes`. Tunables in `settings.agentGate`: `coalesce_s` 5, `status_every_s` 180,
@@ -121,8 +134,8 @@ lines, which the gate drops.
   always important. Voice mode (`settings.voiceMode`: all, important, silent) is changed by the Mute
   button, the verbosity menu, an agent, or saying "mute" / "quiet" / "stop talking" ("unmute",
   "you can talk" to undo).
-- `set {step, w}`: step is 1-based or `"cur"`; `w` integer 0..2000. Flattens the step to `w` watts. The
-  athlete's intensity multiplier still applies. Free steps ignore it.
+- `set {step, w}`: step is 1-based or `"cur"`; `w` integer 0..2000. Flattens the step to `w` watts as the
+  trainer gets them now; later intensity changes still scale it. Free steps ignore it.
 - `edit`: changes the workout itself; the timeline, totals, later step numbers and the chart update.
 
 | op | Fields | Effect |
@@ -133,6 +146,7 @@ lines, which the gate drops.
 | `duration` | `step`, `seconds` | sets a step's length (the current step never ends in the past) |
 | `extend` | `seconds` (+/-) | lengthens or shortens the current step |
 | `total` | `seconds`, `how` (`last` or `scale`) | sets the planned total: `last` changes the last block (dropping trailing steps when needed), `scale` stretches every remaining step |
+| `rest` | `steps` (may be empty), `after` (optional: the step the text was based on) | ride control only: replaces every step after the current one; empty ends the plan after it; after the plan it adds steps now. A stale `after` is refused |
 
 Edits apply to the server ride before the command is queued, so errors return `400` and nothing is
 stored. Only the current and later steps can be edited. Overrides move with their steps. Each edit
@@ -167,19 +181,23 @@ writes an `EDIT ...` event line.
     "id": "r-1767250800000", "name": "VO2 5x3", "text": "12m 40-75%, ...", "mode": "workout",
     "started": true, "paused": false, "auto_paused": false, "elapsed_s": 1834, "el": 1834.0,
     "ftp": 200, "intensity": 1.0, "test": false, "target_w": 230, "grade": null, "jr": {"m": "g", "g": 0, "w": 120},
-    "samples": 1834, "ov": {"6": 275},
+    "samples": 1834, "ov": {"6": 275}, "control": "k", "manual": {"what": "intensity", "step": null, "ts": 1767252600000, "ago_s": 12},
     "last30": {"power": 229, "cadence": 88, "hr": 158, "hr_delta": 6},
     "total_s": 3180,
     "step": {"index": 7, "count": 15, "duration_s": 180, "into_s": 61, "left_s": 119, "free": false},
     "steps": [{"index": 1, "start_s": 0, "duration_s": 720, "free": false, "start_w": 80, "end_w": 150,
-               "planned": {"a": 0.4, "b": 0.75, "unit": "%"}, "override_w": null}]
+               "planned": {"a": 0.4, "b": 0.75, "unit": "%"}, "override_w": null, "manual": false}]
   }
 }
 ```
 
 - `devices.trainer`: `none`, `wait` (connecting or reconnecting), `ble`, `sim`.
 - `ride` is null when nothing is loaded. `mode`: `workout`, `erg` or `grade` (free ride).
-- `steps` is the live list after overrides and edits; `start_w`/`end_w` are resolved watts.
+- `steps` is the live list after overrides and edits; `start_w`/`end_w` are resolved watts; `manual`
+  marks a step the rider set by hand.
+- `control`: what the trainer follows and +/- changes: `k` (ERG at plan times intensity), `w` (ERG
+  watts), `g` (grade), `r` (level). `jr.wm` is the workout trainer mode (`e`, `g`, `r`).
+- `manual`: the rider's last change by hand, or null.
 - `source` is `server`, or `page`/`sim` when a browser-mode page or the headless simulator posts state.
 
 ## Event lines
@@ -198,7 +216,8 @@ writes an `EDIT ...` event line.
 | `resumed` | `RESUMED` | |
 | `ride_resumed` | `RIDE RESUMED after <reload\|restart> at T+<el> (<n> samples kept)` | after, elapsed_s, samples |
 | `ride_end` | `RIDE END <el>` | elapsed_s |
-| `edit` | `EDIT <insert\|replace\|delete\|end\|duration> ... \| <n> steps, <total>` | op, detail, steps, total_s |
+| `edit` | `EDIT <insert\|replace\|delete\|end\|duration\|rest> ... \| <n> steps, <total>` | op, detail, steps, total_s |
+| `manual` | `MANUAL intensity 105%`, `target step 3 250W`, `skip step 3`, `back step 2`, `mode erg\|grade\|level`, `grade 2.5%`, `erg 180W`, `level 6.0` | action, detail |
 | `coach` | `COACH <seq> \| set <step> <w>W \| edit ... \| msg <text>` | seq, set, msg |
 | `cue` (type `other`) | `CUE <text>` (local coach) | |
 | `workout_done` | `WORKOUT DONE at T+<el>, riding free until End` | elapsed_s |

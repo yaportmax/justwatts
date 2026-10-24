@@ -35,10 +35,10 @@ No trainer? Press **Sim** in the header.
 - **Workouts**: library, a builder with a text format (`10m 45-75%, 5x(3m 115%, 3m 50%), 10m free`),
   .zwo import and export, an FTP ramp test.
 - **Ride modes**: structured ERG workouts, free ride by grade (simulation), ERG watts or FTMS
-  resistance level. When the plan ends you keep riding free until you press End. Pause, Save (to
-  History, keeps riding), End (two taps), intensity +/-, workout length +/-5 min, skip.
-- **Change the workout while riding**: add reps, drop a rep, lengthen a recovery, change the total
-  length.
+  resistance level. When the plan ends you keep riding free until you press End.
+- **Full control by hand, mid-ride**: everything the built-in coach or an agent can change, you can
+  too, in one or two taps (see [Ride controls](#ride-controls)). Your change wins: the coaches see it
+  and hold off.
 - **Built-in coach** (no agent needed): interval start and 10 s countdown, rep recaps, recovery heart
   rate, cadence reminders, and safe automatic adjustments: Easier lowers the step 5% FTP, Harder
   raises it 3% (not in HR zone 5), 30 s over your HR cap eases it 5%. Each cue can be turned off in
@@ -53,6 +53,31 @@ No trainer? Press **Sim** in the header.
 - **Uploads** (optional): Garmin Connect, and Strava direct with one click.
 - **Robust**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
 - `browser.html` keeps an older single-tab Web Bluetooth mode as a fallback (Chrome or Edge).
+
+## Ride controls
+
+Common actions sit on the ride screen; the rest are in **Adjust**. Each change shows what changed,
+and intensity, watts, step time, length, trainer mode and settings can be undone for 15 s.
+
+| Control | Where | Key |
+|---|---|---|
+| Pause, resume (Pause during an auto-pause stays paused) | bar | Space |
+| Intensity ±1 % (grade, watts or level when not in ERG) | bar −/+ | ↑ ↓ (Shift ±5) |
+| Back (restart step; in its first 10 s, the previous one), Skip | bar | ← → |
+| Step time ±1 min (±30 s in Adjust) | bar | [ ] |
+| Step watts ±5/±10 | Adjust | - = |
+| Intensity presets, reset to 100 % | Adjust | |
+| Workout length ±5 min | Adjust | |
+| Trainer: ERG, or ERG off by grade or level (the plan keeps showing) | Adjust | 1 2 3 |
+| Next steps: edit the rest of the plan as text | Adjust | |
+| After the plan: hold the last target or ride flat | Adjust | |
+| Cadence range, built-in coach on/off, beeps | Adjust | |
+| Mute, voice level, Easier/Good/Harder | coach bar | M |
+| Undo, Save, End (two taps) | bar | Z, S |
+| Reconnect trainer or HR | header | |
+
+`?` shows the keys. Free steps and a flat finish ride by grade, and −/+ moves it. FTP tests keep
+their targets.
 
 ## Supported hardware
 
@@ -161,7 +186,7 @@ plus an `X-HW: 1` header; local tools use a bearer token from a 0600 file. Detai
 | `OPENSPIN_BLE` | `on` | `off` disables Bluetooth |
 | `OPENSPIN_STRAVA_RELAY` | openspin.maxyaport.com | Strava token service for the shared app; `off` allows only your own API app |
 | `OPENSPIN_STRAVA_CLIENT_ID` | `168528` | Strava client ID used with that token service |
-| `OPENSPIN_MAX_CHANGE_PCT`, `OPENSPIN_MAX_PCT`, `OPENSPIN_FEEL_GATE_PCT`, `OPENSPIN_FEEL_WINDOW_S`, `OPENSPIN_STALE_S`, `OPENSPIN_MAX_INSERT_S`, `OPENSPIN_MAX_EXTEND_S` | 15, 150, 105, 600, 15, 1800, 600 | agent guard rails |
+| `OPENSPIN_MAX_CHANGE_PCT`, `OPENSPIN_MAX_PCT`, `OPENSPIN_FEEL_GATE_PCT`, `OPENSPIN_FEEL_WINDOW_S`, `OPENSPIN_STALE_S`, `OPENSPIN_MAX_INSERT_S`, `OPENSPIN_MAX_EXTEND_S`, `OPENSPIN_MANUAL_HOLD_S` | 15, 150, 105, 600, 15, 1800, 600, 60 | agent guard rails |
 
 Older `HW_*` and `TC_*` names still work, and a `~/.trainer-coach` data dir from earlier versions
 moves to `~/.openspin` on first start.

@@ -153,6 +153,10 @@ The MCP tools enforce these and refuse with a reason; follow the same rules over
 - Raising any step above 105% FTP (`OPENSPIN_FEEL_GATE_PCT`) needs a FEEL HARDER or GOOD from the athlete
   in the last 10 min (`OPENSPIN_FEEL_WINDOW_S`). Ask for it with a message first.
 - Never raise while paused. Lowering is always allowed.
+- The athlete's own changes win. After any change by hand (a `MANUAL ...` or an `EDIT` line you did not
+  make), target changes and edits are refused for 60 s (`OPENSPIN_MANUAL_HOLD_S`), and a step the athlete
+  set by hand (`steps[].manual`) is theirs: ask before touching it. Read the change as a signal: they
+  lowered it, it was too hard.
 - Do not change targets if state is older than 15 s (`OPENSPIN_STALE_S`): the page is closed or asleep.
 - Ramp FTP tests (`test: true`) are not coached: do not change targets, messages only.
 - Lowering is the safe direction. When unsure, lower or do nothing.
@@ -162,6 +166,6 @@ The MCP tools enforce these and refuse with a reason; follow the same rules over
 ## How targets apply
 
 - `set_step_target(n, w)` overrides step `n` (1-based) to a flat `w` watts; ramps become flat.
-- The athlete's own +/- intensity (shown as `intensity` in state) still multiplies overrides.
+  `w` is what the trainer gets now; later +/- intensity presses (shown as `intensity`) still scale it.
 - Overrides survive a page reload (stored with the in-progress ride).
 - Overriding a step that already ended does nothing.

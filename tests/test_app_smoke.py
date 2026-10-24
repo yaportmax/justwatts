@@ -121,6 +121,6 @@ def test_page_reload_at_any_moment(node, srv, moment):
                  "overtime": "Workout done · riding free"}[moment]
         assert out["badge"] == badge
         assert out["start"] == ("" if moment == "loaded" else "none")
-        assert out["pause"] == ("Resume" if moment in ("paused", "auto_paused") else "Pause")
+        assert out["pause"] == ("Resume" if moment == "paused" else "Pause")  # auto-paused: Pause makes it stick
     after = json.dumps(eng.state({}, [])["ride"], sort_keys=True, default=str)
     assert before == after, "booting a page must not change the ride"

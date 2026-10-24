@@ -86,14 +86,15 @@ export class Engine {
       adjust: this.adjust, mode: this.setMode, intensity: this.setIntensity, free: this.setFree, target: this.setTarget, feel: this.feel, save: this.saveCopy,
       dismiss: () => { this.notice = null; }, edit: b => this.edit(b.edit || {}) }[action];
     if (!fn) throw new Error(`unknown action ${action}`);
-    this.src = 'manual';   // in the web build every control comes from the rider's page
+    this.src = 'manual'; this.did = null;   // in the web build every control comes from the rider's page
     let res; try { res = fn.call(this, body) || {}; } finally { this.src = 'api'; }
+    if (this.did) res = { ...res, did: this.did };   // the page confirms exactly what changed
     this.save(); this.bump(); return res;
   }
   // a target or plan change by the rider: logged as a MANUAL line and remembered (coaches hold off)
   changed(what, step = null) {
     const r = this.ride; if (!r || this.src !== 'manual') return;
-    r.manual = { what: what.split(' ')[0], step, ts: this.wall() }; this.log(`MANUAL ${what}`);
+    r.manual = { what: what.split(' ')[0], step, ts: this.wall() }; this.did = what; this.log(`MANUAL ${what}`);
   }
   jrText(m) { const v = this.ride.jr[m]; return m === 'g' ? `grade ${(+v).toFixed(1)}%` : m === 'r' ? `level ${(+v).toFixed(1)}` : `erg ${v}W`; }
   load(body) {

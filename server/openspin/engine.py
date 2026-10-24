@@ -316,16 +316,19 @@ class RideEngine:
                   "save": self.save_copy, "edit": lambda b: self.edit(b.get("edit") or {})}.get(action)
             if not fn:
                 raise ValueError(f"unknown action {action!r}")
-            self._src = source
+            self._src, self._did = source, None
             try:
                 res = fn(body) or {}
             finally:
                 self._src = "api"
+            if self._did:
+                res = {**res, "did": self._did}  # the page confirms exactly what changed
             self.save()
             self._bump()
             return res
 
     _src = "api"  # who is calling: set by control() for the duration of one action
+    _did: str | None = None
 
     def _changed(self, what: str, step: int | None = None) -> None:
         """A target or plan change: the rider's own ones are logged as MANUAL lines and remembered."""
@@ -333,6 +336,7 @@ class RideEngine:
         if r is None or self._src != "manual":
             return
         r.manual = {"what": what.split(" ")[0], "step": step, "ts": int(self.wall() * 1000)}
+        self._did = what
         self.log_event(f"MANUAL {what}")
 
     def load(self, body: dict):

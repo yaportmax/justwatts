@@ -258,13 +258,18 @@ $('#btnHR').onclick = () => {
 $('#btnSim').onclick = () => apiJson('/api/devices', { action: 'sim', kind: 'trainer', on: S?.devices?.trainer !== 'sim' }).catch(e => toast(e.message));
 
 /* ---------- ride ---------- */
+let loadArmed = 0;
 function loadRide(w) {
+  // loading ends the ride in progress: a second tap within 4 s confirms
+  if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return; }
+  loadArmed = 0;
   control('load', { workout: w ? { name: w.name, text: w.text, test: !!w.test } : null }).then(() => show('ride')).catch(() => {});
 }
 function rideShell() {
   const on = !!V;
   $('#rideEmpty').style.display = on ? 'none' : ''; $('#rideOn').style.display = on ? '' : 'none';
-  if (on) { $('#jrMode').style.display = V.cw ? 'none' : ''; $('#cSkip').style.display = V.cw ? '' : 'none'; }
+  if (on) { $('#jrMode').style.display = V.cw ? 'none' : ''; $$('.wk').forEach(el => { el.style.display = V.cw ? '' : 'none'; }); }
+  else { sheet(false); undo = null; }
 }
 const curTarget = () => S?.ride?.target_w ?? null;
 let actx = null;
@@ -297,18 +302,17 @@ function renderLive() {
 }
 function renderRide() {
   if (!V) return;
-  const t = curTarget(); $('#lT').textContent = t ?? '–';
-  $('#lTs').textContent = V.cw ? (t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free ride') : V.jr.m === 'w' ? 'ERG' : V.jr.m === 'r' ? `level ${V.jr.r}` : `grade ${V.jr.g}%`;
+  const t = curTarget(), m = S.ride.control; $('#lT').textContent = t ?? '–';
+  $('#lTs').textContent = V.cw ? (V.jr.wm && V.jr.wm !== 'e' ? 'ERG off · ' + valText(m) : t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free · ' + valText(m)) : m === 'w' ? 'ERG' : valText(m);
   $('#lE').textContent = fmtT(V.el);
   $('#rName').textContent = V.name;
   const st = !V.started ? ['Ready', ''] : V.auto ? ['Start pedaling', 'warn'] : V.paused ? ['Paused', 'warn'] : S.ride.overtime ? ['Workout done · riding free', 'done'] : ['Riding', ''];
   $('#rState').textContent = st[0]; $('#rState').className = 'badge ' + st[1];
   $('#cStart').style.display = V.started ? 'none' : ''; $('#cPause').style.display = V.started ? '' : 'none';
-  $('#cPause').textContent = V.paused ? 'Resume' : 'Pause';
+  $('#cPause').textContent = V.paused && !V.auto ? 'Resume' : 'Pause';  // auto-paused: Pause makes it stick
   $('#cSave').style.display = V.started ? '' : 'none';
-  $('#lenAdj').style.display = V.cw ? '' : 'none';
-  if (V.cw) $('#cLen').textContent = fmtT(S.ride.total_s);
-  $('#cAdj').textContent = V.cw ? Math.round(V.k * 100) + '%' : V.jr.m === 'w' ? V.jr.w + ' W' : V.jr.m === 'r' ? 'Level ' + (+V.jr.r).toFixed(1) : (+V.jr.g).toFixed(1) + '%';
+  $('#cAdj').textContent = m === 'k' ? Math.round(V.k * 100) + '%' : m === 'w' ? V.jr.w + ' W' : valText(m).replace(/^\w/, c => c.toUpperCase());
+  $('#adjBox').style.display = V.test && m === 'k' ? 'none' : '';  // an FTP test keeps its targets
   $$('#jrMode button').forEach(b => b.classList.toggle('on', b.dataset.m === V.jr.m));
   const kk = V.test ? 1 : V.k;
   if (V.cw) {
@@ -328,19 +332,164 @@ function renderRide() {
   const cwDraw = V.cw && V.el > V.cw.total ? { ...V.cw, total: V.el * 1.02 } : V.cw;
   if ($('#v-ride').classList.contains('on')) drawChart($('#rideChart'), { cw: cwDraw, ftp: V.ftp, samples, el: V.el, k: kk });
   wake(V.started);
+  renderAdjust(); renderUndo();
 }
+const valText = m => m === 'r' ? `level ${(+V.jr.r).toFixed(1)}` : m === 'w' ? `${V.jr.w} W` : `grade ${(+V.jr.g).toFixed(1)}%`;
+
+/* ---------- ride controls: everything a coach or an agent can change, by hand, mid-ride ---------- */
+// Each control is one request; the engine applies it at once, logs it as a MANUAL line (coaches see
+// it and hold off) and echoes what changed. Cheap inverses become a 15 s Undo.
+let undo = null;
+function renderUndo() {
+  const b = $('#cUndo'), on = !!undo && Date.now() < undo.until;
+  if (!on) undo = null;
+  b.style.display = on ? '' : 'none'; b.textContent = on ? 'Undo ' + undo.label : 'Undo'; b.title = 'Undo (Z)';
+}
+function doUndo() {
+  const u = undo; if (!u || Date.now() > u.until) return;
+  undo = null; renderUndo();
+  Promise.resolve(u.run()).then(() => toast('Undone')).catch(() => {});
+}
+const didText = d => d.replace(/^target step (\d+) (\d+)W$/, 'Step $1: $2 W').replace(/^skip step (\d+)$/, 'Skipped step $1')
+  .replace(/^back step (\d+)$/, 'Again: step $1').replace(/^mode (\w+)$/, 'Trainer: $1').replace(/^erg (\d+)W$/, '$1 W').replace(/^\w/, c => c.toUpperCase());
+function act(action, body = {}, undoLabel = null, inverse = null, say = null) {
+  return control(action, body).then(j => {
+    toast(say ? say(j) : j.did ? didText(j.did) : j.detail || 'Done');
+    if (inverse) { undo = { label: undoLabel, run: inverse, until: Date.now() + 15000 }; renderUndo(); setTimeout(renderUndo, 15100); }
+    flash(); return j;
+  }).catch(() => {});
+}
+function flash() { for (const id of ['#adjBox', '#tgtTile']) { const el = $(id); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 700); } }
+const R = () => S?.ride;
+const curStep = () => R()?.step?.index ?? null;
+// +/-: intensity in ERG, else the grade, watts or level the trainer follows
+function plusMinus(dir, big) {
+  const r = R(); if (!r) return;
+  const m = r.control, d = dir * (big ? 5 : 1);
+  if (m === 'k') { const k0 = r.intensity; return act('adjust', { dir, big }, Math.round(k0 * 100) + '%', () => control('intensity', { percent: Math.round(k0 * 100) })); }
+  const v0 = r.jr[m]; return act('adjust', { dir: d > 0 ? 1 : -1, big }, valText(m), () => control(m === 'w' ? 'target' : 'free', m === 'w' ? { w: v0 } : { m, value: v0 }));
+}
+function setIntensity(p) { const r = R(); if (!r) return; const k0 = r.intensity; return act('intensity', { percent: p }, Math.round(k0 * 100) + '%', () => control('intensity', { percent: Math.round(k0 * 100) })); }
+function stepWattsBy(delta) {
+  const r = R(); if (!r) return;
+  if (!V.cw) return r.control === 'w' ? act('target', { delta }, r.jr.w + ' W', () => control('target', { w: r.jr.w })) : null;
+  if (!r.step || r.step.free || r.target_w == null) { toast('No ERG target in this step'); return; }
+  const i = r.step.index, w0 = r.target_w;
+  return act('target', { step: i, delta }, w0 + ' W', () => control('target', { step: i, w: w0 }));
+}
+function stepTimeBy(sec) {
+  const r = R(); if (!r?.step) { toast('Workout done'); return; }
+  const i = r.step.index, d0 = r.step.duration_s;
+  return act('edit', { edit: { op: 'extend', seconds: sec } }, 'step time', () => control('edit', { edit: { op: 'duration', step: i, seconds: d0 } }),
+    j => `Step ${i}: ${j.detail?.match(/-> (\S+)$/)?.[1] ?? ''}`);
+}
+function lengthBy(d) {
+  const r = R(); if (!r?.total_s) return;
+  if (!r.step) { toast('Workout done: add next steps'); return; }
+  const t0 = r.total_s;
+  return act('edit', { edit: { op: 'total', seconds: Math.max(1, t0 + d), how: 'last' } }, 'length', () => control('edit', { edit: { op: 'total', seconds: t0, how: 'last' } }),
+    j => 'Workout ' + fmtT(j.total_s));
+}
+function setMode(m) {
+  const r = R(); if (!r) return;
+  if (V.cw) m = m === 'w' ? 'e' : m; else if (m === 'e') m = 'w';
+  const m0 = V.cw ? (r.jr.wm || 'e') : r.jr.m;
+  if (m === m0) return;
+  return act('mode', { m }, 'trainer', () => control('mode', { m: m0 }));
+}
+const skipAct = () => V?.cw && act('skip');
+const backAct = () => V?.cw && act('back');
+const pauseAct = () => V && control(!V.started ? 'start' : V.paused && !V.auto ? 'resume' : 'hold').catch(() => {});
+function setSetting(key, val, label) {
+  const old = JSON.parse(JSON.stringify(settings[key] ?? null));
+  settings[key] = val; saveSettings([key]); renderAdjust(); renderLive();
+  undo = { label, run: () => { settings[key] = old; saveSettings([key]); renderAdjust(); renderLive(); }, until: Date.now() + 15000 }; renderUndo();
+}
+const lcOn = () => ({ ...LC_DEFAULTS, ...(settings.localCoach || {}) }).enabled;
+
 $('#cStart').onclick = () => control('start').catch(() => {});
-$('#cPause').onclick = () => control(V?.paused ? 'resume' : 'hold').catch(() => {});
+$('#cPause').onclick = pauseAct;
 $('#cSave').onclick = () => control('save').then(j => toast(`Saved to History (${fmtT(j.samples)})`)).catch(() => {});
-$('#cShorter').onclick = () => changeLength(-300);
-$('#cLonger').onclick = () => changeLength(300);
-function changeLength(d) {
-  const r = S?.ride; if (!r?.total_s) return;
-  control('edit', { edit: { op: 'total', seconds: Math.max(1, r.total_s + d), how: 'last' } }).then(() => toast(`Workout ${d > 0 ? 'longer' : 'shorter'}: ${fmtT(Math.max(r.el, r.total_s + d))}`)).catch(() => {});
+$('#cShorter').onclick = () => lengthBy(-300);
+$('#cLonger').onclick = () => lengthBy(300);
+$('#cSkip').onclick = skipAct;
+$('#cBack').onclick = backAct;
+$('#cMinus').onclick = () => plusMinus(-1);
+$('#cPlus').onclick = () => plusMinus(1);
+$('#cStepShort').onclick = () => stepTimeBy(-60);
+$('#cStepLong').onclick = () => stepTimeBy(60);
+$('#cUndo').onclick = doUndo;
+$('#cMore').onclick = () => sheet();
+$('#cKeys').onclick = () => $('#keysModal').classList.add('on');
+$('#keysClose').onclick = () => $('#keysModal').classList.remove('on');
+
+// the Adjust sheet: one tap opens it, one tap applies
+let nextBase = null, nextDirty = false;
+function sheet(on = !$('#adjPanel').classList.contains('on')) {
+  $('#adjPanel').classList.toggle('on', !!on && !!V);
+  if (on && V) { nextDirty = false; renderAdjust(); }
 }
-$('#cSkip').onclick = () => control('skip').catch(() => {});
-$('#cMinus').onclick = () => control('adjust', { dir: -1 }).catch(() => {});
-$('#cPlus').onclick = () => control('adjust', { dir: 1 }).catch(() => {});
+function nextText() {
+  const r = R(); if (!V?.cw) return ['', null];
+  if (!r.step) return ['', null];  // after the plan: anything typed here is added now
+  return [toText(V.cw.steps.slice(r.step.index).map(({ t0, ...x }) => x)), r.step.index];
+}
+function renderAdjust() {
+  if (!V || !$('#adjPanel').classList.contains('on')) return;
+  const r = R(), m = r.control, wk = !!V.cw;
+  $('#rowInt').style.display = wk && !V.test ? '' : 'none';
+  $('#aInt').textContent = Math.round(V.k * 100) + '%';
+  const tgtOk = wk && r.step && !r.step.free && r.target_w != null;
+  $('#rowTgt').style.display = tgtOk ? '' : 'none';
+  $('#aTgt').textContent = tgtOk ? r.target_w + ' W' : '–';
+  $('#rowStep').style.display = wk && r.step ? '' : 'none';
+  $('#aStep').textContent = r.step ? fmtT(r.step.left_s) + ' left' : '–';
+  $('#cLen').textContent = r.total_s ? fmtT(r.total_s) : '–';
+  const cur = wk ? (V.jr.wm || 'e') : V.jr.m;
+  $$('#aMode button').forEach(b => { const v = b.dataset.v; b.style.display = (wk ? v !== 'w' : v !== 'e') ? '' : 'none'; b.classList.toggle('on', v === cur); });
+  $('#rowVal').style.display = m === 'k' ? 'none' : '';
+  $('#aValL').textContent = { g: 'Grade', w: 'Watts', r: 'Level' }[m] || '';
+  $('#aVal').textContent = m === 'k' ? '' : valText(m).replace(/^(grade|level) /, '');
+  if (!nextDirty) { const [txt, base] = nextText(); $('#aNext').value = txt; nextBase = base; $('#aNextErr').textContent = ''; }
+  else if (nextBase != null && curStep() !== nextBase) { $('#aNextErr').textContent = 'Step changed. Reset to see the new plan.'; }
+  $$('#aAfter button').forEach(b => b.classList.toggle('on', b.dataset.v === (settings.afterWorkout || 'hold')));
+  const [lo, hi] = settings.cadRange || [85, 95];
+  $('#aCadLo').textContent = lo; $('#aCadHi').textContent = hi;
+  $$('#aCoach button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!lcOn()));
+  $$('#aBeeps button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!settings.beeps));
+}
+$('#aNext').oninput = () => { nextDirty = true; $('#aNextErr').textContent = ''; };
+function applyNext() {
+  const txt = $('#aNext').value.trim();
+  if (txt) { try { parseWorkout(txt); } catch (e) { $('#aNextErr').textContent = e.message; return; } }
+  const body = { op: 'rest', steps: txt }; if (nextBase != null) body.after = nextBase;
+  return control('edit', { edit: body }).then(j => { nextDirty = false; toast(txt ? `Next steps set · ${fmtT(j.total_s)}` : 'Plan ends after this step'); renderAdjust(); })
+    .catch(e => { $('#aNextErr').textContent = e.message; });
+}
+$('#adjPanel').onclick = e => {
+  const b = e.target?.closest?.('[data-a]'); if (!b || !V) return;
+  const a = b.dataset.a, v = b.dataset.v;
+  if (a === 'close') return sheet(false);
+  if (a === 'int') return setIntensity(Math.max(50, Math.min(150, Math.round(V.k * 100) + +v)));
+  if (a === 'int0') return setIntensity(100);
+  if (a === 'tgt') return stepWattsBy(+v);
+  if (a === 'ext') return stepTimeBy(+v);
+  if (a === 'back') return backAct();
+  if (a === 'skip') return skipAct();
+  if (a === 'mode') return setMode(v);
+  if (a === 'adj') return plusMinus(+v > 0 ? 1 : -1, Math.abs(+v) > 1);
+  if (a === 'next') return applyNext();
+  if (a === 'nextReset') { nextDirty = false; return renderAdjust(); }
+  if (a === 'after') return setSetting('afterWorkout', v, 'after plan');
+  if (a === 'cad') {
+    const [i, d] = v.split(',').map(Number), cr = [...(settings.cadRange || [85, 95])];
+    cr[i] = Math.max(40, Math.min(130, cr[i] + d));
+    if (cr[0] >= cr[1]) return;
+    return setSetting('cadRange', cr, 'cadence');
+  }
+  if (a === 'coach') return setSetting('localCoach', { ...(settings.localCoach || {}), enabled: v === '1' }, 'coach');
+  if (a === 'beeps') return setSetting('beeps', v === '1', 'beeps');
+};
 // End needs a second tap within 3 s so a stray tap never ends the ride
 let endArmed = 0;
 $('#cEnd').onclick = () => {
@@ -348,13 +497,25 @@ $('#cEnd').onclick = () => {
   endArmed = Date.now(); $('#cEnd').classList.add('confirm'); $('#cEnd').textContent = 'Tap again to end';
   setTimeout(() => { if (endArmed && Date.now() - endArmed >= 3000) { endArmed = 0; $('#cEnd').classList.remove('confirm'); $('#cEnd').textContent = 'End ride'; } }, 3100);
 };
-$$('#jrMode button').forEach(b => b.onclick = () => control('mode', { m: b.dataset.m }).catch(() => {}));
-document.addEventListener('keydown', e => {
-  if (!V || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
-  if (e.code === 'Space') { e.preventDefault(); control(!V.started ? 'start' : V.paused ? 'resume' : 'hold').catch(() => {}); }
-  if (e.code === 'ArrowUp') { e.preventDefault(); control('adjust', { dir: 1 }).catch(() => {}); }
-  if (e.code === 'ArrowDown') { e.preventDefault(); control('adjust', { dir: -1 }).catch(() => {}); }
-});
+$$('#jrMode button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+// keyboard: documented in the "?" overlay (index.html #keysModal) and the README
+const KEYS = {
+  Space: pauseAct, ArrowUp: e => plusMinus(1, e.shiftKey), ArrowDown: e => plusMinus(-1, e.shiftKey),
+  ArrowRight: skipAct, ArrowLeft: backAct, BracketRight: () => stepTimeBy(60), BracketLeft: () => stepTimeBy(-60),
+  Equal: () => stepWattsBy(5), NumpadAdd: () => stepWattsBy(5), Minus: () => stepWattsBy(-5), NumpadSubtract: () => stepWattsBy(-5),
+  Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
+  KeyA: () => sheet(), KeyZ: doUndo, KeyM: () => $('#coachMute').click(), KeyS: () => $('#cSave').click(),
+};
+function onKey(e) {
+  if (e.key === 'Escape') { sheet(false); $('#keysModal').classList.remove('on'); return; }
+  if (!V || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); return doUndo(); }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === '?') { e.preventDefault(); return $('#keysModal').classList.toggle('on'); }
+  const f = KEYS[e.code]; if (!f) return;
+  e.preventDefault(); f(e);
+}
+document.addEventListener('keydown', onKey);
 $$('[data-feel]').forEach(b => b.onclick = () => control('feel', { feel: b.dataset.feel }).then(() => toast('Sent: ' + b.dataset.feel)).catch(() => {}));
 
 /* ---------- coach bar + voice (speech out; Whisper transcripts in) ---------- */

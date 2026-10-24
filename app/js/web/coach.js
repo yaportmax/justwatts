@@ -1,6 +1,7 @@
 // Built-in rule coach for the web build: a port of LocalCoach in server/openspin/agent_gate.py.
 import { parseLine } from './lines.js';
 
+const MANUAL_HOLD_S = 60;
 const DEFAULTS = { enabled: false, countdown: true, cadence: true, recap: true, recovery: true, auto_adjust: 'no_agent', easier_pct: 5, harder_pct: 3, hr_cap_pct: 5 };
 const spokenDur = s => { const m = Math.floor(s / 60), x = s % 60; return m && x ? `${m} minute${m !== 1 ? 's' : ''} ${x} seconds` : m ? `${m} minute${m !== 1 ? 's' : ''}` : `${x} seconds`; };
 
@@ -16,8 +17,11 @@ export class LocalCoach {
   current() {
     const st = this.lastSt || {}, ride = st.ride || {}, step = ride.step;
     if (!ride.started || !step || step.free || !ride.target_w || ride.test) return null;
+    if ((ride.control ?? 'k') !== 'k') return null;  // ERG off: there is no target to adjust
     return [st, ride, step];
   }
+  // the rider changed this step by hand, or changed something in the last 60 s: their call wins
+  riderOwns(ride, step) { return !!(ride.steps?.[step.index - 1]?.manual || (ride.manual && (ride.manual.ago_s || 0) < MANUAL_HOLD_S)); }
   onEvent(line) {
     const c = this.cfg(); if (!c.enabled) return;
     const ev = parseLine(line), t = ev.type;
@@ -48,7 +52,7 @@ export class LocalCoach {
     // HR cap guard
     const cur = this.current(), ath = st.athlete || {}, hr = st.live?.hr || 0;
     const cap = ath.hr_max ? Math.round(ath.hr_max * 0.95) : ath.hr_zones ? ath.hr_zones[4] : null;
-    if (!cur || !cap || !this.mayAdjust(c) || hr < cap) this.hrOverSince = null;
+    if (!cur || !cap || !this.mayAdjust(c) || hr < cap || this.riderOwns(cur[1], cur[2])) this.hrOverSince = null;
     else {
       this.hrOverSince ??= now;
       const [, r, step] = cur;

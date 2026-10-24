@@ -104,7 +104,8 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     ("paused", re.compile(r"^PAUSED(?: \((stopped pedaling)\))?$")),
     ("resumed", re.compile(r"^RESUMED$")),
     ("coach", re.compile(r"^COACH (\d+)((?: \| .*)?)$")),
-    ("edit", re.compile(rf"^EDIT (insert|replace|delete|end|duration) (.*) \| (\d+) steps, {T}$")),
+    ("edit", re.compile(rf"^EDIT (insert|replace|delete|end|duration|rest) (.*) \| (\d+) steps, {T}$")),
+    ("manual", re.compile(r"^MANUAL (\w+)(?: (.*))?$")),
     ("workout_done", re.compile(rf"^WORKOUT DONE at T\+{T}, riding free until End$")),
     ("said", re.compile(r'^SAID(?: \((\w+)\))?: "(.*)"$')),
     ("voice", re.compile(r"^VOICE (ON|OFF|MUTED|UNMUTED)(?: \((\w+)\))?$")),
@@ -153,6 +154,8 @@ def parse_line(line: str) -> dict[str, Any]:
             ev.update(auto=bool(g[1]))
         elif typ == "edit":
             ev.update(op=g[1], detail=f"{g[1]} {g[2]}", steps=int(g[3]), total_s=parse_t(g[4]))
+        elif typ == "manual":
+            ev.update(action=g[1], detail=g[2] or "")
         elif typ == "workout_done":
             ev.update(elapsed_s=parse_t(g[1]))
         elif typ == "said":

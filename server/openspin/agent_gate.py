@@ -34,7 +34,8 @@ LOCAL_DEFAULTS = {"enabled": True, "countdown": True, "cadence": True, "recap": 
                   "auto_adjust": "no_agent", "easier_pct": 5, "harder_pct": 3, "hr_cap_pct": 5}
 
 PASS_TYPES = {"step_start", "step_end", "feel", "said", "paused", "resumed", "ride_start", "ride_end",
-              "ride_resumed", "workout_done", "edit"}
+              "ride_resumed", "workout_done", "edit", "manual"}
+MANUAL_HOLD_S = 60  # after a change by hand, the built-in coach does not auto-adjust for this long
 
 
 class AgentGate:
@@ -76,6 +77,11 @@ class AgentGate:
             if t not in PASS_TYPES:
                 return  # 30 s ticks, coach commands and local cues, voice on/off, Garmin, other
             data = {k: v for k, v in ev.items() if k not in ("raw", "text", "time")}
+            if t == "manual":  # repeated presses of one control (+ + + +) reach the agent as the final value
+                for p in self.pending:
+                    if p["kind"] == "manual" and p["data"].get("action") == ev["action"]:
+                        p.update(text=ev["text"], data=data)
+                        return
             self._add(t, ev["text"], data, now)
 
     def observe(self, st: dict, now: float | None = None) -> None:
@@ -147,7 +153,8 @@ class AgentGate:
                 a["cad_alerted"] = False
         tgt, p3 = ride.get("target_w"), live.get("power_3s")
         step = ride.get("step") or {}
-        if tgt and p3 is not None and ride.get("mode") == "workout" and (step.get("into_s") or 0) >= 10:
+        erg = ride.get("control", "k") == "k"  # with ERG off the rider sets the resistance: no power alerts
+        if erg and tgt and p3 is not None and ride.get("mode") == "workout" and (step.get("into_s") or 0) >= 10:
             dev = (p3 - tgt) / tgt
             if abs(dev) > c["power_dev"]:
                 a.setdefault("pdev_since", now)
@@ -282,7 +289,18 @@ class LocalCoach:
         step = ride.get("step")
         if not ride.get("started") or not step or step.get("free") or not ride.get("target_w") or ride.get("test"):
             return None
+        if ride.get("control", "k") != "k":  # ERG off: there is no target to adjust
+            return None
         return st, ride, step
+
+    @staticmethod
+    def _rider_owns(ride: dict, step: dict) -> bool:
+        """The rider changed this step by hand, or changed something in the last MANUAL_HOLD_S: their call wins."""
+        steps = ride.get("steps") or []
+        if 0 < step["index"] <= len(steps) and steps[step["index"] - 1].get("manual"):
+            return True
+        m = ride.get("manual")
+        return bool(m and (m.get("ago_s") or 0) < MANUAL_HOLD_S)
 
     def _feel(self, feel: str, c: dict) -> None:
         cur = self._current()
@@ -313,6 +331,9 @@ class LocalCoach:
             self.hr_over_since = None
             return
         _, ride, step = cur
+        if self._rider_owns(ride, step):
+            self.hr_over_since = None
+            return
         self.hr_over_since = self.hr_over_since or now
         if now - self.hr_over_since >= 30 and step["index"] not in self.hr_adjusted_steps:
             self.hr_adjusted_steps.add(step["index"])

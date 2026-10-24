@@ -561,7 +561,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(400, {"error": "body must be an object"})
         if p == "/api/ride/control":
             try:
-                res = srv.engine.control(str(body.get("action", "")), body)
+                # the page is the rider (MANUAL lines, wins over coaches); token holders are CLI or agents
+                res = srv.engine.control(str(body.get("action", "")), body, source="api" if self.token_ok() else "manual")
             except ValueError as e:
                 return self.send_json(400, {"error": str(e)})
             return self.send_json(200, {"ok": True, **res})

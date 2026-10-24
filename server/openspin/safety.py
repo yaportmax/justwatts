@@ -7,6 +7,7 @@ Tune with environment variables (percent values are of the athlete's FTP):
   OPENSPIN_FEEL_GATE_PCT    raising a step above this needs a recent FEEL HARDER/GOOD (default 105)
   OPENSPIN_FEEL_WINDOW_S    how recent that feel signal must be, seconds (default 600)
   OPENSPIN_STALE_S          refuse changes if the page state is older than this (default 15)
+  OPENSPIN_MANUAL_HOLD_S    after the athlete changes something by hand, wait this long (default 60)
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ class Limits:
     stale_s: float = field(default_factory=lambda: _env("OPENSPIN_STALE_S", 15))
     max_insert_s: float = field(default_factory=lambda: _env("OPENSPIN_MAX_INSERT_S", 1800))
     max_extend_s: float = field(default_factory=lambda: _env("OPENSPIN_MAX_EXTEND_S", 600))
+    manual_hold_s: float = field(default_factory=lambda: _env("OPENSPIN_MANUAL_HOLD_S", 60))
     recovery_pct: float = 75
 
 
@@ -61,6 +63,18 @@ def recent_feel(events: list[dict], window_s: float, now: float | None = None) -
     return None
 
 
+def check_manual(ride: dict, lim: "Limits", step: int | None = None) -> None:
+    """The athlete's own changes win: no agent change right after one, and none to a step they set by hand."""
+    m = ride.get("manual")
+    if m and (m.get("ago_s") or 0) < lim.manual_hold_s:
+        wait = round(lim.manual_hold_s - (m.get("ago_s") or 0))
+        raise GuardError(f"the athlete changed {m.get('what')} by hand {m.get('ago_s') or 0}s ago; their change wins. "
+                         f"Ask before changing it (or wait {wait}s)")
+    steps = ride.get("steps") or []
+    if step is not None and 1 <= step <= len(steps) and steps[step - 1].get("manual"):
+        raise GuardError(f"the athlete set step {step} by hand; ask before changing it")
+
+
 def check_target(st: dict, age_s: float | None, events: list[dict], step: int | str, watts: int,
                  limits: Limits | None = None) -> dict:
     """Validate an agent's target change. Returns details; raises GuardError with a reason."""
@@ -83,6 +97,7 @@ def check_target(st: dict, age_s: float | None, events: list[dict], step: int | 
         raise GuardError(f"step {idx} out of range 1..{len(steps)}")
     if cur is not None and idx < cur:
         raise GuardError(f"step {idx} is already done (current step {cur})")
+    check_manual(ride, lim, idx)
     s = steps[idx - 1]
     if s.get("free"):
         raise GuardError(f"step {idx} is a free-ride step with no ERG target")
@@ -151,6 +166,7 @@ def check_edit(st: dict, age_s: float | None, events: list[dict], edit: dict, li
     if idx < cur:
         raise GuardError(f"step {idx} is already done (current step {cur})")
     k = ride.get("intensity") or 1
+    check_manual(ride, lim, idx if op in ("replace", "delete", "duration") else None)
     info = {"op": op, "step": idx}
     harder = False
 

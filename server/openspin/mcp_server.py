@@ -16,7 +16,7 @@ except ImportError:  # mcp 1.x
     from mcp.server.fastmcp.exceptions import ToolError  # type: ignore[no-redef]
 
 from .client import ClientError, CoachClient
-from .safety import GuardError, Limits, check_edit, check_target
+from .safety import GuardError, Limits, check_edit, check_manual, check_target
 
 INSTRUCTIONS = """\
 You are coaching a live indoor bike workout on a smart trainer. Do not poll: call wait_for_events
@@ -292,6 +292,10 @@ def set_intensity(percent: int) -> dict[str, Any]:
         raise ToolError("no ride loaded")
     cur = round((ride.get("intensity") or 1) * 100)
     lim = Limits()
+    try:
+        check_manual(ride, lim)
+    except GuardError as e:
+        raise ToolError(f"refused: {e}") from None
     if abs(percent - cur) > lim.max_change_pct:
         raise ToolError(f"refused: {percent - cur:+d} % at once exceeds {lim.max_change_pct:g} %")
     if percent > cur and percent > 100:
@@ -313,6 +317,10 @@ def free_ride(mode: str, value: float) -> dict[str, Any]:
     st, _ = _state()
     ftp = float(((st or {}).get("athlete") or {}).get("ftp") or 200)
     lim = Limits()
+    try:
+        check_manual((st or {}).get("ride") or {}, lim)
+    except GuardError as e:
+        raise ToolError(f"refused: {e}") from None
     if m == "w" and value > lim.max_pct / 100 * ftp:
         raise ToolError(f"refused: {value:g} W is above the {lim.max_pct:g}% FTP ceiling")
     if m == "g" and value > 8:

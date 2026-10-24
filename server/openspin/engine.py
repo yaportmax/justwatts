@@ -43,7 +43,9 @@ class Ride:
         self.idle = 0
         self.k = 1.0
         self.samples: list[list] = []
-        self.jr = {"m": "g", "g": 0.0, "w": round(ftp * 0.6), "r": 5.0}  # grade %, ERG watts, resistance level
+        # free ride: m = g|w|r (grade %, ERG watts, resistance level). Workouts: wm = e (ERG follows the plan),
+        # g or r (ERG off: the rider sets grade or level; the plan still shows and records its target)
+        self.jr = {"m": "g", "g": 0.0, "w": round(ftp * 0.6), "r": 5.0, "wm": "e"}
         self.start_ts: int | None = None
         self.ov: dict[int, int] = {}
         self.last_step = -1
@@ -56,6 +58,7 @@ class Ride:
         self.agent_seen = False  # an agent connected during this ride (shows the usage meter)
         self.local_cues = 0    # cues the local rule coach spoke instead of waking the agent
         self.usage: dict = {}  # token usage the agent reported for this ride
+        self.manual: dict | None = None  # the rider's last change by hand: {what, step, ts}
 
     @property
     def id(self) -> str:
@@ -87,7 +90,7 @@ class Ride:
                 "events": self.events, "overtime": self.overtime,
                 "agent": {"wakes": self.agent_wakes, "local_cues": self.local_cues, "usage": self.usage, "seen": self.agent_seen},
                 "start": self.start_ts, "samples": self.samples, "el": self.el, "k": self.k, "jr": self.jr,
-                "ov": {str(k): v for k, v in self.ov.items()}, "source": "server"}
+                "ov": {str(k): v for k, v in self.ov.items()}, "manual": self.manual, "source": "server"}
 
 
 class RideEngine:
@@ -244,6 +247,7 @@ class RideEngine:
             r.agent_wakes, r.local_cues, r.usage = ag.get("wakes", 0), ag.get("local_cues", 0), ag.get("usage") or {}
             r.agent_seen = bool(ag.get("seen"))
             r.ov = {int(k): v for k, v in (cur.get("ov") or {}).items()}
+            r.manual = cur.get("manual")
             self.ride = r
             self.log_event(f"RIDE RESUMED after restart at T+{E.fmt_t(r.el)} ({len(r.samples)} samples kept)")
             self.notice = "Ride restored. Pedal to continue."
@@ -273,32 +277,63 @@ class RideEngine:
             return None
         return step_watts(at[1], at[2], r.ftp, 1 if r.test else r.k)
 
+    def control_mode(self) -> str | None:
+        """What the trainer follows and +/- changes: k (ERG at the plan times intensity), w (ERG watts),
+        g (grade) or r (resistance level). Free steps and a flat finish ride by grade."""
+        r = self.ride
+        if not r:
+            return None
+        if not r.steps:
+            return r.jr["m"]
+        wm = r.jr.get("wm", "e")
+        if wm in ("g", "r"):
+            return wm
+        return "k" if self.cur_target() is not None else "g"
+
     def apply_target(self) -> None:
         r = self.ride
         if not r:
             return
-        if not r.steps:
-            m = r.jr["m"]
-            self.hub.want({"k": "erg", "w": r.jr["w"]} if m == "w" else {"k": "res", "r": r.jr["r"]} if m == "r"
-                          else {"k": "sim", "g": r.jr["g"]})
-            return
-        t = self.cur_target()
-        self.hub.want({"k": "sim", "g": 0} if t is None else {"k": "erg", "w": t})
+        m = self.control_mode()
+        if m == "k":
+            self.hub.want({"k": "erg", "w": self.cur_target()})
+        elif m == "w":
+            self.hub.want({"k": "erg", "w": r.jr["w"]})
+        elif m == "r":
+            self.hub.want({"k": "res", "r": r.jr["r"]})
+        else:
+            self.hub.want({"k": "sim", "g": r.jr["g"]})
 
     # ---------- controls (HTTP threads) ----------
-    def control(self, action: str, body: dict) -> dict:
+    def control(self, action: str, body: dict, source: str = "manual") -> dict:
+        """source: "manual" for the rider's page (logged as MANUAL lines; wins over coaches for a while),
+        "api" for token holders (CLI, agents)."""
         with self.lock:
             fn = {"load": self.load, "start": self.start, "pause": self.toggle_pause, "skip": self.skip,
-                  "end": self.finish, "adjust": self.adjust, "mode": self.set_mode, "feel": self.feel,
-                  "dismiss": self.dismiss, "resume": self.resume_ride, "hold": self.hold,
-                  "intensity": self.set_intensity, "free": self.set_free, "save": self.save_copy,
-                  "edit": lambda b: self.edit(b.get("edit") or {})}.get(action)
+                  "back": self.back, "end": self.finish, "adjust": self.adjust, "mode": self.set_mode,
+                  "feel": self.feel, "dismiss": self.dismiss, "resume": self.resume_ride, "hold": self.hold,
+                  "intensity": self.set_intensity, "free": self.set_free, "target": self.set_target,
+                  "save": self.save_copy, "edit": lambda b: self.edit(b.get("edit") or {})}.get(action)
             if not fn:
                 raise ValueError(f"unknown action {action!r}")
-            res = fn(body) or {}
+            self._src = source
+            try:
+                res = fn(body) or {}
+            finally:
+                self._src = "api"
             self.save()
             self._bump()
             return res
+
+    _src = "api"  # who is calling: set by control() for the duration of one action
+
+    def _changed(self, what: str, step: int | None = None) -> None:
+        """A target or plan change: the rider's own ones are logged as MANUAL lines and remembered."""
+        r = self.ride
+        if r is None or self._src != "manual":
+            return
+        r.manual = {"what": what.split(" ")[0], "step": step, "ts": int(self.wall() * 1000)}
+        self.log_event(f"MANUAL {what}")
 
     def load(self, body: dict):
         w = body.get("workout")
@@ -336,9 +371,11 @@ class RideEngine:
         r.auto = False
 
     def hold(self, body: dict | None = None):
-        """Pause (not a toggle)."""
+        """Pause (not a toggle). During an auto-pause it makes the pause stick: pedaling no longer resumes."""
         r = self.ride
-        if r and r.started and not r.paused:
+        if r and r.started and (not r.paused or r.auto):
+            if r.paused and r.pp:  # already logged as an auto-pause: say it is a pause by hand now
+                self.log_event("PAUSED")
             r.paused, r.auto = True, False
 
     def resume_ride(self, body: dict | None = None):
@@ -354,27 +391,71 @@ class RideEngine:
         r = self.ride
         if not r:
             raise ValueError("no ride loaded")
+        if r.test:
+            raise ValueError("FTP test: intensity is fixed")
         pct = float(body.get("percent", 100))
         if not 50 <= pct <= 150:
             raise ValueError("percent must be 50..150")
         r.k = round(pct / 100, 2)
         self.apply_target()
+        self._changed(f"intensity {E.js_round(r.k * 100)}%")
 
     def set_free(self, body: dict):
-        """Free ride target: {m: g|w|r, value}: grade %, ERG watts or resistance level."""
+        """Free ride target: {m: g|w|r, value}: grade %, ERG watts or resistance level. In a workout, g and r
+        set the grade or level used with ERG off, in free steps and after the plan."""
         r = self.ride
-        if not r or r.steps:
-            raise ValueError("free-ride targets need a free ride (load with workout null)")
+        if not r:
+            raise ValueError("no ride loaded")
         m = body.get("m")
         if m not in ("g", "w", "r"):
             raise ValueError("m must be g (grade), w (ERG watts) or r (resistance level)")
+        if r.steps and m == "w":
+            raise ValueError("in a workout, set watts with the target action")
         v = float(body["value"]) if body.get("value") is not None else r.jr[m]
         lim = {"g": (-10, 20), "w": (30, 1500), "r": (0, 25)}[m]
         if not lim[0] <= v <= lim[1]:
             raise ValueError(f"value out of range {lim[0]}..{lim[1]}")
-        r.jr["m"] = m
+        if not r.steps:
+            r.jr["m"] = m
         r.jr[m] = round(v) if m == "w" else round(v, 1)
         self.apply_target()
+        self._changed(self._jr_text(m))
+
+    def _jr_text(self, m: str) -> str:
+        v = self.ride.jr[m]
+        return f"grade {v:.1f}%" if m == "g" else f"level {v:.1f}" if m == "r" else f"erg {v}W"
+
+    def set_target(self, body: dict):
+        """A step's target in watts as the trainer gets it now: {w} or {delta}, optional step (1-based, default
+        the current one). Later intensity changes still scale it. In a free ride it sets the ERG watts."""
+        r = self.ride
+        if not r:
+            raise ValueError("no ride loaded")
+        if not r.steps:
+            w = float(body["w"]) if body.get("w") is not None else r.jr["w"] + float(body.get("delta", 0))
+            return self.set_free({"m": "w", "value": min(1500, max(30, w))})
+        at = step_at(r.steps, r.el)
+        step = body.get("step", "cur")
+        if step in ("cur", None):
+            if not at:
+                raise ValueError("workout finished")
+            idx = at[0]
+        else:
+            idx = int(step) - 1
+            if not at or not at[0] <= idx < len(r.steps):
+                raise ValueError(f"step {step} is not the current or an upcoming step")
+        s = r.steps[idx]
+        if s.get("free"):
+            raise ValueError("free step: no ERG target")
+        kk = 1 if r.test else r.k
+        now_w = self.cur_target() if idx == at[0] else step_watts(s, 0, r.ftp, kk)
+        w = float(body["w"]) if body.get("w") is not None else (now_w or 0) + float(body.get("delta", 0))
+        w = max(0, min(2000, E.js_round(w)))
+        r.apply_override(idx, E.js_round(w / kk))
+        s["m"] = 1  # set by hand: the built-in coach leaves this step alone
+        self.apply_target()
+        self._changed(f"target step {idx + 1} {w}W", idx + 1)
+        return {"step": idx + 1, "w": w}
 
     def skip(self, body: dict | None = None):
         r = self.ride
@@ -384,27 +465,90 @@ class RideEngine:
         if at:
             r.el = at[1]["t0"] + at[1]["d"] + 0.01
             self.apply_target()
+            self._changed(f"skip step {at[0] + 1}", at[0] + 1)
+
+    def back(self, body: dict | None = None):
+        """Like a music player's previous button: restart the current step, or in its first 10 s go back to
+        the previous one. Time only moves forward, so this inserts copies of those steps now. After the
+        plan it rides the last step again."""
+        r = self.ride
+        if not r or not r.steps:
+            return
+        copy = lambda s: {k: v for k, v in s.items() if k != "t0"}  # noqa: E731
+        at = step_at(r.steps, r.el)
+        if not at:
+            src = len(r.steps) - 1
+            new = [copy(r.steps[src])]
+            gap = math.ceil(r.el - r.total)
+            if gap > 0:  # the time ridden since the plan ended becomes a free step
+                r.steps.append({"d": gap, "free": True})
+            r.overtime = False
+            pos = len(r.steps)
+        else:
+            i, s, into = at
+            prev = i > 0 and into < 10
+            src = i - 1 if prev else i
+            if into >= 1:
+                new = [copy(r.steps[i - 1]), copy(s)] if prev else [copy(s)]
+                s["d"] = max(1, math.ceil(into))
+                pos = i + 1
+            elif prev:  # the current step has barely started: put the previous one back in front of it
+                new, pos = [copy(r.steps[i - 1])], i
+                r.acc, r.last_step = None, -1
+            else:
+                return
+        old = dict(r.ov)
+        r.steps[pos:pos] = new
+        r.ov = {(k + len(new) if k >= pos else k): v for k, v in old.items()}
+        for j in range(len(new)):  # copies keep the overrides of the steps they repeat
+            if old.get(src + j) is not None:
+                r.ov[pos + j] = old[src + j]
+        r.retime()
+        r.text = to_text(r.plain_steps())
+        self.apply_target()
+        self._changed(f"back step {src + 1}", src + 1)
 
     def adjust(self, body: dict):
+        """+/-: intensity 1 % in ERG workouts, else grade 0.5 %, level 0.5 or 5 W; big: five times that."""
         r = self.ride
         if not r:
             return
-        d = 1 if body.get("dir", 1) > 0 else -1
-        if r.steps:
+        d = (1 if (body.get("dir") or 1) > 0 else -1) * (5 if body.get("big") else 1)
+        m = self.control_mode()
+        if m == "k":
+            if r.test:
+                raise ValueError("FTP test: intensity is fixed")
             r.k = max(0.5, min(1.5, round(r.k + d * 0.01, 2)))
-        elif r.jr["m"] == "g":
+            self.apply_target()
+            return self._changed(f"intensity {E.js_round(r.k * 100)}%")
+        if m == "g":
             r.jr["g"] = max(-10, min(20, round(r.jr["g"] + d * 0.5, 1)))
-        elif r.jr["m"] == "r":
+        elif m == "r":
             r.jr["r"] = max(0, min(25, round(r.jr.get("r", 5) + d * 0.5, 1)))
         else:
             r.jr["w"] = max(30, min(1500, r.jr["w"] + d * 5))
         self.apply_target()
+        self._changed(self._jr_text(m))
+
+    MODE_NAMES = {"g": "grade", "w": "erg", "r": "level", "e": "erg"}
 
     def set_mode(self, body: dict):
+        """Free ride: m = g|w|r. Workout: m = e (ERG follows the plan), g or r (ERG off)."""
         r = self.ride
-        if r and body.get("m") in ("g", "w", "r"):
-            r.jr["m"] = body["m"]
-            self.apply_target()
+        if not r:
+            return
+        m = body.get("m")
+        if r.steps:
+            m = "e" if m == "w" else m
+            if m not in ("e", "g", "r"):
+                raise ValueError("m must be e (ERG), g (grade) or r (level)")
+            r.jr["wm"] = m
+        else:
+            if m not in ("g", "w", "r"):
+                raise ValueError("m must be g (grade), w (ERG watts) or r (level)")
+            r.jr["m"] = m
+        self.apply_target()
+        self._changed(f"mode {self.MODE_NAMES[m]}")
 
     def feel(self, body: dict):
         f = str(body.get("feel", "")).lower()
@@ -459,8 +603,13 @@ class RideEngine:
             if not r or not r.steps:
                 raise ValueError("no structured workout loaded on the server")
             at = step_at(r.steps, r.el)
-            if not at and e.get("op") == "insert":
+            if not at and e.get("op") in ("insert", "rest"):
                 # plan already ended: the time ridden since becomes a free step, new steps start now
+                try:  # check before anything changes
+                    if not parse_workout(str(e.get("steps") or "")):
+                        raise WorkoutError("empty")
+                except WorkoutError as err:
+                    raise ValueError("nothing to add" if not str(e.get("steps") or "").strip() else f"bad steps: {err}") from None
                 gap = math.ceil(r.el - r.total)
                 if gap > 0:
                     r.steps.append({"d": gap, "free": True})
@@ -551,6 +700,20 @@ class RideEngine:
                 old_total = r.total
                 r.retime()
                 desc = f"duration total {E.fmt_t(old_total)} -> {E.fmt_t(r.total)}"
+            elif op == "rest":  # replace everything after the current step (the rider's "next steps" box)
+                text = str(e.get("steps") or "").strip()
+                try:
+                    new = parse_workout(text) if text else []
+                except WorkoutError as err:
+                    raise ValueError(f"bad steps: {err}") from None
+                keep = cur if at else len(r.steps) - 1  # 0-based index of the last step kept
+                if e.get("after") is not None and int(e["after"]) - 1 != keep:
+                    raise ValueError("the step changed; check the next steps and apply again")
+                if not at and not new:
+                    raise ValueError("nothing to add")
+                r.steps[keep + 1:] = new
+                r.ov = {k: v for k, v in r.ov.items() if k <= keep}
+                desc = f"rest after step {keep + 1}: {to_text(new) or 'none'}"
             elif op in ("duration", "extend"):
                 i = index(e.get("step", "cur") if op == "duration" else "cur", "step")
                 s = r.steps[i]
@@ -562,10 +725,12 @@ class RideEngine:
                 s["d"] = d
                 desc = f"duration step {i + 1} {E.fmt_t(old)} -> {E.fmt_t(d)}"
             else:
-                raise ValueError("edit.op must be insert, replace, delete, duration, extend or total")
+                raise ValueError("edit.op must be insert, replace, delete, duration, extend, total or rest")
             r.retime()
             r.text = to_text(r.plain_steps())
             self.log_event(f"EDIT {desc} | {len(r.steps)} steps, {E.fmt_t(r.total)}")
+            if self._src == "manual":  # the EDIT line already tells the coaches; remember who made it
+                r.manual = {"what": "edit", "step": None, "ts": int(self.wall() * 1000)}
             self.apply_target()
             self.save()
             self._bump()
@@ -583,7 +748,8 @@ class RideEngine:
             if s and r and r.steps:
                 at = step_at(r.steps, r.el)
                 idx = (at[0] if at else None) if s["step"] == "cur" else s["step"] - 1
-                if idx is not None and r.apply_override(idx, s["w"]):
+                kk = 1 if r.test else r.k  # w is what the trainer gets now; later intensity changes still scale it
+                if idx is not None and r.apply_override(idx, E.js_round(s["w"] / kk)):
                     self.apply_target()
                     self.save()
             self._bump()
@@ -727,8 +893,9 @@ class RideEngine:
                 "grade": None if r.steps else r.jr["g"], "level": None if r.steps else r.jr.get("r"),
                 "overtime": r.overtime, "after_workout": self.settings().get("afterWorkout", "hold"),
                 "agent": {"wakes": r.agent_wakes, "local_cues": r.local_cues, "usage": r.usage, "seen": r.agent_seen},
-                "jr": r.jr, "samples": len(r.samples),
+                "jr": r.jr, "samples": len(r.samples), "control": self.control_mode(),
                 "ov": {str(k): v for k, v in r.ov.items()},
+                "manual": {**r.manual, "ago_s": max(0, round(self.wall() - r.manual["ts"] / 1000))} if r.manual else None,
                 "last30": {"power": E.js_round(_mean([x[2] for x in l30])), "cadence": E.js_round(_mean([x[3] for x in l30])),
                            "hr": h[-1] if h else None, "hr_delta": (h[-1] - h[0]) if h else None},
                 "total_s": None, "step": None, "steps": None,
@@ -742,7 +909,7 @@ class RideEngine:
                 ride["steps"] = [{"index": i + 1, "start_s": s["t0"], "duration_s": s["d"], "free": bool(s.get("free")),
                                   "start_w": step_watts(s, 0, r.ftp, kk), "end_w": step_watts(s, s["d"], r.ftp, kk),
                                   "planned": None if s.get("free") else {"a": s["a"], "b": s["b"], "unit": s["u"]},
-                                  "override_w": r.ov.get(i)} for i, s in enumerate(r.steps)]
+                                  "override_w": r.ov.get(i), "manual": bool(s.get("m"))} for i, s in enumerate(r.steps)]
             return st
 
     def samples_since(self, ride_id: str | None, n: int) -> tuple[str | None, list]:

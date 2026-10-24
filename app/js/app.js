@@ -343,7 +343,7 @@ let undo = null;
 function renderUndo() {
   const b = $('#cUndo'), on = !!undo && Date.now() < undo.until;
   if (!on) undo = null;
-  b.style.display = on ? '' : 'none'; b.textContent = on ? 'Undo ' + undo.label : 'Undo'; b.title = 'Undo (Z)';
+  b.style.display = on ? '' : 'none'; b.title = on ? `Undo ${undo.label} change (Z)` : 'Undo (Z)';
 }
 function doUndo() {
   const u = undo; if (!u || Date.now() > u.until) return;
@@ -366,16 +366,16 @@ const curStep = () => R()?.step?.index ?? null;
 function plusMinus(dir, big) {
   const r = R(); if (!r) return;
   const m = r.control, d = dir * (big ? 5 : 1);
-  if (m === 'k') { const k0 = r.intensity; return act('adjust', { dir, big }, Math.round(k0 * 100) + '%', () => control('intensity', { percent: Math.round(k0 * 100) })); }
-  const v0 = r.jr[m]; return act('adjust', { dir: d > 0 ? 1 : -1, big }, valText(m), () => control(m === 'w' ? 'target' : 'free', m === 'w' ? { w: v0 } : { m, value: v0 }));
+  if (m === 'k') { const k0 = r.intensity; return act('adjust', { dir, big }, 'intensity', () => control('intensity', { percent: Math.round(k0 * 100) })); }
+  const v0 = r.jr[m]; return act('adjust', { dir: d > 0 ? 1 : -1, big }, m === 'w' ? 'watts' : m === 'r' ? 'level' : 'grade', () => control(m === 'w' ? 'target' : 'free', m === 'w' ? { w: v0 } : { m, value: v0 }));
 }
-function setIntensity(p) { const r = R(); if (!r) return; const k0 = r.intensity; return act('intensity', { percent: p }, Math.round(k0 * 100) + '%', () => control('intensity', { percent: Math.round(k0 * 100) })); }
+function setIntensity(p) { const r = R(); if (!r) return; const k0 = r.intensity; return act('intensity', { percent: p }, 'intensity', () => control('intensity', { percent: Math.round(k0 * 100) })); }
 function stepWattsBy(delta) {
   const r = R(); if (!r) return;
-  if (!V.cw) return r.control === 'w' ? act('target', { delta }, r.jr.w + ' W', () => control('target', { w: r.jr.w })) : null;
+  if (!V.cw) return r.control === 'w' ? act('target', { delta }, 'watts', () => control('target', { w: r.jr.w })) : null;
   if (!r.step || r.step.free || r.target_w == null) { toast('No ERG target in this step'); return; }
   const i = r.step.index, w0 = r.target_w;
-  return act('target', { step: i, delta }, w0 + ' W', () => control('target', { step: i, w: w0 }));
+  return act('target', { step: i, delta }, 'step watts', () => control('target', { step: i, w: w0 }));
 }
 function stepTimeBy(sec) {
   const r = R(); if (!r?.step) { toast('Workout done'); return; }
@@ -422,6 +422,7 @@ $('#cUndo').onclick = doUndo;
 $('#cMore').onclick = () => sheet();
 $('#cKeys').onclick = () => $('#keysModal').classList.add('on');
 $('#keysClose').onclick = () => $('#keysModal').classList.remove('on');
+$('#keysModal').onclick = e => { if (e.target?.id === 'keysModal') $('#keysModal').classList.remove('on'); };
 
 // the Adjust sheet: one tap opens it, one tap applies
 let nextBase = null, nextDirty = false;

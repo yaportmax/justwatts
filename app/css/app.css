@@ -173,3 +173,11 @@ table.keys tbody tr:hover{background:none}
 kbd{display:inline-block;min-width:22px;padding:1px 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:var(--panel2);font:12px ui-monospace,Consolas,monospace;text-align:center}
 .tile.flash,.adj.flash{border-color:var(--acc)}
 @media (max-width:640px){.sgrid .r{grid-template-columns:1fr;gap:4px}.controls .adj span{min-width:52px}.controls{gap:6px}}
+.toast{bottom:auto;top:calc(var(--hh,58px) + 12px);z-index:30}
+/* phones: the ride view scrolls; the control bar stays pinned to the bottom, always one tap away */
+@media (max-width:900px){
+  #v-ride.on{height:auto}
+  #rideOn>.panel:not(.coach){flex:none}
+  #rideOn .controls{position:sticky;bottom:0;z-index:4;background:var(--bg);padding:8px 0;margin-top:8px;border-top:1px solid var(--line)}
+}
+@media (min-width:1100px){.sheet{left:auto;right:16px;transform:none;bottom:84px;width:600px;max-height:calc(100vh - var(--hh,58px) - 110px);border-radius:14px;border-bottom:1px solid var(--line)}}

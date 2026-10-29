@@ -1,7 +1,7 @@
 {
   "name": "justwatts-desktop",
   "productName": "Just Watts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Just Watts desktop app: the website's build with Bluetooth outside the page.",
   "homepage": "https://justwatts.com",
@@ -21,7 +21,7 @@
     "electron-updater": "6.8.10"
   },
   "devDependencies": {
-    "electron": "44.7.2",
+    "electron": "44.9.1",
     "electron-builder": "26.17.0",
     "playwright-core": "1.61.1"
   },
@@ -29,18 +29,66 @@
     "appId": "com.justwatts.app",
     "productName": "Just Watts",
     "copyright": "Just Watts contributors",
-    "directories": { "output": "dist", "buildResources": "build" },
-    "files": ["src/**", "native/**", "web/**", "build/icon.png", "package.json"],
-    "protocols": [{ "name": "Just Watts", "schemes": ["justwatts"] }],
-    "publish": [{ "provider": "github", "owner": "yaportmax", "repo": "justwatts", "releaseType": "release" }],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "native/**",
+      "web/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "protocols": [
+      {
+        "name": "Just Watts",
+        "schemes": [
+          "justwatts"
+        ]
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yaportmax",
+        "repo": "justwatts",
+        "releaseType": "release"
+      }
+    ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.png",
       "artifactName": "JustWatts-Setup.${ext}"
     },
-    "nsis": { "oneClick": true, "perMachine": false, "deleteAppDataOnUninstall": false, "artifactName": "JustWatts-Setup.${ext}" },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "JustWatts-Setup.${ext}"
+    },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
       "category": "public.app-category.healthcare-fitness",
       "artifactName": "JustWatts-mac.${ext}",
       "icon": "build/icon.png",
@@ -52,7 +100,11 @@
         "NSBluetoothPeripheralUsageDescription": "Just Watts connects to your smart trainer and heart rate strap over Bluetooth."
       }
     },
-    "dmg": { "artifactName": "JustWatts.${ext}" },
-    "linux": { "target": [] }
+    "dmg": {
+      "artifactName": "JustWatts.${ext}"
+    },
+    "linux": {
+      "target": []
+    }
   }
 }

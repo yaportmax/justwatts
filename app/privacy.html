@@ -29,11 +29,18 @@
   <li>An optional display name.</li>
   <li>What you choose to sync: rides (power, cadence, heart rate and timing samples), custom workouts, courses and app settings such as FTP and weight.</li>
   <li>What you publish to the community library: workouts, courses, comments, likes, reports, and a daily count of the community items you ride.</li>
+  <li>If you use friends and group rides: your friends, friend requests and blocks, group rides you create or join, chat messages you send, reports, ride-ons, and a short summary of each finished ride (name, time, distance, average power) for your friends.</li>
   <li>Short-lived security records: rate-limit counters keyed by IP address, email or account, and one-time email links.</li>
 </ul>
 
+<h2>Riding with others</h2>
+<p>Only when you are signed in and riding a course or the open world, the app sends your position on it, power, speed and the road or course name about every 2 seconds. Riders on the same course, riders within about 5 km in the open world, your friends and members of your group ride see your display name, position and power. Signed out, nothing is sent.</p>
+<p>Only your latest position is kept. It is overwritten every 2 seconds and removed when you stop riding. If the app closes without stopping, it stops showing after 15 seconds and is deleted the next time anyone rides. Positions are never kept as history.</p>
+<p>You can switch this off in Settings, Account, Visible to others. Off, your position is not stored at all and friends do not see your finished rides. Friends see your finished rides from the last 7 days.</p>
+<p>Chat is text only, between friends or within a group ride. Messages are checked with the same automatic word and link filter as community comments. Messages that are reported are hidden and reviewed by the owner. Blocking someone hides you from each other everywhere: map, search, friends and chat.</p>
+
 <h2>What we do with it</h2>
-<p>Only run the service: sign you in, sync your data between your devices, and show community items. Published items show your display name. We do not sell data, show ads, or share it with anyone except the providers that run the service: Vercel (hosting), Neon (database, United States), Resend (account emails) and Google Analytics (usage counts, above).</p>
+<p>Only run the service: sign you in, sync your data between your devices, show community items, and show you to other riders as described above. Published items, chat messages and riders on the map show your display name. We do not sell data, show ads, or share it with anyone except the providers that run the service: Vercel (hosting), Neon (database, United States), Resend (account emails) and Google Analytics (usage counts, above).</p>
 
 <h2>Usage analytics</h2>
 <p>On justwatts.com we use Google Analytics to count visits and see which parts of the app get used: which view is open, the kind of ride started (library workout, custom, free ride, course), ride length, and imports. We do not send names, emails, ride data or custom workout names, and Google signals and ad personalization are off. Analytics is skipped when your browser sends Global Privacy Control. The local app and self-hosted copies send nothing.</p>
@@ -42,7 +49,7 @@
 <p>One sign-in cookie (30 days) and, during Google or Strava sign-in, one short state cookie (10 minutes). On justwatts.com, Google Analytics sets its own cookies (_ga) to count returning visitors. No advertising cookies.</p>
 
 <h2>Your control</h2>
-<p>In Settings you can export everything in your account, unlink sign-in methods, sign out of all devices, and delete your account. Deleting removes your account, synced data, published items, comments and likes from the database right away.</p>
+<p>In Settings you can export everything in your account, unlink sign-in methods, sign out of all devices, and delete your account. Deleting removes your account, synced data, published items, comments, likes, friends, group rides, chat messages and ride summaries from the database right away.</p>
 
 <h2>Contact</h2>
 <p>Questions or requests: open an issue at <a href="https://github.com/yaportmax/justwatts/issues">github.com/yaportmax/justwatts</a>.</p>

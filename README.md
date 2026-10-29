@@ -48,6 +48,13 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
   the grade comes from terrain tiles, a workout can run on top, and the road ridden can be saved as a
   course. Roads around the three presets ship with the app (`app/roads`, rebuilt with
   `node tools/bake_roads.mjs`), so those starts load at once.
+- **Riding with others** (justwatts.com, signed in): riders on the same course or within about 5 km in
+  the open world show on the 2D and 3D maps with name and watts, friends highlighted. Friends by name
+  or share link, a Friends panel with who is riding now and "Ride here", group rides (a course or
+  open-world start, a time, an optional workout, a lobby and a countdown, everyone starts together),
+  text chat per friend and per group ride, and ride-ons for friends' finished rides. Plain HTTP
+  polling to the accounts API (`web/api/_lib/social.js`), no extra service. Visibility can be switched
+  off in Settings. The local app has no accounts, so none of this shows there.
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.

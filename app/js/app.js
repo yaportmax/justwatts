@@ -12,12 +12,14 @@ import { createBuilder } from './builder.js';
 import { fromWords } from './words.js';
 import { view as aView, track, workoutTag } from './analytics.js';
 import { LIBRARY, CATEGORIES, FEATURED } from './library.js';
-import { createCourses } from './courses.js';
+import { createCourses, authorCell } from './courses.js';
 import { drawMap, lineDist, pointAt } from './map.js';
 import { checkCourse, buildCourse } from './course.js';
 import { createWorld, PRESETS as WORLD_PRESETS } from './world.js';
 import { createPicker } from './worldpick.js';
 import { createConnect } from './connect.js';
+import { createDetail } from './detail.js';
+import { createListSort } from './listsort.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -31,7 +33,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let onSaved = () => {};  // web build with an account: a synced key changed (custom workouts, courses, settings)
 const SYNCED = new Set(['hw.custom', 'hw.courses', 'hw.settingsAt']);
-let account = null, community = null, social = null, libSrc = 'lib';  // web build: accounts, the community library, social
+let account = null, community = null, social = null, libSrc = 'all';  // web build: accounts, the community library, social; the library Source filter
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED.has(k)) onSaved(k); return true; } catch { return false; } },
@@ -114,29 +116,52 @@ const conn = createConnect({ $, F, WEB, toast,
 // open world: the page provides the road ahead (world.js); quiet controls (a refused road update is not an error to show)
 const world = createWorld({ control: (action, b) => apiJson('/api/ride/control', { action, ...b }),
   course: async () => (await F('/api/ride/course', { headers: { 'X-HW': '1' } })).json(), onChange: () => { if (V) renderRide(); } });
-const courses = createCourses({ world, $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide(),
-  mineOnly: () => libSrc === 'mine', publish: c => community && account?.me() ? () => community.openPublish({ kind: 'course', course: c }) : null });
+const courses = createCourses({ world, openWorld: wid => picker.open(wid), openCourse: c => detail.openCourse(c), $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide(),
+  source: () => srcNow(), comm: f => commFeed('course', f), openComm: id => community?.openItem(id), rideComm: id => community?.rideItem(id), moreComm: () => community?.feedMore('course'),
+  publish: c => community && account?.me() ? () => community.openPublish({ kind: 'course', course: c }) : null });
 
 /* ---------- library + builder ---------- */
 // library filters are a per-browser convenience
 const libF = Object.assign({ q: '', cat: '', dur: '', lvl: '', sort: '' }, store.get('hw.libFilter', {}));
-// the source above both tabs: the built-in library (with yours), only yours, or the community (web build)
-libSrc = libF.cat === 'Mine' ? 'mine' : store.get('hw.libSrc', 'lib');
+// Source, one filter for both tabs: all, Just Watts (built in), yours, or the community (web build, once it loads).
+// Older pages stored the source bar's lib | mine | comm, or a "Mine" category.
+libSrc = libF.cat === 'Mine' ? 'mine' : store.get('hw.libSrc', 'all');
+if (libSrc === 'lib' || !['all', 'jw', 'mine', 'comm'].includes(libSrc)) libSrc = 'all';
 if (libF.cat === 'Mine') libF.cat = '';
+// the source in effect: Community only while the community library is there (no accounts, local app: All)
+function srcNow() { return libSrc === 'comm' && !community ? 'all' : libSrc; }
+function renderSrc() {
+  const opts = [['all', 'All sources'], ['jw', 'Just Watts'], ['mine', 'Mine'], ...(community ? [['comm', 'Community']] : [])];
+  for (const id of ['#libSrc', '#crsSrc']) { const el = $(id); if (!el) continue; el.innerHTML = opts.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join(''); el.value = srcNow(); }
+}
+function setSrc(v) { libSrc = v; store.set('hw.libSrc', v); showTab(wkTab); }
+// community items for a tab's list (All or Community), from the current search and sort; null: local items only
+const CSORT = { liked: 'liked', ridden: 'popular', new: 'new' };
+function commFeed(kind, f) {
+  const s = srcNow(); if (!community || (s !== 'all' && s !== 'comm')) return null;
+  return community.feed(kind, { q: String(f.q || '').trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 80), sort: CSORT[f.sort] || 'liked', dur: kind === 'workout' ? f.dur || '' : '' });
+}
+// a community row's second line: its tags (not the one shown as the category); on a phone, the author first
+const commSub = (it, cat = '') => [`<span class="pau">${esc(it.author)}</span>`, ...(it.tags || []).filter(t => !cat || !isCat([t], cat)).map(esc)].join('<i class="psep"> · </i>');
+const isCat = (tags, cat) => (tags || []).some(t => t.replace(/\s+/g, '') === cat.toLowerCase().replace(/\s+/g, ''));
 const compiled = new Map();
 function cwOf(w) { const k = w.id + '|' + w.text; if (!compiled.has(k)) { try { compiled.set(k, compile(w)); } catch { compiled.set(k, null); } } return compiled.get(k); }
-function libMatch(w, cw) {
-  if (libSrc === 'mine' ? !w.id.startsWith('c-') : libF.cat && w.category !== libF.cat) return false;
+function libMatch(w, cw, it = null) {
+  const src = srcNow(), mine = w.id.startsWith('c-');
+  if (!it && (src === 'comm' || (src === 'mine' && !mine) || (src === 'jw' && mine))) return false;
+  if (libF.cat && (it ? !isCat(it.tags, libF.cat) : w.category !== libF.cat)) return false;  // community: a tag that names the category
   if (libF.dur) { const [lo, hi] = libF.dur.split('-').map(Number), m = cw.total / 60; if (m < lo || m >= hi) return false; }
   if (libF.lvl) { const [lo, hi] = libF.lvl.split('-').map(Number); if (!w.level || w.level < lo || w.level > hi) return false; }
-  if (libF.q) { const q = libF.q.toLowerCase(); if (![w.name, w.category, w.purpose, ...(w.tags || [])].some(x => x && String(x).toLowerCase().includes(q))) return false; }
+  if (libF.q && !it) { const q = libF.q.trim().toLowerCase(); if (![w.name, w.category, w.purpose, mine ? 'You' : 'Just Watts', ...(w.tags || [])].some(x => x && String(x).toLowerCase().includes(q))) return false; }  // community: the server searched
   return true;
 }
 function renderLibBar() {
   const cats = [['', 'All'], ...CATEGORIES.map(c => [c, c])];
-  $('#libCat').style.display = libSrc === 'mine' ? 'none' : '';
   $('#libCat').innerHTML = cats.map(([v, t]) => `<button class="chip${libF.cat === v ? ' on' : ''}" data-cat="${esc(v)}">${esc(t)}</button>`).join('');
-  $('#libQ').value = libF.q; $('#libDur').value = libF.dur; $('#libLvl').value = libF.lvl; $('#libSort').value = libF.sort || '';
+  $('#libQ').value = libF.q; $('#libDur').value = libF.dur; $('#libLvl').value = libF.lvl;
+  $('#libSort').innerHTML = WS.options(libF.sort, { name: 'Workout', author: 'Author', cat: 'Category', time: 'Time', tss: 'TSS', level: 'Level' }); $('#libSort').value = libF.sort || '';
+  $('#libHead').innerHTML = WS.head(libF.sort, WCOLS);
+  renderSrc();
 }
 const setLibF = patch => { Object.assign(libF, patch); store.set('hw.libFilter', libF); renderLibBar(); renderLib(); };
 $('#libCat').onclick = e => { const b = e.target?.closest?.('[data-cat]'); if (b) setLibF({ cat: b.dataset.cat }); };
@@ -144,10 +169,20 @@ $('#libQ').oninput = e => { libF.q = e.target.value; store.set('hw.libFilter', l
 $('#libDur').onchange = e => setLibF({ dur: e.target.value });
 $('#libLvl').onchange = e => setLibF({ lvl: e.target.value });
 $('#libSort').onchange = e => setLibF({ sort: e.target.value });
+$('#libHead').onclick = e => { const b = e?.target?.closest?.('[data-sort]'); if (b) setLibF({ sort: WS.click(libF.sort, b.dataset.sort) }); };
+$('#libSrc').onchange = e => setSrc(e.target.value);
+$('#crsSrc').onchange = e => setSrc(e.target.value);
+$('#libMore').onclick = () => community?.feedMore('workout');
 // Featured: your own workouts, the picks, then the rest taking turns across categories (not one long block per category)
+// sort: Featured, the select's presets, or a header (Workout, Category, Author, Time, TSS, Level); ties go by name
+const WS = createListSort({ short: ['time', 'asc'], long: ['time', 'desc'], easy: ['level', 'asc'], hard: ['level', 'desc'], name: ['name', 'asc'] },
+  [['', 'Featured'], ['short', 'Shortest'], ['long', 'Longest'], ['easy', 'Easiest'], ['hard', 'Hardest'], ['name', 'Name'], ['liked', 'Most liked'], ['ridden', 'Most ridden'], ['new', 'Newest']]);
+const WCOLS = [['', ''], ['name', 'Workout'], ['cat', 'Category'], ['author', 'Author'], ['time', 'Time', 'r'], ['tss', 'TSS', 'r'], ['level', 'Level']];
+const wkVal = (x, k) => k === 'name' ? x.w.name : k === 'author' ? (x.it ? x.it.author : x.w.id.startsWith('c-') ? 'You' : 'Just Watts') : k === 'cat' ? x.w.category || ''
+  : k === 'time' ? x.cw.total : k === 'tss' ? (x.tss ??= estimate(x.cw, settings.ftp).tss) : k === 'level' ? x.w.level || 0 : 0;
+const LIB_SORT = () => WS.cmp(libF.sort, wkVal);
 function sortedWorkouts(list) {
-  const by = { short: (a, b) => a.cw.total - b.cw.total, long: (a, b) => b.cw.total - a.cw.total, easy: (a, b) => (a.w.level || 3) - (b.w.level || 3) || a.cw.total - b.cw.total,
-    hard: (a, b) => (b.w.level || 3) - (a.w.level || 3) || b.cw.total - a.cw.total, name: (a, b) => a.w.name.localeCompare(b.w.name) }[libF.sort];
+  const by = LIB_SORT();
   if (by) return list.sort(by);
   const pick = new Map(FEATURED.map((id, i) => [id, i])), mine = list.filter(x => x.w.id.startsWith('c-')), top = list.filter(x => pick.has(x.w.id)).sort((a, b) => pick.get(a.w.id) - pick.get(b.w.id));
   const rest = list.filter(x => !x.w.id.startsWith('c-') && !pick.has(x.w.id)), q = new Map();
@@ -156,16 +191,15 @@ function sortedWorkouts(list) {
   return [...mine, ...top, ...mixed];
 }
 const lvlDots = n => n ? `<span class="lvl l${n}" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
-let libSel = null, libCourse = '';  // the selected workout row and the course picked on it (Flat: '')
 let planned = [];  // today's planned rides from TrainingPeaks / intervals.icu (connect.js)
 function renderToday(lib, ftp) {
-  if (libF.q || libF.cat === 'Mine') return 0;
+  if (libF.q || srcNow() !== 'all') return 0;  // planned rides: in All, not while searching
   let n = 0;
   for (const p of planned) {
     const w = { id: 'planned-' + p.source, name: p.name, text: p.text }, cw = cwOf(w); if (!cw) continue;
     const e = estimate(cw, ftp), row = document.createElement('div'); row.className = 'lrow today';
     row.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(p.name)}</div><div class="p">${esc(p.sourceName + (p.description ? ' · ' + p.description : ''))}</div></div>
-      <div class="c">Today</div><div class="m num r">${fmtT(cw.total)}</div><div class="m num r">${Math.round(p.tss || e.tss)}</div><div></div>
+      <div class="c">Today</div><div class="au"></div><div class="m num r">${fmtT(cw.total)}</div><div class="m num r">${Math.round(p.tss || e.tss)}</div><div></div>
       <div class="lact"><button class="pri" data-a="ride">Ride</button></div>`;
     lib.appendChild(row); n++;
     requestAnimationFrame(() => drawThumb(row.querySelector('canvas'), cw, ftp));
@@ -174,32 +208,50 @@ function renderToday(lib, ftp) {
   }
   return n;
 }
+// the list: today's planned rides, local workouts (yours and Just Watts), then community items (first, for the community sorts)
+function libRows() {
+  const local = sortedWorkouts(allWorkouts().map(w => ({ w, cw: cwOf(w) })).filter(x => x.cw && libMatch(x.w, x.cw)));
+  const f = commFeed('workout', libF), saved = new Set(custom.map(w => w.name + '\n' + w.text.trim()));
+  let cm = (f?.items || []).filter(it => it.kind === 'workout' && !(srcNow() === 'all' && saved.has(it.name + '\n' + String(it.text).trim())))  // saved to mine already
+    .map(it => { const w = { id: 'm-' + it.id, name: it.name, text: it.text, category: CATEGORIES.find(c => isCat(it.tags, c)) || '' }; return { w, cw: cwOf(w), it }; })
+    .filter(x => x.cw && libMatch(x.w, x.cw, x.it));
+  const by = LIB_SORT(); if (by) cm.sort(by);
+  return { list: CSORT[libF.sort] ? [...cm, ...local] : [...local, ...cm], f };
+}
 function renderLib() {
   const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = renderToday(lib, ftp);
-  for (const { w, cw } of sortedWorkouts(allWorkouts().map(w => ({ w, cw: cwOf(w) })).filter(x => x.cw && libMatch(x.w, x.cw)))) {
+  const { list, f } = libRows(), src = srcNow();
+  for (const { w, cw, it } of list) {
     shown++;
     const e = estimate(cw, ftp), mine = w.id.startsWith('c-');
-    const on = libSel === w.id, row = document.createElement('div'); row.className = 'lrow' + (on ? ' sel' : '');
+    const row = document.createElement('div'); row.className = 'lrow' + (it ? ' cm' : '');
+    const sub = it ? commSub(it, w.category) : w.purpose ? esc(w.purpose) : '';
     row.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(w.name)}</div>
-      ${w.purpose ? `<div class="p">${esc(w.purpose)}</div>` : ''}</div>
-      <div class="c${mine ? ' mine' : ''}">${mine ? 'Mine' : esc(w.category || '')}</div><div class="m num r">${fmtT(cw.total)}</div><div class="m num r">${Math.round(e.tss)}</div><div>${lvlDots(w.level)}</div>
-      <div class="lact">${on ? `<select class="pick" data-a="pick" aria-label="Course">${courses.options(libCourse)}</select>` : ''}<button class="pri" data-a="ride">Ride</button><button data-a="edit">Edit</button></div>`;
+      ${sub ? `<div class="p">${sub}</div>` : ''}</div>
+      <div class="c">${esc(w.category || '')}</div>${authorCell(it ? it.author : mine ? 'You' : 'Just Watts', it)}<div class="m num r">${fmtT(cw.total)}</div><div class="m num r">${Math.round(e.tss)}</div><div>${lvlDots(w.level)}</div>
+      <div class="lact"><button class="pri" data-a="ride">Ride</button>${it ? '' : '<button data-a="edit">Edit</button>'}</div>`;
     lib.appendChild(row);
     requestAnimationFrame(() => drawThumb(row.querySelector('canvas'), cw, ftp));
-    const go = () => loadRide(w, on ? courses.byId(libCourse) : null);
+    if (it) {  // a community workout: the row opens its page (likes, comments, Save to mine), Ride rides it
+      row.onclick = ev => { if (ev?.target?.closest?.('[data-a]')?.dataset.a === 'ride') return community?.rideItem(it.id); community?.openItem(it.id); };
+      row.querySelector('[data-a=ride]').onclick = ev => { ev?.stopPropagation?.(); community?.rideItem(it.id); };
+      continue;
+    }
+    const go = () => detail.rideDefault(w);  // one click: the last course pick (flat at first)
     row.onclick = ev => {
       const a = ev?.target?.closest?.('[data-a]')?.dataset.a;
       if (a === 'ride') return go();
       if (a === 'edit') return editWorkout(w);
       if (a) return;
-      libSel = on ? null : w.id; libCourse = ''; renderLib();
+      detail.openWorkout(w);
     };
     row.querySelector('[data-a=ride]').onclick = ev => { ev?.stopPropagation?.(); go(); };
-    if (on) row.querySelector('[data-a=pick]').onchange = e => { libCourse = e.target.value; };
     row.querySelector('[data-a=edit]').onclick = ev => { ev?.stopPropagation?.(); editWorkout(w); };
   }
   $('#libEmpty').style.display = shown ? 'none' : '';
-  $('#libEmpty').textContent = libSrc === 'mine' && !custom.length ? 'No workouts of your own yet. New workout starts one.' : 'No workouts match.';
+  $('#libEmpty').textContent = src === 'mine' && !custom.length ? 'No workouts of your own yet. New workout starts one.'
+    : src === 'comm' && f?.busy ? 'Loading' : src === 'comm' && f?.error ? f.error : src === 'comm' && !libF.q && !libF.cat && !libF.dur && !libF.lvl ? 'Nothing published yet.' : 'No workouts match.';
+  $('#libMore').style.display = src === 'comm' && f?.more && !f.busy ? '' : 'none';
 }
 renderLibBar();
 let editing = null;
@@ -438,7 +490,13 @@ function placeRiders(list) {
   }).filter(Boolean);
 }
 const picker = createPicker({ $, store, world, wOptions: (cur, free) => courses.wOptions(cur, free), go: rideWorld });
-$('#owOpen').onclick = () => picker.open();
+$('#owStart').onclick = () => picker.open();
+// the workout and course dialogs (detail.js)
+const detail = createDetail({ $, store, fit, css, units: () => settings.units, ftp: () => settings.ftp, compile, estimate, drawChart, courses, workouts: () => allWorkouts(),
+  presets: WORLD_PRESETS, ride: (c, w) => loadRide(w, c), rideWorld: (p, w) => startWorld({ ...p, name: p.id ? p.name : 'Open world' }, w), openPicker: wid => picker.open(wid),
+  edit: w => editWorkout(w), toast, meta: w => { const mine = w.id.startsWith('c-'); return { author: mine ? 'You' : 'Just Watts', source: mine ? 'Custom' : 'Built in', level: lvlDots(w.level) }; } });
+// a course picker set to Open world: its start picker, with the workout (if any) chosen; the picker goes back to what it was
+function pickedWorld(sel, wid, was) { if (sel.value !== 'ow') return false; sel.value = was; picker.open(wid); return true; }
 function rideShell() {
   const on = !!V;
   $('#rideEmpty').style.display = on ? 'none' : ''; $('#rideOn').style.display = on ? '' : 'none';
@@ -730,7 +788,7 @@ const KEYS = {
   KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo,
 };
 function onKey(e) {
-  if (e.key === 'Escape') { if (conn.escape()) return; picker.close(); sheet(false); $('#keysModal').classList.remove('on'); return; }
+  if (e.key === 'Escape') { if (conn.escape()) return; picker.close(); detail.close(); sheet(false); $('#keysModal').classList.remove('on'); return; }
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '');
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !typing && $('#v-workouts').classList.contains('on')) { e.preventDefault(); builder.undo(); return; }
   if (!V || typing) return;
@@ -1037,7 +1095,7 @@ if (WEB) {
   };
   const { createAccount } = await import('./web/account.js');
   account = createAccount({ $, toast, show, store, local, download,
-    onUser: m => { pubBtn(); if (wkTab === 'courses' && libSrc !== 'comm') courses.render(); community?.redraw(); social?.onUser(m); },
+    onUser: m => { pubBtn(); if (wkTab === 'courses') courses.render(); community?.redraw(); social?.onUser(m); },
     onRides: () => { if ($('#v-history').classList.contains('on') && !openId) renderHistory(); } });
   account.init().then(async on => {
     if (!on) { account = null; return; }
@@ -1045,12 +1103,13 @@ if (WEB) {
     // the integrations UI's "Sign in" opens the account dialog
     globalThis.justwatts = Object.assign(globalThis.justwatts || {}, { openSignIn: () => account?.open('signin') });
     const { createCommunity } = await import('./web/community.js');
-    community = createCommunity({ $, toast, account, ftp: () => settings.ftp, units: () => settings.units, compile, estimate, drawThumb, drawChart,
+    community = createCommunity({ $, toast, account, ftp: () => settings.ftp, units: () => settings.units, compile, estimate, drawChart,
       drawProfile: (cv, ele, dist) => courses.draw(cv, ele, dist, null), ride: (w, c) => loadRide(w, c),
       drawRoute: (cv, ll, dist, redraw) => drawMap(cv, { ll, dist, fit, css, redraw, style: store.get('hw.mapStyle', 'osm') }),
       saveWorkout: w => { custom.unshift({ id: 'c-' + Date.now().toString(36), name: w.name, text: w.text, updatedAt: Date.now() }); store.set('hw.custom', custom); renderLibBar(); renderLib(); },
-      saveCourse: c => courses.add(c), onBack: () => showTab(wkTab) });
-    $('[data-src=comm]').style.display = '';
+      saveCourse: c => courses.add(c), onBack: () => showTab(wkTab),
+      onFeed: kind => { if (!$('#v-workouts').classList.contains('on') || community.detail()) return; if (kind === 'workout' && wkTab === 'workouts') renderLib(); if (kind === 'course' && wkTab === 'courses') courses.render(); } });
+    renderSrc();
     pubBtn(); if ($('#v-workouts').classList.contains('on')) showTab(wkTab);
     // social: riders nearby, friends, group rides, chat (signed in only; never in the ride's way)
     const { createSocial } = await import('./web/social.js');
@@ -1074,22 +1133,19 @@ function show(v) {
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
 $('#btnJust').onclick = () => loadRide(null, courses.byId($('#jrCourse').value));
+let jrWas = '';
+$('#jrCourse').onchange = e => { if (!pickedWorld(e.target, '', jrWas)) jrWas = e.target.value; };
 $('#btnJust2').onclick = () => loadRide(null);
 // Workouts page tabs: Workouts (library + builder) or Courses; the last one is remembered
 let wkTab = store.get('hw.wkTab', 'workouts') === 'courses' ? 'courses' : 'workouts';
 function showTab(t) {
   wkTab = t; store.set('hw.wkTab', t);
-  if (libSrc === 'comm' && !community) libSrc = 'lib';
   $$('[data-tab]').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
-  $$('[data-src]').forEach(b => b.classList.toggle('on', b.dataset.src === libSrc));
-  const comm = libSrc === 'comm';
-  $('#tabWorkouts').style.display = t === 'workouts' && !comm ? '' : 'none'; $('#tabCourses').style.display = t === 'courses' && !comm ? '' : 'none';
-  $('#tabComm').style.display = comm ? '' : 'none';
-  if (comm) community.show(t === 'workouts' ? 'workout' : 'course');
-  else if (t === 'workouts') { renderLibBar(); renderLib(); renderBuilder(); } else courses.render();
+  $('#tabWorkouts').style.display = t === 'workouts' ? '' : 'none'; $('#tabCourses').style.display = t === 'courses' ? '' : 'none';
+  renderSrc(); community?.refresh();  // showing a list: community items fetch again (the rows already there stay meanwhile)
+  if (t === 'workouts') { renderLibBar(); renderLib(); renderBuilder(); } else courses.render();
 }
 $$('[data-tab]').forEach(b => b.onclick = () => showTab(b.dataset.tab));
-$$('[data-src]').forEach(b => b.onclick = () => { libSrc = b.dataset.src; store.set('hw.libSrc', libSrc); libSel = null; showTab(wkTab); });
 $('#btnFtp').onclick = () => $('#ftpModal').classList.add('on');
 $('#ftpClose').onclick = () => $('#ftpModal').classList.remove('on');
 $('#ftpModal').onclick = e => {
@@ -1133,4 +1189,4 @@ connect();
 const setHH = () => { const h = document.querySelector('header'); document.documentElement.style.setProperty('--hh', (h.offsetWidth >= globalThis.innerWidth - 1 ? h.offsetHeight : 0) + 'px'); };
 setHH();
 window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) wkTab === 'workouts' ? renderLib() : courses.render(); if (V) renderRide(); });
-window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE, conn, world, courses, get account() { return account; }, get community() { return community; }, get social() { return social; } };
+window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE, conn, world, courses, detail, get account() { return account; }, get community() { return community; }, get social() { return social; } };

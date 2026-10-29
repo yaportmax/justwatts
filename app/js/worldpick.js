@@ -36,9 +36,10 @@ export function createPicker({ $, store, world, wOptions, go }) {
     mk = new ml.Marker({ element: dot }).setLngLat([c.lon, c.lat]).addTo(map);
     map.on('click', e => pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }));
   }
-  function open() {
+  // wid: the workout to ride there ('' free ride)
+  function open(wid = '') {
     box.classList.add('on'); busy = false;
-    $('#owWk').innerHTML = wOptions('', 'Free ride');
+    $('#owWk').innerHTML = wOptions(wid, 'Free ride'); $('#owWk').value = wid;
     $('#owAttr').textContent = osm.attr + ' · Terrain © Mapzen, AWS';
     const last = store.get('hw.owStart', null);
     if (!map) initMap().then(() => pick(last || PRESETS[0])).catch(() => hint('Map unavailable here', true));

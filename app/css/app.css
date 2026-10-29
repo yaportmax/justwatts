@@ -104,6 +104,14 @@ h2{font-size:15px;font-weight:600;margin:0 0 4px;letter-spacing:-.005em}
 .empty.big{padding:14vh 0 0;display:flex;flex-direction:column;align-items:center;gap:6px}
 .empty .eic{width:56px;height:56px;fill:none;stroke:var(--faint);stroke-width:1.5;stroke-linejoin:round;margin-bottom:10px}
 .empty .et{margin:0;color:var(--ink);font-size:16px;font-weight:600}
+/* the Ride tab with no ride: the ways to start */
+.starts{display:grid;grid-template-columns:repeat(3,minmax(0,200px));gap:12px;margin-top:18px;max-width:100%}
+.starts .start{height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:16px;text-align:left;background:var(--panel);border-color:var(--line2)}
+.starts .start:hover{background:var(--panel2);border-color:var(--dim)}
+.starts .start .ic{width:22px;height:22px;margin-bottom:6px;color:var(--acc)}
+.starts .start b{font-size:15px;font-weight:600;color:var(--ink)}
+.starts .start small{color:var(--dim);font-size:12.5px}
+@media (max-width:640px){.starts{grid-template-columns:1fr;width:100%}}
 .empty .hint{margin:0 0 14px;font-size:13px}
 .warnbanner{border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.06);border-radius:var(--r2);padding:10px 14px;margin-bottom:16px;font-size:13px}
 
@@ -134,10 +142,16 @@ select.pick:hover,select.pick:focus{color:var(--ink)}
 
 /* list rows: columns, hairlines, actions only on the hovered or selected row */
 .lhead,.lrow{display:grid;gap:20px;align-items:center}
-.wk-cols,#lib .lrow{grid-template-columns:136px minmax(0,1fr) 110px 70px 48px 64px}
-.crs-cols,#crsList .lrow{grid-template-columns:136px minmax(0,1fr) 110px 90px}
+.wk-cols,#lib .lrow{grid-template-columns:136px minmax(0,1fr) 104px 132px 64px 44px 64px}
+.crs-cols,#crsList .lrow{grid-template-columns:168px minmax(0,1fr) 160px 110px 90px}
 .lhead{padding:0 12px 8px;font-size:12px;font-weight:500;color:var(--faint);border-bottom:1px solid var(--line)}
 .lhead .r,.lrow .r{text-align:right}
+/* sortable headers: quiet buttons, an arrow on the active one */
+.lhead .hs{justify-self:stretch;width:100%;justify-content:flex-start;text-align:left;height:auto;padding:0;background:none;border:0;border-radius:0;color:inherit;font:inherit;display:flex;align-items:center;gap:3px;cursor:pointer;min-width:0}
+.lhead .hs.r{justify-content:flex-end}
+.lhead .hs:hover,.lhead .hs.on{background:none;color:var(--ink)}
+.lhead .hs .ar{font-style:normal;color:var(--acc)}
+.lhead .hs:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .llist{display:flex;flex-direction:column}
 .lrow{position:relative;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .1s}
 .lrow:hover{background:var(--hover)}
@@ -147,10 +161,59 @@ select.pick:hover,select.pick:focus{color:var(--ink)}
 .lrow .p{color:var(--dim);font-size:13px;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lrow .m{color:var(--dim);font-size:13px}
 .lrow .c{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lrow .c.mine{color:var(--acc)}
+.lrow .au{display:flex;align-items:center;gap:8px;min-width:0;color:var(--dim);font-size:13px;white-space:nowrap}
+.lrow .au>span:first-child{overflow:hidden;text-overflow:ellipsis}
+.lrow .au.you{color:var(--acc)}
+.lrow .au .lk{display:inline-flex;align-items:center;gap:3px;color:var(--faint);font-size:12px;flex:none}
+.lrow .au .lk svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
+/* Courses: map first. A row's thumb is the route on the map with a slim profile under it (no GPS: the profile) */
+.cthumb{width:168px;height:84px;display:flex;flex-direction:column;border-radius:6px;overflow:hidden;background:var(--panel2)}
+.cthumb canvas.tmap{width:168px;height:68px;display:block}
+.cthumb canvas.tprof{width:168px;height:16px;display:block}
+.cthumb.nomap{justify-content:flex-end}
+.cthumb.nomap canvas.tprof{height:48px}
+.mapattr{margin-top:12px;font-size:11px}
+.lrow.ow .owic{width:168px;height:84px;border-radius:6px;background:var(--panel2);display:flex;align-items:center;justify-content:center;color:var(--acc)}
+.lrow.ow .owic .ic{width:22px;height:22px}
+@media (max-width:900px){
+  .cthumb,.cthumb canvas.tmap,.cthumb canvas.tprof,.lrow.ow .owic{width:96px}.cthumb,.lrow.ow .owic{height:56px}.cthumb canvas.tmap{height:44px}.cthumb canvas.tprof{height:12px}.cthumb.nomap canvas.tprof{height:36px}
+}
+/* detail dialogs: a workout (chart, numbers, segments, course choice) and a course (map, profile, workout) */
+.dlg.detdlg{width:min(880px,100%);max-height:calc(100vh - 8vh);overflow:auto}
+.modal:has(.detdlg){padding-top:4vh}
+.detdlg .dtitle b{font-size:20px;font-weight:650;letter-spacing:-.01em}
+.detdlg .dtitle .sub{color:var(--dim);font-size:13px;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.detdlg .dpur{margin:0;color:var(--dim);font-size:14px}
+.detdlg .dchart{width:100%;height:180px;display:block}
+.detdlg .bstats{margin:0}
+.detdlg .cmtext{margin:0}
+.detdlg .sec-h{margin:8px 0 0}
+.cpick{display:grid;grid-template-columns:240px minmax(0,1fr);gap:16px;min-height:260px}
+.clist{display:flex;flex-direction:column;gap:2px;max-height:300px;overflow:auto;padding-right:4px}
+.copt{height:auto;min-height:34px;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 10px;background:none;border-color:transparent;text-align:left;color:var(--dim);font-size:13.5px}
+.copt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.copt small{color:var(--faint);font-size:12px;flex:none}
+.copt:hover{background:var(--panel2);color:var(--ink)}
+.copt.on{background:var(--panel2);border-color:var(--line2);color:var(--ink)}
+.cprev{display:flex;flex-direction:column;gap:6px;min-width:0}
+.dmap{width:100%;height:220px;display:block;border-radius:8px}
+.dmap.big{height:min(46vh,400px)}
+.dprof{width:100%;height:56px;display:block}
+.dnomap{border-radius:8px;background:var(--panel2);padding:24px 0 0}
+.dprof.tall{height:120px}
+.dcs,.dflat{color:var(--dim);font-size:13px}
+.dflat{padding:24px 0}
+.dow{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+.dow .chips{margin:0}
+.wlist{max-height:240px}
+.detdlg .search{flex:none;max-width:320px}
+@media (max-width:640px){.cpick{grid-template-columns:1fr}.clist{max-height:200px}.detdlg .bstats{gap:16px}.detdlg .dfoot .hint{display:none}}
+/* a community row's second line: the author shows there only on a phone (no Author column) */
+.lrow .p .pau,.lrow .p .pau+.psep{display:none}
+.lrow .p i{font-style:normal}
 .lrow .lact{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:flex;gap:6px;align-items:center;visibility:hidden}
 /* the actions take the place of the columns they cover */
-#lib .lrow:hover>:nth-child(n+5),#lib .lrow.sel>:nth-child(n+3):not(.lmain):not(canvas),#crsList .lrow:hover>:nth-child(4),#crsList .lrow.sel>:nth-child(n+3){visibility:hidden}
+#lib .lrow:hover>:nth-child(n+5),#lib .lrow.sel>:nth-child(n+3):not(.lmain):not(canvas),#crsList .lrow:hover>:nth-child(5),#crsList .lrow.sel>:nth-child(n+3){visibility:hidden}
 .lrow:hover>.lact,.lrow.sel>.lact{visibility:visible !important}
 .lrow .lact button{height:30px}
 .lrow .lact select.pick{height:30px;background-color:var(--bg);width:220px}
@@ -463,8 +526,9 @@ body.web .serveronly{display:none !important}
   .wk-cols,#lib .lrow{grid-template-columns:84px minmax(0,1fr) 56px}
   .crs-cols,#crsList .lrow{grid-template-columns:84px minmax(0,1fr) 80px}
   .lhead{display:none}
-  #lib .lrow>:nth-child(3),#lib .lrow>:nth-child(5),#lib .lrow>:nth-child(6),#crsList .lrow>:nth-child(4){display:none}
+  #lib .lrow>:nth-child(3),#lib .lrow>:nth-child(4),#lib .lrow>:nth-child(6),#lib .lrow>:nth-child(7),#crsList .lrow>:nth-child(3),#crsList .lrow>:nth-child(5){display:none}
   .lrow canvas{width:84px;height:30px}
+  .lrow .p .pau,.lrow .p .pau+.psep{display:inline}
   .lrow .lact{position:static;transform:none;grid-column:1/-1;display:none;padding:0;background:none}
   .lrow.sel .lact{display:flex;flex-wrap:wrap}
   .bcols{grid-template-columns:1fr;gap:0}
@@ -587,7 +651,7 @@ a.btn:hover{background:#20252c}
 #lib .lrow.today{box-shadow:inset 2px 0 0 var(--acc)}
 .lrow.today .c{color:var(--acc);font-weight:600}
 .lrow.today>.lact{visibility:visible}
-#lib .lrow.today>:nth-child(n+6):not(.lact){visibility:hidden}
+#lib .lrow.today>:nth-child(n+7):not(.lact){visibility:hidden}
 @media (max-width:900px){
   .irow{grid-template-columns:1fr;gap:10px}
   .irow>.sc{justify-content:flex-start;padding-left:16px}
@@ -652,19 +716,10 @@ button.danger.solid{background:var(--bad);border-color:var(--bad);color:#fff}
 #acErr:empty{display:none}
 #acErr{margin-top:10px}
 
-/* ---------- library source + community (web build) ---------- */
-.srcbar{display:flex;gap:20px;margin:-8px 0 16px;border-bottom:1px solid var(--line)}
-.srcbar button{height:34px;padding:0;background:none;border:0;border-radius:0;color:var(--dim);font-size:14px;box-shadow:inset 0 -2px 0 transparent}
-.srcbar button:hover{background:none;color:var(--ink)}
-.srcbar button.on{color:var(--ink);box-shadow:inset 0 -2px 0 var(--acc)}
-.cm-cols,#cmList .lrow{grid-template-columns:136px minmax(0,1fr) 84px 56px 176px}
-#cmList .lrow:hover>.soc{visibility:hidden}
-.soc{display:flex;gap:14px;justify-content:flex-end;color:var(--dim);font-size:13px}
-.soc span{display:inline-flex;align-items:center;gap:5px;min-width:34px}
-.soc svg,.likeb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
-.cmload{padding:24px 12px}
+/* ---------- community (web build) ---------- */
+.likeb svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
 .cmmore{display:flex;justify-content:center;margin-top:16px}
-#crsList .lrow:hover:has([data-a=pub])>:nth-child(3){visibility:hidden}
+#crsList .lrow:hover:has([data-a=pub])>:nth-child(4){visibility:hidden}
 .likeb.on{color:var(--bad);border-color:rgba(240,82,79,.35)}
 .likeb.on svg{fill:currentColor}
 button.armed{color:var(--warn)}
@@ -692,8 +747,6 @@ button.armed{color:var(--warn)}
   .acctme .an,.acctme .chev,.acctbtn span{display:none}
   .acctme{min-height:36px;padding:4px}
   .amenu{left:auto;right:0;bottom:auto;top:calc(100% + 6px);width:200px}
-  .cm-cols,#cmList .lrow{grid-template-columns:84px minmax(0,1fr) 120px}
-  #cmList .lrow>:nth-child(3),#cmList .lrow>:nth-child(4){display:none}
 }
 
 /* ---------- social (web build): riders on the ride maps, the ride strip, the Friends panel ---------- */

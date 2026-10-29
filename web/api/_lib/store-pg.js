@@ -287,7 +287,7 @@ function pgStore(db) {
       if (f.tag) w.push(`${arg(f.tag)} = ANY(i.tags)`);
       if (f.durMin != null) w.push(`i.minutes >= ${arg(f.durMin)}`);
       if (f.durMax != null) w.push(`i.minutes < ${arg(f.durMax)}`);
-      if (f.q) w.push(`position(${arg(f.q)} in i.search) > 0`);
+      if (f.q) { const a = arg(f.q); w.push(`(position(${a} in i.search) > 0 OR position(${a} in lower(coalesce(u.name, ''))) > 0)`); }  // name, tags or the publisher
       const since = f.since || 0;
       if (f.sort === 'new' && since) w.push(`i.created_at >= ${arg(since)}`);
       const score = f.sort === 'liked' ? (since ? `(SELECT count(*) FROM ${S}.likes l WHERE l.item_id = i.id AND l.created_at >= ${arg(since)})::int` : 'i.likes')

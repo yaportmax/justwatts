@@ -51,42 +51,39 @@
     </div>
   </div>
 
-  <div class="srcbar" id="libSrc" role="group" aria-label="Source"><button data-src="lib" class="on">Library</button><button data-src="mine">Mine</button><button data-src="comm" class="webonly" style="display:none">Community</button></div>
-
   <div class="tabpane" id="tabCourses" role="tabpanel" style="display:none">
-    <div class="toolbar crsbar"><span class="hint">With a workout: watt segments stay ERG, free segments follow the road.</span><button id="owOpen" title="Ride any road from a start you pick"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg>Open world</button><button id="crsImport" title="GPX, TCX or FIT"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3M6 7l4-4 4 4M4 13v3h12v-3"/></svg>Import route</button></div>
-    <div class="lhead crs-cols"><span></span><span>Course</span><span class="r">Distance</span><span class="r">Climb</span></div>
+    <div class="toolbar libbar crsbar">
+      <label class="search"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/></svg><input id="crsQ" type="search" placeholder="Search courses" aria-label="Search courses"></label>
+      <select id="crsSrc" class="srcsel" aria-label="Source"></select>
+      <select id="crsSort" aria-label="Sort"></select>
+      <span class="grow"></span>
+      <button id="crsImport" title="GPX, TCX or FIT"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3M6 7l4-4 4 4M4 13v3h12v-3"/></svg>Import route</button>
+    </div>
+    <div class="lhead crs-cols" id="crsHead"></div>
     <div class="llist" id="crsList"></div>
+    <div class="empty" id="crsEmpty" style="display:none"></div>
+    <div class="cmmore"><button id="crsMore" style="display:none">More</button></div>
+    <div class="hint mapattr">Maps © OpenStreetMap contributors</div>
     <input type="file" id="crsFile" accept=".gpx,.tcx,.fit" hidden>
   </div>
 
   <div class="tabpane" id="tabWorkouts" role="tabpanel">
   <div class="toolbar libbar">
     <label class="search"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/></svg><input id="libQ" type="search" placeholder="Search workouts" aria-label="Search workouts"></label>
-    <select id="libSort" aria-label="Sort"><option value="">Featured</option><option value="short">Shortest</option><option value="long">Longest</option><option value="easy">Easiest</option><option value="hard">Hardest</option><option value="name">Name</option></select>
+    <select id="libSrc" class="srcsel" aria-label="Source"></select>
+    <select id="libSort" aria-label="Sort"></select>
     <select id="libDur" aria-label="Length"><option value="">Any length</option><option value="0-45">Under 45 min</option><option value="45-75">45 to 75 min</option><option value="75-120">75 min to 2 h</option><option value="120-999">Over 2 h</option></select>
     <select id="libLvl" aria-label="Difficulty"><option value="">Any difficulty</option><option value="1-2">Easy</option><option value="3-3">Moderate</option><option value="4-5">Hard</option></select>
     <span class="grow"></span>
     <button id="btnNew"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>New workout</button>
   </div>
   <div class="chips" id="libCat" role="group" aria-label="Category"></div>
-  <div class="lhead wk-cols"><span></span><span>Workout</span><span>Category</span><span class="r">Time</span><span class="r">TSS</span><span>Level</span></div>
+  <div class="lhead wk-cols" id="libHead"></div>
   <div class="llist" id="lib"></div>
   <div class="empty" id="libEmpty" style="display:none">No workouts match.</div>
+  <div class="cmmore"><button id="libMore" style="display:none">More</button></div>
   </div>
 
-  <div class="tabpane webonly" id="tabComm" style="display:none">
-    <div class="toolbar libbar" id="cmBar">
-      <label class="search"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/></svg><input id="cmQ" type="search" placeholder="Search community workouts" aria-label="Search community"></label>
-      <select id="cmSort" aria-label="Sort"><option value="liked">Most liked</option><option value="popular">Most popular</option><option value="new">New</option></select>
-      <select id="cmPeriod" aria-label="Period"><option value="all">All time</option><option value="month">This month</option><option value="week">This week</option></select>
-      <select id="cmDur" aria-label="Length"><option value="">Any length</option><option value="0-30">Under 30 min</option><option value="30-60">30 to 60 min</option><option value="60-90">60 to 90 min</option><option value="90-">Over 90 min</option></select>
-    </div>
-    <div class="lhead cm-cols" id="cmHead"></div>
-    <div class="llist" id="cmList"></div>
-    <div class="empty" id="cmEmpty" style="display:none"></div>
-    <div class="cmmore"><button id="cmMore" style="display:none">More</button></div>
-  </div>
   </div>
 
   <!-- a community item: its own page inside Workouts (web build) -->
@@ -140,8 +137,11 @@
   <div id="rideEmpty" class="empty big">
     <svg class="eic" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="17"/><path d="M20.5 17.5v13l10-6.5z"/></svg>
     <p class="et">No ride loaded</p>
-    <p class="hint">Pick a workout or course, or ride free.</p>
-    <div class="row" style="justify-content:center"><button id="btnJust2" class="pri">Just ride</button><button data-go="workouts">Workouts</button></div>
+    <div class="starts">
+      <button id="btnJust2" class="start"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M8.5 7.2v5.6l4.4-2.8z"/></svg><b>Just ride</b><small>No plan, flat</small></button>
+      <button id="owStart" class="start"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg><b>Open world: Marin</b><small>Any road, pick a start</small></button>
+      <button data-go="workouts" class="start"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15l4-5 3 3 3-6 4 8"/></svg><b>Pick a workout</b><small>Workouts and courses</small></button>
+    </div>
   </div>
   <div id="rideOn" style="display:none">
     <div class="rtop">
@@ -377,6 +377,7 @@
     </div>
   </div>
 </div>
+<div class="modal" id="detModal"><div class="panel dlg detdlg" role="dialog" aria-label="Details" id="detDlg"></div></div>
 <div class="modal" id="owModal">
   <div class="panel dlg owdlg" role="dialog" aria-labelledby="owTitle">
     <div class="dhead"><b id="owTitle">Open world</b><button id="owClose" class="x" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>

@@ -16,12 +16,17 @@ const filterOf = st => st.dark ? 'invert(1) hue-rotate(180deg) brightness(.75) c
 
 const cache = new Map();  // url -> Image (loaded or loading); bounded below
 function tile(url, onload) {
+  if (!globalThis.Image) return null;  // no images (tests under node): the line on the plain background
   let im = cache.get(url);
   if (!im) {
     if (cache.size > 300) cache.delete(cache.keys().next().value);
-    im = new Image(); im.referrerPolicy = 'strict-origin'; im.onload = () => onload(); im.src = url; cache.set(url, im);
+    im = new Image(); im.referrerPolicy = 'strict-origin'; im.cbs = new Set();
+    im.onload = () => { const cbs = [...im.cbs]; im.cbs.clear(); for (const f of cbs) f(); };
+    im.src = url; cache.set(url, im);
   }
-  return im.complete && im.naturalWidth ? im : null;
+  if (im.complete && im.naturalWidth) return im;
+  im.cbs?.add(onload);  // every map waiting on this tile redraws when it lands (lists re-render while tiles load)
+  return null;
 }
 
 // world pixels at zoom 0

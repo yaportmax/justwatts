@@ -1,4 +1,4 @@
-// Community library (web build): the "Community" source on the Workouts and Courses tabs, the item page with
+// Community library (web build): community items for the Workouts and Courses lists (feed), the item page with
 // comments, likes and reports, and publishing a custom workout or an imported course. Browsing and riding work
 // signed out; liking, commenting, reporting and publishing need an account. API: /api/community (docs/API.md).
 import { esc, fmtT, distText } from '../core.js';
@@ -6,8 +6,6 @@ import { track } from '../analytics.js';
 
 const SVG = {
   like: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16.5s-6-3.6-6-8.1A3.4 3.4 0 0 1 10 6.3a3.4 3.4 0 0 1 6 2.1c0 4.5-6 8.1-6 8.1z"/></svg>',
-  ride: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M8.5 7.2v5.6l4.4-2.8z"/></svg>',
-  cmt: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h12v8H9l-3.5 2.5v-2.5H4z"/></svg>',
 };
 const ago = t => { const s = (Date.now() - t) / 1000; return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : s < 86400 * 60 ? `${Math.round(s / 86400)} d ago` : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }); };
 const ERR = {
@@ -17,62 +15,47 @@ const ERR = {
 };
 const errText = b => b?.error === 'rate_limited' ? 'Daily limit reached. Try again later.' : (b?.error === 'bad_workout' || b?.error === 'bad_course') && b.message ? `${ERR[b.error]} ${b.message}` : ERR[b?.error] || 'Something went wrong.';
 
-export function createCommunity({ $, toast, account, ftp, units, compile, estimate, drawThumb, drawChart, drawProfile, drawRoute = null, ride, saveWorkout, saveCourse, onBack, fetch = (...a) => globalThis.fetch(...a) }) {
-  const F = { kind: 'workout', q: '', sort: 'liked', period: 'all', dur: '', page: 0 };
-  let items = [], more = false, loading = 0, detail = null, qTimer = null, reportArm = null, pub = null;
+export function createCommunity({ $, toast, account, ftp, units, compile, estimate, drawChart, drawProfile, drawRoute = null, ride, saveWorkout, saveCourse, onBack, onFeed = () => {}, fetch = (...a) => globalThis.fetch(...a) }) {
+  let detail = null, reportArm = null, pub = null;
   const api = (m, p, b) => account.api(m, p, b);
 
-  /* ---------- list ---------- */
-  function query() {
-    const q = new URLSearchParams({ kind: F.kind, sort: F.sort, period: F.period, page: String(F.page), limit: '20' });
-    if (F.q) q.set('q', F.q);
-    if (F.dur && F.kind === 'workout') q.set('dur', F.dur);
-    return '/api/community?' + q;
-  }
-  async function load(append = false) {
-    const my = ++loading;
-    if (!append) { F.page = 0; renderList(true); }
-    let r; try { r = await fetch(query(), { credentials: 'same-origin' }); } catch { r = null; }
-    const j = r && r.ok ? await r.json().catch(() => null) : null;
-    if (my !== loading) return;
-    if (!j) { items = append ? items : []; more = false; renderList(false, r ? errText(await r.json().catch(() => ({}))) : ERR.offline); return; }
-    items = append ? [...items, ...j.items] : j.items; more = !!j.more;
-    renderList(false);
-  }
-  function renderBar() {
-    const bar = $('#cmBar'); if (!bar) return;
-    $('#cmQ').value = F.q; $('#cmQ').placeholder = F.kind === 'workout' ? 'Search community workouts' : 'Search community courses';
-    $('#cmSort').value = F.sort; $('#cmPeriod').value = F.period; $('#cmDur').value = F.dur;
-    $('#cmDur').style.display = F.kind === 'workout' ? '' : 'none';
-    $('#cmHead').innerHTML = F.kind === 'workout' ? '<span></span><span>Workout</span><span class="r">Time</span><span class="r">TSS</span><span></span>' : '<span></span><span>Course</span><span class="r">Distance</span><span class="r">Climb</span><span></span>';
-  }
-  const social = i => `<div class="soc num"><span title="Likes">${SVG.like}${i.likes}</span><span title="Rides">${SVG.ride}${i.rides}</span><span title="Comments">${SVG.cmt}${i.comments}</span></div>`;
-  const up = m => units() === 'metric' ? `${Math.round(m)} m` : `${Math.round(m * 3.28084)} ft`;
-  function renderList(busy = false, error = '') {
-    const box = $('#cmList'); if (!box) return;
-    box.innerHTML = '';
-    $('#cmEmpty').style.display = !busy && !items.length ? '' : 'none';
-    $('#cmEmpty').textContent = error || (F.q ? 'Nothing matches.' : 'Nothing published yet.');
-    $('#cmMore').style.display = more && !busy ? '' : 'none';
-    if (busy) { box.innerHTML = '<div class="hint cmload">Loading…</div>'; return; }
-    for (const it of items) {
-      const row = document.createElement('div'); row.className = 'lrow'; row.dataset.id = it.id;
-      const sub = [`by ${esc(it.author)}`, ...(it.tags || []).map(esc)].join(' · ');
-      const cw = it.kind === 'workout' ? cwOf(it) : null;  // time and TSS the same way the library shows them
-      const cols = it.kind === 'workout' ? `<div class="m num r">${fmtT(cw ? cw.total : Math.round(it.minutes * 60))}</div><div class="m num r">${Math.round(cw ? estimate(cw, ftp()).tss : it.tss)}</div>`
-        : `<div class="m num r">${distText(it.distM / 1000, units())}</div><div class="m num r">${up(it.gainM)}</div>`;
-      row.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(it.name)}</div><div class="p">${sub}</div></div>${cols}${social(it)}
-        <div class="lact"><button class="pri" data-a="ride">Ride</button></div>`;
-      box.appendChild(row);
-      requestAnimationFrame(() => thumb(row.querySelector('canvas'), it));
-      row.onclick = ev => { const a = ev?.target?.closest?.('[data-a]')?.dataset.a; if (a === 'ride') return rideItem(it.id); if (!a) openItem(it.id); };
+  /* ---------- feed: one page of community items for a tab's list (the lists themselves are in app.js and courses.js) ---------- */
+  // feed(kind, { q, sort, dur }) answers at once from the last fetch for the same filter, and starts a fetch when the
+  // filter changed (typing waits a moment). onFeed(kind) fires when a fetch lands. The same filter fetches again
+  // (keeping its rows meanwhile) after refresh(), after 2 min, or 30 s after a failure.
+  const feeds = { workout: null, course: null }, timers = {};
+  function feed(kind, f) {
+    const key = JSON.stringify([f.q || '', f.sort || 'liked', f.dur || '']);
+    let s = feeds[kind];
+    if (s && s.key === key) {
+      if (!s.busy && (s.stale || Date.now() - s.at > (s.error ? 30000 : 120000))) { s.stale = false; s.busy = true; s.page = 0; fetchPage(s, true); }
+      return s;
     }
+    const typing = s && s.key !== key && JSON.parse(s.key)[0] !== (f.q || '');
+    s = feeds[kind] = { kind, key, f: { ...f }, items: [], more: false, page: 0, busy: true, error: '', at: Date.now() };
+    clearTimeout(timers[kind]);
+    if (typing) timers[kind] = setTimeout(() => fetchPage(s), 250); else fetchPage(s);
+    return s;
   }
-  function thumb(cv, it) {
-    if (!cv) return;
-    if (it.kind === 'workout') { const cw = cwOf(it); if (cw) drawThumb(cv, cw, ftp()); }
-    else if (it.profile?.length > 1) drawProfile(cv, it.profile, it.distM);
+  async function fetchPage(s, replace = false) {
+    const q = new URLSearchParams({ kind: s.kind, sort: s.f.sort || 'liked', page: String(s.page), limit: '20' });
+    if (s.f.q) q.set('q', s.f.q);
+    if (s.f.dur && s.kind === 'workout') q.set('dur', s.f.dur);
+    let r = null, j = null;
+    try { r = await fetch('/api/community?' + q, { credentials: 'same-origin' }); j = r.ok ? await r.json() : null; } catch { j = null; }
+    if (feeds[s.kind] !== s) return;  // the filter changed meanwhile
+    s.busy = false; s.at = Date.now();
+    if (!Array.isArray(j?.items)) { s.error = r ? errText(await r.json().catch(() => ({}))) : ERR.offline; if (!replace) s.more = false; }
+    else { s.items = replace ? j.items : [...s.items, ...j.items]; s.more = !!j.more; s.error = ''; }
+    onFeed(s.kind);
   }
+  function feedMore(kind) {
+    const s = feeds[kind]; if (!s || s.busy || !s.more) return;
+    s.page++; s.busy = true; fetchPage(s); onFeed(kind);
+  }
+  const refresh = () => { for (const s of Object.values(feeds)) if (s) s.stale = true; };
+  const feedItem = id => feeds.workout?.items.find(x => x.id === id) || feeds.course?.items.find(x => x.id === id);
+  const up = m => units() === 'metric' ? `${Math.round(m)} m` : `${Math.round(m * 3.28084)} ft`;
   function cwOf(it) { try { return compile({ id: 'm-' + it.id, name: it.name, text: it.text }); } catch { return null; } }
 
   /* ---------- item page ---------- */
@@ -92,7 +75,7 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
       : [[distText(it.course.dist / 1000, units()), 'Distance'], [up(it.course.gain ?? it.gainM), 'Climb']];
     stats.push([it.rides, it.rides === 1 ? 'Ride' : 'Rides']);
     box.innerHTML = `<div class="phead bhead">
-      <div class="ptitle"><button class="crumb" data-a="back"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 4l-6 6 6 6"/></svg>Community</button>
+      <div class="ptitle"><button class="crumb" data-a="back"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M12 4l-6 6 6 6"/></svg>${w ? 'Workouts' : 'Courses'}</button>
         <h1>${esc(it.name)}</h1><div class="sub">by ${esc(it.author)} · ${esc(ago(it.createdAt))}${(it.tags || []).map(t => ` · <span class="tag">${esc(t)}</span>`).join('')}</div></div>
       <div class="pact">
         ${mine || admin ? '<button class="ghost danger" data-a="delete">Delete</button>' : ''}
@@ -135,7 +118,7 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
       const on = !detail.liked, r = await api(on ? 'POST' : 'DELETE', `/api/community/${it.id}/like`, {});
       if (r.status !== 200) return toast(errText(r.body));
       detail.liked = r.body.liked; it.likes = r.body.likes; if (on) track('community_like');
-      const li = items.find(x => x.id === it.id); if (li) li.likes = r.body.likes;
+      const li = feedItem(it.id); if (li) li.likes = r.body.likes;
       return renderItem();
     }
     if (a === 'report' || a === 'creport') {
@@ -157,7 +140,8 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
       if (reportArm !== 'del') { reportArm = 'del'; toast('Tap Delete again to remove it for everyone'); return; }
       const r = await api('DELETE', `/api/community/${it.id}`, {});
       if (r.status !== 200) return toast(errText(r.body));
-      items = items.filter(x => x.id !== it.id); toast('Deleted'); return closeItem();
+      for (const f of Object.values(feeds)) if (f) f.items = f.items.filter(x => x.id !== it.id);
+      toast('Deleted'); return closeItem();
     }
   }
   async function comment(body) {
@@ -171,7 +155,7 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
     if (!d) { const r = await api('GET', `/api/community/${encodeURIComponent(id)}`); if (r.status !== 200) return toast(errText(r.body)); d = r.body; }
     const it = d.item;
     const ok = it.kind === 'workout' ? await ride({ id: 'm-' + it.id, name: it.name, text: it.text }, null) : await ride(null, { id: 'm-' + it.id, ...it.course, name: it.name });
-    if (ok && account.me()) { const r = await api('POST', `/api/community/${it.id}/ride`, {}); if (r.status === 200) { it.rides = r.body.rides; const li = items.find(x => x.id === it.id); if (li) li.rides = r.body.rides; } }
+    if (ok && account.me()) { const r = await api('POST', `/api/community/${it.id}/ride`, {}); if (r.status === 200) { it.rides = r.body.rides; const li = feedItem(it.id); if (li) li.rides = r.body.rides; } }
     return ok;
   }
 
@@ -189,18 +173,13 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
     const body = pub.kind === 'workout' ? { kind: 'workout', name, text: pub.text, tags }
       : { kind: 'course', name, course: { name, dist: pub.course.dist, ele: pub.course.ele, ll: pub.course.ll || [] }, tags };
     const r = await api('POST', '/api/community', body);
-    if (r.status === 201) { $('#pubModal').classList.remove('on'); track('community_publish'); toast('Published'); pub = null; return r.body.item; }
+    if (r.status === 201) { $('#pubModal').classList.remove('on'); track('community_publish'); toast('Published'); pub = null; refresh(); return r.body.item; }
     if (r.status === 409 && r.body.error === 'duplicate' && r.body.id) { $('#pubModal').classList.remove('on'); toast('Already published'); pub = null; return { id: r.body.id }; }
     $('#pubErr').textContent = errText(r.body); return null;
   }
 
   /* ---------- wiring ---------- */
   function wire() {
-    $('#cmQ').oninput = e => { F.q = e.target.value.trim().slice(0, 80); clearTimeout(qTimer); qTimer = setTimeout(() => load(), 250); };
-    $('#cmSort').onchange = e => { F.sort = e.target.value; load(); };
-    $('#cmPeriod').onchange = e => { F.period = e.target.value; load(); };
-    $('#cmDur').onchange = e => { F.dur = e.target.value; load(); };
-    $('#cmMore').onclick = () => { F.page++; load(true); };
     const pane = $('#commPane');
     pane.onclick = e => { const b = e?.target?.closest?.('[data-a]'); if (b) itemAction(b.dataset.a, b); };
     pane.onsubmit = e => { e?.preventDefault?.(); const t = e?.target?.querySelector?.('textarea'); if (t) comment(t.value).then(ok => { if (ok) t.value = ''; }); };
@@ -208,10 +187,5 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
     $('#pubForm').onsubmit = e => { e?.preventDefault?.(); publish($('#pubName').value.trim(), $('#pubTags').value); };
   }
   wire();
-  // show the list for a tab: kind 'workout' | 'course'
-  function show(kind) {
-    const changed = F.kind !== kind || !items.length; F.kind = kind;
-    renderBar(); if (changed) load(); else renderList();
-  }
-  return { show, load, openItem, closeItem, itemAction, comment, rideItem, openPublish, publish, items: () => items, detail: () => detail, filter: F, redraw: () => detail ? renderItem() : renderList() };
+  return { feed, feedMore, refresh, openItem, closeItem, itemAction, comment, rideItem, openPublish, publish, detail: () => detail, redraw: () => { if (detail) renderItem(); } };
 }

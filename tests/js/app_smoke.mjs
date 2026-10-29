@@ -10,7 +10,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const realFetch = globalThis.fetch;
 
 class ClassList { constructor() { this.s = new Set(); } add(c) { this.s.add(c); } remove(c) { this.s.delete(c); } toggle(c, on) { (on ?? !this.s.has(c)) ? this.s.add(c) : this.s.delete(c); } contains(c) { return this.s.has(c); } }
-const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : k === 'measureText' ? () => ({ width: 40 }) : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
 class El {
   constructor(sel, data = {}) { this.sel = sel; this.dataset = data; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } }; this.classList = new ClassList(); this.kids = {}; this.value = ''; this.textContent = ''; this.innerHTML = ''; this.tagName = 'DIV'; this.width = 0; this.height = 0; this.offsetHeight = 50; }
   querySelector(s) { return this.kids[s] ??= new El(s); }
@@ -98,16 +98,20 @@ if (MODE === 'pick') {
   const tap = el => el.onclick({ target: { closest: () => null } });
   const ride = () => ({ name: S().ride.name, course: S().ride.course?.name ?? null });
   const out = {};
+  const D = window.__hw.detail;
+  // a workout row opens its dialog: the course choice (Flat, Open world, the courses), then Ride
   tap(rowOf('Sweet spot 2x12'));
-  let row = rowOf('Sweet spot 2x12');
-  row.querySelector('[data-a=pick]').onchange({ target: { value: 's-climb' } });
-  row.querySelector('[data-a=ride]').onclick();
+  out.wDialog = { open: D.isOpen(), html: ['Edit a copy', 'Open world', 'The climb', 'kJ', 'data-d="ride"'].every(t => D.html().includes(t)) };
+  D.act('pick', { dataset: { v: 's-climb' } });
+  out.picked = { on: D.html().includes('class="copt on" aria-selected="true" data-d="pick" data-v="s-climb"'), stored: JSON.parse(localStorage.getItem('hw.wkCourse')) };
+  await D.ride();
   await until(() => S().ride?.course?.name === 'The climb', 'workout + course');
-  out.workoutCourse = ride();
+  out.workoutCourse = ride(); out.closed = !D.isOpen();
+  // a course row opens its dialog: map or profile, numbers, a searchable workout list, Ride
   tap(rowOf('Rolling hills'));
-  row = rowOf('Rolling hills');
-  row.querySelector('[data-a=pick]').onchange({ target: { value: 'l-ss-2x12' } });
-  row.querySelector('[data-a=ride]').onclick();
+  out.cDialog = { open: D.isOpen(), html: ['Max grade', 'Free ride', 'Search workouts', 'Sweet spot 2x12'].every(t => D.html().includes(t)) };
+  D.pickWorkout('l-ss-2x12');
+  await D.ride();
   await until(() => S().ride?.course?.name === 'Rolling hills', 'course + workout');
   out.courseWorkout = ride();
   finish({ ...out, posts: posts.filter(p => p.body?.action === 'load').map(p => ({ w: p.body.workout?.name ?? null, c: p.body.course?.id ?? null })) });

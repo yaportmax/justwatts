@@ -27,3 +27,6 @@ Thumbs.db
 dist-web/
 .claude/worktrees/
 node_modules/
+
+# private planning notes (kept outside the repo)
+docs/BACKLOG.md

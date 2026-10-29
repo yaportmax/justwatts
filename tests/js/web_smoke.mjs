@@ -14,6 +14,7 @@ class FakeStore {
   put(v, k) { return request(() => { this.m.set(this.key ? v[this.key] : k, structuredClone(v)); }); }
   delete(k) { return request(() => { this.m.delete(k); }); }
   getAll() { return request(() => [...this.m.values()].map(v => structuredClone(v))); }
+  getAllKeys() { return request(() => [...this.m.keys()]); }
 }
 globalThis.indexedDB = {
   open(name) {

@@ -251,6 +251,27 @@ out.bobReads = (await bob.post('/api/social/chat/read', { group: g2.id, since: 0
 await ctl({ action: 'end' });
 await until(() => !hw.state().ride, 'ended 3');
 
+/* ---------- 5b. Ready survives a reload: stored per group until the start, the new page arms and starts it ---------- */
+const g3 = (await hw.account.api('POST', '/api/social/groups', { name: 'After reload', plan: { kind: 'course', id: 'r-hawk', name: 'Hawk Hill, Marin' }, at: Date.now() + 5000, invite: [] })).body.group;
+hw.social.open('group', { id: g3.id });
+await until(() => hw.social.state().viewData?.g?.group.id === g3.id, 'lobby 3');
+await hw.social.groupAct('garm');
+hw.social.close();
+const stored = JSON.parse(localStorage.getItem('jw.groupReady') || 'null');
+const oldHw = hw; oldHw.account.me = () => null;  // the old page is gone
+await boot(51);
+await until(() => hw.social?.state().armed === g3.id, 'ready restored after reload', 8000);
+await until(() => hw.state().ride?.started, 'restored group ride started at the time', 12000);
+out.reloadReady = { stored: stored && [stored.id === g3.id, stored.at === g3.at, typeof stored.uid], armed: true, started: true, after: localStorage.getItem('jw.groupReady') };
+await ctl({ action: 'end' });
+await until(() => !hw.state().ride, 'ended 4');
+// expired or another account: dropped, nothing armed
+localStorage.setItem('jw.groupReady', JSON.stringify({ id: g3.id, at: Date.now() - 120000, uid: stored.uid }));
+await boot(52);
+await until(() => hw.social?.state().profile, 'profile 52');
+await sleep(300);
+out.expiredReady = { armed: hw.social.state().armed, kept: localStorage.getItem('jw.groupReady') };
+
 /* ---------- 6. share links: ?friend=CODE sends a request, ?group=ID opens the lobby; the URL is cleaned ---------- */
 const catCode = (await cat.get('/api/social/me')).code;
 await cat.post('/api/social/friends/remove', { id: (await hw.account.api('GET', '/api/auth/me')).body.user.id });

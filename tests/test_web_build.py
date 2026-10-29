@@ -167,6 +167,8 @@ def test_web_social(dist, node):
     assert "<b>Right now</b>" in gr["grp"] and 'class="on">Bob' in gr["grp"] and "Go go go" in gr["msgs"] and gr["chat"] == ""
     assert gr["mates"] == [["Bob", True]]
     assert out["said"] is True and out["bobReads"] == [["Bob", "Go go go"], ["Ann", "On your wheel"]]
+    assert out["reloadReady"] == {"stored": [True, True, "string"], "armed": True, "started": True, "after": None}  # Ready survives a reload
+    assert out["expiredReady"] == {"armed": None, "kept": None}                                    # past the start: forgotten
     lk = out["links"]                                                                              # share links, then a clean URL
     assert lk["stripped"] == "/" and lk["view"] == "group" and lk["toast"] == "Request sent to Cat"
     assert out["afterSignOut"]["calls"] == 0 and out["afterSignOut"].get("strip") in (None, "none")

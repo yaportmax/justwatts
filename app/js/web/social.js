@@ -124,8 +124,24 @@ export function createSocial({ $, toast, account, units, workouts, starts, posit
   }
 
   /* ---------- group ride start: load about 15 s ahead, start at the time ---------- */
+  // Ready survives a reload: { id, at, uid } in local storage until shortly after the start time
+  const READY_KEY = 'jw.groupReady', READY_GRACE = 60000;
+  const ls = () => { try { return globalThis.localStorage || null; } catch { return null; } };
+  function saveReady(g) { try { ls()?.setItem(READY_KEY, JSON.stringify({ id: g.group.id, at: g.group.at, uid: account.me()?.user?.id || null })); } catch {} }
+  function dropReady(id) {
+    try { const s = ls(), v = JSON.parse(s?.getItem(READY_KEY) || 'null'); if (v && (!id || v.id === id)) s.removeItem(READY_KEY); } catch {}
+  }
+  async function restoreReady(u) {
+    let v = null; try { v = JSON.parse(ls()?.getItem(READY_KEY) || 'null'); } catch {}
+    if (!v?.id || armed) return;
+    if (v.uid !== (u?.user?.id || null) || !(v.at + READY_GRACE > now())) { dropReady(v.id); return; }
+    const r = await link.group(v.id).catch(() => null);
+    if (armed || !signed()) return;
+    if (r?.status === 200 && r.body.group.state === 'in' && r.body.group.at + READY_GRACE > now()) arm(r.body);
+    else if (r?.status === 200 || r?.status === 404) dropReady(v.id);
+  }
   function arm(g) {
-    armed = g; group = g.group.id; groupInfo = g; groupAt = now(); loaded = false;
+    armed = g; group = g.group.id; groupInfo = g; groupAt = now(); loaded = false; saveReady(g);
     clearInterval(armTimer); armTimer = setInterval(armTick, 500); armTick();
   }
   function disarm() { armed = null; loaded = false; clearInterval(armTimer); armTimer = 0; }
@@ -136,9 +152,9 @@ export function createSocial({ $, toast, account, units, workouts, starts, posit
     if (!loaded) {
       loaded = true;
       const ok = await Promise.resolve(ride(g.plan, g.workout)).catch(() => false);
-      if (!ok) { disarm(); toast('Group ride not loaded'); return; }
+      if (!ok) { disarm(); dropReady(g.id); toast('Group ride not loaded'); return; }
     }
-    if (left <= 0) { disarm(); Promise.resolve(start()).catch(() => {}); toast(`${g.name}: go`); }
+    if (left <= 0) { disarm(); dropReady(g.id); Promise.resolve(start()).catch(() => {}); toast(`${g.name}: go`); }
   }
 
   /* ---------- the Friends panel ---------- */
@@ -303,7 +319,7 @@ export function createSocial({ $, toast, account, units, workouts, starts, posit
     const g = x.group;
     if (a === 'gcopy') return copy(`${loc?.origin || ''}/?group=${g.id}`);
     if (a === 'gjoin') { const r = await link.groupAct(g.id, 'join'); if (r.status !== 200) toast(errText(r.body)); return poll(); }
-    if (a === 'gleave') { const r = await link.groupAct(g.id, 'leave'); if (r.status !== 200) return toast(errText(r.body)); if (armed?.group.id === g.id) { disarm(); group = null; } open('main'); return; }
+    if (a === 'gleave') { const r = await link.groupAct(g.id, 'leave'); if (r.status !== 200) return toast(errText(r.body)); if (armed?.group.id === g.id) { disarm(); group = null; } dropReady(g.id); open('main'); return; }
     if (a === 'garm' || a === 'gride') { arm(x); toast(a === 'gride' ? 'Loading' : 'Ready. The ride loads and starts at the time.'); if (a === 'gride') { close(); } else renderLobby(); return; }
     if (a === 'ginvite') {
       const box = $('#socInv'), fr = data?.friends.filter(f => !x.members.some(m => m.id === f.id)) || [];
@@ -420,12 +436,13 @@ export function createSocial({ $, toast, account, units, workouts, starts, posit
     globalThis.document?.addEventListener?.('keydown', e => { if (e.key === 'Escape' && view) close(); });
   }
   async function onUser(u) {
-    if (!u) { profile = null; data = null; disarm(); group = null; groupInfo = null; chat = []; if (sending) { sending = false; setRiders([]); } close(); renderSettings(); account.setFriends?.(open, 0); return; }
+    if (!u) { profile = null; data = null; disarm(); dropReady(); group = null; groupInfo = null; chat = []; if (sending) { sending = false; setRiders([]); } close(); renderSettings(); account.setFriends?.(open, 0); return; }
     account.setFriends?.(open, 0);
     const r = await link.me().catch(() => null);
     if (r?.status === 200) profile = r.body;
     renderSettings();
     refresh();
+    restoreReady(u);
     if (pending) handleParams(pending);
   }
   wire();

@@ -15,7 +15,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride }) {
   // elevation profile; done = metres ridden (null: no marker). Flat courses get a 20 m scale so they look flat.
   function draw(cv, ele, dist, done) {
     const [c, w, h] = fit(cv); if (!ele?.length) return;
-    let lo = Math.min(...ele), hi = Math.max(...ele); if (hi - lo < 20) { const m = (hi + lo) / 2; lo = m - 10; hi = m + 10; }
+    let lo = Math.min(...ele), hi = Math.max(...ele); if (hi - lo < 150) { lo = Math.min(...ele) - 5; hi = lo + 150; }  // a flat course looks flat
     const X = i => i / (ele.length - 1) * w, Y = e => h - 3 - (e - lo) / (hi - lo) * (h - 10);
     const path = () => { c.beginPath(); c.moveTo(0, h); ele.forEach((e, i) => c.lineTo(X(i), Y(e))); c.lineTo(w, h); c.closePath(); };
     c.fillStyle = css('--panel2'); path(); c.fill();
@@ -33,10 +33,10 @@ export function createCourses({ $, store, toast, fit, css, units, ride }) {
     box.innerHTML = '';
     for (const c of all()) {
       const own = !c.id.startsWith('s-'), on = c.id === sel;
-      const card = document.createElement('div'); card.className = 'card';
-      card.innerHTML = `<canvas></canvas><div><div class="t">${esc(c.name)}</div>
-        <div class="m num">${distText(c.dist / 1000, units())} · ${upText(c.gain)} up</div></div>
-        <div class="row"><button class="pri" data-a="ride">Ride</button><button data-a="use" aria-pressed="${on}" class="${on ? 'on' : ''}">${on ? 'In use' : 'Use'}</button>${own ? '<button data-a="del" class="danger">Delete</button>' : ''}</div>`;
+      const card = document.createElement('div'); card.className = 'lrow' + (on ? ' sel' : '');
+      card.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(c.name)}</div>
+        <div class="m num">${distText(c.dist / 1000, units())} · ${upText(c.gain)} up${on ? ' · used for every ride' : ''}</div></div>
+        <div class="lact"><button class="pri" data-a="ride">Ride</button><button data-a="use" aria-pressed="${on}" title="Use this road for workouts and Just ride">${on ? 'Stop using' : 'Use'}</button>${own ? '<button data-a="del" class="danger">Delete</button>' : ''}</div>`;
       box.appendChild(card);
       requestAnimationFrame(() => draw(card.querySelector('canvas'), c.ele, c.dist, null));
       card.querySelector('[data-a=ride]').onclick = () => ride(c);

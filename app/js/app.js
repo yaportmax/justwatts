@@ -426,8 +426,9 @@ function intervalText(cw, i, ftp) {
 function renderRide() {
   if (!V) return;
   const t = curTarget(), m = S.ride.control; $('#lT').textContent = t ?? '–';
+  $('#lI').parentElement.style.display = V.cw ? '' : 'none';  // no workout: no interval tile
   $('#tgtTile').querySelector('.of').style.display = t == null || (V.jr.wm && V.jr.wm !== 'e') ? 'none' : '';  // free riding: just the power
-  $('#lTs').textContent = V.cw ? (V.jr.wm && V.jr.wm !== 'e' ? 'ERG off · ' + valText(m) : t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free · ' + valText(m)) : m === 'w' ? 'ERG' : valText(m);
+  $('#lTs').textContent = !V.cw && S.ride.course ? '' : V.cw ? (V.jr.wm && V.jr.wm !== 'e' ? 'ERG off · ' + valText(m) : t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free · ' + valText(m)) : m === 'w' ? 'ERG' : valText(m);
   $('#lE').textContent = fmtT(V.started ? samples.length : 0);  // time ridden (1 sample a second)
   $('#rName').textContent = V.name;
   const st = !V.started ? ['Ready', ''] : V.auto ? ['Start pedaling', 'warn'] : V.paused ? ['Paused', 'warn'] : S.ride.overtime ? ['Workout done · riding free', 'done'] : ['Riding', ''];
@@ -449,7 +450,7 @@ function renderRide() {
     $('#ivBar').style.background = at.s.free ? css('--z1') : zoneColor(stepWatts(at.s, at.into, V.ftp, V.k) / V.ftp);
   } else {
     $('#lI').textContent = '–'; $('#lIs').textContent = ''; $('#lEs').textContent = '';
-    $('#ivNow').textContent = V.jr.m === 'w' ? `ERG ${V.jr.w} W` : V.jr.m === 'r' ? `Resistance level ${(+V.jr.r).toFixed(1)}` : valText('g').replace(/^\w/, c => c.toUpperCase()); $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
+    $('#ivNow').textContent = S.ride.course ? '' : V.jr.m === 'w' ? `ERG ${V.jr.w} W` : V.jr.m === 'r' ? `Resistance level ${(+V.jr.r).toFixed(1)}` : valText('g').replace(/^\w/, c => c.toUpperCase());  // a course shows its own grade under the chart $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
   }
   $('#rClock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const cwDraw = V.cw && V.el > V.cw.total ? { ...V.cw, total: V.el * 1.02 } : V.cw;

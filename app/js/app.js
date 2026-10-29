@@ -994,7 +994,7 @@ async function syncHrZones() {
   } catch {}
 }
 $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3m 55%), 8m 50-40%';
-showTab(wkTab);
+showTab(wkTab); aView(document.querySelector('.view.on')?.id?.replace('v-', '') || 'workouts');
 setStatus();
 loadSettings().then(syncHrZones);
 migrateLocalRides().then(renderHistory);

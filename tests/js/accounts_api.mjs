@@ -224,6 +224,10 @@ S.origin = async () => {
   assert.equal((await call('POST', '/api/auth/login', { raw: '{nope', headers: good })).body.error, 'bad_json');
   assert.equal((await call('POST', '/api/auth/login', { raw: '[1]', headers: good })).body.error, 'bad_json');
   assert.equal((await call('POST', '/api/auth/login', { raw: JSON.stringify({ email: 'x'.repeat(20000) }), headers: good })).status, 413);
+  // the vercel.json rewrite: /api/accounts?__path=<original path>&<original query>
+  assert.equal((await call('GET', '/api/accounts?__path=/api/auth/providers')).body.accounts, true);
+  assert.equal((await call('GET', '/api/accounts?__path=/api/community&sort=new')).body.sort, 'new');
+  assert.equal((await call('GET', '/api/accounts?__path=/api/strava/token')).status, 404);
   // GET routes need no origin; unknown methods
   assert.equal((await call('GET', '/api/auth/providers')).status, 200);
   assert.equal((await call('PATCH', '/api/auth/login', { headers: good })).status, 405);

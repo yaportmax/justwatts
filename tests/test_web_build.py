@@ -23,9 +23,7 @@ def test_build_output(dist):
     assert {"index.html", "js/app.js", "js/core.js", "js/mode.js", "js/web/backend.js", "css/app.css", "vercel.json", "icon.svg"} <= files
     assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
     api = {f for f in files if f.startswith("api/")}                                  # the Strava token relay + accounts API
-    assert {"api/strava/token.js", "api/auth/[...path].js", "api/sync/[...path].js", "api/community/index.js",
-            "api/community/[...path].js", "api/admin/[...path].js", "api/_lib/app.js"} <= api
-    assert all(f.startswith("api/_lib/") or f.count("/") == 2 for f in api)          # shared code only under _lib (not routed)
+    assert {f for f in api if not f.startswith("api/_lib/")} == {"api/strava/token.js", "api/accounts.js"}  # _lib is not routed
     pkg = json.loads((dist / "package.json").read_text())                             # Vercel installs the one dependency
     assert pkg["dependencies"] == {"@neondatabase/serverless": "1.2.0"} and (dist / "package-lock.json").exists()
     assert "privacy.html" in files
@@ -41,6 +39,7 @@ def test_vercel_headers(dist):
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
     assert h["X-Content-Type-Options"] == "nosniff" and "bluetooth=(self)" in h["Permissions-Policy"]
     assert v["rewrites"] == [{"source": "/privacy", "destination": "/privacy.html"},
+                             {"source": "/api/(auth|sync|community|admin)(/.*)?", "destination": "/api/accounts?__path=/api/$1$2"},
                              {"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the functions
     assert v["regions"] == ["pdx1"]                                                   # next to the Neon database
 

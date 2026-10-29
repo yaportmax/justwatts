@@ -83,6 +83,9 @@ async function handler(req, res) {
     send(res, code, body, { ...ctx.headers, ...headers });
   };
   try {
+    // behind the vercel.json rewrite the original path arrives as ?__path=; only API paths are honored
+    const given = url.searchParams.get('__path');
+    if (given && /^\/api\/(auth|sync|community|admin)(\/|$)/.test(given)) { url.pathname = given; url.searchParams.delete('__path'); }
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const match = routes.map(r => ({ r, m: r.re.exec(path) })).filter(x => x.m);
     if (!match.length) return out(404, { error: 'not_found' });

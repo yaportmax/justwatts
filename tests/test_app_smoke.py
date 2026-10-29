@@ -125,3 +125,45 @@ def test_page_reload_at_any_moment(node, srv, moment):
         assert out["pause"] == ("Resume" if moment == "paused" else "Pause")  # auto-paused: Pause makes it stick
     after = json.dumps(eng.state({})["ride"], sort_keys=True, default=str)
     assert before == after, "booting a page must not change the ride"
+
+
+def test_page_integrations_and_upload_panel(node, srv):
+    """Settings > Integrations, the Upload panel with nothing connected, connect-with-ride, mixed upload states,
+    the manual fallback and Today's planned ride, on the real page against the server (intervals.icu stubbed)."""
+    from test_integrations_api import KEY, IcuHttp, J, ride
+
+    srv.garmin.is_linked = False  # nothing connected yet
+    rid = ride(srv, "Smoke ride")
+    fake = IcuHttp()
+    html403 = J(403, {}, {"content-type": "text/html"})
+    html403.body = b"<html>blocked</html>"
+    fake.upload = [J(201, {"id": "i9", "activities": [{"id": "i9"}]}), J(503, {}), html403, J(401, {}), J(401, {})]
+    srv.server.integrations.conns["intervals"].http = fake
+    env = {**os.environ, "JUSTWATTS_SMOKE_PORT": str(srv.port), "JUSTWATTS_SMOKE_KEY": KEY, "JUSTWATTS_SMOKE_RIDE": rid}
+    p = subprocess.run([node, str(SCRIPT), "connect"], capture_output=True, text=True, timeout=90, env=env, encoding="utf-8")
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    s = out["settings"]
+    assert s["order"] == ["garmin", "strava", "trainingpeaks", "intervals", "coros", "polar", "suunto", "wahoo"]
+    assert s["recommended"] == 1 and s["garminRecommended"] and s["note"] and s["manualHead"] and s["polar"]
+    assert s["connectButtons"] == 4  # Garmin, Strava (Just Watts's shared app), TrainingPeaks, intervals.icu
+    # nothing connected: one Upload action, a Connect Garmin nudge, the panel with Garmin first and the manual route
+    assert out["summary0"] == {"button": "Upload", "cls": "pri", "line": "none", "nudge": ""}
+    p0 = out["panel0"]
+    assert p0["on"] and p0["title"] == "Upload" and p0["order"][:4] == ["garmin", "strava", "trainingpeaks", "intervals"]
+    assert p0["fit"] and p0["steps"] and p0["link"] and p0["connects"] == 4
+    assert out["manualCoros"] and out["fitHref"] == f"/api/rides/{rid}/fit"
+    # connect from the panel: the form, secrets cleared after submit, the ride uploaded at once
+    f = out["form"]
+    assert f == {"open": True, "title": "Connect intervals.icu", "fields": True, "keyIsPassword": True, "help": True}
+    assert out["cleared"] and out["connectPost"] == [{"ride": rid, "hasKey": True}]
+    assert out["summary1"]["button"] == "Uploaded" and out["summary1"]["cls"] == "done" and "intervals.icu Uploaded" in out["summary1"]["line"]
+    retrying, blocked, signed_out = out["states"]
+    assert "Retrying Retry" in retrying["line"] and retrying["button"] == "Uploading…" and "Retry now" in retrying["panel"]
+    assert "Failed Upload by hand" in blocked["line"] and blocked["button"] == "Upload failed"
+    assert "Reconnect" in signed_out["line"] and "Reconnect" in signed_out["panel"]
+    assert out["fallback"] and out["settingsReconnect"]
+    # Today: the planned ride from intervals.icu, ridden in one click
+    assert out["today"] and out["loaded"]["name"] == "Tempo" and "10m" in out["loaded"]["text"]
+    assert not out["leak"]
+    assert [c for c in fake.calls if c[0] == "POST"]  # the upload went to the stub, never a real service

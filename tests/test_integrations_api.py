@@ -70,6 +70,12 @@ def test_reads_and_writes_need_the_page_or_token(srv):
     for path in ("/api/integrations", "/api/integrations/planned", "/api/rides/x/uploads", "/api/rides/x/targets"):
         assert srv.req("GET", path)[0] == 403
         assert srv.req("GET", path, headers={"Origin": "https://evil.example", "X-HW": "1"})[0] == 403
+        assert srv.req("GET", path, headers={"X-HW": "1"})[0] == 403
+        assert srv.req("GET", path, headers={"X-HW": "1", "Sec-Fetch-Site": "cross-site"})[0] == 403
+        assert srv.req("GET", path, headers={"Sec-Fetch-Site": "same-origin"})[0] == 403
+    # the page's own GET: a browser sends no Origin on a same-origin GET, but Sec-Fetch-Site (it cannot be forged by a page)
+    assert srv.req("GET", "/api/integrations", headers={"X-HW": "1", "Sec-Fetch-Site": "same-origin"})[0] == 200
+    assert srv.req("POST", "/api/integrations/intervals/auto", {"on": True}, headers={"X-HW": "1", "Sec-Fetch-Site": "same-origin"})[0] == 403
     assert srv.req("GET", "/api/integrations", headers=srv.bearer)[0] == 200
     assert srv.req("POST", "/api/integrations/intervals/connect", {"athlete_id": "i1", "api_key": KEY})[0] == 403
     # credentials only from the page itself, never a token caller

@@ -45,6 +45,12 @@ const MIGRATIONS = [
     `CREATE TABLE IF NOT EXISTS ${S}.reports (type text NOT NULL, target_id text NOT NULL, user_id text NOT NULL REFERENCES ${S}.users(id) ON DELETE CASCADE,
       reason text NOT NULL DEFAULT '', created_at float8 NOT NULL, PRIMARY KEY (type, target_id, user_id))`,
   ] },
+  // integrations: secrets (AES-256-GCM sealed before they get here), job state and FIT files, per user
+  { version: 2, sql: [
+    `CREATE TABLE IF NOT EXISTS ${S}.integration_data (user_id text NOT NULL REFERENCES ${S}.users(id) ON DELETE CASCADE,
+      ns text NOT NULL, name text NOT NULL, value bytea NOT NULL, updated_at float8 NOT NULL, PRIMARY KEY (user_id, ns, name))`,
+    `CREATE INDEX IF NOT EXISTS integration_data_age ON ${S}.integration_data (ns, updated_at)`,
+  ] },
 ];
 
 const USER = 'id, name, pass_hash AS "passHash", created_at AS "createdAt", session_version AS "sessionVersion", rev';
@@ -114,6 +120,20 @@ function pgStore(db) {
         [`DELETE FROM ${S}.users WHERE id = $1`, [id]],
       ]);
     },
+    /* integrations (web/api/_lib/integrations): values are bytes */
+    async getIntegrationData(uid, ns, name) {
+      const r = one(await q(`SELECT encode(value, 'base64') AS b64 FROM ${S}.integration_data WHERE user_id = $1 AND ns = $2 AND name = $3`, [uid, ns, name]));
+      return r ? Buffer.from(r.b64, 'base64') : null;
+    },
+    async putIntegrationData(uid, ns, name, value, now) {
+      if (value === null || value === undefined) { await q(`DELETE FROM ${S}.integration_data WHERE user_id = $1 AND ns = $2 AND name = $3`, [uid, ns, name]); return; }
+      await q(`INSERT INTO ${S}.integration_data (user_id, ns, name, value, updated_at) VALUES ($1, $2, $3, decode($4::text, 'base64'), $5)
+        ON CONFLICT (user_id, ns, name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, [uid, ns, name, Buffer.from(value).toString('base64'), now]);
+    },
+    async pruneIntegrationData(before) {
+      await q(`DELETE FROM ${S}.integration_data WHERE updated_at < $1 AND (ns = 'file' OR (ns = 'state' AND name LIKE 'meta:%'))`, [before]);
+    },
+    async countIntegrationData(uid) { return one(await q(`SELECT count(*)::int AS n FROM ${S}.integration_data WHERE user_id = $1`, [uid])).n; },
     /* one-time tokens */
     async putToken(t) {
       await tx([

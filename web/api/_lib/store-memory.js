@@ -10,6 +10,7 @@ function memoryStore() {
   const users = new Map(), idents = new Map(), tokens = new Map(), rate = new Map();
   const records = new Map(), rides = new Map();           // key `${user}\n${kind}\n${id}` / `${user}\n${id}`
   const items = new Map(), likes = new Map(), itemRides = new Set(), comments = new Map(), reports = new Map();
+  const integ = new Map();                                 // `${user}\n${ns}\n${name}` -> { value: Buffer, at }
   const ik = (p, s) => `${p}\n${s}`;
   const userIdents = uid => [...idents.values()].filter(i => i.userId === uid);
   const bumpRev = uid => ++users.get(uid).rev;
@@ -61,9 +62,20 @@ function memoryStore() {
         for (const [lk, l] of likes) if (l.itemId === k) likes.delete(lk);
         for (const rk of [...itemRides]) if (rk.startsWith(k + '\n')) itemRides.delete(rk);
       }
+      for (const k of [...integ.keys()]) if (k.split('\n')[0] === id) integ.delete(k);
       for (const t of touched) recount(t);
       users.delete(id);
     },
+    /* integrations (web/api/_lib/integrations): sealed secrets, job state, FIT files; values are bytes */
+    async getIntegrationData(uid, ns, name) { const v = integ.get(`${uid}\n${ns}\n${name}`); return v ? Buffer.from(v.value) : null; },
+    async putIntegrationData(uid, ns, name, value, now) {
+      const k = `${uid}\n${ns}\n${name}`;
+      if (value === null || value === undefined) integ.delete(k); else integ.set(k, { value: Buffer.from(value), at: now });
+    },
+    async pruneIntegrationData(before) {
+      for (const [k, v] of integ) { const [, ns, name] = k.split('\n'); if (v.at < before && (ns === 'file' || (ns === 'state' && name.startsWith('meta:')))) integ.delete(k); }
+    },
+    async countIntegrationData(uid) { return [...integ.keys()].filter(k => k.split('\n')[0] === uid).length; },
     /* one-time tokens (hashed) */
     async putToken(t) {
       for (const [k, x] of tokens) if (x.userId === t.userId && x.purpose === t.purpose) tokens.delete(k);

@@ -2,6 +2,8 @@
 // and a small in-memory IndexedDB that survives the "reload". Rides a simulated workout entirely in
 // the page: no server, no Bluetooth, no network. Usage: node web_smoke.mjs <dist-web dir>
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+import { Readable } from 'node:stream';
 const DIST = process.argv[2];
 
 // ---------- minimal IndexedDB (enough for app/js/web/idb.js) ----------
@@ -37,7 +39,7 @@ class El {
   constructor(sel, data = {}) { this.sel = sel; this.dataset = data; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } }; this.classList = new ClassList(); this.kids = {}; this.value = ''; this.textContent = ''; this.innerHTML = ''; this.tagName = 'DIV'; this.offsetHeight = 50; this.checked = false; }
   querySelector(s) { return this.kids[s] ??= new El(s); }
   get parentElement() { return this._p ??= new El('parent'); }
-  appendChild() {} scrollIntoView() {} addEventListener() {} setAttribute(k, v) { (this.attrs ??= {})[k] = v; }
+  appendChild() {} scrollIntoView() {} addEventListener() {} setAttribute(k, v) { (this.attrs ??= {})[k] = v; } querySelectorAll() { return this.qsa || []; }
   getBoundingClientRect() { return { width: 300, height: 100 }; }
   getContext() { return ctx; }
   click() { this.onclick?.(); }
@@ -49,7 +51,7 @@ const multi = () => ({
   '#jrMode button': [],
 });
 let M = multi();
-const mkDoc = () => ({ querySelector: s => els[s] ??= new El(s), querySelectorAll: s => M[s] || [], createElement: () => { const e = new El('new'); made.push(e); return e; },
+const mkDoc = () => ({ querySelector: s => els[s] ??= new El(s), querySelectorAll: s => M[s] || [], getElementById: id => els['#' + id] ??= new El('#' + id), createElement: () => { const e = new El('new'); made.push(e); return e; },
   addEventListener() {}, documentElement: new El('html'), body: new El('body'), activeElement: { tagName: 'BODY' }, hidden: false });
 globalThis.window = globalThis;
 globalThis.addEventListener = () => {};
@@ -64,9 +66,9 @@ globalThis.EventSource = undefined;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(fn, what, ms = 10000) { const t0 = Date.now(); while (!fn()) { if (Date.now() - t0 > ms) throw new Error('timeout: ' + what); await sleep(5); } }
 
-async function boot(n) {
+async function boot(n, extra = {}) {
   els = {}; M = multi(); globalThis.document = mkDoc();
-  globalThis.__justwattsWeb = { tickMs: 0 };
+  globalThis.__justwattsWeb = { tickMs: 0, ...extra };
   const mod = pathToFileURL(`${DIST}/js/app.js`).href + `?boot=${n}`;
   await import(mod);
   const hw = window.__hw; await until(() => hw.state(), 'first state');
@@ -153,5 +155,78 @@ await sleep(20);
 const rc = hw.state().ride.course;
 out.course = { name: hw.state().ride.name, course: rc.name, done: rc.done_m, profile: rc.profile.length, want: hw.backend.engine?.hub?.wantCmd ?? null,
   strip: $('#crsRide').style.display, text: $('#crsK').innerHTML };
+// ---------- boot 4: integrations on the web, through the real /api/integrations handler (dist-web/api) ----------
+// Signed out: manual upload and "Sign in". Signed in: connect from the Upload panel uploads this ride (the page
+// posts its FIT), Today's planned ride. intervals.icu itself is a stub; the user is whoever `uid` says.
+{
+  const require = createRequire(import.meta.url);
+  const { makeHandler } = require(`${DIST}/api/_lib/integrations/http.js`);
+  const { memoryStore } = require(`${DIST}/api/_lib/integrations/store.js`);
+  const KEY = 'icukey-0123456789abcdef';
+  let uid = null; const svc = [], net = [];
+  const R = (status, obj) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
+  const H = makeHandler({ store: memoryStore(), key: Buffer.alloc(32, 3), userId: async () => uid, fetch: async (url, opt = {}) => {
+    svc.push(`${opt.method || 'GET'} ${url}`);
+    if (/\/athlete\/i42$/.test(url)) return R(200, { id: 'i42', name: 'Web Rider' });
+    if (/\/athlete\/i42\/activities/.test(url)) return R(201, { id: 'i42', activities: [{ id: 'i77' }] });
+    if (/\/athlete\/i42\/events/.test(url)) return R(200, [{ id: 5, category: 'WORKOUT', type: 'Ride', name: 'Tempo', workout_doc: { steps: [{ duration: 600, power: { value: 80, units: '%ftp' } }] } }]);
+    return R(404, {});
+  } });
+  const netFetch = (url, opt = {}) => {
+    const b = opt.body instanceof Uint8Array ? Buffer.from(opt.body) : Buffer.from(opt.body || '');
+    net.push({ url, method: opt.method || 'GET', fit: b.length > 12 && b.toString('latin1', 8, 12) === '.FIT', hasKey: b.toString('latin1').includes(KEY) });
+    const headers = { host: 'justwatts.test', 'x-hw': (opt.headers || {})['X-HW'] };
+    if (opt.method === 'POST') headers.origin = 'https://justwatts.test';  // the browser adds it to a POST
+    const req = Object.assign(Readable.from(b.length ? [b] : []), { method: opt.method || 'GET', url, headers });
+    return new Promise(resolve => {
+      const res = { statusCode: 200, h: {}, setHeader(k, v) { this.h[k.toLowerCase()] = v; }, end(x) { resolve(new Response(x ?? null, { status: this.statusCode, headers: this.h })); } };
+      H(req, res);
+    });
+  };
+  let signIns = 0;
+  globalThis.justwatts.openSignIn = () => { signIns++; };  // what the account UI adds next to openConnectServices
+  hw = await boot(4, { net: netFetch });
+  const nav = v => M['nav button'].find(b => b.dataset.v === v).click();
+  const html = sel => String($(sel).innerHTML);
+  const tapIn = (sel, act, svcId) => $(sel).onclick({ target: { closest: () => ({ dataset: { act, svc: svcId }, disabled: false }) } });
+  const w = out.web = {};
+  // signed out: Settings offers sign in and the manual routes; the Upload panel too
+  nav('settings');
+  await until(() => $('#intSignin').style.display === '' && html('#intList').includes('Upload by hand'), 'signed out settings');
+  w.signedOut = { connects: (html('#intList').match(/data-conn=/g) || []).length, manual: ['garmin', 'strava', 'coros', 'wahoo'].every(id => html('#intList').includes(`data-svc="${id}"`)),
+    steps: html('#intList').includes('Drop the file in and click Import Data.') };
+  const rid = (await (await hw.backend.fetch('/api/rides')).json()).rides.find(r => r.name === 'Web ride').id;
+  nav('history');
+  await until(() => made.some(e => String(e.innerHTML).includes('Web ride')), 'history');
+  made.findLast(e => String(e.innerHTML).includes('Web ride')).onclick();
+  await until(() => $('#sName').textContent === 'Web ride' && $('#sUpload').textContent === 'Upload', 'summary');
+  $('#sUpload').onclick();
+  w.panelOut = { signin: html('#upBody').includes('Sign in to connect services'), fit: html('#upBody').includes('Download .fit'), steps: html('#upBody').includes('Open Garmin Connect') };
+  tapIn('#upBody', 'signin');
+  w.signIns = signIns;
+  // the account UI signs the rider in, then calls openConnectServices()
+  uid = 'u1';
+  await globalThis.justwatts.openConnectServices();
+  w.connectStep = { title: $('#upTitle').textContent, first: (html('#upBody').match(/data-svc="(\w+)"/) || [])[1], skip: html('#upBody').includes('Skip for now') };
+  tapIn('#upBody', 'skip');
+  // connect with this ride from the Upload panel: no FIT on the server yet, so the page posts it
+  hw.conn.openPanel('ride'); await hw.conn.renderSummary(rid);
+  tapIn('#upBody', 'connect', 'intervals');
+  $('#connBody').qsa = [{ name: 'athlete_id', value: 'i42' }, { name: 'api_key', value: KEY }];
+  await $('#connGo').onclick();
+  await until(() => String($('#sUpLine').innerHTML).includes('Uploaded'), 'web uploaded');
+  w.after = { button: $('#sUpload').textContent, line: String($('#sUpLine').innerHTML).includes('https://intervals.icu/activities/i77') };
+  w.posts = net.filter(c => c.method === 'POST').map(c => ({ op: new URL(c.url, 'https://x').searchParams.get('op'), services: new URL(c.url, 'https://x').searchParams.get('services'), fit: c.fit, key: c.hasKey }));
+  // a ride saved later goes up by itself (auto upload, no services list)
+  const n0 = net.length;
+  await hw.conn.afterRide(rid);
+  w.auto = net.slice(n0).map(c => ({ op: new URL(c.url, 'https://x').searchParams.get('op'), services: new URL(c.url, 'https://x').searchParams.get('services'), fit: c.fit }));
+  // Today
+  nav('workouts');
+  await until(() => made.some(e => e.className === 'lrow today' && String(e.innerHTML).includes('Tempo')), 'web today');
+  w.today = true;
+  w.leak = Object.values(els).some(e => String(e.innerHTML).includes(KEY));
+  w.svc = [...new Set(svc.map(x => x.split(' ')[0] + ' ' + new URL(x.split(' ')[1]).pathname.replace(/\d+/g, 'N')))];
+}
 process.stdout.write(JSON.stringify(out));
 process.exit(0);

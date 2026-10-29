@@ -1,10 +1,15 @@
-// Who is calling. Stub until the accounts branch lands: wiring is replacing userId() with its session lookup
-// (one line in web/api/integrations.js, see docs/INTEGRATIONS.md "Wiring to accounts").
-// Without accounts nobody is signed in, so the integration endpoints answer 401 in production. For local
-// testing only, JUSTWATTS_INTEGRATIONS_DEV_USER names a fixed user.
+// Who is calling: the accounts session cookie (web/api/_lib/app.js sessionUser), or null when signed out.
+// For local testing only, JUSTWATTS_INTEGRATIONS_DEV_USER names a fixed user outside production when nobody
+// is signed in.
 'use strict';
+const app = require('../app');
 
-async function userId(req) {  // eslint-disable-line no-unused-vars
+async function userId(req) {
+  const store = app.storeOrNull();
+  if (store && app.secret()) {
+    const u = await app.sessionUser({ req, store, now: app.clock.now() });
+    if (u) return u.id;
+  }
   const dev = process.env.JUSTWATTS_INTEGRATIONS_DEV_USER;
   return dev && process.env.VERCEL_ENV !== 'production' ? String(dev) : null;
 }

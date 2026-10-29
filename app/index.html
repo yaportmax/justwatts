@@ -213,10 +213,11 @@
         <button id="sFit" class="ghost" title="Download .fit">.fit</button>
         <button id="sTcx" class="ghost" title="Download .tcx">.tcx</button>
         <button id="sDel" class="ghost danger">Delete</button>
-        <button id="sStrava" class="serveronly">Upload to Strava</button>
-        <button id="sGarmin" class="pri serveronly">Upload to Garmin</button>
+        <button id="sUpload" class="pri">Upload</button>
       </div>
     </div>
+    <div class="upline" id="sUpLine" style="display:none" role="status" aria-live="polite"></div>
+    <div class="nudge" id="sNudge" style="display:none"><button id="sNudgeGo" class="link">Connect Garmin</button><span class="hint">Rides then upload by themselves</span><button id="sNudgeX" class="x sm" aria-label="Dismiss"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
     <div id="sTest" class="row ftpest" style="display:none"></div>
     <div id="sStats"></div>
     <canvas id="sMap" style="display:none"></canvas>
@@ -245,7 +246,7 @@
     <button data-set="set-athlete" class="on">Athlete</button>
     <button data-set="set-hr">Heart rate</button>
     <button data-set="set-ride">Ride</button>
-    <button data-set="set-uploads">Uploads</button>
+    <button data-set="set-uploads">Integrations</button>
     <button data-set="set-data" class="webonly">Your data</button>
     <!-- Account goes here (accounts branch) -->
   </div>
@@ -278,28 +279,19 @@
       <label class="srow"><span class="sl">Distance in History<small>From the trainer's virtual speed. FIT files keep it.</small></span><span class="sc"><select id="virtDist"><option value="0">Virtual distance</option><option value="1">Hide</option></select></span></label>
     </section>
     <section class="sset" id="set-uploads">
-      <h2>Uploads</h2>
-      <label class="srow serveronly"><span class="sl">Garmin<small id="garminState"></small></span><span class="sc"><select id="autoGarmin2"><option value="1">Auto upload</option><option value="0">Manual</option></select></span></label>
-      <div class="srow webonly"><span class="sl">Garmin<small>Import the ride's .fit in Garmin Connect, or use the local app for auto upload.</small></span></div>
-      <details class="serveronly adv" id="stBox">
-      <summary>Strava</summary>
-      <div class="srow"><span class="sl">Account<small id="stState"></small></span><span class="sc"><button id="stConnect" class="pri">Connect Strava</button></span></div>
-      <label class="srow"><span class="sl">Upload</span><span class="sc"><select id="autoStrava"><option value="1">Auto upload</option><option value="0">Manual</option></select></span></label>
-      <div class="warnbox" id="stDup">If Garmin Connect syncs to Strava, uploading to both makes duplicates. Use one.</div>
-      <details class="adv" id="stOwnBox"><summary>Use your own Strava API app</summary>
-        <div class="hint">Create one at strava.com/settings/api, callback domain <b>localhost</b>. The secret stays on this computer; Just Watts's token service is not used.</div>
+      <h2>Integrations</h2>
+      <div class="srow" id="intSignin" style="display:none"><span class="sl"><span id="intSigninTxt">Sign in to connect services.</span></span><span class="sc"><button id="intSigninBtn" class="pri">Sign in</button></span></div>
+      <div class="intlist" id="intList"></div>
+      <details class="serveronly adv" id="stOwnBox"><summary>Strava API app</summary>
+        <div class="hint">Create one at strava.com/settings/api, callback domain <b>localhost</b>. The secret stays on this computer.</div>
         <div class="row" style="margin-top:10px">
           <label class="f">Client ID<input id="stId" style="width:120px"></label>
           <label class="f">Client secret<input id="stSecret" type="password" autocomplete="off" style="width:220px"></label>
           <button id="stSave">Save</button>
           <button id="stShared">Use Just Watts's app</button>
         </div>
-      </details>
-      <details class="adv"><summary>Advanced</summary>
         <label class="srow"><span class="sl">Share card base URL<small>Without it, Strava gets a text summary (NP, IF, TSS, intervals).</small></span><span class="sc"><input id="shareBase" placeholder="https://example.com/justwatts" style="width:280px"></span></label>
       </details>
-      </details>
-      <div class="srow webonly"><span class="sl">Strava<small>Upload the ride's .fit on strava.com, or use the local app.</small></span></div>
     </section>
     <section class="sset webonly" id="set-data">
       <h2>Your data</h2>
@@ -333,6 +325,18 @@
       <button id="devScan" class="pri">Scan</button>
     </div>
   </div>
+</div>
+<div class="modal" id="connModal">
+  <div class="panel dlg cdlg" role="dialog" aria-labelledby="connTitle">
+    <div class="dhead"><b id="connTitle">Connect</b><button id="connClose" class="x" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+    <div class="cbody" id="connBody"></div>
+    <div class="err" id="connErr" role="alert"></div>
+    <div class="dfoot"><span></span><div class="row" style="gap:8px"><button id="connCancel" class="ghost">Cancel</button><button id="connGo" class="pri">Connect</button></div></div>
+  </div>
+</div>
+<div class="sheet up" id="upPanel" role="dialog" aria-labelledby="upTitle">
+  <div class="shead"><b id="upTitle">Upload</b><span class="grow"></span><button id="upClose" class="x" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+  <div id="upBody"></div>
 </div>
 <div class="modal" id="cardModal">
   <div class="panel dlg" style="width:min(560px,100%)">

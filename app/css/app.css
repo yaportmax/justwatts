@@ -481,3 +481,95 @@ button.pri:disabled,button.pri:disabled:hover{background:var(--panel2);border-co
 .sitefoot a{color:var(--dim);text-decoration:none}
 .sitefoot a:hover{color:var(--ink);text-decoration:underline}
 main:has(#v-ride.on) .sitefoot{display:none}
+
+/* ---------- integrations: Settings rows, connect dialog, the Upload panel, Today ---------- */
+.intlist{display:flex;flex-direction:column}
+.irow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.iname{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;min-width:0}
+.iname .dot{margin-right:0}
+.isub{font-size:12px;color:var(--faint);margin-top:2px;padding-left:16px}
+.isub:empty{display:none}
+.isub .ok,.psub .ok{color:var(--good)}.isub .warn,.psub .warn,.psub.warn{color:var(--warn)}.isub .bad,.psub .bad{color:var(--bad)}
+.rec{font-size:11px;font-weight:600;color:var(--acc);background:var(--acc-soft);padding:1px 7px;border-radius:999px;line-height:16px}
+.tip{position:relative;font-size:12px;font-weight:400;color:var(--faint);text-decoration:underline dotted var(--faint);text-underline-offset:3px;cursor:help;outline-offset:2px}
+.tip .pop{display:none;position:absolute;left:0;top:calc(100% + 8px);z-index:12;width:320px;padding:12px 14px;background:var(--panel2);border-radius:var(--r2);box-shadow:var(--shadow);color:var(--dim);font-size:12.5px;line-height:1.5;white-space:normal;cursor:default;text-align:left}
+.tip .pop::before{content:"";position:absolute;left:0;right:0;top:-10px;height:10px}
+.tip:hover .pop,.tip:focus .pop,.tip:focus-within .pop{display:block}
+.steps{margin:8px 0 0;padding-left:18px;color:var(--dim);font-size:13px;line-height:1.65}
+.pop .steps{font-size:12.5px;margin-top:6px}
+.mlink{margin-top:6px;font-size:13px}
+.pop a,.steps a,.mlink a,.hint a,.upline a,a.btn{color:var(--acc);text-decoration:none}
+.pop a:hover,.steps a:hover,.mlink a:hover,.hint a:hover,.upline a:hover{text-decoration:underline}
+.ihead{margin:28px 0 0;padding-bottom:8px;font-size:12px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;font-weight:600;border-bottom:1px solid var(--line)}
+details.irow.man{display:block;padding:0}
+details.irow.man>summary{display:flex;align-items:center;gap:10px;padding:12px 0;cursor:pointer;list-style:none}
+details.irow.man>summary::-webkit-details-marker{display:none}
+details.irow.man .isub{padding:0;margin:0}
+details.irow.man .how{font-size:13px;color:var(--dim);display:inline-flex;align-items:center;gap:6px}
+details.irow.man .how::after{content:"";width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);margin:-3px 3px 0 0;transition:transform .15s}
+details.irow.man[open] .how::after{transform:rotate(-135deg);margin-top:3px}
+details.irow.man>summary:hover .how{color:var(--ink)}
+details.irow.man>:not(summary){margin-left:0}
+details.irow.man[open]{padding-bottom:14px}
+.isyncs{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin-top:10px;padding-left:16px;font-size:12px;color:var(--faint)}
+.chk{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--ink);cursor:pointer;user-select:none}
+.chk input{accent-color:var(--acc);width:15px;height:15px;margin:0;padding:0;cursor:pointer}
+.irow .warnbox{margin-left:16px}
+/* connect dialog */
+.dlg.cdlg{width:min(420px,100%)}
+.dlg .tip .pop{top:auto;bottom:calc(100% + 8px)}
+.dlg .tip .pop::before{top:auto;bottom:-10px}
+.cbody{display:flex;flex-direction:column;gap:12px}
+.cbody label.f input{width:100%;height:36px;font-size:14px;color:var(--ink)}
+.cbody .steps{margin:0}
+.cbody .q{margin:2px 0 0;font-size:14px;color:var(--ink)}
+.chks{display:flex;gap:20px;flex-wrap:wrap}
+.cbody>.hint .tip{font-size:12px}
+.dlg .err:empty{display:none}
+/* ride summary: one Upload button, a status line per connected service, the Garmin nudge */
+#sUpload.done{background:none;color:var(--good);border-color:rgba(34,197,94,.35)}
+#sUpload.warn{background:none;color:var(--warn);border-color:rgba(245,158,11,.45)}
+.upline{display:flex;flex-wrap:wrap;gap:6px 24px;margin:-10px 0 20px;font-size:13px;color:var(--ink)}
+.us{display:inline-flex;align-items:center;gap:7px}
+.us i{width:7px;height:7px;border-radius:50%;background:var(--faint)}
+.us.done i,.us.there i{background:var(--good)}.us.failed i{background:var(--bad)}.us.uploading i,.us.retrying i{background:var(--warn)}
+.us em{font-style:normal;color:var(--faint)}.us.failed em{color:var(--bad)}
+.us .link{margin-left:4px}
+button.link{height:auto;padding:0;background:none;border:0;color:var(--acc);font-weight:500;font-size:13px}
+button.link:hover{background:none;text-decoration:underline}
+.nudge{display:flex;align-items:center;gap:10px;margin:-10px 0 20px;font-size:13px}
+.nudge .x.sm{width:24px;height:24px}
+.nudge .x.sm svg{width:14px;height:14px}
+/* Upload panel: a side sheet like Adjust */
+.sheet.up{width:min(460px,calc(100vw - 24px))}
+.up .sh{margin:20px 0 2px;font-size:12px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.up .shead+div>.sh:first-child{margin-top:4px}
+.prow{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.prow.signin{border:0;padding-top:4px}
+.pmain{flex:1;min-width:0}
+.pname{display:flex;align-items:center;gap:8px;font-weight:550;font-size:14px}
+.pname .dot{margin-right:0}
+.dot.bad{background:var(--bad)}
+.psub{font-size:12px;color:var(--faint);margin-top:2px;overflow-wrap:anywhere}
+a.btn{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid var(--line2);border-radius:var(--r);font-size:13px;font-weight:500;color:var(--ink);background:var(--panel2)}
+a.btn:hover{background:#20252c}
+.manual{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.manual .dl{align-self:flex-start}
+.manual .steps{margin:0}
+.mchips{display:flex;flex-wrap:wrap;gap:4px}
+.chip2{height:28px;padding:0 10px;background:none;border-color:transparent;color:var(--dim);border-radius:999px;font-size:13px}
+.chip2:hover{background:var(--panel2);color:var(--ink)}
+.chip2.on{background:var(--panel2);border-color:var(--line2);color:var(--ink)}
+.pfoot{margin-top:20px;display:flex;justify-content:flex-end}
+/* Today: planned rides from TrainingPeaks or intervals.icu, rideable in one click */
+#lib .lrow.today{box-shadow:inset 2px 0 0 var(--acc)}
+.lrow.today .c{color:var(--acc);font-weight:600}
+.lrow.today>.lact{visibility:visible}
+#lib .lrow.today>:nth-child(n+6):not(.lact){visibility:hidden}
+@media (max-width:900px){
+  .irow{grid-template-columns:1fr;gap:10px}
+  .irow>.sc{justify-content:flex-start;padding-left:16px}
+  .tip .pop{width:min(300px,80vw)}
+  .sheet.up{width:100%}
+  .lrow.today .lact{display:flex;position:absolute;right:12px;top:50%;transform:translateY(-50%)}
+}

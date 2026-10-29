@@ -22,6 +22,32 @@ function memoryStore() {
   };
 }
 
+// The accounts database (store-memory.js / store-pg.js, table integration_data) behind the interface above.
+// getStore() is read on every call, so a missing DATABASE_URL never crashes at load; `fallback` (a memoryStore)
+// serves only the dev user when there is no database. FIT files and ride metadata older than 30 days are pruned
+// now and then on a write.
+const FILE_DAYS = 30, DAY = 86400000;
+function accountsStore(getStore, { fallback = null, now = () => Date.now(), prune = () => Math.random() < 0.02 } = {}) {
+  const db = () => { const s = getStore(); if (!s) throw new Error('no database'); return s; };
+  const get = (u, ns, n) => db().getIntegrationData(u, ns, n);
+  const put = async (u, ns, n, buf) => {
+    const s = db();
+    await s.putIntegrationData(u, ns, n, buf, now());
+    if (buf && ns === 'file' && prune()) await s.pruneIntegrationData(now() - FILE_DAYS * DAY);
+  };
+  const real = {
+    async getSecret(u, svc) { const b = await get(u, 'secret', svc); return b ? b.toString('utf8') : null; },
+    async setSecret(u, svc, v) { await put(u, 'secret', svc, v === null || v === undefined ? null : Buffer.from(String(v), 'utf8')); },
+    async getState(u, k) { const b = await get(u, 'state', k); return b ? JSON.parse(b.toString('utf8')) : null; },
+    async setState(u, k, v) { await put(u, 'state', k, v === null || v === undefined ? null : Buffer.from(JSON.stringify(v), 'utf8')); },
+    async getFile(u, n) { return get(u, 'file', n); },
+    async putFile(u, n, b) { await put(u, 'file', n, b ? Buffer.from(b) : null); },
+  };
+  if (!fallback) return real;
+  const pick = () => (getStore() ? real : fallback);
+  return Object.fromEntries(Object.keys(real).map(m => [m, (...a) => pick()[m](...a)]));
+}
+
 function userStore(raw, key, userId) {
   const aad = s => `justwatts:${userId}:${s}`;
   return {
@@ -34,4 +60,4 @@ function userStore(raw, key, userId) {
   };
 }
 
-module.exports = { memoryStore, userStore };
+module.exports = { memoryStore, userStore, accountsStore, FILE_DAYS };

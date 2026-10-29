@@ -25,7 +25,9 @@ def test_build_output(dist):
     ml = "vendor/maplibre-gl-5.24.0/"                                                # 3D map, pinned, no CDN (CSP)
     assert {ml + f for f in ("maplibre-gl-csp.js", "maplibre-gl-csp-worker.js", "maplibre-gl.css", "LICENSE.txt")} <= files
     assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
-    assert {f for f in files if f.startswith("api/")} == {"api/strava/token.js"}     # only the Strava token service
+    lib = {f"api/_lib/integrations/{m}.js" for m in ("base", "crypto", "store", "planned", "intervals", "trainingpeaks",
+                                                      "garmin", "hub", "http", "session")}
+    assert {f for f in files if f.startswith("api/")} == {"api/strava/token.js", "api/integrations.js", *lib}  # serverless only
     assert "MODE = 'web'" in (dist / "js/mode.js").read_text()
     assert "MODE = 'server'" in (REPO / "app/js/mode.js").read_text()                # the local app is untouched
 

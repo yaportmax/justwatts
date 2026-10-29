@@ -5,6 +5,10 @@
 
 const L = (id, name, category, level, text, purpose, tags) => ({ id, name, text, category, purpose, level, tags });
 
+// shown first under Featured: the classics across the range of efforts
+export const FEATURED = ['l-ss-2x20', 'p-vo2', 'p-endurance', 'p-threshold', 'p-3030', 'p-overunder', 'l-tempo-2x15', 'l-vo2-ronnestad',
+  'l-quick-20', 'p-pyramid', 'l-sprint-20s', 'p-recovery'];
+
 export const CATEGORIES = ['Recovery', 'Endurance', 'Tempo', 'Sweet spot', 'Threshold', 'VO2 max', 'Anaerobic', 'Sprint', 'Mixed'];
 
 export const LIBRARY = [

@@ -32,15 +32,14 @@ from justwatts.server import make_server  # noqa: E402
 RESERVED_PORTS = {8765, 8780}  # the live app and the reviewer's test server: never bind them
 
 
-def free_port(start=8770, end=8798) -> int:
-    for p in (x for x in range(start, end) if x not in RESERVED_PORTS):
+def free_port() -> int:
+    """A port the OS says is free (several worktrees run the suite at once, so a fixed range collides)."""
+    while True:
         with socket.socket() as s:
-            try:
-                s.bind(("127.0.0.1", p))
-                return p
-            except OSError:
-                continue
-    raise RuntimeError("no free port in 8770..8798")
+            s.bind(("127.0.0.1", 0))
+            p = s.getsockname()[1]
+        if p not in RESERVED_PORTS:
+            return p
 
 
 class FakeGarmin:

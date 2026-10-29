@@ -10,7 +10,7 @@ import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
 import { createBuilder } from './builder.js';
 import { fromWords } from './words.js';
-import { LIBRARY, CATEGORIES } from './library.js';
+import { LIBRARY, CATEGORIES, FEATURED } from './library.js';
 import { createCourses } from './courses.js';
 import { drawMap } from './map.js';
 import { checkCourse } from './course.js';
@@ -95,7 +95,7 @@ const courses = createCourses({ $, store, toast, fit, css, units: () => settings
 
 /* ---------- library + builder ---------- */
 // library filters are a per-browser convenience
-const libF = Object.assign({ q: '', cat: '', dur: '', lvl: '' }, store.get('hw.libFilter', {}));
+const libF = Object.assign({ q: '', cat: '', dur: '', lvl: '', sort: '' }, store.get('hw.libFilter', {}));
 const compiled = new Map();
 function cwOf(w) { const k = w.id + '|' + w.text; if (!compiled.has(k)) { try { compiled.set(k, compile(w)); } catch { compiled.set(k, null); } } return compiled.get(k); }
 function libMatch(w, cw) {
@@ -108,19 +108,30 @@ function libMatch(w, cw) {
 function renderLibBar() {
   const cats = [['', 'All'], ...(custom.length ? [['Mine', 'Mine']] : []), ...CATEGORIES.map(c => [c, c])];
   $('#libCat').innerHTML = cats.map(([v, t]) => `<button class="chip${libF.cat === v ? ' on' : ''}" data-cat="${esc(v)}">${esc(t)}</button>`).join('');
-  $('#libQ').value = libF.q; $('#libDur').value = libF.dur; $('#libLvl').value = libF.lvl;
+  $('#libQ').value = libF.q; $('#libDur').value = libF.dur; $('#libLvl').value = libF.lvl; $('#libSort').value = libF.sort || '';
 }
 const setLibF = patch => { Object.assign(libF, patch); store.set('hw.libFilter', libF); renderLibBar(); renderLib(); };
 $('#libCat').onclick = e => { const b = e.target?.closest?.('[data-cat]'); if (b) setLibF({ cat: b.dataset.cat }); };
 $('#libQ').oninput = e => { libF.q = e.target.value; store.set('hw.libFilter', libF); renderLib(); };
 $('#libDur').onchange = e => setLibF({ dur: e.target.value });
 $('#libLvl').onchange = e => setLibF({ lvl: e.target.value });
+$('#libSort').onchange = e => setLibF({ sort: e.target.value });
+// Featured: your own workouts, the picks, then the rest taking turns across categories (not one long block per category)
+function sortedWorkouts(list) {
+  const by = { short: (a, b) => a.cw.total - b.cw.total, long: (a, b) => b.cw.total - a.cw.total, easy: (a, b) => (a.w.level || 3) - (b.w.level || 3) || a.cw.total - b.cw.total,
+    hard: (a, b) => (b.w.level || 3) - (a.w.level || 3) || b.cw.total - a.cw.total, name: (a, b) => a.w.name.localeCompare(b.w.name) }[libF.sort];
+  if (by) return list.sort(by);
+  const pick = new Map(FEATURED.map((id, i) => [id, i])), mine = list.filter(x => x.w.id.startsWith('c-')), top = list.filter(x => pick.has(x.w.id)).sort((a, b) => pick.get(a.w.id) - pick.get(b.w.id));
+  const rest = list.filter(x => !x.w.id.startsWith('c-') && !pick.has(x.w.id)), q = new Map();
+  for (const x of rest) { const k = x.w.category || ''; if (!q.has(k)) q.set(k, []); q.get(k).push(x); }
+  const mixed = []; for (let left = rest.length; left;) for (const a of q.values()) if (a.length) { mixed.push(a.shift()); left--; }
+  return [...mine, ...top, ...mixed];
+}
 const lvlDots = n => n ? `<span class="lvl" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
 let libSel = null, libCourse = '';  // the selected workout row and the course picked on it (Flat: '')
 function renderLib() {
   const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = 0;
-  for (const w of allWorkouts()) {
-    const cw = cwOf(w); if (!cw || !libMatch(w, cw)) continue;
+  for (const { w, cw } of sortedWorkouts(allWorkouts().map(w => ({ w, cw: cwOf(w) })).filter(x => x.cw && libMatch(x.w, x.cw)))) {
     shown++;
     const e = estimate(cw, ftp), mine = w.id.startsWith('c-');
     const on = libSel === w.id, row = document.createElement('div'); row.className = 'lrow' + (on ? ' sel' : '');
@@ -791,7 +802,7 @@ async function openSummary(id) {
   if (d.ftp_estimate) {
     const est = d.ftp_estimate; tb.style.display = '';
     tb.innerHTML = `<span class="badge">FTP estimate <b class="num" style="color:var(--ink)">${esc(est)} W</b></span><button id="sSetFtp">Set FTP</button>`;
-    $('#sSetFtp').onclick = () => { settings.ftp = est; saveSettings(['ftp']); $('#ftp').value = est; renderLib(); renderBuilder(); toast(`FTP set to ${est} W`); };
+    $('#sSetFtp').onclick = () => { settings.ftp = est; saveSettings(['ftp']); renderLib(); renderBuilder(); toast(`FTP set to ${est} W`); };
   } else tb.style.display = 'none';
   const hz = d.hr_zones_s ? Object.values(d.hr_zones_s) : null, hn = hz ? hz.reduce((a, b) => a + b, 0) : 0;
   $('#sHR').style.display = hn ? '' : 'none';
@@ -893,9 +904,8 @@ async function renderSettings() {
   $('#stDup').classList.toggle('hot', !!(settings.autoGarmin && settings.autoStrava));
   $('#agentState').textContent = S?.agent?.connected ? 'Connected' : 'Not connected';
 }
-// Settings > Athlete and the Workouts tab shortcuts edit the same values
-$('#sFtp').onchange = e => { $('#ftp').value = e.target.value; $('#ftp').onchange({ target: $('#ftp') }); renderSettings(); };
-$('#sWeight').onchange = e => { $('#weight').value = e.target.value; $('#weight').onchange({ target: $('#weight') }); renderSettings(); };
+$('#sFtp').onchange = e => { const v = +e.target.value; if (v >= 50 && v <= 600) { settings.ftp = Math.round(v); settings.ftpSrc = 'manual'; saveSettings(['ftp', 'ftpSrc']); renderLib(); renderBuilder(); } renderSettings(); };
+$('#sWeight').onchange = e => { settings.weight = weightKg(e.target.value, settings.units); saveSettings(['weight']); renderSettings(); };
 $('#units').onchange = e => { settings.units = e.target.value === 'metric' ? 'metric' : 'imperial'; saveSettings(['units']); showSettings(); renderSettings(); };
 function showUnits() { $$('.wUnit').forEach(x => { x.textContent = weightUnit(settings.units); }); courses.render(); }
 // HR zones: % of max HR (default), Custom floors, or Garmin (local server with Garmin on)
@@ -1047,11 +1057,9 @@ $('#ftpModal').onclick = e => {
   $('#ftpModal').classList.remove('on'); loadRide(FTP_TESTS.find(t => t.id === b.dataset.t));
 };
 function showSettings() {
-  $('#ftp').value = settings.ftp; $('#weight').value = weightShow(settings.weight, settings.units); showUnits(); $('#beeps').value = settings.beeps ? '1' : '0';
+  showUnits(); $('#beeps').value = settings.beeps ? '1' : '0';
   renderLib(); renderBuilder();
 }
-$('#ftp').onchange = e => { const v = +e.target.value; if (v >= 50 && v <= 600) { settings.ftp = Math.round(v); settings.ftpSrc = 'manual'; saveSettings(['ftp', 'ftpSrc']); renderLib(); renderBuilder(); } };
-$('#weight').onchange = e => { settings.weight = weightKg(e.target.value, settings.units); saveSettings(['weight']); };
 $('#beeps').onchange = e => { settings.beeps = e.target.value === '1'; saveSettings(['beeps']); };
 if (globalThis.location?.hash === '#settings') setTimeout(() => show('settings'), 0);
 

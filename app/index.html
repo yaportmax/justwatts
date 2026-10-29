@@ -33,11 +33,7 @@
 </div>
 <!-- WORKOUTS -->
 <section class="view on" id="v-workouts">
-  <div class="row" style="justify-content:space-between">
-    <div class="row">
-      <label class="f">FTP (W)<input id="ftp" type="number" min="50" max="600" step="1"></label>
-      <label class="f"><span>Weight (<span class="wUnit">lb</span>)</span><input id="weight" type="number" min="0" max="450" step="0.1"></label>
-    </div>
+  <div class="row" style="justify-content:flex-end">
     <div class="row" style="gap:6px"><button id="btnFtp">FTP test</button><select id="jrCourse" class="pick" aria-label="Just ride course" title="Course for Just ride"></select><button id="btnJust" class="pri">Just ride</button></div>
   </div>
 
@@ -56,6 +52,7 @@
   <div class="libbar">
     <input id="libQ" type="search" placeholder="Search" aria-label="Search workouts">
     <select id="libDur" aria-label="Length"><option value="">Any length</option><option value="0-45">Under 45 min</option><option value="45-75">45 to 75 min</option><option value="75-120">75 min to 2 h</option><option value="120-999">Over 2 h</option></select>
+    <select id="libSort" aria-label="Sort"><option value="">Featured</option><option value="short">Shortest</option><option value="long">Longest</option><option value="easy">Easiest</option><option value="hard">Hardest</option><option value="name">Name</option></select>
     <select id="libLvl" aria-label="Difficulty"><option value="">Any difficulty</option><option value="1-2">Easy</option><option value="3-3">Moderate</option><option value="4-5">Hard</option></select>
   </div>
   <div class="chips" id="libCat" role="group" aria-label="Category"></div>

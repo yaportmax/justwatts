@@ -23,8 +23,8 @@ export function cellsAround(lat, lon, r = 1) {
   return out;
 }
 // bikeable ways: roads (no motorways, private or no-bike ways, parking aisles, driveways) and paths open to bikes
-export function overpassQuery(key) {
-  const bb = cellBox(key).join(',');
+export function overpassQuery(key, box = cellBox(key)) {
+  const bb = box.join(',');
   return `[out:json][timeout:25];(way["highway"~"^(trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|road|service|cycleway)$"]`
     + `["access"!~"^(private|no)$"]["bicycle"!~"^(no|dismount|use_sidepath)$"]["motorroad"!="yes"]["area"!="yes"]["service"!~"^(parking_aisle|driveway|drive-through|emergency_access)$"](${bb});`
     + `way["highway"~"^(path|footway|pedestrian|bridleway)$"]["bicycle"~"^(yes|designated|permissive)$"]["area"!="yes"](${bb}););out body geom qt;`;

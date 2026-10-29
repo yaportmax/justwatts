@@ -1,7 +1,9 @@
 """Open world roads (app/js/roads.js): Overpass parsing, the road graph, the default way at junctions (same road,
 straight on, main road), dead-end U-turns, oneways, roundabouts, cell (chunk) boundaries, 10 m points and grade
 from a Terrarium tile with bridges. Overpass answers are recorded fixtures; nothing touches the network."""
+import json
 import math
+import subprocess
 
 import pytest
 
@@ -183,3 +185,12 @@ def test_bridges_span_the_valley(js):
     assert max(abs(a - b) for a, b in zip(fixed["fixed"], line)) < 3
     assert js([{"op": "bridges", "raw": [10, 0, 0, 40, 50], "br": [0, 1, 1, 0, 0]}])[0] == [10, 20, 30, 40, 50]
     assert js([{"op": "bridges", "raw": [5, 0, 30], "br": [1, 1, 0]}])[0] == pytest.approx([5 + 25 / 3, 5 + 50 / 3, 30])
+
+
+def test_preset_roads_are_baked_in(node):
+    p = subprocess.run([node, str(REPO / "tests/js/seed_harness.mjs")], capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout)
+    assert out.pop("asked") == ["/roads/bay.json", "/roads/alpe.json"]  # one file per area, never Overpass
+    for pid, r in out.items():
+        assert r["here"] > 0 and r["around"], pid

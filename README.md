@@ -46,7 +46,8 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
   ride real roads with no route. You stay on the road; at a junction you go straight on or follow the
   main road unless you pick another way. Roads are OpenStreetMap data loaded around you (Overpass),
   the grade comes from terrain tiles, a workout can run on top, and the road ridden can be saved as a
-  course.
+  course. Roads around the three presets ship with the app (`app/roads`, rebuilt with
+  `node tools/bake_roads.mjs`), so those starts load at once.
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.

@@ -2,7 +2,7 @@
 // one request at a time, cached), plans the road ahead (roads.js), samples its grade from terrain tiles and sends
 // it to the engine (control 'road'), which only follows a growing course. A reload or a server restart rebuilds
 // the plan from the engine's course. Junction choices: choose(), or key() with the arrow keys.
-import { RoadGraph, Plan, OVERPASS, overpassQuery, parseWays, cellKey, cellsAround, tileAt, tileEle, bridges, smoothFrom, label } from './roads.js';
+import { RoadGraph, Plan, OVERPASS, overpassQuery, parseWays, cellKey, cellBox, cellsAround, tileAt, tileEle, bridges, smoothFrom, label } from './roads.js';
 import { STEP_M } from './course.js';
 
 export const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
@@ -11,6 +11,11 @@ export const PRESETS = [
   { id: 'hawk', name: 'Hawk Hill', lat: 37.83294, lon: -122.48262, heading: 290 },
   { id: 'alpe', name: "Alpe d'Huez", lat: 45.0558, lon: 6.03584, heading: 320 },
 ];
+// roads baked into the app around the presets (tools/bake_roads.mjs): those starts never wait on Overpass
+export const SEEDS = [
+  { id: 'bay', box: [37.77, -122.53, 37.87, -122.43] },   // Golden Gate Bridge, Hawk Hill, the Presidio, Marin Headlands
+  { id: 'alpe', box: [45.02, 5.98, 45.11, 6.1] },        // Bourg d'Oisans to Alpe d'Huez
+];
 const AHEAD = 2500, PROMPT = 200, BATCH = 30, CACHE = 'jw-roads-1';
 const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 
@@ -18,7 +23,7 @@ const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 // with a polite gap, a mirror that fails backs off (2x .. 32x the gap) while the other carries on; a cell another
 // mirror has not answered in HEDGE ms is asked of an idle one too; a cell is retried until it loads.
 // get(key) resolves to the ways.
-export function createRoadLoader({ fetch = globalThis.fetch, caches = globalThis.caches, gap = 1100, now = () => Date.now() } = {}) {
+export function createRoadLoader({ fetch = globalThis.fetch, caches = globalThis.caches, gap = 1100, now = () => Date.now(), base = '/roads/' } = {}) {
   const mem = new Map(), wait = new Map(), queue = [], busy = new Map(), working = new Set(), HEDGE = 10000;  // busy: key -> asked at
   const fails = OVERPASS.map(() => 0), last = OVERPASS.map(() => -1e9);
   const url = key => `https://roads.justwatts.invalid/${CACHE}/${key}`;
@@ -26,6 +31,19 @@ export function createRoadLoader({ fetch = globalThis.fetch, caches = globalThis
     try { const r = await (await caches?.open(CACHE))?.match(url(key)); const j = r && await r.json(); return Array.isArray(j?.ways) ? j.ways : null; } catch { return null; }
   }
   async function toCache(key, ways) { try { await (await caches?.open(CACHE))?.put(url(key), new Response(JSON.stringify({ ways }), { headers: { 'Content-Type': 'application/json' } })); } catch {} }
+  const seeds = new Map();  // id -> Promise<{ cells, byId } | null>
+  function fromSeed(key) {
+    const [cs, cw, cn, ce] = cellBox(key), seed = SEEDS.find(({ box: [s, w, n, e] }) => cs >= s && cw >= w && cn <= n && ce <= e);
+    if (!seed) return Promise.resolve(null);
+    if (!seeds.has(seed.id)) seeds.set(seed.id, (async () => {
+      try {
+        const r = await fetch(base + seed.id + '.json'); if (!r.ok) return null;
+        const j = await r.json(); if (!j?.cells || !Array.isArray(j.ways)) return null;
+        return { cells: j.cells, byId: new Map(j.ways.map(w => [w.id, w])) };
+      } catch { return null; }
+    })());
+    return seeds.get(seed.id).then(d => { const ids = d?.cells[key]; return Array.isArray(ids) ? ids.map(id => d.byId.get(id)).filter(Boolean) : null; });
+  }
   function done(key, ways) {
     mem.set(key, ways); const i = queue.indexOf(key); if (i >= 0) queue.splice(i, 1);
     for (const f of wait.get(key) || []) f(ways); wait.delete(key);
@@ -60,7 +78,7 @@ export function createRoadLoader({ fetch = globalThis.fetch, caches = globalThis
     return new Promise(ok => {
       if (!wait.has(key)) {
         wait.set(key, []);
-        fromCache(key).then(ways => {
+        fromCache(key).then(ways => ways || fromSeed(key)).then(ways => {
           if (ways) return done(key, ways);
           if (!queue.includes(key)) urgent ? queue.unshift(key) : queue.push(key);
           run();

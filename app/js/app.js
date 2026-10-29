@@ -15,6 +15,7 @@ import { LIBRARY, CATEGORIES, FEATURED } from './library.js';
 import { createCourses } from './courses.js';
 import { drawMap } from './map.js';
 import { checkCourse } from './course.js';
+import { createConnect } from './connect.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -93,6 +94,18 @@ function hoverable(cv) {
   cv.onpointerleave = () => { hoverT.delete(cv); redraw(); };
 }
 hoverable($('#rideChart')); hoverable($('#sumChart'));
+// integrations: Settings > Integrations, the Upload panel, Today's planned rides (connect.js)
+const conn = createConnect({ $, F, WEB, toast,
+  fitOf: async id => {  // web: the FIT the page posts to the integration functions
+    const r = await (await F('/api/rides/' + id)).json(), data = await B.exportFile(id, 'fit'); if (!data || !r?.samples) return null;
+    const t0 = r.start || r.samples[0][0], d = new Date(t0), p = n => String(n).padStart(2, '0');
+    return { bytes: new Uint8Array(data), name: r.name, start: t0, duration: r.samples.length,
+      local: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` };
+  },
+  downloadFit: id => fileLink('fit', id),
+  onPlanned: list => { planned = list; if ($('#v-workouts').classList.contains('on') && wkTab === 'workouts') renderLib(); },
+  stravaSetup: () => { const d = $('#stOwnBox'); d.open = true; d.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); },
+});
 const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide() });
 
 /* ---------- library + builder ---------- */
@@ -131,8 +144,25 @@ function sortedWorkouts(list) {
 }
 const lvlDots = n => n ? `<span class="lvl l${n}" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
 let libSel = null, libCourse = '';  // the selected workout row and the course picked on it (Flat: '')
+let planned = [];  // today's planned rides from TrainingPeaks / intervals.icu (connect.js)
+function renderToday(lib, ftp) {
+  if (libF.q || libF.cat === 'Mine') return 0;
+  let n = 0;
+  for (const p of planned) {
+    const w = { id: 'planned-' + p.source, name: p.name, text: p.text }, cw = cwOf(w); if (!cw) continue;
+    const e = estimate(cw, ftp), row = document.createElement('div'); row.className = 'lrow today';
+    row.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(p.name)}</div><div class="p">${esc(p.sourceName + (p.description ? ' · ' + p.description : ''))}</div></div>
+      <div class="c">Today</div><div class="m num r">${fmtT(cw.total)}</div><div class="m num r">${Math.round(p.tss || e.tss)}</div><div></div>
+      <div class="lact"><button class="pri" data-a="ride">Ride</button></div>`;
+    lib.appendChild(row); n++;
+    requestAnimationFrame(() => drawThumb(row.querySelector('canvas'), cw, ftp));
+    row.onclick = () => loadRide(w);
+    row.querySelector('[data-a=ride]').onclick = ev => { ev?.stopPropagation?.(); loadRide(w); };
+  }
+  return n;
+}
 function renderLib() {
-  const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = 0;
+  const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = renderToday(lib, ftp);
   for (const { w, cw } of sortedWorkouts(allWorkouts().map(w => ({ w, cw: cwOf(w) })).filter(x => x.cw && libMatch(x.w, x.cw)))) {
     shown++;
     const e = estimate(cw, ftp), mine = w.id.startsWith('c-');
@@ -631,7 +661,7 @@ const KEYS = {
   KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo,
 };
 function onKey(e) {
-  if (e.key === 'Escape') { sheet(false); $('#keysModal').classList.remove('on'); return; }
+  if (e.key === 'Escape') { if (conn.escape()) return; sheet(false); $('#keysModal').classList.remove('on'); return; }
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '');
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !typing && $('#v-workouts').classList.contains('on')) { e.preventDefault(); builder.undo(); return; }
   if (!V || typing) return;
@@ -683,9 +713,13 @@ async function migrateLocalRides() {
   for (const r of local) { try { if (!(await api('/api/ride', r)).ok) ok = false; } catch { ok = false; } }
   if (ok) store.set('hw.migrated', true);
 }
+let justFinished = null;
 async function finishedRide(f) {
   beep(660, 0.4); track('ride_finish', { minutes: Math.round((f.samples || 0) / 60) });
-  show('history'); await renderHistory(); openSummary(f.id);
+  justFinished = f.id;
+  show('history'); await renderHistory();
+  await conn.afterRide(f.id).catch(() => {});  // web: send the FIT to connected services; local: the server already queued them
+  openSummary(f.id);
 }
 let openId = null, openRide = null;
 async function openSummary(id) {
@@ -731,60 +765,16 @@ async function openSummary(id) {
     $('#sHZleg').innerHTML = hz.map((t, i) => `<span><b style="background:var(${HRZ_COLORS[i]})"></b>Z${i + 1} ${esc(fl[i])}+ · ${esc(fmtT(t))}</span>`).join('');
   }
   $('#sLaps').innerHTML = d.laps.map(l => `<tr><td>${esc(l.overtime ? 'free' : l.index)}</td><td class="num">${esc(fmtT(l.time_s))}</td><td class="num">${esc(l.target_w ?? (l.free ? 'free' : '–'))}</td><td class="num">${esc(l.avg_w)}</td><td class="num">${esc(l.max_w)}</td><td class="num">${esc(l.np)}</td><td class="num">${esc(l.avg_hr ?? '–')}</td><td class="num">${esc(l.max_hr ?? '–')}</td><td class="num">${esc(l.avg_cad ?? '–')}</td></tr>`).join('');
-  renderGarminBtn(d.garmin);
-  renderStravaBtn(d.strava);
+  conn.renderSummary(id, { fresh: justFinished === id });
   globalThis.scrollTo?.(0, 0);
 }
-function renderGarminBtn(g) {
-  const b = $('#sGarmin'); b.disabled = !garminOn && !g;
-  b.title = garminOn ? '' : 'Garmin is disabled on this server';
-  b.textContent = g ? 'On Garmin ✓' : 'Upload to Garmin'; b.classList.toggle('pri', !g); b.dataset.g = g || '';
-}
-function renderStravaBtn(sid) {
-  const b = $('#sStrava'); b.dataset.s = sid || '';
-  b.textContent = sid ? 'On Strava ✓' : 'Upload to Strava';
-  b.disabled = !sid && !strava.connected; b.title = strava.connected || sid ? '' : 'Connect Strava in Settings';
-}
-$('#sStrava').onclick = async () => {
-  const sid = $('#sStrava').dataset.s;
-  if (sid) { window.open(`https://www.strava.com/activities/${sid}`, '_blank'); return; }
-  if (!openId) return;
-  if (settings.autoGarmin && !confirmDup()) return;
-  $('#sStrava').disabled = true; $('#sStrava').textContent = 'Uploading…';
-  try { const j = await apiJson(`/api/rides/${openId}/strava`, {}); toast(j.duplicate ? 'Already on Strava' : 'Uploaded to Strava'); renderStravaBtn(j.activity_id); }
-  catch (e) { toast('Strava upload failed: ' + e.message); renderStravaBtn(null); }
-  renderHistory();
-};
-let dupWarned = false;
-function confirmDup() {  // Garmin auto-sync to Strava + direct upload = duplicate activity
-  if (dupWarned) return true;
-  dupWarned = true; toast('Garmin may already sync this ride to Strava. Tap Upload again to send anyway.');
-  return false;
-}
-async function uploadGarmin(id) {
-  if (openId === id) { $('#sGarmin').disabled = true; $('#sGarmin').textContent = 'Uploading…'; }
-  let g = null;
-  try {
-    const res = await api(`/api/rides/${id}/garmin`, {});
-    const j = await res.json().catch(() => ({ error: 'no local server (run: justwatts serve)' }));
-    if (!j.ok) throw new Error(j.error || res.status);
-    g = j.activityId || true; toast(j.duplicate ? 'Already on Garmin' : 'Uploaded to Garmin');
-  } catch (e) { toast('Garmin upload failed: ' + e.message); }
-  if (openId === id) renderGarminBtn(g);
-  renderHistory();
-}
-$('#sGarmin').onclick = () => {
-  const g = $('#sGarmin').dataset.g;
-  if (g) window.open(/^\d+$/.test(g) ? `https://connect.garmin.com/modern/activity/${g}` : 'https://connect.garmin.com/modern/activities', '_blank');
-  else if (openId) uploadGarmin(openId);
-};
 function closeSummary() { $('#summary').style.display = 'none'; $('#histMain').style.display = ''; openId = null; }
 $('#sClose').onclick = () => { closeSummary(); renderTrends(); };
 $('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); closeSummary(); renderHistory(); toast('Deleted (kept in rides/trash)'); };
-const fileLink = async ext => {
-  if (!openId) return;
-  if (WEB) { const data = await B.exportFile(openId, ext); if (data) download(fileBaseOf(openRide) + '.' + ext, data, ext === 'fit' ? 'application/octet-stream' : 'application/xml'); return; }
-  const a = document.createElement('a'); a.href = `/api/rides/${openId}/${ext}`; a.download = ''; a.click();
+const fileLink = async (ext, id = openId) => {
+  if (!id) return;
+  if (WEB) { const data = await B.exportFile(id, ext); if (data) download(fileBaseOf(id === openId ? openRide : await (await F('/api/rides/' + id)).json()) + '.' + ext, data, ext === 'fit' ? 'application/octet-stream' : 'application/xml'); return; }
+  const a = document.createElement('a'); a.href = `/api/rides/${id}/${ext}`; a.download = ''; a.click();
 };
 $('#sFit').onclick = () => fileLink('fit');
 $('#sTcx').onclick = () => fileLink('tcx');
@@ -803,20 +793,15 @@ async function renderSettings() {
   renderHrZones();
   $('#virtDist').value = settings.hideVirtualDistance ? '1' : '0';
   $('#afterWk').value = settings.afterWorkout || 'hold';
-  $('#autoGarmin2').value = settings.autoGarmin ? '1' : '0'; $('#autoGarmin2').disabled = !garminOn;
   $('#gImport').style.display = garminOn ? '' : 'none';
-  $('#garminState').textContent = garminOn ? '' : 'Garmin is off on this server (see README: Garmin upload)';
+  conn.renderSettings();
+  if (WEB) return;
   $('#shareBase').value = settings.shareBaseUrl || '';
   try { strava = await (await F('/api/strava/status')).json(); } catch { strava = {}; }
   const own = strava.mode === 'own';
   $('#stId').value = own ? strava.client_id || '' : '';
   $('#stSecret').value = ''; $('#stSecret').placeholder = strava.has_secret ? 'saved (hidden)' : 'paste once';
-  $('#stOwnBox').open = own; $('#stShared').style.display = own ? '' : 'none';
-  $('#stConnect').textContent = strava.connected ? 'Reconnect Strava' : 'Connect Strava';
-  $('#stConnect').disabled = !strava.configured;
-  $('#stState').textContent = strava.connected ? `Connected${strava.athlete?.name ? ' as ' + strava.athlete.name : ''}` : strava.configured ? 'Not connected' : 'Set up your own Strava API app below';
-  $('#autoStrava').value = settings.autoStrava ? '1' : '0'; $('#autoStrava').disabled = !strava.connected;
-  $('#stDup').classList.toggle('hot', !!(settings.autoGarmin && settings.autoStrava));
+  $('#stShared').style.display = own ? '' : 'none';
 }
 $('#sFtp').onchange = e => { const v = +e.target.value; if (v >= 50 && v <= 600) { settings.ftp = Math.round(v); settings.ftpSrc = 'manual'; saveSettings(['ftp', 'ftpSrc']); renderLib(); renderBuilder(); } renderSettings(); };
 $('#sWeight').onchange = e => { settings.weight = weightKg(e.target.value, settings.units); saveSettings(['weight']); renderSettings(); };
@@ -858,21 +843,15 @@ $('#hrMax').onchange = e => {
   if (!e.target.value) settings.hrMax = null; else if (v >= 100 && v <= 230) settings.hrMax = Math.round(v); else { toast('Max HR: 100 to 230'); renderHrZones(); return; }
   saveHr();
 };
-$('#autoGarmin2').onchange = e => { settings.autoGarmin = e.target.value === '1'; saveSettings(['autoGarmin']); renderSettings(); };
-$('#autoStrava').onchange = e => { settings.autoStrava = e.target.value === '1'; saveSettings(['autoStrava']); renderSettings(); };
 $('#shareBase').onchange = e => { settings.shareBaseUrl = e.target.value.trim(); saveSettings(['shareBaseUrl']); };
 $('#stSave').onclick = async () => {
   try { await apiJson('/api/strava/config', { client_id: $('#stId').value.trim(), client_secret: $('#stSecret').value.trim() }); toast('Strava app saved'); }
   catch (e) { toast('Strava: ' + e.message); }
-  $('#stSecret').value = ''; renderSettings();
+  $('#stSecret').value = ''; await conn.load(); renderSettings();
 };
 $('#stShared').onclick = async () => {
   try { await apiJson('/api/strava/shared', {}); toast("Using Just Watts's Strava app. Connect again."); } catch (e) { toast('Strava: ' + e.message); }
-  renderSettings();
-};
-$('#stConnect').onclick = async () => {
-  if (!WEB) { location.href = '/api/strava/connect'; return; }
-  try { location.href = (await apiJson('/api/strava/connect', {})).url; } catch (e) { toast('Strava: ' + e.message); }
+  await conn.load(); renderSettings();
 };
 $('#gImport').onclick = async () => {
   try {
@@ -881,7 +860,7 @@ $('#gImport').onclick = async () => {
     await loadSettings(); renderSettings();
   } catch (e) { toast('Garmin import failed: ' + e.message); }
 };
-{ const u = new URLSearchParams(globalThis.location?.search || ''); if (u.get('strava') === 'connected') toast('Strava connected'); if (u.get('strava_error')) toast('Strava: ' + u.get('strava_error')); }
+{ const u = new URLSearchParams(globalThis.location?.search || ''); if (u.get('strava') === 'connected') { toast('Strava connected'); track('integration_connect', { service: 'strava', ok: 1 }); } if (u.get('strava_error')) toast('Strava: ' + u.get('strava_error')); }
 
 /* ---------- share card (rendered here; Strava's API cannot take photos) ---------- */
 async function shareCard() {
@@ -944,7 +923,7 @@ function show(v) {
   aView(v);
   $$('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
-  if (v === 'workouts') showTab(wkTab);
+  if (v === 'workouts') { showTab(wkTab); conn.loadPlanned().catch(() => {}); }
   if (v === 'ride' && V) renderRide();
   if (v === 'history') { closeSummary(); renderHistory(); }
   if (v === 'settings') renderSettings();
@@ -997,6 +976,7 @@ $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3
 showTab(wkTab); aView(document.querySelector('.view.on')?.id?.replace('v-', '') || 'workouts');
 setStatus();
 loadSettings().then(syncHrZones);
+conn.load().then(() => conn.loadPlanned()).catch(() => {});
 migrateLocalRides().then(renderHistory);
 F('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() => {});
 connect();
@@ -1004,4 +984,4 @@ connect();
 const setHH = () => { const h = document.querySelector('header'); document.documentElement.style.setProperty('--hh', (h.offsetWidth >= globalThis.innerWidth - 1 ? h.offsetHeight : 0) + 'px'); };
 setHH();
 window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) wkTab === 'workouts' ? renderLib() : courses.render(); if (V) renderRide(); });
-window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE };
+window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE, conn };

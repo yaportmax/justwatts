@@ -203,13 +203,16 @@ def profile_of(c: dict, n: int = 300) -> list[float]:
 
 
 # ---------- speed from power, with momentum ----------
-def speed_step(v: float, watts: float, grade: float, mass: float, dt: float) -> float:
+DRAFT_MAX = 0.35  # the share of air drag a rider ahead can take away (the open world's riders)
+
+
+def speed_step(v: float, watts: float, grade: float, mass: float, dt: float, draft: float = 0) -> float:
     a = math.atan(grade / 100)
     n = max(1, math.ceil(dt / 0.25 - 1e-9))
     h = dt / n
     p = max(0, watts) * PHYS["eta"]
     fk = mass * PHYS["g"] * (PHYS["crr"] * math.cos(a) + math.sin(a))
-    air = 0.5 * PHYS["rho"] * PHYS["cda"]
+    air = 0.5 * PHYS["rho"] * PHYS["cda"] * (1 - max(0.0, min(DRAFT_MAX, float(draft or 0))))
     for _ in range(n):
         e = 0.5 * mass * v * v + (p - (fk + air * v * v) * v) * h
         v = min(PHYS["vmax"], math.sqrt(2 * e / mass)) if e > 0 else 0.0

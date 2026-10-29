@@ -77,7 +77,10 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(susp, 3));
   bridge.add(new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0xa83a2e })));
   // anchorages
-  box(40, 30, 50, concrete, -GGB.anchor, 0, deckH(-GGB.anchor) - 23); box(40, 30, 50, concrete, GGB.anchor, 0, deckH(GGB.anchor) - 23);  // under the deck
+  // anchorages: massive blocks from the ground (or the sea floor) up under the deck
+  for (const s of [-GGB.anchor, GGB.anchor]) { const top = deckH(s) - 8.2; box(42, top + 8, 56, concrete, s, 0, (top - 8) / 2); }
+  // the approach beyond the south anchorage: steel towers down to the ground
+  for (let s = GGB.ends[0] + 12; s < -GGB.anchor - 20; s += 48) for (const t of [-11, 11]) { const top = deckH(s) - 7.8; box(2.4, top + 6, 3.2, orange, s, t, (top - 6) / 2); }
   bridge.traverse(o => { o.matrixAutoUpdate = true; });
 
   // the rider's deck: inside the deck's width and span, the deck top

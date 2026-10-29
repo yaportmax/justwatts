@@ -4,24 +4,29 @@
 // frame rate that stays bad calls onFail and the ride map falls back to the other views.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { makeProj, tileX, tileY, key, unkey, headingOf, angDiff } from './geo.js';
-import { gridFromHeights, gridHeight, carve, rasterClasses, gridMesh } from './terrain.js';
+import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, gridMesh, upsample, gridNormals, gridCurvature, classMasks } from './terrain.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { scatter, hash2, KINDS } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, WIND } from './materials.js';
 import { treeGeometries, species, buildingGeometry } from './props.js';
 import { createSky } from './sky.js';
+import { createPost } from './post.js';
+import { createGrass } from './grass.js';
 import { makeRider } from './rider.js';
 import { createLandmarks } from './marin.js';
 
 const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordinate stays within about 25 km
-// quality tiers: shadow map size (0: none), pixel ratio cap, tree share, near rings, far ring, draw distance
+// quality tiers: shadow map size (0: none) and span, pixel ratio cap, tree share, near rings, far ring, terrain grid
+// (segs) and upsampling near the rider (up), draw distance, post-processing (bloom, MSAA samples), grass radius and
+// clumps per square metre, ground detail (bump, close-up noise)
 export const QUALITY = [
-  { name: 'high', shadow: 2048, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, view: 42000, aa: true },
-  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, view: 32000, aa: true },
-  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, view: 22000, aa: false },
+  { name: 'high', shadow: 2048, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 4, grass: [64, 4], detail: true, treeNear: 300 },
+  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 2, grass: [44, 2.6], detail: true, treeNear: 200 },
+  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120 },
 ];
-const CAP = { 0: 6000, 1: 1600 };  // trees per tile at full share, by detail
+const CAP = { 0: 6000, 1: 1600 };
+const OCC = 512;  // the road mask per tile: cells of about 3.8 m (no grass, trees or shrubs on a road)  // trees per tile at full share, by detail
 
 export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, quality = 0, time = 'golden' }) {
   let q = Math.max(0, Math.min(2, quality)), dead = false, raf = 0;
@@ -29,21 +34,24 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const tags = document.createElement('div'); tags.className = 'w3tags'; container.appendChild(tags);
   let renderer;
   try {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: QUALITY[q].aa, powerPreference: 'high-performance', logarithmicDepthBuffer: true, failIfMajorPerformanceCaveat: false });
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true, failIfMajorPerformanceCaveat: false });
   } catch (e) { canvas.remove(); tags.remove(); throw e; }
   if (!renderer.capabilities.isWebGL2) { renderer.dispose(); canvas.remove(); tags.remove(); throw new Error('no WebGL2'); }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.shadowMap.autoUpdate = true;
+  renderer.info.autoReset = false;
   canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); fail(new Error('WebGL context lost')); });
 
   const scene = new THREE.Scene(), proj = makeProj(...ORIGIN);
-  const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 60000);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 60000);
   const sky = createSky(scene, { far: 60000 }); sky.set(time);
-  const mats = { terrain: terrainMaterial(), road: roadMaterial(), prop: propMaterial(), bldg: buildingMaterial(),
-    pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c, flatShading: true }) };
+  const mats = { terrain: terrainMaterial(), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(), propLo: propMaterial({ wind: false }),
+    bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
+    tunnel: new THREE.MeshLambertMaterial({ color: 0x77736b, emissive: 0x1a1712 }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }) };
   const trees = treeGeometries(), treesLo = treeGeometries(true), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
+  const post = createPost(renderer, scene, camera);
 
   /* ---------- streaming ---------- */
   const near = new Map(), far = new Map(), jobs = jobQueue();
@@ -61,33 +69,52 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   function dropChunk(map, k) { const c = map.get(k); if (!c) return; disposeObj(c.group); map.delete(k); jobs.drop(id => id.startsWith(k + '|')); farDirty = true; }
   function setPart(c, name, obj) { if (c.parts[name]) disposeObj(c.parts[name]); c.parts[name] = obj; if (obj) c.group.add(obj); }
 
+  // a neighbour tile's height sample (grid indices past this tile's edge; tiles share their edge rows), null if not loaded
+  const extOf = c => (i, j) => {
+    const n = c.tile.n, dx = i < 0 ? -1 : i >= n ? 1 : 0, dy = j < 0 ? -1 : j >= n ? 1 : 0, t = baked.peek(c.z, c.x + dx, c.y + dy);
+    if (!t) return null;
+    const ii = i < 0 ? n - 1 + i : i >= n ? i - (n - 1) : i, jj = j < 0 ? n - 1 + j : j >= n ? j - (n - 1) : j;
+    return ii >= 0 && jj >= 0 && ii < n && jj < n ? t.hs[jj * n + ii] : null;
+  };
   function buildTerrain(c) {
     const t = c.tile, Q = QUALITY[q];
     if (!t) { c.grid = null; setPart(c, 'terrain', null); c.built = true; c.ver = (c.ver || 0) + 1; farDirty = true; return; }
-    const step = c.z === FAR_Z ? 1 : c.lod === 0 ? (Q.segs === 128 ? 1 : 2) : 4;
-    if (!c.grid || c.grid.step !== step) { c.grid = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: t.hs, n: t.n, step, proj }); c.grid.step = step; }
+    const fine = c.z === NEAR_Z && c.lod === 0, up = fine ? Q.up : 1;
+    const step = c.z === FAR_Z ? 1 : c.lod === 0 ? (Q.segs === 128 ? 1 : 2) : 4, gk = up > 1 ? 'u' + up : 's' + step;
+    if (!c.grid || c.grid.key !== gk) {
+      if (up > 1) c.grid = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: upsample(t.hs, t.n, up, extOf(c)), n: (t.n - 1) * up + 1, step: 1, proj });
+      else c.grid = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: t.hs, n: t.n, step, proj });
+      c.grid.key = gk; c.grid.m = up > 1 ? 1 / up : step;  // source steps (about 15 m) per grid step
+    }
     c.grid.cut = null; c.grid.hs = c.grid.raw;
-    if (c.z === NEAR_Z && c.lod === 0) {
-      // every road level across its width (heights along it from the ground, eased)
+    const ms = c.grid.m;
+    if (fine) {
+      // every road level across its width (heights along it from the ground, eased), cut and fill banks either side
       const under = [];
       for (const r of t.roads) {
         if (r.fl & 3 || /path|footway|track|bridleway|steps/.test(r.hw)) continue;
-        const pts = resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 15), P = [];
+        const pts = resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 8), P = [];
         for (let i = 0; i < pts.length; i++) { const h = gridHeight(c.grid, pts[i][0], pts[i][1], c.grid.raw); if (h != null) P.push([pts[i][0], pts[i][1], h]); }
-        for (let k = 0; k < 3; k++) for (let i = 1; i + 1 < P.length; i++) P[i][2] = (P[i - 1][2] + 2 * P[i][2] + P[i + 1][2]) / 4;
+        for (let k = 0; k < 4; k++) for (let i = 1; i + 1 < P.length; i++) P[i][2] = (P[i - 1][2] + 2 * P[i][2] + P[i + 1][2]) / 4;
         const w = roadStyle(r.hw, r.ln, r.fl).w;
-        if (P.length > 1) under.push({ pts: P, r0: w / 2 + 8 * step, r1: w / 2 + 22 * step });
+        if (P.length > 1) under.push({ pts: P, r0: w / 2 + Math.max(2.5, 8 * ms), r1: w / 2 + Math.max(9, 22 * ms) });
       }
       // the ridden road is one of them: the rider sits on the same ground (the engine's grade comes from these heights too)
       carve(c.grid, [], 0, 1, under);
     }
     const lu = rasterClasses(c.grid, t.features), m = gridMesh(c.grid, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: c.z === FAR_Z ? farSkip(c) : null });
-    const g = new THREE.BufferGeometry(), cls = new Float32Array(m.cls.length);
-    const cut = c.grid.cut, nv = (c.grid.segs + 1) ** 2;  // a road bank: flagged for the shader (+32)
-    for (let i = 0; i < cls.length; i++) cls[i] = m.cls[i] + (cut && i < nv && cut[i] ? 32 : 0) + 0.9 * hash2(i, c.x * 7 + c.y);
-    g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3)); g.setAttribute('cls', new THREE.BufferAttribute(cls, 1)); g.setIndex(new THREE.BufferAttribute(m.idx, 1));
-    g.computeBoundingSphere();
-    const mesh = new THREE.Mesh(g, mats.terrain); mesh.receiveShadow = c.z === NEAR_Z && c.lod === 0; mesh.matrixAutoUpdate = false;
+    const nor = gridNormals(c.grid), mask = classMasks(lu, c.grid.cut), cv = gridCurvature(c.grid, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6);
+    const nv = m.src.length, N = new Float32Array(nv * 3), A = new Uint8Array(nv * 4), B = new Uint8Array(nv * 4), CV = new Float32Array(nv);
+    for (let i = 0; i < nv; i++) {
+      const v = m.src[i]; N[3 * i] = nor[3 * v]; N[3 * i + 1] = nor[3 * v + 1]; N[3 * i + 2] = nor[3 * v + 2]; CV[i] = cv[v];
+      for (let k = 0; k < 4; k++) { A[4 * i + k] = mask[8 * v + k]; B[4 * i + k] = mask[8 * v + 4 + k]; }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+    g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
+    g.setIndex(new THREE.BufferAttribute(m.idx, 1)); g.computeBoundingSphere();
+    const mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? mats.terrain : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false;
+    if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(); } else { c.nor = c.mask = c.cv = null; }
     setPart(c, 'terrain', mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
   }
   // far tiles leave out the quads a built near tile covers
@@ -99,9 +126,9 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   function buildRoads(c) {
     const t = c.tile; c.decks = []; c.occ = null;
     if (!t || !c.grid) return setPart(c, 'roads', null);
-    const B = builder(), pillars = [], hAt = hOf(c), g = c.grid, occ = new Uint8Array(128 * 128), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
-    const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / 128, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / 128;
-    const mark = (x, z, r) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < 128 && b < 128) occ[b * 128 + a] = 1; };
+    const B = builder(), pillars = [], hAt = hOf(c), g = c.grid, occ = new Uint8Array(OCC * OCC), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
+    const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
+    const mark = (x, z, r) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = 1; };
     const minor = c.lod > 0, lanes = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     for (const r of t.roads) {
       if (r.fl & 2) continue;                          // tunnels: under the hill
@@ -117,7 +144,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         pillars.push(...deckSides(B, centre, st.w, 1.4, hAt));
         for (let i = 1; i < centre.length; i++) c.decks.push([centre[i - 1], centre[i], st.w / 2 + 0.6]);
       }
-      if (!minor) for (const q of centre) { mark(q[0], q[2], st.w / 2 + 1.5); lanes.push(q[0], q[2], st.w / 2); }
+      if (!minor) centre.forEach((q, i) => { mark(q[0], q[2], st.w / 2 + 1.2); lanes.push(q[0], q[2], st.w / 2); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, st.w / 2 + 1.2); } });
       }
     }
     c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes);
@@ -133,19 +160,19 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     }
     setPart(c, 'roads', grp);
   }
-  const occAt = (o, x, z) => { if (!o) return false; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < 128 && b < 128 && o.occ[b * 128 + a] === 1; };
+  const occAt = (o, x, z) => { if (!o) return false; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < OCC && b < OCC && o.occ[b * OCC + a] === 1; };
   function buildTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
     const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c);
     const box = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     const out = {}; let n = 0;
     const add = (sp, x, z, s, r) => { const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r]); n++; };
-    const STEP = { wood: 11, scrub: 9, park: 24, urban: 34 };
+    const STEP = { wood: 11, scrub: 8, park: 24, urban: 30, grass: 70, farm: 90 };
     for (const f of t.features) {
       const st = STEP[f.k]; if (!st) continue;
       const rings = f.rings.map(r => r.map(([la, lo]) => proj.xz(la, lo)));
       const step = st * (c.lod ? 2.2 : 1) / Math.sqrt(Math.max(0.15, share));
-      for (const [x, z, r] of scatter(rings, step, f.k === 'urban' ? 0.5 : 1, box)) {
+      for (const [x, z, r] of scatter(rings, step, f.k === 'urban' ? 0.55 : f.k === 'grass' || f.k === 'farm' ? 0.6 : 1, box)) {
         if (n > cap) break;
         const lat = proj.lat(z), lon = proj.lon(x), h = hAt(x, z) ?? 0, sp = species(f.k, f.lt, h, lat, lon, r);
         add(sp, x, z, 0.75 + 0.5 * hash2(Math.round(x), Math.round(z)), r);
@@ -162,14 +189,63 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         if (h == null || h < 6) continue;
         add('oak', px, pz, 0.6 + 0.6 * hash2(ix, iz + 3), hash2(ix + 1, iz));
       }
+      // coyote brush and toyon in patches on the open hills: thickest on the shaded north slopes and in the gullies
+      const ss = 7 / Math.sqrt(Math.max(0.2, share)), nn = g.segs + 1;
+      let shrubs = 0;
+      for (let x = Math.ceil(box[0] / ss) * ss; x < box[2]; x += ss) for (let z = Math.ceil(box[1] / ss) * ss; z < box[3]; z += ss) {
+        if (shrubs > 5000 * share) break;
+        const ix = Math.round(x / ss), iz = Math.round(z / ss), px = x + (hash2(ix + 7, iz) - 0.5) * ss, pz = z + (hash2(ix, iz + 7) - 0.5) * ss;
+        const [fi, fj] = gridIJ(g, px, pz), v = Math.round(fj) * nn + Math.round(fi);
+        if (!(v >= 0 && v < nn * nn) || !c.mask) continue;
+        const mk = c.mask, open = mk[8 * v] < 80 && mk[8 * v + 2] < 60 && mk[8 * v + 3] < 60 && mk[8 * v + 4] < 128 && mk[8 * v + 5] < 128 && mk[8 * v + 6] < 128;
+        if (!open || c.nor[3 * v + 1] < 0.8) continue;
+        const north = Math.max(0, -c.nor[3 * v + 2] * 2.5), patch = hash2(Math.floor(px / 90), Math.floor(pz / 90)) * 0.7 + hash2(Math.floor(px / 31) + 5, Math.floor(pz / 31)) * 0.3;
+        const p = (patch - 0.55) * 1.6 + north * 0.5 + Math.max(0, c.cv[v]) * 0.9 + (mk[8 * v + 1] > 0 ? -0.2 : 0);
+        if (hash2(ix * 3, iz * 5) > p) continue;
+        const r = hash2(ix, iz * 3);
+        add(r < 0.78 ? 'bush' : 'shrub', px, pz, 0.7 + 0.8 * hash2(iz, ix + 1), r); shrubs++;
+      }
+      // stones in the grass, more on the steep
+      for (let k = 0; k < 1400 * share; k++) {
+        const px = box[0] + hash2(k, c.x) * (box[2] - box[0]), pz = box[1] + hash2(c.y, k) * (box[3] - box[1]);
+        const [fi, fj] = gridIJ(g, px, pz), v = Math.round(fj) * nn + Math.round(fi);
+        if (!(v >= 0 && v < nn * nn) || !c.mask || c.mask[8 * v + 3] > 60 || c.mask[8 * v + 2] > 60) continue;
+        if (hash2(k, 7) > 0.25 + (1 - c.nor[3 * v + 1]) * 4) continue;
+        add('stone', px, pz, 0.6 + 1.4 * hash2(k, 3) ** 2, hash2(k, 5));
+      }
     }
-    const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3();
+    // per species two instanced sets: full trees near the rider, simple ones further out (partTrees splits them)
+    const grp = new THREE.Group(); c.treeSets = [];
     for (const [sp, list] of Object.entries(out)) {
-      const im = new THREE.InstancedMesh((c.lod ? treesLo : trees)[sp], mats.prop, list.length);
-      list.forEach(([x, y, z, sc, r], i) => { e.set((r - 0.5) * 0.08, r * 6.283, 0); im.setMatrixAt(i, m4.compose(v.set(x, y, z), qt.setFromEuler(e), s.set(sc, sc * (0.85 + 0.3 * r), sc))); });
-      im.computeBoundingSphere(); im.userData.shared = true; im.castShadow = c.lod === 0 && QUALITY[q].shadow > 0; grp.add(im);
+      const sm = sp === 'stone', mk = (geo, mat, shadow) => {
+        const im = new THREE.InstancedMesh(geo, mat, list.length); im.count = 0; im.userData.shared = true; im.castShadow = shadow; im.receiveShadow = c.lod === 0; grp.add(im); return im;
+      };
+      const hi = c.lod ? null : mk(trees[sp] ?? trees.bush, sm ? mats.propLo : mats.prop, !sm && QUALITY[q].shadow > 0);
+      const lo = sm ? null : mk(treesLo[sp] ?? treesLo.bush, mats.propLo, false);
+      c.treeSets.push({ sp, list, hi, lo });
     }
+    c.partAt = null; partTrees(c, me.group.position.x, me.group.position.z);
     setPart(c, 'trees', grp);
+  }
+  // split a tile's trees: within `near` metres of (x, z) the full models, the rest the simple ones (stones only near)
+  function partTrees(c, x, z) {
+    const R2 = QUALITY[q].treeNear ** 2, m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(), tint = new THREE.Color();
+    c.partAt = [x, z];
+    for (const { sp, list, hi, lo } of c.treeSets || []) {
+      let a = 0, b = 0; const sm = sp === 'stone';
+      for (const [px, y, pz, sc, r] of list) {
+        const isHi = hi && (px - x) ** 2 + (pz - z) ** 2 < R2 * (sm ? 0.25 : 1);
+        if (!isHi && !lo) continue;
+        const im = isHi ? hi : lo, i = isHi ? a++ : b++;
+        e.set((r - 0.5) * 0.08, r * 6.283, 0); im.setMatrixAt(i, m4.compose(v.set(px, sm ? y + 0.25 : y, pz), qt.setFromEuler(e), s.set(sc, sc * (0.85 + 0.3 * r), sc)));
+        const k = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
+        im.setColorAt(i, tint.setRGB(k * (1 + w), k, k * (1 - w)));
+      }
+      for (const [im, n] of [[hi, a], [lo, b]]) if (im) {
+        im.count = n; im.visible = n > 0; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
+        if (n) im.computeBoundingSphere();
+      }
+    }
   }
   function buildBuildings(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'bldg', null);
@@ -211,6 +287,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (c.ver != null && c.sig.roads !== ds) { c.sig.roads = ds; jobs.add(c.k + '|r', pri + 0.1, () => buildRoads(c)); }
       if (c.ver != null && c.sig.trees !== ds) { c.sig.trees = ds; jobs.add(c.k + '|v', pri + 0.3 + c.lod, () => buildTrees(c)); }
       if (c.ver != null && c.sig.bldg !== ds) { c.sig.bldg = ds; jobs.add(c.k + '|b', pri + 0.2 + c.lod, () => buildBuildings(c)); }
+      if (c.ver != null && c.lod === 0 && c.sig.tun !== ds) { c.sig.tun = ds; jobs.add(c.k + '|u', pri + 0.15, () => buildTunnels(c)); }
     }
     for (const c of far.values()) {
       if (c.tile === undefined) continue;
@@ -245,38 +322,79 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     for (let i = 0; i < L.length; i += 3) { const d = (L[i] - x) ** 2 + (L[i + 1] - z) ** 2; if (d < best) { best = d; half = L[i + 2]; } }
     return best < 64 && half != null ? Math.max(0, Math.min(6.5, half - 1.1)) : side;
   }
-  // grass tufts and stones in a ring round the rider, laid again every 40 m
-  const tuftGeo = treeGeometries().tuft, stoneGeo = treeGeometries().stone, ring = { at: null, tufts: null, stones: null };
-  function detailRing(x, z) {
-    if (ring.at && Math.hypot(x - ring.at[0], z - ring.at[1]) < 30) return;
-    ring.at = [x, z];
-    const n = Math.round(9000 * QUALITY[q].trees), m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
-    for (const k of ['tufts', 'stones']) { if (ring[k]) { scene.remove(ring[k]); ring[k].dispose(); } }
-    const tufts = new THREE.InstancedMesh(tuftGeo, mats.prop, n), stones = new THREE.InstancedMesh(stoneGeo, mats.prop, Math.round(n / 12));
-    let a = 0, b = 0; const tint = new THREE.Color();
-    for (let i = 0; i < n * 1.6 && a < n; i++) {
-      const r = 90 * Math.pow(hash2(i, 77), 0.7), t = hash2(i, 91) * 6.283, px = x + Math.cos(t) * r, pz = z + Math.sin(t) * r;
-      const [tx, ty] = tileOf(px, pz), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid) continue;
-      if (occAt(c.occ, px, pz)) continue;
-      const h = gridHeight(c.grid, px, pz); if (h == null || h < 1.5) continue;
-      const s = 0.45 + hash2(i, 9) * 0.6;
-      if (hash2(i, 13) < 0.08 && b < stones.count) stones.setMatrixAt(b++, m4.compose(v.set(px, h - 0.1, pz), qt.setFromEuler(e.set(hash2(i, 2), hash2(i, 3) * 6, 0)), sc.set(s, s * 0.6, s)));
-      else {
-        const nz = (gridHeight(c.grid, px, pz - 2) ?? h) - (gridHeight(c.grid, px, pz + 2) ?? h), slope = Math.abs(nz) / 4;
-        const north = Math.max(0, Math.min(1, -nz / 4 * 2.2)) * Math.min(1, slope * 5), g = north * 0.6 + hash2(i, 31) * 0.35;
-        tint.setRGB(0.95 - g * 0.35, 0.88 - g * 0.05, 0.62 - g * 0.15);
-        tufts.setColorAt(a, tint);
-        tufts.setMatrixAt(a++, m4.compose(v.set(px, h - 0.05, pz), qt.setFromEuler(e.set(0, hash2(i, 4) * 6.283, 0)), sc.set(s * 1.3, s * (0.6 + hash2(i, 8) * 0.6), s * 1.3)));
+  // grass: clumps in cells round the camera (grass.js); the ground under a point: height, normal, class weights
+  function groundSample(x, z) {
+    const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid || !c.mask) return null;
+    if (occAt(c.occ, x, z) || tunnelNear(c, x, z)) return { skip: true };
+    const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), i = Math.round(fi), j = Math.round(fj);
+    if (i < 0 || j < 0 || i >= n || j >= n) return null;
+    const v = j * n + i, h = gridHeight(g, x, z), mk = c.mask, N = c.nor; if (h == null || h < 1.2) return null;
+    if ((mk[8 * v + 4] > 100 && N[3 * v + 1] < 0.8) || mk[8 * v + 5] > 128 || mk[8 * v + 6] > 100) return { skip: true };
+    return { h, nx: N[3 * v], ny: N[3 * v + 1], nz: N[3 * v + 2], cv: c.cv[v], m: [mk[8 * v] / 255, mk[8 * v + 1] / 255, mk[8 * v + 2] / 255, mk[8 * v + 3] / 255] };
+  }
+  const grass = createGrass({ THREE, scene, mat: mats.grass, sample: groundSample });
+
+  /* ---------- tunnels: a lined bore through the hill, portals at both ends, the rider on the line between them ---------- */
+  function buildTunnels(c) {
+    c.tunnels = [];
+    const t = c.tile; if (!t || !c.grid) return setPart(c, 'tunnels', null);
+    const B = builder(), grp = new THREE.Group(), pos = [], idx = [], port = [];
+    for (const r of t.roads) {
+      if (!(r.fl & 2) || /path|footway|steps/.test(r.hw)) continue;
+      const P = resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 6); if (P.length < 2) continue;
+      const D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+      const out = (p, q) => { const dx = p[0] - q[0], dz = p[1] - q[1], l = Math.hypot(dx, dz) || 1, a = groundAt(...p), b = groundAt(p[0] + dx / l * 12, p[1] + dz / l * 12); return a == null ? b : b == null ? a : Math.min(a, b); };
+      const h0 = out(P[0], P[1]) ?? 0, h1 = out(P.at(-1), P.at(-2)) ?? h0, st = roadStyle(r.hw, r.ln, r.fl), w = st.w / 2 + 1.2, L = D.at(-1) || 1;
+      // under little cover (cut and cover under flat ground): ride it on the surface, no bore
+      let cover = 0; for (let i = 0; i < P.length; i++) cover += (groundAt(...P[i]) ?? 0) - (h0 + (h1 - h0) * D[i] / L);
+      if (cover / P.length < 8) { ribbon(B, P, { ...st, hAt: (x, z) => groundAt(x, z), lift: roadLift(r.hw), step: 6 }); continue; }
+      const T = { P, D, h0, h1, w, L }; c.tunnels.push(T);
+      ribbon(B, P, { ...st, hAt: () => 0, deck: [h0, h1], lift: 0.05, step: 6 });
+      // the bore: a half barrel over the road, faces inward
+      const SEG = 10, R = w, H = 2.2;
+      for (let i = 0; i < P.length; i++) {
+        const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l, y = h0 + (h1 - h0) * D[i] / L;
+        for (let k = 0; k <= SEG; k++) { const th = Math.PI * k / SEG, cx = Math.cos(th) * R, cy = Math.sin(th) * (R * 0.75) + H; pos.push(P[i][0] + nx * cx, y + (k === 0 || k === SEG ? -0.3 : cy), P[i][1] + nz * cx); }
+        if (i) for (let k = 0; k < SEG; k++) { const p0 = (i - 1) * (SEG + 1) + k, p1 = i * (SEG + 1) + k; idx.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1); }
+        if (i === 0 || i === P.length - 1) port.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, i === 0 ? -1 : 1]);
       }
     }
-    tufts.count = a; stones.count = b;
-    for (const im of [tufts, stones]) { im.computeBoundingSphere(); im.receiveShadow = true; scene.add(im); }
-    ring.tufts = tufts; ring.stones = stones;
+    if (!B.n) return setPart(c, 'tunnels', null);
+    const d = B.done(), rg = new THREE.BufferGeometry();
+    rg.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); rg.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); rg.setAttribute('rd', new THREE.BufferAttribute(d.code, 4));
+    rg.setIndex(new THREE.BufferAttribute(d.idx, 1)); rg.computeVertexNormals(); grp.add(new THREE.Mesh(rg, mats.road));
+    if (pos.length) {
+      const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); bg.setIndex(idx); bg.computeVertexNormals();
+      const bore = new THREE.Mesh(bg, mats.tunnel); bore.material.side = THREE.DoubleSide; grp.add(bore);
+    }
+    // portals: a concrete face with an arched opening, set into the hillside
+    for (const [x, y, z, yaw, R, H, dir] of port) {
+      const sh = new THREE.Shape(); sh.moveTo(-R - 3.5, -1); sh.lineTo(R + 3.5, -1); sh.lineTo(R + 3.5, H + R + 3); sh.lineTo(-R - 3.5, H + R + 3); sh.lineTo(-R - 3.5, -1);
+      const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H);
+      for (let k = 1; k <= 12; k++) { const th = Math.PI * k / 12; hole.lineTo(Math.cos(th) * R, H + Math.sin(th) * R * 0.75); }
+      hole.lineTo(-R, -0.5); sh.holes.push(hole);
+      const pg = new THREE.ExtrudeGeometry(sh, { depth: 1.2, bevelEnabled: false }), pm = new THREE.Mesh(pg, mats.portal);
+      pm.position.set(x, y, z); pm.rotation.y = yaw + (dir > 0 ? Math.PI : 0); pm.castShadow = true; pm.receiveShadow = true; grp.add(pm);
+    }
+    setPart(c, 'tunnels', grp);
   }
+  // the tunnel a point is in: { y, k } (k: how far in, 0 at a portal .. 1 from 25 m in), null outside
+  function tunnelNear(c, x, z) {
+    for (const T of c?.tunnels || []) {
+      const { P, D } = T;
+      for (let i = 1; i < P.length; i++) {
+        const a = P[i - 1], b = P[i], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2)) : 0;
+        if (Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t) < T.w + 0.5) { const d = D[i - 1] + (D[i] - D[i - 1]) * t; return { y: T.h0 + (T.h1 - T.h0) * d / T.L, k: Math.min(1, Math.min(d, T.L - d) / 25) }; }
+      }
+    }
+    return null;
+  }
+  const tunnelAt = (x, z) => { const [tx, ty] = tileOf(x, z); return tunnelNear(near.get(key(NEAR_Z, tx, ty)), x, z); };
 
   /* ---------- riders ---------- */
   const me = makeRider(THREE, { kit: 0xf2c230, kit2: 0x1b1f25, accent: 0xe8b21e }); scene.add(me.group);
   const others = new Map();  // id -> { r, tag, x, z, yaw, seen }
+  let grade = 0, dark = 0;
   let chase = [6.5, 2.6], side = 0, rx = 0, rz = 0, camInit = false, st = null, dShown = 0, dAt = 0, tAt = 0, yaw = 0, camYaw = null, mode = 'chase';
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
   function course(s) {
@@ -299,7 +417,11 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   }
   const eleAt = d => { if (!st.ele?.length) return null; const i = d / 10, a = Math.max(0, Math.min(st.ele.length - 1, Math.floor(i))), b = Math.min(st.ele.length - 1, a + 1); return st.ele[a] + (st.ele[b] - st.ele[a]) * (i - a); };
   // the surface the rider is on: a bridge deck, else the ground (carved to the road), else the course's own height
-  function yAt(x, z, d) { const k = deckAt(x, z); if (k != null && (d == null || Math.abs(k - (eleAt(d) ?? k)) < 15)) return k; return groundAt(x, z) ?? (d != null ? eleAt(d) : null) ?? 0; }
+  function yAt(x, z, d) {
+    const k = deckAt(x, z); if (k != null && (d == null || Math.abs(k - (eleAt(d) ?? k)) < 15)) return k;
+    const tn = tunnelAt(x, z); if (tn) return tn.y + 0.05;
+    return groundAt(x, z) ?? (d != null ? eleAt(d) : null) ?? 0;
+  }
 
   function syncOthers(dt, now) {
     const list = getOthers(), keep = new Set();
@@ -362,15 +484,16 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   function resize() {
     const w = container.clientWidth, h = container.clientHeight, k = `${w}x${h}x${q}`;
     if (!w || !h || k === size) return !!(w && h); size = k;
-    renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, QUALITY[q].pr)); renderer.setSize(w, h, false);
-    camera.aspect = w / h; camera.updateProjectionMatrix(); return true;
+    const pr = Math.min(globalThis.devicePixelRatio || 1, QUALITY[q].pr);
+    renderer.setPixelRatio(pr); renderer.setSize(w, h, false); post.setSize(w, h, pr);
+    camera.aspect = w / h; camera.fov = mode === 'first' ? 58 : w / h < 1.2 ? 62 : 50; camera.updateProjectionMatrix(); return true;
   }
   function applyQuality() {
     const Q = QUALITY[q];
     renderer.shadowMap.enabled = Q.shadow > 0; sky.sun.castShadow = Q.shadow > 0;
     if (Q.shadow) { sky.sun.shadow.mapSize.set(Q.shadow, Q.shadow); sky.sun.shadow.map?.dispose(); sky.sun.shadow.map = null; }
-    camera.far = Q.view; camera.updateProjectionMatrix(); scene.fog.far = Math.min(scene.fog.far, Q.view * 0.92);
-    sky.set(sky.time); scene.fog.far = Math.min(scene.fog.far, Q.view * 0.92);
+    camera.far = Q.view; camera.updateProjectionMatrix();
+    sky.set(sky.time); post.build(Q); grass.set(...Q.grass);
     size = ''; poke();
     scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   }
@@ -399,12 +522,15 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);
       me.group.position.set(p[0], y, p[1]); me.group.rotation.set(Math.atan2(yb - ya, 5) * 0.9, -yaw, 0, 'YXZ');
-      me.update(dt, st.cad || 0, v);
+      grade += ((yb - ya) / 5 - grade) * Math.min(1, dt * 1.5);
+      me.update(dt, st.cad || 0, v, grade);
       const lat = proj.lat(p[1]), lon = proj.lon(p[0]);
       stream(lat, lon, now);
       jobs.run(q === 2 ? 3 : 5);
       marks.update(camera, dt);
-      if (ready) detailRing(p[0], p[1]);
+      for (const c of near.values()) if (c.treeSets && c.lod === 0 && (!c.partAt || Math.hypot(c.partAt[0] - p[0], c.partAt[1] - p[1]) > 60)) { c.partAt = [p[0], p[1]]; jobs.add(c.k + '|p', 0.5, () => partTrees(c, p[0], p[1])); }
+      if (ready) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1.5 : 3);
+      WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
       // camera: behind and above, looking down the road; first person: at the eyes
       const ahead = at(d + 14), hd = yAt(ahead[0], ahead[1], d + 14);
@@ -413,7 +539,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       const fx = Math.sin(camYaw), fz = -Math.cos(camYaw);
       if (mode === 'chase') {
         tmp.set(p[0] - fx * chase[0], y + chase[1], p[1] - fz * chase[0]);
-        const g = groundAt(tmp.x, tmp.z); if (g != null && tmp.y < g + 1.4) tmp.y = g + 1.4;
+        const tn = tunnelAt(tmp.x, tmp.z), g = tn ? null : groundAt(tmp.x, tmp.z); if (g != null && tmp.y < g + 1.4) tmp.y = g + 1.4;
+        if (tn) tmp.y = Math.min(tmp.y, tn.y + 3.4);
         camPos.lerp(tmp, camInit ? Math.min(1, dt * 6) : 1); camInit = true;
         camLook.set(p[0] + fx * 10, (y + hd) / 2 + 1.1, p[1] + fz * 10);
         me.group.visible = true;
@@ -424,7 +551,11 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       }
       camera.position.copy(camPos); camera.lookAt(camLook);
       sky.update(camera, me.group.position, dt, QUALITY[q].span);
-      renderer.render(scene, camera);
+      // inside a tunnel: the daylight fades out
+      const tk = tunnelAt(camPos.x, camPos.z)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
+      sky.sun.intensity = sky.sunI * (1 - 0.92 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.8 * dark);
+      renderer.info.reset();
+      post.render(sky.exposure * (1 + dark * 0.6));
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
       governor(dt, now);
     } catch (e) { fail(e); return; }
@@ -438,6 +569,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     if (dead) return; dead = true; cancelAnimationFrame(raf);
     for (const m of [near, far]) for (const k of [...m.keys()]) dropChunk(m, k);
     me.dispose(); for (const e of others.values()) e.r.dispose();
+    grass.dispose(); post.dispose();
     renderer.dispose(); renderer.forceContextLoss?.(); canvas.remove(); tags.remove();
   }
   raf = requestAnimationFrame(frame);
@@ -447,10 +579,14 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     camera: () => mode,
     // the chase camera's distance behind and height (a wider view for screenshots)
     setChase(back, up) { chase = [back, up]; },
-    toggleCamera() { mode = mode === 'chase' ? 'first' : 'chase'; return mode; },
+    toggleCamera() { mode = mode === 'chase' ? 'first' : 'chase'; size = ''; return mode; },
     setTime(t) { sky.set(t); return sky.time; },
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
+    // Karl the fog's banks on or off
+    setFog(on) { return sky.setBanks(on); }, fog: () => sky.banksOn,
+    setKit(kit, accent) { me.setKit?.(kit, accent); },
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
+    debug: () => ({ scene, camera, THREE }),
   };
 }

@@ -85,7 +85,7 @@ export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = '
     c.beginPath(); c.arc(...at, 6, 0, 2 * Math.PI); c.fill(); c.stroke();
   }
   if (!attr) return;  // the ride screen shows it as text over the map
-  c.font = '10px system-ui, sans-serif'; c.textAlign = 'right'; c.textBaseline = 'bottom';
+  c.font = '10px "Inter var", system-ui, sans-serif'; c.textAlign = 'right'; c.textBaseline = 'bottom';
   c.fillStyle = 'rgba(12,14,17,.7)'; const tw = c.measureText(st.attr).width; c.fillRect(w - tw - 8, h - 15, tw + 8, 15);
   c.fillStyle = css('--dim'); c.fillText(st.attr, w - 4, h - 2);
 }

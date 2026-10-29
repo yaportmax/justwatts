@@ -245,7 +245,7 @@ export function createBuilder({ list, chart: cv, palette: pal, fit, css, ftp, on
         c.stroke();
         if (chartDrag) {
           const lbl = s.free ? `${fmtClock(s.d)} free` : `${fmtClock(s.d)} · ${s.u === 'w' ? Math.round(s.a) + ' W' : Math.round(s.a * 100) + '%'} · ${stepWatts(s, 0, f)} W`;
-          c.font = '600 12px system-ui, sans-serif'; const tw = c.measureText(lbl).width;
+          c.font = '600 12px "Inter var", system-ui, sans-serif'; const tw = c.measureText(lbl).width;
           const lx = Math.min(Math.max(4, X(s.t0)), w - tw - 12), ly = Math.max(16, (s.free ? Y(0.5 * f) : Y(stepWatts(s, 0, f))) - 8);
           c.fillStyle = 'rgba(12,14,17,.85)'; c.fillRect(lx - 4, ly - 13, tw + 8, 18); c.fillStyle = '#fff'; c.fillText(lbl, lx, ly);
         }

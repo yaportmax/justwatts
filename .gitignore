@@ -30,3 +30,10 @@ node_modules/
 
 # private planning notes (kept outside the repo)
 docs/BACKLOG.md
+AGENTS.md
+CLAUDE.md
+docs/plans/
+docs/RELIABILITY.md
+docs/API.md
+docs/INTEGRATIONS.md
+tools/

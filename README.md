@@ -44,7 +44,7 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.
 - **Uploads** (optional): Garmin Connect and Strava.
-- **Crash-safe**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
+- **Crash-safe**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride.
 - The web version (justwatts.com) runs the same app with Bluetooth in the browser tab (Chrome or Edge).
 
 ## Ride controls
@@ -143,14 +143,7 @@ pytest
 
 Tests run the browser code under Node (`node` 18+ on PATH), boot the full page against a real test
 server, drive BLE through a fake bleak module, mock Garmin and Strava, force Garmin and Bluetooth
-off, and check that a full ride works with none of the optional extras installed. See
-[AGENTS.md](AGENTS.md).
-
-## Roadmap
-
-- Import past rides from Garmin and Strava
-- Push planned workouts to a calendar (Garmin, intervals.icu, TrainingPeaks)
-- ANT+ FE-C via a USB bridge
+off, and check that a full ride works with none of the optional extras installed.
 
 ## Security
 

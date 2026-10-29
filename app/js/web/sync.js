@@ -6,6 +6,8 @@
 //   local.rideActive() -> true while a ride is loaded: settings from the server wait until it ends
 //   local.activeRideId() -> the ride in progress (never uploaded)
 // State (rev, what the server has, rides still to download) lives in `storage` under one key per browser.
+// `${key}.owner` remembers which account the local data last synced with, also after sign-out. Signing in to a
+// different account while local data is here asks first (ask({ name }) -> 'merge' | 'clean' | null): never a silent merge.
 const KINDS = ['workout', 'course', 'settings'];
 const PUSH_MAX = 200, PUSH_BYTES = 2.5 * 1024 * 1024, RIDE_UPLOADS = 20, RIDE_DOWNLOADS = 3;
 const IDLE_MS = 120000, MAX_BACKOFF = 300000;
@@ -26,8 +28,9 @@ export async function gunzip(buf) {
 const blank = uid => ({ uid, rev: 0, base: {}, rides: {}, want: {}, pending: null, at: 0 });
 
 export function createSync({ fetch = (...a) => globalThis.fetch(...a), local, storage, key = 'hw.sync', now = () => Date.now(), onState = () => {}, onSignedOut = () => {},
-  onRides = () => {}, timers = { set: (f, ms) => setTimeout(f, ms), clear: h => clearTimeout(h) }, isOnline = () => globalThis.navigator?.onLine !== false } = {}) {
+  onRides = () => {}, ask = async () => 'merge', timers = { set: (f, ms) => setTimeout(f, ms), clear: h => clearTimeout(h) }, isOnline = () => globalThis.navigator?.onLine !== false } = {}) {
   let st = null, running = null, again = false, timer = null, fails = 0, status = 'off', lastError = null, stopped = true;
+  let asking = null, undecided = null;  // the account waiting on the merge question; one dismissed without an answer
   const save = () => storage.set(key, st);
   const set = (s, err = null) => { status = s; lastError = err; onState({ status: s, at: st?.at || 0, error: err }); };
 
@@ -171,15 +174,46 @@ export function createSync({ fetch = (...a) => globalThis.fetch(...a), local, st
     running = cycle().finally(() => { running = null; });
     return running;
   }
-  // signed in as uid: a different account than last time starts over (local data merges into it)
-  function start(uid) {
-    const saved = storage.get(key, null);
-    st = saved && saved.uid === uid ? { ...blank(uid), ...saved } : blank(uid);
-    stopped = false; fails = 0; save();
+  // signed in as uid: the same account carries on. A different account starts over: the first sign-in on this device
+  // merges local data into it; local data from another account asks first (add it, or start clean).
+  const ownerKey = key + '.owner';
+  async function hasLocal() {
+    if (local.list('workout').length || local.list('course').length) return true;
+    const active = local.activeRideId();
+    return (await local.rides()).some(r => r.id !== active);
+  }
+  async function wipe() {  // start clean: the other account's workouts, courses and rides leave this device
+    for (const kind of ['workout', 'course']) for (const x of local.list(kind)) local.remove(kind, x.id);
+    const active = local.activeRideId();
+    for (const r of await local.rides()) if (r.id !== active) await local.removeRide(r.id);
+    onRides();
+  }
+  async function start(uid, name = '') {
+    const saved = storage.get(key, null), owner = storage.get(ownerKey, null) ?? saved?.uid ?? null;
+    stopped = false; fails = 0; undecided = null;
+    if (saved && saved.uid === uid) { st = { ...blank(uid), ...saved }; storage.set(ownerKey, uid); save(); return kick(0); }
+    st = null; asking = uid;
+    let how = 'merge';
+    if (owner && owner !== uid && await hasLocal()) {
+      if (asking !== uid || stopped) return;
+      set('waiting');
+      how = await Promise.resolve(ask({ name })).catch(() => null);
+      if (asking !== uid || stopped) return;
+      if (how !== 'merge' && how !== 'clean') { asking = null; undecided = { uid, name }; set('error', 'choose'); return; }
+    }
+    if (asking !== uid || stopped) return;
+    asking = null; st = blank(uid);
+    if (how === 'clean') {
+      await wipe();
+      for (const x of local.list('settings')) st.base['settings:' + x.id] = x.updatedAt;  // settings stay here, the account's copy wins
+    }
+    storage.set(ownerKey, uid); save();
     return kick(0);
   }
+  // the merge question was dismissed: ask again (Sync now)
+  function resume() { if (!undecided || stopped) return null; const u = undecided; undecided = null; return start(u.uid, u.name); }
   function stop() { stopped = true; if (timer) timers.clear(timer); timer = null; }
   // signed out: forget the server state so another account starts clean; local data stays on this device
-  function signOut() { stop(); st = null; storage.set(key, null); set('off'); }
-  return { start, stop, signOut, kick, applyPending, get status() { return status; }, get error() { return lastError; }, get state() { return st; }, flush: () => running || Promise.resolve() };
+  function signOut() { stop(); st = null; asking = null; undecided = null; storage.set(key, null); set('off'); }
+  return { start, stop, signOut, resume, get undecided() { return !!undecided; }, kick, applyPending, get status() { return status; }, get error() { return lastError; }, get state() { return st; }, flush: () => running || Promise.resolve() };
 }

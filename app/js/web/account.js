@@ -52,13 +52,26 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
 
   /* ---------- sync ---------- */
   let syncState = { status: 'off', at: 0 };
+  // another account's data on this device: ask before anything goes up (the dialog's 'device' step)
+  let askRes = null, afterAsk = null;
+  const ask = ({ name }) => new Promise(res => {
+    askRes?.(null);
+    afterAsk = step && step !== 'device' ? { s: step, data: stepData } : null;
+    askRes = res; open('device', { name });
+  });
+  function answer(how) {
+    const r = askRes, next = afterAsk; askRes = null; afterAsk = null;
+    if (next) open(next.s, next.data); else close();
+    r?.(how);
+    if (how === 'clean') toast('Started clean');
+  }
   const sync = createSync({ fetch, local, storage: store, onState: s => { syncState = s; renderSlot(); renderSyncRow(); },
-    onSignedOut: () => { setMe(null); toast('Signed out'); }, onRides });
+    onSignedOut: () => { setMe(null); toast('Signed out'); }, onRides, ask });
 
   function setMe(m) {
     const was = me?.user?.id;
     me = m?.user ? m : null;
-    if (me && me.user.id !== was) sync.start(me.user.id);
+    if (me && me.user.id !== was) sync.start(me.user.id, me.user.name || me.user.email?.split('@')[0] || 'this account');
     if (!me && was) sync.signOut();
     render(); onUser(me);
   }
@@ -137,9 +150,14 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
   function scrollToAccount() { setTimeout(() => document.getElementById?.('set-account')?.scrollIntoView?.({ block: 'start' }), 0); }
 
   /* ---------- the dialog: sign in, sign up, reset, Strava email, connect services ---------- */
-  const TITLES = { signin: 'Sign in', signup: 'Create account', forgot: 'Reset password', sent: 'Check your inbox', reset: 'New password', email: 'Add your email', connect: 'Connect your services' };
-  function open(s, data = {}) { step = s; stepData = data; renderDialog(); $('#authModal')?.classList.add('on'); setTimeout(() => $('#authBody')?.querySelector?.('input')?.focus?.(), 30); }
-  function close() { step = null; $('#authModal')?.classList.remove('on'); }
+  const TITLES = { device: 'Data on this device', signin: 'Sign in', signup: 'Create account', forgot: 'Reset password', sent: 'Check your inbox', reset: 'New password', email: 'Add your email', connect: 'Connect your services' };
+  function open(s, data = {}) {
+    if (askRes && step === 'device' && s !== 'device') { afterAsk = { s, data }; return; }  // the question first, then this
+    step = s; stepData = data; renderDialog(); $('#authModal')?.classList.add('on'); setTimeout(() => $('#authBody')?.querySelector?.('input')?.focus?.(), 30); }
+  function close() {
+    if (askRes && step === 'device') { const r = askRes; askRes = null; afterAsk = null; r(null); }  // dismissed: sync waits
+    step = null; $('#authModal')?.classList.remove('on');
+  }
   function oauthButtons() {
     const b = [];
     if (providers?.google) b.push(`<button type="button" class="oauth" data-a="google">${ICONS.google}<span>Continue with Google</span></button>`);
@@ -172,6 +190,10 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
       body.innerHTML = `<p class="amsg">Strava does not share your email. Add one to sign in without Strava and to recover your account.</p>
         <form class="aform" data-f="email" novalidate><label class="f">Email<input name="email" type="email" autocomplete="email" required></label>
         ${err}<button class="pri wide" type="submit">Continue</button></form><div class="aalt"><span></span><button type="button" class="lnk" data-a="connect">Skip for now</button></div>`;
+    } else if (step === 'device') {
+      body.innerHTML = `<p class="amsg">Workouts, courses and rides here are from another account.</p>
+        <div class="aform"><button class="pri wide" data-a="dmerge">Add this device's data to ${esc(stepData.name || 'this account')}</button>
+        <button class="wide" data-a="dclean">Start clean</button><div class="hint">Start clean removes them from this device.</div></div>`;
     } else if (step === 'connect') {
       body.innerHTML = `<p class="amsg">Send rides where you train. You can change this later in Settings.</p><div class="svcs">${SERVICES.map(s => `
         <div class="svc"><span class="sn">${esc(s.name)}${s.recommended ? '<span class="badge rec">Recommended</span>' : ''}</span>
@@ -193,13 +215,13 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
         if (r.status === 202) open('sent', { text: 'If that address has an account, a reset link is on its way.' }); else setErr(errText(r.body));
       } else if (form === 'reset') {
         const r = await api('POST', '/api/auth/reset/confirm', { token: stepData.token, password: vals.password });
-        if (r.status === 200) { setMe(r.body); close(); toast('Password set'); } else setErr(errText(r.body));
+        if (r.status === 200) { close(); setMe(r.body); toast('Password set'); } else setErr(errText(r.body));
       } else if (form === 'email') return await claimEmail(vals.email);
     } finally { busy(false); }
   }
   async function signIn(email, password) {
     const r = await api('POST', '/api/auth/login', { email, password });
-    if (r.status === 200) { setMe(r.body); close(); track('login', { method: 'email' }); toast('Signed in'); return true; }
+    if (r.status === 200) { close(); setMe(r.body); track('login', { method: 'email' }); toast('Signed in'); return true; }
     setErr(errText(r.body)); return false;
   }
   async function signUp(email, password, name = '') {
@@ -224,6 +246,7 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     const b = e?.target?.closest?.('[data-a]'); if (!b) return;
     const a = b.dataset.a;
     if (a === 'close') return close();
+    if (a === 'dmerge' || a === 'dclean') return answer(a === 'dmerge' ? 'merge' : 'clean');
     if (a === 'google' || a === 'strava') return startOAuth(a);
     if (a === 'svc') { close(); return openConnectServices(b.dataset.s); }
     if (['signin', 'signup', 'forgot', 'connect'].includes(a)) return open(a, { email: $('#authBody')?.querySelector?.('input[name=email]')?.value || '' });
@@ -238,7 +261,7 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
   /* ---------- Settings > Account ---------- */
   function renderSyncRow() {
     const el = $('#acSync'); if (!el || !me) return;
-    el.textContent = syncState.status === 'syncing' ? 'Syncing…' : syncState.status === 'offline' ? 'Offline. Changes sync when you are back.' : syncState.status === 'error' ? `Paused (${syncState.error || 'error'}). Retrying.` : syncState.at ? `Synced ${ago(syncState.at)}` : '';
+    el.textContent = syncState.status === 'syncing' ? 'Syncing…' : syncState.status === 'offline' ? 'Offline. Changes sync when you are back.' : syncState.status === 'error' ? (syncState.error === 'choose' ? 'Paused. Sync now to choose.' : `Paused (${syncState.error || 'error'}). Retrying.`) : syncState.at ? `Synced ${ago(syncState.at)}` : '';
   }
   function renderSettings() {
     const box = $('#acctSet'); if (!box) return;
@@ -286,7 +309,7 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     if (a === 'linkemail') { linkOpen = !linkOpen; return renderSettings(); }
     if (a === 'pw') { pwOpen = !pwOpen; return renderSettings(); }
     if (a === 'del') { delOpen = !delOpen; return renderSettings(); }
-    if (a === 'syncnow') return sync.kick(0);
+    if (a === 'syncnow') return sync.resume() || sync.kick(0);
     if (a === 'signout') return signOut(false);
     if (a === 'signoutall') return signOut(true);
     if (a === 'unlink') {

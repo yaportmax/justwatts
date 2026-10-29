@@ -128,6 +128,13 @@ def test_web_account_sync_and_community(dist, node):
     assert out["published"] == {"item": ["Local over-unders", ["vo2", "threshold"]], "modal": False}
     sa = out["signedOutAgain"]
     assert sa["slot"] and sa["custom"] == 1 and sa["sync"] == "null"                                 # local data stays on the device
+    assert out["sameAgain"] == {"step": None, "owner": True}                                        # the same account again: no question
+    ak = out["asked"]                                                                                # another account: ask, nothing goes up yet
+    assert ak["title"] == "Data on this device" and "Add this device's data to Bob" in ak["html"] and "Start clean" in ak["html"] and ak["server"] == 0
+    assert out["afterMerge"] == {"step": "connect"}                                                  # then the sign-up's connect step
+    assert out["merged"] == {"records": ["settings:main", "workout:c-local1"], "rides": True}
+    assert out["dismissed"] == {"status": "error", "error": "choose", "step": None, "server": 0}      # dismissed: no merge, sync waits
+    assert out["clean"] == {"custom": 0, "courses": 0, "rides": 0, "server": [], "serverRides": 0, "step": None}
     st = out["strava"]                                                                               # Strava sign-up: ask for the email once
     assert st["back"] == "/?provider=strava&auth=ok&new=1" and st["step"] == "email" and "Skip for now" in st["html"] and st["stripped"] == "/"
     assert out["claim"]["step"] == "sent" and out["claim"]["mail"] == ["eddy@example.com"] and 'data-a="connect"' in out["claim"]["html"]

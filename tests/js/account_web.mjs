@@ -205,6 +205,41 @@ hw.community.itemAction('back');
 await hw.account.signOut();
 out.signedOutAgain = { slot: $('#acctSlot').innerHTML.includes('Sign in'), custom: lsCustom().length, sync: mem.get('hw.sync') };
 
+/* ---------- 5b. another account on this device: ask before merging; the same account carries on ---------- */
+const rideIds = async () => (await hw.backend.store.rideIds()).sort();
+const tapDialog = a => hw.account.dialogClick({ target: { id: '', closest: () => ({ dataset: { a } }) } });
+await hw.account.signIn('ann@example.com', 'password123');
+await synced();
+out.sameAgain = { step: hw.account.state().step, owner: mem.get('hw.sync.owner') === JSON.stringify(hw.account.me().user.id) };
+await hw.account.signOut();
+// Bob signs up here: Ann's data is on the device, so ask; the connect step waits for the answer
+const nRides = (await rideIds()).length;
+await hw.account.signUp('bob@example.com', 'password123', 'Bob');
+await until(() => hw.account.state().step === 'device', 'merge question');
+const bobDev = device(); await bobDev.post('/api/auth/login', { email: 'bob@example.com', password: 'password123' });
+out.asked = { title: $('#authTitle').textContent, html: $('#authBody').innerHTML, status: hw.account.sync.status, server: (await bobDev.get('/api/sync/changes?since=0')).records.length };
+tapDialog('dmerge');
+out.afterMerge = { step: hw.account.state().step };
+await synced();
+ch = await bobDev.get('/api/sync/changes?since=0');
+out.merged = { records: ch.records.map(r => r.kind + ':' + r.id).sort(), rides: ch.rides.length === nRides };
+hw.account.close();
+await hw.account.signOut();
+// Cat: dismiss the question (nothing goes up, sync waits), Sync now asks again, Start clean
+await hw.account.signUp('cat@example.com', 'password123', 'Cat');
+await until(() => hw.account.state().step === 'device', 'merge question 2');
+const catDev = device(); await catDev.post('/api/auth/login', { email: 'cat@example.com', password: 'password123' });
+tapDialog('close');
+await sleep(50);
+out.dismissed = { status: hw.account.sync.status, error: hw.account.sync.error, step: hw.account.state().step, server: (await catDev.get('/api/sync/changes?since=0')).records.length };
+hw.account.settingsAction('syncnow');
+await until(() => hw.account.state().step === 'device', 'asked again');
+tapDialog('dclean');
+await synced();
+ch = await catDev.get('/api/sync/changes?since=0');
+out.clean = { custom: lsCustom().length, courses: JSON.parse(mem.get('hw.courses') || '[]').length, rides: (await rideIds()).length, server: ch.records.map(r => r.kind + ':' + r.id), serverRides: ch.rides.length, step: hw.account.state().step };
+await hw.account.signOut();
+
 /* ---------- 6. Strava sign-up: ask for an email once, then connect; the emailed link confirms it ---------- */
 Object.assign(process.env, { STRAVA_CLIENT_ID: '1', STRAVA_CLIENT_SECRET: 's', RESEND_API_KEY: 'k', EMAIL_FROM: 'a@b.c' });
 jar.clear(); athlete = 4242;

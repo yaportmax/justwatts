@@ -1,6 +1,7 @@
 // Test bridge for app/js/course.js and a course ride on the web build's engine. stdin: JSON array of
 // requests, stdout: JSON array of results. tests/test_course.py runs the same on the Python side.
 import * as C from '../../app/js/course.js';
+import { ROUTE_COURSES } from '../../app/js/course-routes.js';
 import { Engine } from '../../app/js/web/engine.js';
 import { fitEncode, toTcx, summarize } from '../../app/js/core.js';
 
@@ -41,6 +42,7 @@ function run(r) {
     case 'speed': { let v = r.v0 || 0; return r.seq.map(([w, g, dt]) => (v = C.speedStep(v, w, g, r.mass, dt))); }
     case 'profile': return C.profileOf(r.course, r.n);
     case 'samples': return C.SAMPLE_COURSES;
+    case 'routes': return ROUTE_COURSES;
     case 'check': { try { return C.checkCourse(r.course); } catch (e) { return { error: e.message }; } }
     case 'checkRide': { try { return C.checkRideCourse(r.course); } catch (e) { return { error: e.message }; } }
     case 'extend': { try { return C.roadExtend(r.course, r.body, r.d); } catch (e) { return { error: e.message }; } }

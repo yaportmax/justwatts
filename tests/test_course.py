@@ -336,7 +336,7 @@ def test_fit_and_tcx_carry_course_distance_and_altitude(js, tmp_path):
 def test_exports_carry_gps_from_the_map_line(js, tmp_path):
     # a course with a map line: FIT records and TCX trackpoints get positions along it, and FIT says virtual
     fitdecode = pytest.importorskip("fitdecode")
-    alpe = json.loads(re.search(r"ROUTE_COURSES = (.*);", (REPO / "app/js/course-routes.js").read_text(encoding="utf-8"))[1])[2]
+    alpe = route_courses(js)["r-alpe"]
     res, eng = run_python(tmp_path, [["power", 300], ["load", {"workout": None, "course": alpe}], ["start", {}], ["tick", 600]])
     p = res["payload"]
     data = H.fit_encode(p)
@@ -363,7 +363,7 @@ def test_exports_carry_gps_from_the_map_line(js, tmp_path):
 
 def test_fit_import_reads_positions_and_altitude(js, tmp_path):
     # an exported course ride is a valid FIT track: importing it gives back the road
-    alpe = json.loads(re.search(r"ROUTE_COURSES = (.*);", (REPO / "app/js/course-routes.js").read_text(encoding="utf-8"))[1])[2]
+    alpe = route_courses(js)["r-alpe"]
     res, eng = run_python(tmp_path, [["power", 400], ["load", {"workout": None, "course": alpe}], ["start", {}], ["tick", 900]])
     p = res["payload"]
     t = js([{"op": "parseFit", "b64": base64.b64encode(H.fit_encode(p)).decode()}])[0]
@@ -399,6 +399,43 @@ def test_course_done_line_parses():
     from justwatts import events as E
     ev = E.parse_line("[10:00:00] COURSE DONE at T+1:02:03, riding on until End")
     assert ev["type"] == "course_done" and ev["elapsed_s"] == 3723
+
+
+CATS = {"Climb", "Marin", "70.3/Ironman", "Tour de France", "Classic"}
+
+
+def route_courses(js):
+    return {c["id"]: c for c in js([{"op": "routes"}])[0]}
+
+
+def test_bundled_route_courses_are_well_formed(js):
+    # every real-road course: a profile point per 10 m, a map line, sane numbers, rideable grades
+    src = (REPO / "app/js/course-routes.js").read_text(encoding="utf-8")
+    assert "OpenStreetMap" in src.splitlines()[0] and "Copernicus" in src.splitlines()[0]
+    assert len(src.encode()) < 1_500_000
+    cs = js([{"op": "routes"}])[0]
+    ids = [c["id"] for c in cs]
+    assert len(ids) == len(set(ids)) and {"r-hawk", "r-olh", "r-alpe"} <= set(ids)
+    assert len(cs) >= 20 and all(c["cat"] in CATS for c in cs) and sum(c["dist"] > 60_000 for c in cs) >= 3 and max(c["dist"] for c in cs) > 100_000
+    assert [c["dist"] for c in cs] == sorted(c["dist"] for c in cs)  # the list reads shortest first
+    for c in cs:
+        ele, ll = c["ele"], c["ll"]
+        assert c["name"] and len(c["name"]) <= 80, c["id"]
+        assert abs(len(ele) - (c["dist"] / 10 + 1)) <= 1, c["id"]  # one point per 10 m
+        assert all(isinstance(x, (int, float)) and math.isfinite(x) and -100 < x < 5000 for x in ele), c["id"]
+        assert 2 <= len(ll) <= 500 and all(len(p) == 2 and all(math.isfinite(v) for v in p) for p in ll), c["id"]
+        assert all(abs(p[0]) <= 90 and abs(p[1]) <= 180 for p in ll), c["id"]
+        line = sum(C.haversine({"lat": a[0], "lon": a[1]}, {"lat": b[0], "lon": b[1]}) for a, b in zip(ll, ll[1:]))
+        assert 0.85 * c["dist"] < line <= 1.01 * c["dist"], c["id"]  # the map line follows the profile's road
+        gain = sum(max(0, b - a) for a, b in zip(ele, ele[1:]))
+        assert abs(gain - c["gain"]) <= 1, c["id"]
+        assert max(abs(ele[i] - ele[i - 10]) / 100 for i in range(10, len(ele))) < 0.25, c["id"]  # over 100 m
+        assert checked(c)
+
+
+def checked(c):
+    out = C.check_course(c)
+    return out["dist"] == c["dist"] and len(out["ll"]) == len(c["ll"])
 
 
 def test_samples_json_stays_small(js):

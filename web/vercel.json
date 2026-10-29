@@ -8,7 +8,7 @@
   },
   "rewrites": [
     { "source": "/privacy", "destination": "/privacy.html" },
-    { "source": "/api/(auth|sync|community|admin)(/.*)?", "destination": "/api/accounts?__path=/api/$1$2" },
+    { "source": "/api/(auth|sync|community|social|admin)(/.*)?", "destination": "/api/accounts?__path=/api/$1$2" },
     { "source": "/((?!api/)[^.]*)", "destination": "/index.html" }
   ],
   "headers": [

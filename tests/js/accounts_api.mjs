@@ -1,4 +1,4 @@
-// Drives the accounts / sync / community API (web/api/_lib) in-process with fake requests, a fake clock
+// Drives the accounts / sync / community / social API (web/api/_lib) in-process with fake requests, a fake clock
 // and stubbed fetch (Resend, Google, Strava). Usage:
 //   node accounts_api.mjs <repo> <section|all> [memory|pglite:<path to @electric-sql/pglite>]
 // Prints {"<section>": "ok", ...}; any failed assertion exits 1 with the stack on stderr.
@@ -752,6 +752,18 @@ S.moderation = async () => {
   h = (await owner.get('/api/admin/hidden')).body; assert.deepEqual([h.items.length, h.comments.length], [0, 0]);
   assert.equal((await a.post(`/api/admin/items/${it.id}`, { action: 'delete' })).status, 403);
   assert.equal((await owner.post('/api/admin/items/zzzzzzzz', { action: 'delete' })).status, 404);
+  // group chat: 3 members hide a message; the owner lists, unhides and deletes it
+  const g = (await a.post('/api/social/groups', { plan: { kind: 'course', id: 'hawk-hill', name: 'Hawk Hill' }, at: NOW + HOUR })).body.group;
+  for (const u of rs.slice(0, 3)) await u.post(`/api/social/groups/${g.id}/join`);
+  const msg = (await a.post('/api/social/chat/send', { group: g.id, body: 'Mean words here' })).body.message;
+  for (const u of rs.slice(0, 3)) await u.post('/api/social/chat/report', { id: msg.id, reason: 'mean' });
+  h = (await owner.get('/api/admin/hidden')).body;
+  assert.deepEqual(h.messages.map(m => [m.id, m.body, m.reasons]), [[msg.id, 'Mean words here', ['mean', 'mean', 'mean']]]);
+  assert.equal((await owner.post(`/api/admin/messages/${msg.id}`, { action: 'unhide' })).status, 200);
+  assert.equal((await rs[0].post('/api/social/chat/read', { group: g.id, since: 0 })).body.messages.length, 1);
+  assert.equal((await owner.post(`/api/admin/messages/${msg.id}`, { action: 'delete' })).status, 200);
+  assert.equal((await rs[0].post('/api/social/chat/read', { group: g.id, since: 0 })).body.messages.length, 0);
+  assert.equal((await a.post(`/api/admin/messages/${msg.id}`, { action: 'delete' })).status, 403);
   // an unverified account with an owner address is not an admin
   await reset({ OWNER_EMAILS: 'boss@example.com' });
   const fake = await signup('boss@example.com');
@@ -918,6 +930,209 @@ S.claim = async () => {
   for (let i = 0; i < 5; i++) assert.equal((await d.post('/api/auth/email/claim', { email: `rl${i}@example.com` })).status, 202);
   r = await d.post('/api/auth/email/claim', { email: 'rl9@example.com' });
   assert.deepEqual([r.status, r.body.error], [429, 'rate_limited']);
+};
+
+S.social = async () => {
+  await reset({ OWNER_EMAILS: 'boss@example.com' });
+  const ann = await signup('ann@example.com', 'password123', 'Ann'), bob = await signup('bob@example.com', 'password123', 'Bob');
+  const cat = await signup('cat@example.com', 'password123', 'Cat'), dan = await signup('dan@example.com', 'password123', 'Dan');
+  const id = async c => (await c.get('/api/auth/me')).body.user.id;
+  const [A, B, C, D] = [await id(ann), await id(bob), await id(cat), await id(dan)];
+  // signed out: nothing
+  for (const [m, p] of [['GET', '/api/social'], ['POST', '/api/social/presence'], ['POST', '/api/social/search'], ['GET', '/api/social/me']]) {
+    const r = m === 'GET' ? await client().get(p) : await client().post(p, { open: true, lat: 1, lon: 1 });
+    assert.equal(r.status, 401, p);
+  }
+  assert.equal((await ann.post('/api/social/presence', { open: true, lat: 1, lon: 1 }, { headers: { origin: 'https://evil.test' } })).status, 403);
+  // profile: a share code, visible by default
+  let me = (await ann.get('/api/social/me')).body;
+  assert.match(me.code, /^[A-Za-z0-9]{10}$/); assert.equal(me.visible, true);
+  assert.equal((await ann.get('/api/social/me')).body.code, me.code);  // stable
+
+  // search by display name; request, accept; requests by share code; remove
+  let r = await ann.post('/api/social/search', { q: 'bo' });
+  assert.deepEqual(r.body.users, [{ id: B, name: 'Bob', state: 'none' }]);
+  assert.deepEqual((await ann.post('/api/social/search', { q: 'b' })).body.users, []);  // 2 characters at least
+  assert.deepEqual((await ann.post('/api/social/search', { q: 'ann' })).body.users, []);  // never yourself
+  r = await ann.post('/api/social/friends/request', { id: B }); assert.deepEqual(r.body, { state: 'out', id: B, name: 'Bob' });
+  assert.equal((await ann.post('/api/social/friends/request', { id: A })).body.error, 'self');
+  assert.equal((await ann.post('/api/social/friends/request', { id: 'nobody123' })).status, 404);
+  let bs = (await bob.get('/api/social')).body;
+  assert.deepEqual(bs.incoming, [{ id: A, name: 'Ann' }]); assert.deepEqual(bs.friends, []);
+  assert.deepEqual((await ann.get('/api/social')).body.outgoing, [{ id: B, name: 'Bob' }]);
+  assert.equal((await cat.post('/api/social/friends/accept', { id: A })).status, 404);  // nothing to accept
+  assert.deepEqual((await bob.post('/api/social/friends/accept', { id: A })).body, { state: 'yes' });
+  assert.deepEqual((await ann.get('/api/social')).body.friends, [{ id: B, name: 'Bob', riding: null }]);
+  const catCode = (await cat.get('/api/social/me')).body.code;
+  r = await ann.post('/api/social/friends/request', { code: catCode }); assert.equal(r.body.state, 'out'); assert.equal(r.body.name, 'Cat');
+  r = await cat.post('/api/social/friends/request', { id: A }); assert.equal(r.body.state, 'yes');  // asking back accepts
+  assert.equal((await ann.post('/api/social/friends/request', { code: 'nope' })).status, 404);
+  assert.deepEqual((await ann.post('/api/social/search', { q: 'cat' })).body.users[0].state, 'yes');
+
+  // presence: open world, 5 km; the same course; friends flagged; invisible riders send nothing
+  const at = (lat, lon, extra = {}) => ({ open: true, lat, lon, w: 210, v: 31.4, road: 'Conzelman Road', h: 90, ...extra });
+  r = await ann.post('/api/social/presence', at(37.8324, -122.4795));
+  assert.equal(r.status, 200); assert.deepEqual(r.body.riders, []);
+  await bob.post('/api/social/presence', at(37.8330, -122.4790, { w: 250 }));       // about 80 m away
+  await cat.post('/api/social/presence', at(37.8324, -122.4195));                   // about 5.3 km east
+  await dan.post('/api/social/presence', at(37.8000, -122.4795));                   // 3.6 km south, a stranger
+  r = await ann.post('/api/social/presence', at(37.8324, -122.4795));
+  assert.deepEqual(r.body.riders.map(x => [x.name, x.friend, x.w]), [['Bob', true, 250], ['Dan', false, 210]]);
+  const bobRow = r.body.riders[0];
+  assert.deepEqual([bobRow.road, bobRow.v, bobRow.open, bobRow.h], ['Conzelman Road', 31.4, true, 90]);
+  // the friends panel shows who is riding, and where
+  let as = (await ann.get('/api/social')).body;
+  assert.deepEqual(as.friends.map(f => [f.name, f.riding?.road]), [['Bob', 'Conzelman Road'], ['Cat', 'Conzelman Road']]);
+  assert.equal(as.friends[0].riding.lat, 37.833);
+  // a course: riders on that course only
+  const crs = { open: false, course: 'Hawk Hill|5200', cid: 'hawk-hill', d: 1200, w: 180, road: 'Hawk Hill' };
+  await bob.post('/api/social/presence', crs);
+  await cat.post('/api/social/presence', { ...crs, course: 'Other|100', d: 50 });
+  r = await ann.post('/api/social/presence', { ...crs, d: 1000 });
+  assert.deepEqual(r.body.riders.map(x => [x.name, x.d, x.course]), [['Bob', 1200, 'Hawk Hill|5200']]);
+  assert.equal((await ann.post('/api/social/presence', { open: false })).body.error, 'bad_course');
+  assert.equal((await ann.post('/api/social/presence', { open: true, lat: 'x' })).body.error, 'bad_position');
+  // stale after 15 s
+  advance(16000);
+  assert.deepEqual((await ann.post('/api/social/presence', { ...crs, d: 1000 })).body.riders, []);
+  assert.deepEqual((await ann.get('/api/social')).body.friends.map(f => f.riding), [null, null]);
+  // visible: false drops the row at once and sends nothing more; the rider still sees others
+  await bob.post('/api/social/presence', crs);
+  assert.equal((await bob.post('/api/social/me', { visible: false })).body.visible, false);
+  assert.deepEqual((await ann.post('/api/social/presence', { ...crs, d: 1000 })).body.riders, []);
+  r = await bob.post('/api/social/presence', { ...crs, visible: false });
+  assert.deepEqual(r.body.riders.map(x => x.name), ['Ann']);
+  assert.deepEqual((await ann.post('/api/social/presence', { ...crs, d: 1000 })).body.riders, []);
+  await bob.post('/api/social/me', { visible: true });
+  await bob.post('/api/social/presence', crs);
+  assert.equal((await ann.post('/api/social/presence/stop')).status, 200);
+  assert.deepEqual((await bob.post('/api/social/presence', crs)).body.riders, []);  // Ann stopped
+  // rate limit per account: 60 a minute
+  advance(60000);
+  for (let i = 0; i < 59; i++) await dan.post('/api/social/presence', crs);
+  r = await dan.post('/api/social/presence', crs); assert.equal(r.status, 200);
+  r = await dan.post('/api/social/presence', crs); assert.deepEqual([r.status, r.body.error], [429, 'rate_limited']);
+
+  // block hides both ways: presence, search, friends; a blocked request looks like no account
+  advance(60000);
+  await dan.post('/api/social/presence', crs); await bob.post('/api/social/presence', crs);
+  assert.deepEqual((await ann.post('/api/social/presence', crs)).body.riders.map(x => x.name).sort(), ['Bob', 'Dan']);
+  assert.deepEqual((await dan.post('/api/social/block', { id: A })).body, { blocked: true });
+  assert.deepEqual((await ann.post('/api/social/presence', crs)).body.riders.map(x => x.name), ['Bob']);
+  assert.deepEqual((await dan.post('/api/social/presence', crs)).body.riders.map(x => x.name), ['Bob']);
+  assert.deepEqual((await ann.post('/api/social/search', { q: 'dan' })).body.users, []);
+  assert.equal((await ann.post('/api/social/friends/request', { id: D })).status, 404);
+  assert.deepEqual((await dan.get('/api/social')).body.blocked, [{ id: A, name: 'Ann' }]);
+  await dan.post('/api/social/unblock', { id: A });
+  assert.deepEqual((await ann.post('/api/social/search', { q: 'dan' })).body.users.map(u => u.name), ['Dan']);
+  // blocking a friend ends the friendship
+  await ann.post('/api/social/friends/request', { id: D }); await dan.post('/api/social/friends/accept', { id: A });
+  await ann.post('/api/social/block', { id: D });
+  assert.deepEqual((await ann.get('/api/social')).body.friends.map(f => f.name), ['Bob', 'Cat']);
+  await ann.post('/api/social/unblock', { id: D });
+
+  // group rides: create with a plan, time and workout; invite friends only; lobby; join by link; leave; organizer cancels
+  const plan = { kind: 'open', name: 'Golden Gate Bridge', lat: 37.80817, lon: -122.47641, heading: 340 };
+  assert.equal((await ann.post('/api/social/groups', { plan: { kind: 'x' }, at: NOW + HOUR })).body.error, 'bad_plan');
+  assert.equal((await ann.post('/api/social/groups', { plan, at: NOW + 30 * DAY })).body.error, 'bad_time');
+  assert.equal((await ann.post('/api/social/groups', { plan, at: NOW + HOUR, workout: { name: 'x', text: 'nonsense' } })).body.error, 'bad_workout');
+  r = await ann.post('/api/social/groups', { plan, at: NOW + HOUR, name: 'Tuesday spin', workout: { name: 'Tempo', text: '10m 60%, 20m 80%' }, invite: [B, D, 'junk'] });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  const g = r.body.group;
+  assert.match(g.id, /^[A-Za-z0-9]{12}$/);
+  assert.deepEqual([g.name, g.plan.kind, g.workout.name, g.mine, g.state, g.owner.name], ['Tuesday spin', 'open', 'Tempo', true, 'in', 'Ann']);
+  let lobby = (await bob.get(`/api/social/groups/${g.id}`)).body;
+  const names = l => l.members.map(m => [m.name, m.state]).sort((a, b) => a[0] < b[0] ? -1 : 1);
+  assert.deepEqual(names(lobby), [['Ann', 'in'], ['Bob', 'invited']]);  // Dan is not a friend now
+  assert.equal(lobby.group.state, 'invited');
+  bs = (await bob.get('/api/social')).body;
+  assert.deepEqual(bs.groups.map(x => [x.name, x.state, x.members]), [['Tuesday spin', 'invited', 1]]);
+  assert.deepEqual((await bob.post(`/api/social/groups/${g.id}/join`)).body, { state: 'in' });
+  assert.equal((await dan.post(`/api/social/groups/${g.id}/join`)).status, 200);  // the share link works for anyone
+  lobby = (await ann.get(`/api/social/groups/${g.id}`)).body;
+  assert.deepEqual(names(lobby), [['Ann', 'in'], ['Bob', 'in'], ['Dan', 'in']]);
+  assert.equal((await cat.post(`/api/social/groups/${g.id}/invite`, { ids: [A] })).status, 403);  // members invite
+  assert.deepEqual((await ann.post(`/api/social/groups/${g.id}/invite`, { ids: [C] })).body, { invited: 1 });
+  assert.equal((await ann.get('/api/social/groups/nope12345')).status, 404);
+  // presence in a group ride: members anywhere, flagged; group chat piggybacks
+  await dan.post('/api/social/presence', { ...at(45.05, 6.03), group: g.id });
+  r = await bob.post('/api/social/presence', { ...at(37.8, -122.47), group: g.id, chat: { since: 0 } });
+  assert.deepEqual(r.body.riders.map(x => [x.name, x.group]), [['Dan', true]]);
+  assert.deepEqual(r.body.chat, []);
+  // chat: group members only, moderated, rate limited; read since a cursor
+  assert.equal((await cat.post('/api/social/chat/send', { group: g.id, body: 'hi' })).body.error, 'not_member');
+  let m1 = await ann.post('/api/social/chat/send', { group: g.id, body: '  Rolling in 5  ' });
+  assert.equal(m1.status, 201); m1 = m1.body.message;
+  assert.deepEqual([m1.body, m1.name, m1.mine], ['Rolling in 5', 'Ann', true]);
+  assert.equal((await ann.post('/api/social/chat/send', { group: g.id, body: 'see example.com' })).body.error, 'no_links');
+  assert.equal((await ann.post('/api/social/chat/send', { group: g.id, body: 'oh sh1t' })).body.error, 'blocked_words');
+  assert.equal((await ann.post('/api/social/chat/send', { group: g.id, body: 'x'.repeat(301) })).body.error, 'bad_message');
+  const m2 = (await dan.post('/api/social/chat/send', { group: g.id, body: 'Ready' })).body.message;
+  r = await bob.post('/api/social/presence', { ...at(37.8, -122.47), group: g.id, chat: { since: 0 } });
+  assert.deepEqual(r.body.chat.map(x => [x.name, x.body, x.mine]), [['Ann', 'Rolling in 5', false], ['Dan', 'Ready', false]]);
+  r = await bob.post('/api/social/chat/read', { group: g.id, since: m2.seq + 5 });
+  assert.deepEqual(r.body.messages, []);
+  r = await bob.post('/api/social/chat/read', { group: g.id, since: m2.seq });
+  assert.ok(r.body.messages.every(x => x.seq <= m2.seq));  // a few of overlap, the page keeps ids it has
+  // a block hides chat both ways
+  await bob.post('/api/social/block', { id: D });
+  assert.deepEqual((await bob.post('/api/social/chat/read', { group: g.id, since: 0 })).body.messages.map(x => x.name), ['Ann']);
+  assert.deepEqual((await dan.post('/api/social/chat/read', { group: g.id, since: 0 })).body.messages.map(x => x.name), ['Ann', 'Dan']);
+  assert.deepEqual((await dan.get(`/api/social/groups/${g.id}`)).body.members.map(m => m.name).sort(), ['Ann', 'Cat', 'Dan']);  // Bob blocked Dan
+  await bob.post('/api/social/unblock', { id: D });
+  // reports: 3 members hide a group message; the owner reviews it
+  const rude = (await dan.post('/api/social/chat/send', { group: g.id, body: 'You are all slow' })).body.message;
+  await cat.post(`/api/social/groups/${g.id}/join`);
+  for (const u of [ann, bob]) assert.deepEqual((await u.post('/api/social/chat/report', { id: rude.id, reason: 'rude' })).body, { ok: true, hidden: false });
+  assert.deepEqual((await cat.post('/api/social/chat/report', { id: rude.id })).body, { ok: true, hidden: true });
+  assert.ok(!(await ann.post('/api/social/chat/read', { group: g.id, since: 0 })).body.messages.some(x => x.id === rude.id));
+  // direct chat: friends only; one report hides it for both
+  assert.equal((await ann.post('/api/social/chat/send', { to: D, body: 'hey' })).body.error, 'not_friends');
+  const dm = (await ann.post('/api/social/chat/send', { to: B, body: 'Ride tonight?' })).body.message;
+  assert.deepEqual((await bob.post('/api/social/chat/read', { to: A, since: 0 })).body.messages.map(x => x.body), ['Ride tonight?']);
+  assert.equal((await dan.post('/api/social/chat/read', { to: A, since: 0 })).body.error, 'not_friends');
+  assert.equal((await dan.post('/api/social/chat/report', { id: dm.id })).body.error, 'not_friends');
+  assert.deepEqual((await bob.post('/api/social/chat/report', { id: dm.id })).body, { ok: true, hidden: true });
+  assert.deepEqual((await ann.post('/api/social/chat/read', { to: B, since: 0 })).body.messages, []);
+  // chat rate limit: 20 a minute
+  advance(60000);
+  for (let i = 0; i < 20; i++) assert.equal((await ann.post('/api/social/chat/send', { to: B, body: `m${i}` })).status, 201);
+  assert.equal((await ann.post('/api/social/chat/send', { to: B, body: 'one more' })).status, 429);
+  // leaving; the organizer leaving cancels
+  assert.deepEqual((await bob.post(`/api/social/groups/${g.id}/leave`)).body, { state: null });
+  assert.equal((await bob.post('/api/social/chat/send', { group: g.id, body: 'hi' })).body.error, 'not_member');
+  await ann.post(`/api/social/groups/${g.id}/leave`);
+  assert.equal((await dan.get(`/api/social/groups/${g.id}`)).status, 404);
+  assert.deepEqual((await dan.get('/api/social')).body.groups, []);
+  // a group with a course plan
+  r = await bob.post('/api/social/groups', { plan: { kind: 'course', id: 'hawk-hill', name: 'Hawk Hill' }, at: NOW + 120000 });
+  assert.equal(r.status, 201); assert.deepEqual(r.body.group.plan, { kind: 'course', id: 'hawk-hill', name: 'Hawk Hill' });
+  assert.equal(r.body.group.workout, null);
+
+  // ride-ons: a finished ride shows to friends, who can ride it on once; strangers cannot
+  assert.equal((await bob.post('/api/social/activity', { name: 'Short', secs: 30 })).body.error, 'too_short');
+  r = await bob.post('/api/social/activity', { name: 'Hawk Hill repeats', secs: 3600, dist: 30500, avg: 215 });
+  assert.equal(r.status, 201);
+  as = (await ann.get('/api/social')).body;
+  assert.deepEqual(as.activity.map(a => [a.name, a.title, a.secs, a.dist, a.avg, a.rideons, a.gave, a.mine]), [['Bob', 'Hawk Hill repeats', 3600, 30500, 215, 0, false, false]]);
+  assert.deepEqual((await ann.post(`/api/social/activity/${r.body.id}/rideon`)).body, { rideons: 1, gave: true });
+  assert.deepEqual((await ann.post(`/api/social/activity/${r.body.id}/rideon`)).body, { rideons: 1, gave: true });
+  assert.equal((await dan.post(`/api/social/activity/${r.body.id}/rideon`)).status, 404);
+  assert.equal((await bob.post(`/api/social/activity/${r.body.id}/rideon`)).status, 404);  // not your own
+  assert.deepEqual((await bob.get('/api/social')).body.activity.map(a => [a.mine, a.rideons]), [[true, 1]]);
+  assert.deepEqual((await ann.get('/api/social')).body.activity[0].gave, true);
+  // hidden riders post no activity
+  await cat.post('/api/social/me', { visible: false });
+  assert.deepEqual((await cat.post('/api/social/activity', { name: 'Secret', secs: 600 })).body, { ok: true, posted: false });
+  // a week later the list is empty
+  advance(8 * DAY);
+  assert.deepEqual((await ann.get('/api/social')).body.activity, []);
+
+  // deleting an account removes its social rows; friends see it gone
+  await bob.post('/api/auth/delete', { confirm: 'DELETE', password: 'password123' });
+  as = (await ann.get('/api/social')).body;
+  assert.deepEqual(as.friends.map(f => f.name), ['Cat']);
+  assert.deepEqual((await ann.post('/api/social/search', { q: 'bob' })).body.users, []);
 };
 
 /* ---------- run ---------- */

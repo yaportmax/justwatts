@@ -1,4 +1,4 @@
-// Router and shared context for /api/auth/*, /api/sync/*, /api/community*, /api/admin/*.
+// Router and shared context for /api/auth/*, /api/sync/*, /api/community*, /api/social*, /api/admin/*.
 // One handler serves every entry file under web/api; it routes on the request path.
 'use strict';
 const { HttpError, fail, send, parseCookies, cookie, clientIp, publicOrigin } = require('./http');
@@ -85,7 +85,7 @@ async function handler(req, res) {
   try {
     // behind the vercel.json rewrite the original path arrives as ?__path=; only API paths are honored
     const given = url.searchParams.get('__path');
-    if (given && /^\/api\/(auth|sync|community|admin)(\/|$)/.test(given)) { url.pathname = given; url.searchParams.delete('__path'); }
+    if (given && /^\/api\/(auth|sync|community|social|admin)(\/|$)/.test(given)) { url.pathname = given; url.searchParams.delete('__path'); }
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const match = routes.map(r => ({ r, m: r.re.exec(path) })).filter(x => x.m);
     if (!match.length) return out(404, { error: 'not_found' });
@@ -109,4 +109,4 @@ const open = fn => Object.assign(fn, { open: true });
 
 module.exports = { clock, handler, route, open, providers, env, secret, setStore, storeOrNull, sessionUser, startSession, endSession, requireUser, limit, isAdmin, SESSION, DAY };
 // load the route tables (they call route() above)
-require('./auth'); require('./sync'); require('./community');
+require('./auth'); require('./sync'); require('./community'); require('./social');

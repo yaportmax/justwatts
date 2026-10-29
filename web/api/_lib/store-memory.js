@@ -11,6 +11,23 @@ function memoryStore() {
   const records = new Map(), rides = new Map();           // key `${user}\n${kind}\n${id}` / `${user}\n${id}`
   const items = new Map(), likes = new Map(), itemRides = new Set(), comments = new Map(), reports = new Map();
   const integ = new Map();                                 // `${user}\n${ns}\n${name}` -> { value: Buffer, at }
+  // social: profiles, friend rows both ways (`${a}\n${b}` -> { state: out|in|yes }), blocks, presence, group rides,
+  // members (`${group}\n${user}`), chat messages, activities (finished rides) and ride-ons
+  const prof = new Map(), friends = new Map(), blocks = new Map(), pres = new Map(), groups = new Map(), members = new Map();
+  const msgs = new Map(), acts = new Map(), rideons = new Set();
+  let seq = 0;
+  const nm = uid => users.get(uid)?.name || '';
+  const blockedEither = (a, b) => blocks.has(`${a}\n${b}`) || blocks.has(`${b}\n${a}`);
+  function dropSocial(uid) {
+    prof.delete(uid); pres.delete(uid);
+    for (const k of [...friends.keys()]) if (k.split('\n').includes(uid)) friends.delete(k);
+    for (const k of [...blocks.keys()]) if (k.split('\n').includes(uid)) blocks.delete(k);
+    for (const [id, g] of [...groups]) if (g.owner === uid) { groups.delete(id); for (const k of [...members.keys()]) if (k.startsWith(id + '\n')) members.delete(k); }
+    for (const k of [...members.keys()]) if (k.split('\n')[1] === uid) members.delete(k);
+    for (const [id, m] of [...msgs]) if (m.userId === uid) { msgs.delete(id); for (const [rk, r] of reports) if (r.type === 'message' && r.targetId === id) reports.delete(rk); }
+    for (const [id, a] of [...acts]) if (a.userId === uid) { acts.delete(id); for (const k of [...rideons]) if (k.startsWith(id + '\n')) rideons.delete(k); }
+    for (const k of [...rideons]) if (k.split('\n')[1] === uid) { rideons.delete(k); const a = acts.get(k.split('\n')[0]); if (a) a.rideons--; }
+  }
   const ik = (p, s) => `${p}\n${s}`;
   const userIdents = uid => [...idents.values()].filter(i => i.userId === uid);
   const bumpRev = uid => ++users.get(uid).rev;
@@ -70,6 +87,7 @@ function memoryStore() {
       for (const k of [...itemRides]) { const [it, uid, day] = k.split('\n'); if (uid === from) { itemRides.delete(k); itemRides.add(`${it}\n${to}\n${day}`); touched.add(it); } }
       for (const [k, r] of [...reports]) if (r.userId === from) { reports.delete(k); const nk = `${r.type}\n${r.targetId}\n${to}`; if (!reports.has(nk)) reports.set(nk, { ...r, userId: to }); }
       for (const [k, t] of tokens) if (t.userId === from) tokens.delete(k);
+      dropSocial(from);  // friends, groups and chat of the merged account are not carried over
       users.delete(from);
       for (const t of touched) recount(t);
       return true;
@@ -94,6 +112,7 @@ function memoryStore() {
         for (const rk of [...itemRides]) if (rk.startsWith(k + '\n')) itemRides.delete(rk);
       }
       for (const k of [...integ.keys()]) if (k.split('\n')[0] === id) integ.delete(k);
+      dropSocial(id);
       for (const t of touched) recount(t);
       users.delete(id);
     },
@@ -218,12 +237,12 @@ function memoryStore() {
       const k = `${type}\n${targetId}\n${uid}`;
       if (!reports.has(k)) reports.set(k, { type, targetId, userId: uid, reason, createdAt: now });
       const count = [...reports.values()].filter(r => r.type === type && r.targetId === targetId).length;
-      const t = type === 'item' ? items.get(targetId) : comments.get(targetId);
+      const t = type === 'item' ? items.get(targetId) : type === 'message' ? msgs.get(targetId) : comments.get(targetId);
       if (t && count >= threshold && !t.hidden) { t.hidden = true; if (type === 'comment') recount(t.itemId); }
       return { count, hidden: !!t?.hidden };
     },
     async setHidden(type, id, hidden) {
-      const t = type === 'item' ? items.get(id) : comments.get(id); if (!t) return false;
+      const t = type === 'item' ? items.get(id) : type === 'message' ? msgs.get(id) : comments.get(id); if (!t) return false;
       t.hidden = !!hidden;
       if (!hidden) for (const [k, r] of reports) if (r.type === type && r.targetId === id) reports.delete(k);
       if (type === 'comment') recount(t.itemId);
@@ -234,7 +253,90 @@ function memoryStore() {
       return {
         items: [...items.values()].filter(i => i.hidden).map(i => ({ ...clone(i), ownerName: users.get(i.owner)?.name || '', reasons: rc('item', i.id) })),
         comments: [...comments.values()].filter(c => c.hidden).map(c => ({ ...clone(c), userName: users.get(c.userId)?.name || '', reasons: rc('comment', c.id) })),
+        messages: [...msgs.values()].filter(m => m.hidden).map(m => ({ ...clone(m), userName: nm(m.userId), reasons: rc('message', m.id) })),
       };
+    },
+    /* social (social.js) */
+    async socialMe(uid, code) {
+      if (!prof.has(uid)) prof.set(uid, { code, visible: true });
+      return clone(prof.get(uid));
+    },
+    async setVisible(uid, visible, code) { await this.socialMe(uid, code); prof.get(uid).visible = !!visible; return clone(prof.get(uid)); },
+    async userByCode(code) {
+      for (const [uid, p] of prof) if (p.code === code && users.has(uid)) return { id: uid, name: nm(uid) };
+      return null;
+    },
+    async searchUsers(uid, q, lim) {
+      const pre = u => u.name.toLowerCase().startsWith(q) ? 0 : 1;
+      return [...users.values()].filter(u => u.id !== uid && u.name && u.name.toLowerCase().includes(q) && !blockedEither(uid, u.id))
+        .sort((a, b) => pre(a) - pre(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, lim).map(u => ({ id: u.id, name: u.name }));
+    },
+    async relation(a, b) { return { state: friends.get(`${a}\n${b}`)?.state || null, blocked: blockedEither(a, b) }; },
+    async setFriend(a, b, sa, sb, now) {
+      if (!sa) { friends.delete(`${a}\n${b}`); friends.delete(`${b}\n${a}`); return; }
+      if (!users.has(a) || !users.has(b)) return;
+      friends.set(`${a}\n${b}`, { state: sa, at: now }); friends.set(`${b}\n${a}`, { state: sb, at: now });
+    },
+    async setBlock(a, b, on, now) {
+      if (!on) { blocks.delete(`${a}\n${b}`); return; }
+      if (!users.has(b)) return;
+      friends.delete(`${a}\n${b}`); friends.delete(`${b}\n${a}`); blocks.set(`${a}\n${b}`, now);
+    },
+    async socialLists(uid, since) {
+      const fr = [...friends].filter(([k]) => k.split('\n')[0] === uid).map(([k, f]) => {
+        const id = k.split('\n')[1], p = pres.get(id);
+        return { id, name: nm(id), state: f.state, riding: p && p.at > since ? clone(p) : null };
+      });
+      const bl = [...blocks.keys()].filter(k => k.split('\n')[0] === uid).map(k => { const id = k.split('\n')[1]; return { id, name: nm(id) }; });
+      return { friends: fr, blocked: bl };
+    },
+    async putPresence(uid, row, look) {
+      if (row) pres.set(uid, { ...clone(row), userId: uid }); else pres.delete(uid);
+      const out = [];
+      for (const [id, p] of pres) {
+        if (id === uid || p.at <= look.since || blockedEither(uid, id)) continue;
+        if (!(look.areas.includes(p.area) || (look.group && p.group === look.group))) continue;
+        out.push({ id, name: nm(id), lat: p.lat, lon: p.lon, data: clone(p.data), group: p.group, friend: friends.get(`${uid}\n${id}`)?.state === 'yes' });
+      }
+      for (const [id, p] of [...pres]) if (p.at < look.since - 60000) pres.delete(id);
+      return out.slice(0, 200);
+    },
+    async dropPresence(uid) { pres.delete(uid); },
+    async createGroup(g) { groups.set(g.id, clone(g)); },
+    async getGroup(id) { const g = groups.get(id); return g ? { ...clone(g), ownerName: nm(g.owner) } : null; },
+    async deleteGroup(id) { groups.delete(id); for (const k of [...members.keys()]) if (k.startsWith(id + '\n')) members.delete(k); },
+    async groupMembers(gid, viewer) {
+      return [...members].filter(([k]) => k.split('\n')[0] === gid).map(([k, m]) => ({ id: k.split('\n')[1], name: nm(k.split('\n')[1]), state: m.state, at: m.at }))
+        .filter(m => !viewer || m.id === viewer || !blockedEither(viewer, m.id)).sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+    },
+    async memberState(gid, uid) { return members.get(`${gid}\n${uid}`)?.state || null; },
+    async setMember(gid, uid, state, now) {
+      const k = `${gid}\n${uid}`;
+      if (!state) members.delete(k); else if (groups.has(gid) && users.has(uid)) members.set(k, { state, at: members.get(k)?.state === state ? members.get(k).at : now });
+    },
+    async myGroups(uid, since) {
+      return [...members].filter(([k]) => k.split('\n')[1] === uid).map(([k, m]) => ({ g: groups.get(k.split('\n')[0]), state: m.state }))
+        .filter(x => x.g && x.g.startAt >= since).sort((a, b) => a.g.startAt - b.g.startAt)
+        .map(x => ({ ...clone(x.g), ownerName: nm(x.g.owner), state: x.state, members: [...members].filter(([k, m]) => k.split('\n')[0] === x.g.id && m.state === 'in').length }));
+    },
+    async addMessage(m) { const r = { ...clone(m), seq: ++seq, hidden: false }; msgs.set(m.id, r); return { seq: r.seq }; },
+    async getMessage(id) { const m = msgs.get(id); return m ? clone(m) : null; },
+    async readMessages(chan, viewer, since, lim) {
+      return [...msgs.values()].filter(m => m.chan === chan && m.seq > since && !m.hidden && !blockedEither(viewer, m.userId))
+        .sort((a, b) => a.seq - b.seq).slice(-lim).map(m => ({ ...clone(m), name: nm(m.userId) }));
+    },
+    async deleteMessage(id) { msgs.delete(id); for (const [k, r] of reports) if (r.type === 'message' && r.targetId === id) reports.delete(k); },
+    async addActivity(a) { acts.set(a.id, { ...clone(a), rideons: 0 }); },
+    async getActivity(id) { const a = acts.get(id); return a ? clone(a) : null; },
+    async friendActivity(uid, since, lim) {
+      const ok = id => id === uid || friends.get(`${uid}\n${id}`)?.state === 'yes';
+      return [...acts.values()].filter(a => a.at >= since && ok(a.userId)).sort((a, b) => b.at - a.at).slice(0, lim)
+        .map(a => ({ ...clone(a), name: nm(a.userId), gave: rideons.has(`${a.id}\n${uid}`) }));
+    },
+    async rideOn(aid, uid) {
+      const a = acts.get(aid), k = `${aid}\n${uid}`;
+      if (a && !rideons.has(k)) { rideons.add(k); a.rideons++; }
+      return { rideons: a?.rideons || 0, gave: true };
     },
   };
 }

@@ -1,4 +1,4 @@
-// /api/community*: publish, browse, likes, rides, comments, reports; /api/admin/*: owner review.
+// /api/community*: publish, browse, likes, rides, comments, reports; /api/admin/*: owner review (chat messages too).
 'use strict';
 const { route, open, sessionUser, requireUser, limit, isAdmin, DAY } = require('./app');
 const { fail, readJson, checkWrite } = require('./http');
@@ -224,19 +224,25 @@ route('GET', '/api/admin/hidden', async ctx => {
     body: {
       items: h.items.map(i => ({ ...summary(i), owner: i.owner, reasons: i.reasons, ...(i.kind === 'workout' ? { text: i.text } : {}) })),
       comments: h.comments.map(c => ({ id: c.id, itemId: c.itemId, author: c.userName || 'Rider', userId: c.userId, body: c.body, createdAt: c.createdAt, reasons: c.reasons })),
+      messages: (h.messages || []).map(m => ({ id: m.id, author: m.userName || 'Rider', userId: m.userId, body: m.body, createdAt: m.createdAt, reasons: m.reasons })),
     },
   };
 });
-for (const type of ['items', 'comments']) {
+const ADMIN = {  // chat messages (social.js) are reviewed here too
+  items: { t: 'item', get: (s, id) => s.getItem(id), del: (s, id) => s.deleteItem(id) },
+  comments: { t: 'comment', get: (s, id) => s.getComment(id), del: (s, id) => s.deleteComment(id) },
+  messages: { t: 'message', get: (s, id) => s.getMessage(id), del: (s, id) => s.deleteMessage(id) },
+};
+for (const [type, A] of Object.entries(ADMIN)) {
   route('POST', `/api/admin/${type}/:id`, async ctx => {
     checkWrite(ctx.req);
     await requireAdmin(ctx);
-    const b = await readJson(ctx.req), id = ctx.params.id, t = type === 'items' ? 'item' : 'comment';
-    const exists = ID_RE.test(id) && (t === 'item' ? await ctx.store.getItem(id) : await ctx.store.getComment(id));
+    const b = await readJson(ctx.req), id = ctx.params.id, t = A.t;
+    const exists = /^[A-Za-z0-9_-]{6,24}$/.test(id) && await A.get(ctx.store, id);
     if (!exists) fail(404, 'not_found');
     if (b.action === 'unhide') await ctx.store.setHidden(t, id, false);
     else if (b.action === 'hide') await ctx.store.setHidden(t, id, true);
-    else if (b.action === 'delete') await (t === 'item' ? ctx.store.deleteItem(id) : ctx.store.deleteComment(id));
+    else if (b.action === 'delete') await A.del(ctx.store, id);
     else fail(400, 'bad_action');
     return { body: { ok: true } };
   });

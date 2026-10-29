@@ -48,7 +48,7 @@ def test_vercel_headers(dist):
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
     assert h["X-Content-Type-Options"] == "nosniff" and "bluetooth=(self)" in h["Permissions-Policy"]
     assert v["rewrites"] == [{"source": "/privacy", "destination": "/privacy.html"},
-                             {"source": "/api/(auth|sync|community|admin)(/.*)?", "destination": "/api/accounts?__path=/api/$1$2"},
+                             {"source": "/api/(auth|sync|community|social|admin)(/.*)?", "destination": "/api/accounts?__path=/api/$1$2"},
                              {"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the functions
     assert v["regions"] == ["pdx1"]                                                   # next to the Neon database
 

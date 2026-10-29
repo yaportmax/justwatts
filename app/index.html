@@ -36,7 +36,7 @@
   <div class="row" style="justify-content:space-between">
     <div class="row">
       <label class="f">FTP (W)<input id="ftp" type="number" min="50" max="600" step="1"></label>
-      <label class="f">Weight (kg)<input id="weight" type="number" min="0" max="200" step="0.1"></label>
+      <label class="f"><span>Weight (<span class="wUnit">lb</span>)</span><input id="weight" type="number" min="0" max="450" step="0.1"></label>
     </div>
     <div class="row" style="gap:6px"><button id="btnFtp">FTP test</button><button id="btnJust" class="pri">Just ride</button></div>
   </div>
@@ -192,13 +192,23 @@
       <h2>Athlete</h2>
       <div class="row">
         <label class="f">FTP (W)<input id="sFtp" type="number" min="50" max="600" step="1"></label>
-        <label class="f">Weight (kg)<input id="sWeight" type="number" min="0" max="200" step="0.1"></label>
-        <label class="f">HR zone floors<input id="sHrZones" placeholder="100,120,140,160,180" title="Lower bpm of Z1..Z5"></label>
+        <label class="f"><span>Weight (<span class="wUnit">lb</span>)</span><input id="sWeight" type="number" min="0" max="450" step="0.1"></label>
+        <label class="f">Units<select id="units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select></label>
       </div>
       <div class="row" style="margin-top:10px">
         <label class="f">Cadence low<input id="cadLo" type="number" min="40" max="120"></label>
         <label class="f">Cadence high<input id="cadHi" type="number" min="40" max="130"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
         <label class="f">Max HR<input id="hrMax" type="number" min="100" max="230"></label>
+        <label class="f">HR zones<select id="hrSrc"><option value="default">% of max HR</option><option value="manual">Custom</option><option value="garmin">From Garmin</option></select></label>
+      </div>
+      <div class="row hz" id="sHrZones" style="margin-top:10px" title="Lowest bpm of each zone">
+        <label class="f">Z1<input data-hz="0" type="number" min="30" max="230"></label>
+        <label class="f">Z2<input data-hz="1" type="number" min="30" max="230"></label>
+        <label class="f">Z3<input data-hz="2" type="number" min="30" max="230"></label>
+        <label class="f">Z4<input data-hz="3" type="number" min="30" max="230"></label>
+        <label class="f">Z5<input data-hz="4" type="number" min="30" max="230"></label>
       </div>
       <div class="row" style="margin-top:10px">
         <button id="gImport" title="Copy FTP, weight and HR zones from your Garmin account">Import from Garmin</button>

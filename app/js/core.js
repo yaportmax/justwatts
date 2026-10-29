@@ -17,6 +17,32 @@ export function hrZone(h, zones) {
   if (!zones || !(h > 0)) return -1;
   let i = -1; zones.forEach((f, k) => { if (h >= f) i = k; }); return i;
 }
+// Active zones: manual or Garmin floors when set, else 50/60/70/80/90% of max HR (185 when unset).
+// Mirrored by history.active_hr_zones.
+export const HR_MAX_DEFAULT = 185, HRZ_PCT = [50, 60, 70, 80, 90];
+const validMax = m => Number.isFinite(m) && m >= 100 && m <= 230;
+export const validHrFloors = z => Array.isArray(z) && z.length === 5 && z.every((x, i) => Number.isFinite(x) && x > 30 && x < 230 && (!i || x > z[i - 1]));
+export const defaultHrFloors = max => HRZ_PCT.map(p => Math.round(max * p / 100));
+export function activeHrZones(s) {
+  const src = s?.hrZonesSrc, set = validMax(+s?.hrMax) ? +s.hrMax : null;
+  if (src !== 'default' && validHrFloors(s?.hrZones)) return { floors: s.hrZones, max: set, src: src || 'manual' };
+  const max = set || HR_MAX_DEFAULT;
+  return { floors: defaultHrFloors(max), max, src: 'default' };
+}
+
+/* ---------- units (storage is metric: weight kg, distance km) ---------- */
+export const LB_PER_KG = 2.20462, MI_PER_KM = 0.621371;
+export const isMetric = units => units === 'metric';
+export const weightUnit = units => isMetric(units) ? 'kg' : 'lb';
+export function weightShow(kg, units) {  // value for the weight input; '' when unset
+  if (!(kg > 0)) return '';
+  return Math.round((isMetric(units) ? kg : kg * LB_PER_KG) * 10) / 10;
+}
+export function weightKg(v, units) {  // input value -> kg (2 decimals so 195.8 lb round-trips)
+  v = +v; if (!(v > 0)) return 0;
+  return Math.round((isMetric(units) ? v : v / LB_PER_KG) * 100) / 100;
+}
+export const distText = (km, units) => isMetric(units) ? (+km).toFixed(1) + ' km' : (km * MI_PER_KM).toFixed(1) + ' mi';
 
 /* ---------- workout text format ---------- */
 // step: {d: sec, a, b, u: '%'|'w'} or {d, free: true}; a/b are fractions of FTP when u === '%'

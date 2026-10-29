@@ -51,7 +51,7 @@ export class LocalCoach {
     const now = ride.elapsed_s || 0;
     // HR cap guard
     const cur = this.current(), ath = st.athlete || {}, hr = st.live?.hr || 0;
-    const cap = ath.hr_max ? Math.round(ath.hr_max * 0.95) : ath.hr_zones ? ath.hr_zones[4] : null;
+    const cap = ath.hr_max ? Math.round(ath.hr_max * 0.95) : ath.hr_zones && ath.hr_zones_source !== 'default' ? ath.hr_zones[4] : null;  // default zones guess max HR: no cap
     if (!cur || !cap || !this.mayAdjust(c) || hr < cap || this.riderOwns(cur[1], cur[2])) this.hrOverSince = null;
     else {
       this.hrOverSince ??= now;

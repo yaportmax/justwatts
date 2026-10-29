@@ -94,8 +94,9 @@ tested so far. Resistance-level mode follows FTMS 1.0 and is untested on hardwar
 ## Uploads
 
 **Garmin** (`pip install "openspin[garmin]"`, then `openspin login-garmin` once). On first start with
-Garmin linked, OpenSpin imports your FTP, weight and HR zones (only the ones you have not set
-yourself; **Import from Garmin** in Settings redoes it). It uses the unofficial
+Garmin linked, OpenSpin imports your FTP and weight (only the ones you have not set yourself;
+**Import from Garmin** in Settings redoes it and also brings HR zones). HR zones from Garmin are a
+choice under Settings > HR zones; the default is % of max HR. It uses the unofficial
 [python-garminconnect](https://github.com/cyberjunky/python-garminconnect) library, which Garmin can
 break at any time. Garmin is only active for the default data dir; `OPENSPIN_GARMIN=off` or
 `serve --no-garmin` disables it, and any other `OPENSPIN_DATA` has it off unless `OPENSPIN_GARMIN=on`.

@@ -4,6 +4,7 @@
 import {
   fmtT, esc, ZONES, zoneIdx, HRZ_COLORS, hrZone as hrZoneOf, parseWorkout, toText, compile, stepAt, stepWatts,
   estimate, toZwo as toZwoCore, PRESETS, FTP_TESTS, testKind, summarize, fitEncode, toTcx,
+  activeHrZones, validHrFloors, HR_MAX_DEFAULT, weightShow, weightKg, weightUnit, distText,
 } from './core.js';
 import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
@@ -25,7 +26,7 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
 // Settings live on the server (agents read the athlete profile there); localStorage is only migrated once.
-const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95], voiceMode: 'all' }, store.get('hw.settings', {}));
+const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95], voiceMode: 'all', units: 'imperial' }, store.get('hw.settings', {}));
 let garminOn = false;
 const api = (path, body) => F(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const apiJson = async (path, body) => { const r = await api(path, body); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
@@ -39,7 +40,7 @@ async function loadSettings() {
     const j = await (await F('/api/settings')).json();
     garminOn = !!j.garmin;
     if (j.stored) Object.assign(settings, j.settings);
-    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'voiceMode']);
+    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'voiceMode', 'units']);
     if (!garminOn) settings.autoGarmin = false;
     store.set('hw.settings', settings);
   } catch {}
@@ -49,7 +50,8 @@ async function loadSettings() {
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), 2600); }
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const zoneColor = f => css(ZONES[zoneIdx(f)][1]);
-const hrZone = h => hrZoneOf(h, settings.hrZones);
+const hrZ = () => activeHrZones(settings);  // manual, Garmin or % of max HR
+const hrZone = h => hrZoneOf(h, hrZ().floors);
 
 let custom = store.get('hw.custom', []);
 const allWorkouts = () => [...custom, ...PRESETS];
@@ -371,7 +373,8 @@ function renderLive() {
   const hrNow = live.hr || 0, hz = hrZone(hrNow);
   $('#lH').textContent = hrNow || '–';
   $('#hrTile').style.setProperty('--hrc', hz >= 0 ? `var(${HRZ_COLORS[hz]})` : 'var(--line)');
-  $('#lHs').innerHTML = hrNow && settings.hrZones ? (hz >= 0 ? `<span class="zn">Z${hz + 1}</span>` : 'below Z1') + (settings.hrMax ? ` · ${Math.round(hrNow / settings.hrMax * 100)}% max` : '') : 'bpm';
+  const hmax = hrZ().max;
+  $('#lHs').innerHTML = hrNow ? (hz >= 0 ? `<span class="zn">Z${hz + 1}</span>` : 'below Z1') + (hmax ? ` · ${Math.round(hrNow / hmax * 100)}% max` : '') : 'bpm';
 }
 function renderRide() {
   if (!V) return;
@@ -704,7 +707,7 @@ async function openSummary(id) {
   $('#summary').style.display = ''; $('#sName').textContent = r.name;
   $('#sDate').textContent = new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const st = [['Time', fmtT(m.time_s)], ['Avg power', m.avg_w + ' W'], ['NP', m.np + ' W'], ['Max', m.max_w + ' W'], ['IF', m.if.toFixed(2)], ['TSS', m.tss], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–'], ['Best 1/5/20', ['1m', '5m', '20m'].map(k => d.best[k] ?? '–').join('/')]];
-  if (!settings.hideVirtualDistance) st.push(['Virtual distance', m.distance_km.toFixed(1) + ' km']);
+  if (!settings.hideVirtualDistance) st.push(['Virtual distance', distText(m.distance_km, settings.units)]);
   if (d.agent?.local_cues) st.push(['Built-in coach cues', d.agent.local_cues]);
   if (d.agent?.wakes > 0) st.push(['Coach usage', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
   $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
@@ -725,8 +728,9 @@ async function openSummary(id) {
   const hz = d.hr_zones_s ? Object.values(d.hr_zones_s) : null, hn = hz ? hz.reduce((a, b) => a + b, 0) : 0;
   $('#sHR').style.display = hn ? '' : 'none';
   if (hn) {
+    const fl = hrZ().floors;
     $('#sHZones').innerHTML = hz.map((t, i) => `<i style="width:${t / hn * 100}%;background:var(${HRZ_COLORS[i]})"></i>`).join('');
-    $('#sHZleg').innerHTML = hz.map((t, i) => `<span><b style="background:var(${HRZ_COLORS[i]})"></b>Z${i + 1} ${esc(settings.hrZones[i])}+ · ${esc(fmtT(t))}</span>`).join('');
+    $('#sHZleg').innerHTML = hz.map((t, i) => `<span><b style="background:var(${HRZ_COLORS[i]})"></b>Z${i + 1} ${esc(fl[i])}+ · ${esc(fmtT(t))}</span>`).join('');
   }
   $('#sLaps').innerHTML = d.laps.map(l => `<tr><td>${esc(l.overtime ? 'free' : l.index)}</td><td class="num">${esc(fmtT(l.time_s))}</td><td class="num">${esc(l.target_w ?? (l.free ? 'free' : '–'))}</td><td class="num">${esc(l.avg_w)}</td><td class="num">${esc(l.max_w)}</td><td class="num">${esc(l.np)}</td><td class="num">${esc(l.avg_hr ?? '–')}</td><td class="num">${esc(l.max_hr ?? '–')}</td><td class="num">${esc(l.avg_cad ?? '–')}</td></tr>`).join('');
   const cls = l => /^COACH|^EDIT/.test(l) ? 'c' : /^SAID/.test(l) ? 's' : /^FEEL|^PAUSED/.test(l) ? 'f' : '';
@@ -798,9 +802,10 @@ const LC_DEFAULTS = { enabled: !WEB,  // the web build starts with the coach off
 let strava = {};
 async function renderSettings() {
   const lc = { ...LC_DEFAULTS, ...(settings.localCoach || {}) }, cr = settings.cadRange || [85, 95];
-  $('#cadLo').value = cr[0]; $('#cadHi').value = cr[1]; $('#hrMax').value = settings.hrMax || '';
-  $('#sFtp').value = settings.ftp; $('#sWeight').value = settings.weight || '';
-  $('#sHrZones').value = settings.hrZones ? settings.hrZones.join(',') : '';
+  $('#cadLo').value = cr[0]; $('#cadHi').value = cr[1];
+  $('#sFtp').value = settings.ftp; $('#sWeight').value = weightShow(settings.weight, settings.units);
+  $('#units').value = settings.units || 'imperial'; showUnits();
+  renderHrZones();
   $('#virtDist').value = settings.hideVirtualDistance ? '1' : '0';
   $$('[data-lc]').forEach(b => { b.checked = !!lc[b.dataset.lc]; });
   $('#lcAuto').value = lc.auto_adjust; $('#afterWk').value = settings.afterWorkout || 'hold';
@@ -823,12 +828,34 @@ async function renderSettings() {
 // Settings > Athlete and the Workouts tab shortcuts edit the same values
 $('#sFtp').onchange = e => { $('#ftp').value = e.target.value; $('#ftp').onchange({ target: $('#ftp') }); renderSettings(); };
 $('#sWeight').onchange = e => { $('#weight').value = e.target.value; $('#weight').onchange({ target: $('#weight') }); renderSettings(); };
-$('#sHrZones').onchange = e => {
-  const v = e.target.value.split(/[,\s]+/).map(Number).filter(n => n > 30 && n < 230);
-  if (v.length === 5 && v.every((x, i) => !i || x > v[i - 1])) { settings.hrZones = v; settings.hrZonesSrc = 'manual'; saveSettings(['hrZones', 'hrZonesSrc']); toast('HR zones saved'); }
-  else toast('Enter 5 rising numbers');
-  renderSettings();
+$('#units').onchange = e => { settings.units = e.target.value === 'metric' ? 'metric' : 'imperial'; saveSettings(['units']); showSettings(); renderSettings(); };
+function showUnits() { $$('.wUnit').forEach(x => { x.textContent = weightUnit(settings.units); }); }
+// HR zones: % of max HR (default), Custom floors, or Garmin (local server with Garmin on)
+function renderHrZones() {
+  const z = hrZ();
+  $('#hrMax').value = settings.hrMax || ''; $('#hrMax').placeholder = HR_MAX_DEFAULT;
+  const g = $('#hrSrc option[value="garmin"]'); if (g) g.hidden = !garminOn && z.src !== 'garmin';
+  $('#hrSrc').value = z.src;
+  $$('[data-hz]').forEach(x => { x.value = z.floors[+x.dataset.hz]; });
+}
+const saveHr = () => { saveSettings(['hrZones', 'hrMax', 'hrZonesSrc']); renderHrZones(); };
+$('#hrSrc').onchange = async e => {
+  const v = e.target.value;
+  if (v === 'garmin') {
+    try {
+      const j = await (await F('/api/garmin/zones')).json();
+      if (!validHrFloors(j.floors)) throw new Error(j.error || 'no zones');
+      settings.hrZones = j.floors; if (j.max) settings.hrMax = j.max;
+    } catch (err) { toast('Garmin zones: ' + err.message); renderHrZones(); return; }
+  } else if (v === 'manual') settings.hrZones = [...hrZ().floors];
+  else settings.hrZones = null;
+  settings.hrZonesSrc = v; saveHr();
 };
+$$('[data-hz]').forEach(x => x.onchange = () => {
+  const v = $$('[data-hz]').map(i => +i.value);
+  if (validHrFloors(v)) { settings.hrZones = v; settings.hrZonesSrc = 'manual'; saveHr(); }
+  else { toast('Zones must rise'); renderHrZones(); }
+});
 $('#virtDist').onchange = e => { settings.hideVirtualDistance = e.target.value === '1'; saveSettings(['hideVirtualDistance']); };
 const setLC = patch => { settings.localCoach = { ...(settings.localCoach || {}), ...patch }; saveSettings(['localCoach']); };
 $$('[data-lc]').forEach(b => b.onchange = () => setLC({ [b.dataset.lc]: b.checked }));
@@ -836,7 +863,11 @@ $('#lcAuto').onchange = e => setLC({ auto_adjust: e.target.value });
 $('#afterWk').onchange = e => { settings.afterWorkout = e.target.value; saveSettings(['afterWorkout']); };
 const cadSave = () => { const lo = +$('#cadLo').value, hi = +$('#cadHi').value; if (lo >= 40 && hi > lo && hi <= 130) { settings.cadRange = [lo, hi]; saveSettings(['cadRange']); } else toast('Cadence range: low < high'); };
 $('#cadLo').onchange = cadSave; $('#cadHi').onchange = cadSave;
-$('#hrMax').onchange = e => { const v = +e.target.value; if (v >= 100 && v <= 230) { settings.hrMax = v; saveSettings(['hrMax']); } };
+$('#hrMax').onchange = e => {
+  const v = +e.target.value;
+  if (!e.target.value) settings.hrMax = null; else if (v >= 100 && v <= 230) settings.hrMax = Math.round(v); else { toast('Max HR: 100 to 230'); renderHrZones(); return; }
+  saveHr();
+};
 $('#autoGarmin2').onchange = e => { settings.autoGarmin = e.target.value === '1'; saveSettings(['autoGarmin']); renderSettings(); };
 $('#autoStrava').onchange = e => { settings.autoStrava = e.target.value === '1'; saveSettings(['autoStrava']); renderSettings(); };
 $('#shareBase').onchange = e => { settings.shareBaseUrl = e.target.value.trim(); saveSettings(['shareBaseUrl']); };
@@ -930,16 +961,16 @@ $('#ftpModal').onclick = e => {
   $('#ftpModal').classList.remove('on'); loadRide(FTP_TESTS.find(t => t.id === b.dataset.t));
 };
 function showSettings() {
-  $('#ftp').value = settings.ftp; $('#weight').value = settings.weight || ''; $('#beeps').value = settings.beeps ? '1' : '0';
+  $('#ftp').value = settings.ftp; $('#weight').value = weightShow(settings.weight, settings.units); showUnits(); $('#beeps').value = settings.beeps ? '1' : '0';
   renderLib(); renderBuilder();
 }
 $('#ftp').onchange = e => { const v = +e.target.value; if (v >= 50 && v <= 600) { settings.ftp = Math.round(v); settings.ftpSrc = 'manual'; saveSettings(['ftp', 'ftpSrc']); renderLib(); renderBuilder(); } };
-$('#weight').onchange = e => { settings.weight = +e.target.value || 0; saveSettings(['weight']); };
+$('#weight').onchange = e => { settings.weight = weightKg(e.target.value, settings.units); saveSettings(['weight']); };
 $('#beeps').onchange = e => { settings.beeps = e.target.value === '1'; saveSettings(['beeps']); };
 if (globalThis.location?.hash === '#settings') setTimeout(() => show('settings'), 0);
 
 async function syncHrZones() {
-  if (settings.hrZonesSrc === 'manual' || !garminOn) return;
+  if (settings.hrZonesSrc !== 'garmin' || !garminOn) return;  // Garmin zones only when chosen in Settings
   try {
     const j = await (await F('/api/garmin/zones')).json();
     if (j.floors?.length === 5) { settings.hrZones = j.floors; settings.hrMax = j.max; settings.hrZonesSrc = 'garmin'; saveSettings(['hrZones', 'hrMax', 'hrZonesSrc']); showSettings(); }

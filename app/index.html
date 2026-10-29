@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenSpin</title>
+<title>Just Watts</title>
 <link rel="stylesheet" href="css/app.css">
 <meta name="theme-color" content="#0c0e11">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body>
 <header>
-  <div class="brand">OpenSpin</div>
+  <div class="brand">Just Watts</div>
   <nav>
     <button data-v="workouts" class="on">Workouts</button>
     <button data-v="ride">Ride</button>
@@ -259,18 +259,18 @@
         <span class="hint" id="stState"></span>
       </div>
       <details class="adv" id="stOwnBox"><summary>Use your own Strava API app</summary>
-        <div class="hint">Create one at strava.com/settings/api, callback domain <b>localhost</b>. The secret stays on this computer; OpenSpin's token service is not used.</div>
+        <div class="hint">Create one at strava.com/settings/api, callback domain <b>localhost</b>. The secret stays on this computer; Just Watts's token service is not used.</div>
         <div class="row" style="margin-top:8px">
           <label class="f">Client ID<input id="stId" style="width:110px"></label>
           <label class="f">Client secret<input id="stSecret" type="password" autocomplete="off" style="width:220px"></label>
           <button id="stSave">Save</button>
-          <button id="stShared">Use OpenSpin's app</button>
+          <button id="stShared">Use Just Watts's app</button>
         </div>
       </details>
       <div class="warnbox" id="stDup">If Garmin Connect syncs to Strava, uploading to both makes duplicates. Use one.</div>
       <details class="adv"><summary>Advanced</summary>
         <div class="row" style="margin-top:8px">
-          <label class="f" style="flex:1">Share card base URL<input id="shareBase" placeholder="https://example.com/openspin" style="width:100%"></label>
+          <label class="f" style="flex:1">Share card base URL<input id="shareBase" placeholder="https://example.com/justwatts" style="width:100%"></label>
         </div>
         <div class="hint">Without it, Strava gets a text summary (NP, IF, TSS, intervals).</div>
       </details>

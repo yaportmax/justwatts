@@ -2,12 +2,12 @@
 
 Humans using the CLI can still set anything 0..2000 W. Agents going through MCP get these limits.
 Tune with environment variables (percent values are of the athlete's FTP):
-  OPENSPIN_MAX_CHANGE_PCT   largest change per command vs the step's current target (default 15)
-  OPENSPIN_MAX_PCT          absolute ceiling, unless the step is already planned higher (default 150)
-  OPENSPIN_FEEL_GATE_PCT    raising a step above this needs a recent FEEL HARDER/GOOD (default 105)
-  OPENSPIN_FEEL_WINDOW_S    how recent that feel signal must be, seconds (default 600)
-  OPENSPIN_STALE_S          refuse changes if the page state is older than this (default 15)
-  OPENSPIN_MANUAL_HOLD_S    after the athlete changes something by hand, wait this long (default 60)
+  JUSTWATTS_MAX_CHANGE_PCT   largest change per command vs the step's current target (default 15)
+  JUSTWATTS_MAX_PCT          absolute ceiling, unless the step is already planned higher (default 150)
+  JUSTWATTS_FEEL_GATE_PCT    raising a step above this needs a recent FEEL HARDER/GOOD (default 105)
+  JUSTWATTS_FEEL_WINDOW_S    how recent that feel signal must be, seconds (default 600)
+  JUSTWATTS_STALE_S          refuse changes if the page state is older than this (default 15)
+  JUSTWATTS_MANUAL_HOLD_S    after the athlete changes something by hand, wait this long (default 60)
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 
 
 def _env(name: str, default: float) -> float:
-    """OPENSPIN_<X>, falling back to the old TC_<X> name."""
-    v = os.environ.get(name) or os.environ.get(name.replace("OPENSPIN_", "TC_", 1))
+    """JUSTWATTS_<X>, falling back to the old TC_<X> name."""
+    v = os.environ.get(name) or os.environ.get(name.replace("JUSTWATTS_", "TC_", 1))
     try:
         return float(v) if v else default
     except ValueError:
@@ -27,14 +27,14 @@ def _env(name: str, default: float) -> float:
 
 @dataclass
 class Limits:
-    max_change_pct: float = field(default_factory=lambda: _env("OPENSPIN_MAX_CHANGE_PCT", 15))
-    max_pct: float = field(default_factory=lambda: _env("OPENSPIN_MAX_PCT", 150))
-    feel_gate_pct: float = field(default_factory=lambda: _env("OPENSPIN_FEEL_GATE_PCT", 105))
-    feel_window_s: float = field(default_factory=lambda: _env("OPENSPIN_FEEL_WINDOW_S", 600))
-    stale_s: float = field(default_factory=lambda: _env("OPENSPIN_STALE_S", 15))
-    max_insert_s: float = field(default_factory=lambda: _env("OPENSPIN_MAX_INSERT_S", 1800))
-    max_extend_s: float = field(default_factory=lambda: _env("OPENSPIN_MAX_EXTEND_S", 600))
-    manual_hold_s: float = field(default_factory=lambda: _env("OPENSPIN_MANUAL_HOLD_S", 60))
+    max_change_pct: float = field(default_factory=lambda: _env("JUSTWATTS_MAX_CHANGE_PCT", 15))
+    max_pct: float = field(default_factory=lambda: _env("JUSTWATTS_MAX_PCT", 150))
+    feel_gate_pct: float = field(default_factory=lambda: _env("JUSTWATTS_FEEL_GATE_PCT", 105))
+    feel_window_s: float = field(default_factory=lambda: _env("JUSTWATTS_FEEL_WINDOW_S", 600))
+    stale_s: float = field(default_factory=lambda: _env("JUSTWATTS_STALE_S", 15))
+    max_insert_s: float = field(default_factory=lambda: _env("JUSTWATTS_MAX_INSERT_S", 1800))
+    max_extend_s: float = field(default_factory=lambda: _env("JUSTWATTS_MAX_EXTEND_S", 600))
+    manual_hold_s: float = field(default_factory=lambda: _env("JUSTWATTS_MANUAL_HOLD_S", 60))
     recovery_pct: float = 75
 
 

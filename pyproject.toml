@@ -3,14 +3,14 @@ requires = ["hatchling>=1.21"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openspin"
+name = "justwatts"
 version = "0.1.0"
 description = "A free, open-source smart-trainer app: ERG workouts, free ride, history, built-in coach. Optional AI agent coaching over MCP."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-authors = [{ name = "OpenSpin contributors" }]
+authors = [{ name = "Just Watts contributors" }]
 keywords = ["cycling", "smart trainer", "ftms", "erg", "mcp", "ai agent", "coaching", "zwift hub"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -29,14 +29,14 @@ all = ["bleak>=0.22", "garminconnect>=0.2.19", "mcp>=1.2", "faster-whisper>=1.0"
 dev = ["pytest>=8", "fitdecode>=0.10", "mcp>=1.2"]
 
 [project.scripts]
-openspin = "openspin.cli:main"
+justwatts = "justwatts.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["server/openspin"]
+packages = ["server/justwatts"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"app" = "openspin/app"
-"docs/COACHING.md" = "openspin/COACHING.md"
+"app" = "justwatts/app"
+"docs/COACHING.md" = "justwatts/COACHING.md"
 
 [tool.hatch.build.targets.sdist]
 include = ["server", "app", "docs", "tests", "examples", "README.md", "LICENSE", "AGENTS.md", "start.cmd", "start.sh"]

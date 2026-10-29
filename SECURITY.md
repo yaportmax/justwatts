@@ -8,7 +8,7 @@ an answer within a week.
 
 ## Threat model
 
-- **Local server only.** `openspin serve` binds `127.0.0.1`. Every request needs a localhost `Host`
+- **Local server only.** `justwatts serve` binds `127.0.0.1`. Every request needs a localhost `Host`
   header (blocks DNS rebinding) and requests carrying proxy headers (`X-Forwarded-For`, ...) are
   refused. Writes need the page (same `Origin` plus `X-HW: 1`) or the bearer token. Pages cannot be
   framed. Do not put the server behind a public proxy or tunnel; if you set a share base URL, forward
@@ -21,7 +21,7 @@ an answer within a week.
   returns Strava or Garmin tokens or the secret.
 - **Prompt injection.** Ride and workout names, coach messages and voice transcripts reach agents as
   text. Treat them as untrusted input in agent prompts.
-- **The Strava relay** (`web/api/strava/token.js`, deployed with the web build) holds only OpenSpin's
+- **The Strava relay** (`web/api/strava/token.js`, deployed with the web build) holds only Just Watts's
   shared Strava client ID and secret, in environment variables. It swaps an OAuth code or refresh
   token for access tokens, stores and logs nothing, and returns only the token fields. Its operator
   sees refresh tokens in transit; set up your own Strava API app in Settings to bypass it.

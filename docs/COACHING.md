@@ -18,7 +18,7 @@ Do not poll `get_ride_status` on a timer: that is what made a single ride cost ~
 
 ## The built-in coach is the baseline
 
-OpenSpin coaches without you: cues and safe adjustments (Easier -5% FTP, Harder +3% unless HR is in
+Just Watts coaches without you: cues and safe adjustments (Easier -5% FTP, Harder +3% unless HR is in
 Z5, 30 s over the HR cap -5%). While you are connected (`auto_adjust: no_agent`, the default), it
 stops changing targets and leaves those decisions to you; its spoken cues continue.
 
@@ -42,7 +42,7 @@ stops changing targets and leaves those decisions to you; its spoken cues contin
   cost_usd, model)`. The athlete sees a live meter in the ride header, and History keeps it per
   ride. Without reports the meter shows the server's wake count only.
 
-Without MCP, the same data is in `<data>/coach/events.log` (`openspin tail -f`) and
+Without MCP, the same data is in `<data>/coach/events.log` (`justwatts tail -f`) and
 `GET /api/state`. Commands go to `POST /api/coach` (see PROTOCOL.md).
 
 ## Reading telemetry
@@ -147,18 +147,18 @@ unless replying to a FEEL press.
 
 The MCP tools enforce these and refuse with a reason; follow the same rules over raw HTTP.
 
-- Max change per command: 15% FTP (`OPENSPIN_MAX_CHANGE_PCT`). Larger moves take several commands, 60 s apart.
-- Edits: at most 30 min added per edit (`OPENSPIN_MAX_INSERT_S`), steps lengthened by at most 10 min per edit
-  (`OPENSPIN_MAX_EXTEND_S`), every new step under the FTP ceiling. Only the current and later steps can change.
-- Ceiling: 150% FTP (`OPENSPIN_MAX_PCT`) unless the step was already planned higher.
-- Raising any step above 105% FTP (`OPENSPIN_FEEL_GATE_PCT`) needs a FEEL HARDER or GOOD from the athlete
-  in the last 10 min (`OPENSPIN_FEEL_WINDOW_S`). Ask for it with a message first.
+- Max change per command: 15% FTP (`JUSTWATTS_MAX_CHANGE_PCT`). Larger moves take several commands, 60 s apart.
+- Edits: at most 30 min added per edit (`JUSTWATTS_MAX_INSERT_S`), steps lengthened by at most 10 min per edit
+  (`JUSTWATTS_MAX_EXTEND_S`), every new step under the FTP ceiling. Only the current and later steps can change.
+- Ceiling: 150% FTP (`JUSTWATTS_MAX_PCT`) unless the step was already planned higher.
+- Raising any step above 105% FTP (`JUSTWATTS_FEEL_GATE_PCT`) needs a FEEL HARDER or GOOD from the athlete
+  in the last 10 min (`JUSTWATTS_FEEL_WINDOW_S`). Ask for it with a message first.
 - Never raise while paused. Lowering is always allowed.
 - The athlete's own changes win. After any change by hand (a `MANUAL ...` or an `EDIT` line you did not
-  make), target changes and edits are refused for 60 s (`OPENSPIN_MANUAL_HOLD_S`), and a step the athlete
+  make), target changes and edits are refused for 60 s (`JUSTWATTS_MANUAL_HOLD_S`), and a step the athlete
   set by hand (`steps[].manual`) is theirs: ask before touching it. Read the change as a signal: they
   lowered it, it was too hard.
-- Do not change targets if state is older than 15 s (`OPENSPIN_STALE_S`): the page is closed or asleep.
+- Do not change targets if state is older than 15 s (`JUSTWATTS_STALE_S`): the page is closed or asleep.
 - Ramp FTP tests (`test: true`) are not coached: do not change targets, messages only.
 - Lowering is the safe direction. When unsure, lower or do nothing.
 - Chest pain, dizziness or any athlete report of feeling unwell: tell them to stop. You are not a

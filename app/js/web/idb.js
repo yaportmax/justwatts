@@ -1,4 +1,5 @@
 // Tiny IndexedDB wrapper: a key/value store ("kv") and a ride archive ("rides", keyed by id).
+// the IndexedDB name is from before the rename: changing it would hide saved rides
 export function openDB(name = 'openspin', idb = globalThis.indexedDB) {
   return new Promise((res, rej) => {
     if (!idb) return rej(new Error('no IndexedDB'));
@@ -23,10 +24,10 @@ export class Store {
   async exportAll() {
     const kv = {};
     for (const k of ['settings', 'custom', 'meta', 'devices']) kv[k] = await this.get(k);
-    return { app: 'openspin', version: 1, exported: new Date().toISOString(), kv, rides: await this.allRides() };
+    return { app: 'justwatts', version: 1, exported: new Date().toISOString(), kv, rides: await this.allRides() };
   }
   async importAll(data) {
-    if (data?.app !== 'openspin' || !Array.isArray(data.rides)) throw new Error('not an OpenSpin backup');
+    if (!['justwatts', 'openspin'].includes(data?.app) || !Array.isArray(data.rides)) throw new Error('not a Just Watts backup');
     for (const [k, v] of Object.entries(data.kv || {})) if (v != null && k !== 'devices') await this.set(k, v);
     for (const r of data.rides) if (r?.id && r.samples?.length) await this.putRide(r);
     return data.rides.length;

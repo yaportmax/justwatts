@@ -16,10 +16,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from openspin import ftms
-from openspin import history as H
-from openspin.devices import DeviceHub
-from openspin.engine import RideEngine
+from justwatts import ftms
+from justwatts import history as H
+from justwatts.devices import DeviceHub
+from justwatts.engine import RideEngine
 
 WORKOUT = "10m 45-70%, 16x(5m 95%, 5m 55%), 10m 60-40%"  # 180 min
 FTP = 250

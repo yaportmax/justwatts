@@ -1,4 +1,4 @@
-// In-page ride engine for the web build: a port of server/openspin/engine.py.
+// In-page ride engine for the web build: a port of server/justwatts/engine.py.
 // Same state shape, controls, coach commands, mid-ride edits, overtime and persistence semantics;
 // persistence goes to IndexedDB (snapshot every 30 s + a sample journal every 5 s, see backend.js).
 import { parseWorkout, toText, stepAt, stepWatts, fmtT, lineRideStart, lineRideEnd, lineStepStart, lineStepEnd, lineTick, lineFeel } from '../core.js';

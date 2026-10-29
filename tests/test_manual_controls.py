@@ -4,9 +4,9 @@ import time
 
 import pytest
 
-from openspin import events as E
-from openspin.config import Config
-from openspin.server import make_server
+from justwatts import events as E
+from justwatts.config import Config
+from justwatts.server import make_server
 
 
 def ctl(srv, action, page=True, **kw):
@@ -327,7 +327,7 @@ def test_agent_stream_sees_manual_changes_coalesced(srv):
 
 def test_mcp_waits_after_a_manual_change(srv):
     pytest.importorskip("mcp")
-    from openspin import mcp_server as M
+    from justwatts import mcp_server as M
     M.set_client(srv.client)
     try:
         eng = ride(srv, "2m 50%, 5m 100%, 2m 50%", n=130)

@@ -1,4 +1,4 @@
-// History analytics for the web build: a port of server/openspin/history.py (detail, laps, trends).
+// History analytics for the web build: a port of server/justwatts/history.py (detail, laps, trends).
 import { summarize, normPower, parseWorkout, stepAt, ZONES, hrZone } from '../core.js';
 
 const jsr = Math.round, WINDOWS = [60, 300, 1200];
@@ -92,6 +92,6 @@ export function summaryText(d, link, coach) {
   const work = (d.laps || []).filter(l => l.target_w && !l.free && d.ftp && l.target_w >= 0.88 * d.ftp);
   if (work.length) lines.push(`Intervals (${work.length}): ${work.slice(0, 12).map(l => l.avg_w).join(', ')} W`);
   if (link) lines.push(link);
-  lines.push('Recorded with OpenSpin');
+  lines.push('Recorded with Just Watts');
   return lines.join('\n');
 }

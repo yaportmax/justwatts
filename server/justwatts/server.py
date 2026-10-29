@@ -254,7 +254,7 @@ class Handler(SimpleHTTPRequestHandler):
     def trusted(self) -> bool:
         origin = self.headers.get("Origin")
         if self.token_ok():
-            if self.headers.get("X-OpenSpin-Client") == "agent" or urlsplit(self.path).path in ("/api/agent-events", "/api/agent-usage"):
+            if self.headers.get("X-JustWatts-Client") == "agent" or urlsplit(self.path).path in ("/api/agent-events", "/api/agent-usage"):
                 self.server.mark_agent()
             # a token caller is a local process, never a web page from another origin
             return origin is None or origin in self.origins()
@@ -302,7 +302,7 @@ class Handler(SimpleHTTPRequestHandler):
         p = url.path
         srv = self.server
         if p == "/api/health":
-            return self.send_json(200, {"ok": True, "app": "openspin", "version": __version__,
+            return self.send_json(200, {"ok": True, "app": "justwatts", "version": __version__,
                                         "garmin": srv.garmin_enabled, "ble": srv.hub.ble_enabled})
         if p == "/api/stream":
             return self.stream()
@@ -621,7 +621,7 @@ class Handler(SimpleHTTPRequestHandler):
         if getattr(g, "enabled", True) is False:
             return self.send_json(503, {"ok": False, "disabled": True, "error": DISABLED_MSG, "saved": str(path)})
         if not g.linked():
-            return self.send_json(401, {"ok": False, "error": "not signed in, run: openspin login-garmin", "saved": str(path)})
+            return self.send_json(401, {"ok": False, "error": "not signed in, run: justwatts login-garmin", "saved": str(path)})
         res = g.upload(path)
         code = 200 if res.get("ok") else 502
         if res.get("ok") and rid:
@@ -650,7 +650,7 @@ class CoachServer(ThreadingHTTPServer):
         if cfg.is_default_data:
             from .config import migrate_legacy_data
             if migrate_legacy_data():
-                print("moved ~/.trainer-coach to ~/.openspin")
+                print("moved ~/.trainer-coach to ~/.justwatts")
         self.token = cfg.ensure_token()
         self.garmin_enabled = cfg.garmin_enabled if garmin is None else getattr(garmin, "enabled", True)
         self.garmin = garmin or GarminLink(cfg.garmin_tokens, enabled=cfg.garmin_enabled)
@@ -890,7 +890,7 @@ class CoachServer(ThreadingHTTPServer):
         meta = self.ride_meta(rid)
         d = H.detail(ride, H.active_hr_zones(self.settings)["floors"], meta)
         desc = summary_text(d, self.card_url(rid), meta.get("description"))
-        res = self.strava.upload(H.fit_encode(ride), ride.get("name") or "OpenSpin ride", desc, rid)
+        res = self.strava.upload(H.fit_encode(ride), ride.get("name") or "Just Watts ride", desc, rid)
         if res.get("activity_id"):
             self.set_ride_meta(rid, {"strava": res["activity_id"], "strava_at": int(time.time() * 1000)})
         self.log_event(f"STRAVA {'uploaded' if res.get('ok') else 'failed: ' + str(res.get('error'))[:120]}")
@@ -1011,7 +1011,7 @@ def make_server(cfg: Config | None = None, garmin: GarminLink | None = None, qui
 def serve(cfg: Config | None = None) -> None:
     srv = make_server(cfg)
     c = srv.cfg
-    print(f"openspin {__version__} on {c.base_url}")
+    print(f"justwatts {__version__} on {c.base_url}")
     print(f"  app:    {c.app}")
     print(f"  data:   {c.data}")
     print(f"  token:  {c.token_file}")

@@ -5,14 +5,14 @@ once a second, and serves the web page, which is only a view: reloading or closi
 interrupts a ride. Agents use the same HTTP API.
 
 ```
- trainer, HR strap ── BLE (bleak) ── openspin serve ── SSE /api/stream ──▶ page (any browser)
+ trainer, HR strap ── BLE (bleak) ── justwatts serve ── SSE /api/stream ──▶ page (any browser)
                                        │  ride engine        ◀── /api/ride/control, /api/devices
                                        │  events.log, engine.json
                                        └── HTTP ── CLI / MCP server ── agent
- mic ── openspin voice (Whisper) ── SAID events ──┘
+ mic ── justwatts voice (Whisper) ── SAID events ──┘
 ```
 
-Default base URL `http://127.0.0.1:8765` (`OPENSPIN_PORT`). Data dir `~/.openspin` (`OPENSPIN_DATA`).
+Default base URL `http://127.0.0.1:8765` (`JUSTWATTS_PORT`). Data dir `~/.justwatts` (`JUSTWATTS_DATA`).
 
 ## Auth
 
@@ -28,7 +28,7 @@ Open endpoints (Host-checked only): `GET /api/health`, `/api/stream`, `/api/live
 them (no CORS headers). Local tools should use the token, never fake `Origin`.
 
 ```sh
-curl -s -H "Authorization: Bearer $(cat ~/.openspin/token)" http://127.0.0.1:8765/api/state
+curl -s -H "Authorization: Bearer $(cat ~/.justwatts/token)" http://127.0.0.1:8765/api/state
 ```
 
 ## Endpoints
@@ -107,7 +107,7 @@ since into a free step and starts the new steps now.
 
 A ride can carry a course: `{name, dist, ele, ll?}` with `dist` in metres (100..500000), `ele` the
 smoothed elevation every 10 m from the start, `ll` an optional decimated `[[lat, lon]]` polyline.
-The page builds it from a GPX or TCX file (`app/js/course.js`, mirrored by `server/openspin/course.py`):
+The page builds it from a GPX or TCX file (`app/js/course.js`, mirrored by `server/justwatts/course.py`):
 track points, haversine distance, resampled every 10 m, 50 m median then 90 m moving average; the
 grade of each 10 m segment is clamped to -15..+20 %. The engine checks it and keeps it with the ride.
 

@@ -1,5 +1,5 @@
 # Append to ~/.codex/config.toml
-[mcp_servers.openspin]
-command = "openspin"
+[mcp_servers.justwatts]
+command = "justwatts"
 args = ["mcp"]
-env = { OPENSPIN_PORT = "8765" }
+env = { JUSTWATTS_PORT = "8765" }

@@ -2,7 +2,7 @@
 import pytest
 
 from conftest import REPO, run_node
-from openspin import history as H
+from justwatts import history as H
 
 HARNESS = REPO / "tests" / "js" / "harness.mjs"
 
@@ -71,7 +71,7 @@ def test_settings_units_and_zone_source(srv):
 
 
 def test_default_zones_set_no_hr_cap():
-    from openspin.agent_gate import hr_cap
+    from justwatts.agent_gate import hr_cap
     z = [93, 111, 130, 148, 167]
     assert hr_cap({"hr_zones": z, "hr_zones_source": "default"}) is None
     assert hr_cap({"hr_zones": z, "hr_zones_source": "manual"}) == 167

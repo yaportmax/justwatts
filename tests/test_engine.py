@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from openspin.config import Config
-from openspin.server import make_server
+from justwatts.config import Config
+from justwatts.server import make_server
 
 
 def ctl(srv, action, **kw):
@@ -235,7 +235,7 @@ def test_settings_roundtrip_and_garmin_forced_off(tmp_path):
     from conftest import free_port
     s = make_server(Config(port=free_port(), data=tmp_path / "d"), quiet=True, ticker=False, devices=False)
     try:
-        assert s.garmin_enabled is False  # OPENSPIN_GARMIN=off in tests
+        assert s.garmin_enabled is False  # JUSTWATTS_GARMIN=off in tests
         p = s.settings_payload()
         assert p["stored"] is False and p["settings"]["autoGarmin"] is False and p["settings"]["ftp"] == 200
         out = s.update_settings({"ftp": 265, "autoGarmin": True, "weight": 70, "bogus": 1, "hrZones": [100, 120, 140, 160, 180]})

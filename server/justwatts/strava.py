@@ -1,7 +1,7 @@
 """Optional direct upload to Strava through the official API.
 
-Default: OpenSpin's shared Strava app. Its client secret never ships with the app; a small token
-service (web/api/strava/token.js, at OPENSPIN_STRAVA_RELAY) holds it and only swaps OAuth codes and
+Default: Just Watts's shared Strava app. Its client secret never ships with the app; a small token
+service (web/api/strava/token.js, at JUSTWATTS_STRAVA_RELAY) holds it and only swaps OAuth codes and
 refresh tokens for access tokens. Uploads go straight from this computer to Strava.
 
 Advanced: the user's own API app. Client ID and secret are entered in Settings (the page only; the
@@ -27,8 +27,8 @@ AUTH_URL = "https://www.strava.com/oauth/authorize"
 TOKEN_URL = "https://www.strava.com/oauth/token"
 API = "https://www.strava.com/api/v3"
 SCOPE = "activity:write,activity:read"
-SHARED_CLIENT_ID = os.environ.get("OPENSPIN_STRAVA_CLIENT_ID", "168528")
-RELAY_URL = os.environ.get("OPENSPIN_STRAVA_RELAY", "https://openspin.maxyaport.com/api/strava/token")
+SHARED_CLIENT_ID = os.environ.get("JUSTWATTS_STRAVA_CLIENT_ID", "168528")
+RELAY_URL = os.environ.get("JUSTWATTS_STRAVA_RELAY", "https://openspin.maxyaport.com/api/strava/token")
 STATE_TTL_S = 900  # an OAuth state is good for 15 minutes
 MAX_STATES = 8
 
@@ -126,7 +126,7 @@ class StravaLink:
         self.token_file.unlink(missing_ok=True)
 
     def use_shared(self) -> None:
-        """Forget the user's own API app (and its tokens) and go back to OpenSpin's shared app."""
+        """Forget the user's own API app (and its tokens) and go back to Just Watts's shared app."""
         self.app_file.unlink(missing_ok=True)
         self.token_file.unlink(missing_ok=True)
 
@@ -222,5 +222,5 @@ def summary_text(detail: dict, link: str | None = None, coach_text: str | None =
         lines.append(f"Intervals ({len(work)}): {reps} W")
     if link:
         lines.append(link)
-    lines.append("Recorded with OpenSpin")
+    lines.append("Recorded with Just Watts")
     return "\n".join(lines)

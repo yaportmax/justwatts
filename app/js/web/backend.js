@@ -116,7 +116,7 @@ export class WebBackend {
   }
   async route(p, q, method, body, opts) {
     const E = this.engine;
-    if (p === '/api/health') return resp(200, { ok: true, app: 'openspin', web: true, garmin: false, ble: this.hub.supported });
+    if (p === '/api/health') return resp(200, { ok: true, app: 'justwatts', web: true, garmin: false, ble: this.hub.supported });
     if (p === '/api/live') return resp(200, this.live(q.get('ride') || null, +(q.get('n') || 0)));
     if (p === '/api/state') return resp(200, { state: this.state(), age_s: 0, received_at: Date.now() / 1000 });
     if (p === '/api/settings') return resp(200, method === 'POST' ? this.updateSettings(body) : this.settingsPayload());

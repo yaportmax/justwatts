@@ -3,7 +3,7 @@
 It posts the same event lines and /api/state snapshots as app/js/app.js, polls /api/coach and
 applies `set`/`msg` commands, so an agent (or a test) can exercise the whole coach loop.
 
-  openspin simulate --workout "5m 50-70%, 3x(3m 110%, 2m 50%), 5m 50%" --speed 10 --scenario fade
+  justwatts simulate --workout "5m 50-70%, 3x(3m 110%, 2m 50%), 5m 50%" --speed 10 --scenario fade
 """
 from __future__ import annotations
 

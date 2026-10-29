@@ -30,7 +30,7 @@ class CoachClient:
     def token(self) -> str:
         tok = self._token or self.cfg.read_token()
         if not tok:
-            raise ClientError(f"no API token at {self.cfg.token_file}; start the server once (openspin serve) or set OPENSPIN_TOKEN")
+            raise ClientError(f"no API token at {self.cfg.token_file}; start the server once (justwatts serve) or set JUSTWATTS_TOKEN")
         return tok
 
     def request(self, method: str, path: str, body: Any = None, auth: bool = True) -> Any:
@@ -41,7 +41,7 @@ class CoachClient:
         if auth:
             req.add_header("Authorization", f"Bearer {self.token}")
             if self.agent:
-                req.add_header("X-OpenSpin-Client", "agent")
+                req.add_header("X-JustWatts-Client", "agent")
         try:
             with _OPENER.open(req, timeout=self.timeout) as r:
                 return json.loads(r.read() or b"null")
@@ -52,7 +52,7 @@ class CoachClient:
                 detail = None
             raise ClientError(f"{method} {path}: HTTP {e.code} {detail or e.reason}") from None
         except (urllib.error.URLError, OSError) as e:
-            raise ClientError(f"cannot reach {self.base_url} ({getattr(e, 'reason', e)}); is `openspin serve` running?") from None
+            raise ClientError(f"cannot reach {self.base_url} ({getattr(e, 'reason', e)}); is `justwatts serve` running?") from None
 
     # ---------- API ----------
     def health(self) -> dict:

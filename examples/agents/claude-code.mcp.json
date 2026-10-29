@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "openspin": {
-      "command": "openspin",
+    "justwatts": {
+      "command": "justwatts",
       "args": ["mcp"],
-      "env": { "OPENSPIN_PORT": "8765" }
+      "env": { "JUSTWATTS_PORT": "8765" }
     }
   }
 }

@@ -1,4 +1,4 @@
-// Browser UI. The local server owns the trainer, HR strap and the ride (see server/openspin/engine.py),
+// Browser UI. The local server owns the trainer, HR strap and the ride (see server/justwatts/engine.py),
 // so this page only renders state from /api/stream and sends controls. Reloading or closing it never
 // interrupts a ride. Pure logic (workout format, summaries, FIT/TCX) lives in core.js.
 import {
@@ -19,7 +19,7 @@ import { checkCourse } from './course.js';
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
 const WEB = MODE === 'web';
 const WB = WEB ? await import('./web/backend.js') : null;
-const B = WB ? await WB.createWebBackend(globalThis.__openspinWeb || {}) : null;  // tests pass { tickMs: 0, store }
+const B = WB ? await WB.createWebBackend(globalThis.__justwattsWeb || {}) : null;  // tests pass { tickMs: 0, store }
 const F = B ? (p, o) => B.fetch(p, o) : (p, o) => globalThis.fetch(p, o);
 const ES = B ? WB.makeEventSource(B) : globalThis.EventSource;
 
@@ -834,7 +834,7 @@ async function uploadGarmin(id) {
   let g = null;
   try {
     const res = await api(`/api/rides/${id}/garmin`, {});
-    const j = await res.json().catch(() => ({ error: 'no local server (run: openspin serve)' }));
+    const j = await res.json().catch(() => ({ error: 'no local server (run: justwatts serve)' }));
     if (!j.ok) throw new Error(j.error || res.status);
     g = j.activityId || true; toast(j.duplicate ? 'Already on Garmin' : 'Uploaded to Garmin');
   } catch (e) { toast('Garmin upload failed: ' + e.message); }
@@ -941,7 +941,7 @@ $('#stSave').onclick = async () => {
   $('#stSecret').value = ''; renderSettings();
 };
 $('#stShared').onclick = async () => {
-  try { await apiJson('/api/strava/shared', {}); toast("Using OpenSpin's Strava app. Connect again."); } catch (e) { toast('Strava: ' + e.message); }
+  try { await apiJson('/api/strava/shared', {}); toast("Using Just Watts's Strava app. Connect again."); } catch (e) { toast('Strava: ' + e.message); }
   renderSettings();
 };
 $('#stConnect').onclick = async () => {
@@ -964,7 +964,7 @@ async function shareCard() {
   const W = 1080, H = 1080, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const c = cv.getContext('2d');
   c.fillStyle = '#0c0e11'; c.fillRect(0, 0, W, H);
-  c.fillStyle = '#38bdf8'; c.font = '700 40px system-ui'; c.textBaseline = 'top'; c.fillText('OpenSpin', 60, 52);
+  c.fillStyle = '#38bdf8'; c.font = '700 40px system-ui'; c.textBaseline = 'top'; c.fillText('Just Watts', 60, 52);
   c.fillStyle = '#e9edf2'; c.font = '700 64px system-ui'; c.fillText(r.name.slice(0, 28), 60, 120);
   c.fillStyle = '#8b95a4'; c.font = '30px system-ui';
   c.fillText(new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }), 60, 200);
@@ -998,7 +998,7 @@ if (WEB) {
   document.body.classList.add('web');
   if (!navigator.bluetooth) $('#webNotice').style.display = '';
   // rides and settings live in IndexedDB (the backend); custom workouts and imported courses in localStorage
-  $('#bkExport').onclick = async () => { const j = await (await F('/api/backup')).json(); j.local = { custom, courses: store.get('hw.courses', []) }; download(`openspin-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(j), 'application/json'); };
+  $('#bkExport').onclick = async () => { const j = await (await F('/api/backup')).json(); j.local = { custom, courses: store.get('hw.courses', []) }; download(`justwatts-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(j), 'application/json'); };
   $('#bkImport').onclick = () => $('#bkFile').click();
   $('#bkFile').onchange = async e => {
     const f = e.target.files[0]; if (!f) return; e.target.value = '';

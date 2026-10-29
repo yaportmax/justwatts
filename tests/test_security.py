@@ -6,7 +6,7 @@ import subprocess
 import time
 
 from conftest import REPO
-from openspin.strava import MAX_STATES, StravaError, StravaLink
+from justwatts.strava import MAX_STATES, StravaError, StravaLink
 
 import pytest
 
@@ -80,7 +80,7 @@ def test_oauth_states_bounded_and_expire(tmp_path, monkeypatch):
     url = link.authorize_url("http://localhost:1/api/strava/callback")
     state = re.search(r"state=([^&]+)", url)[1]
     now = time.time()
-    monkeypatch.setattr("openspin.strava.time.time", lambda: now + 901)
+    monkeypatch.setattr("justwatts.strava.time.time", lambda: now + 901)
     with pytest.raises(StravaError, match="expired"):
         link.callback("c" * 40, state, "activity:write")
     with pytest.raises(StravaError, match="expired"):

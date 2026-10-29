@@ -1,7 +1,7 @@
 """MCP server (stdio) that lets an agent read the ride and coach it through the local HTTP API.
 
-Run: `openspin mcp` (needs the [mcp] extra). It talks to http://127.0.0.1:$OPENSPIN_PORT using
-the token in $OPENSPIN_DATA/token, so point it at the same OPENSPIN_PORT/OPENSPIN_DATA as `openspin serve`.
+Run: `justwatts mcp` (needs the [mcp] extra). It talks to http://127.0.0.1:$JUSTWATTS_PORT using
+the token in $JUSTWATTS_DATA/token, so point it at the same JUSTWATTS_PORT/JUSTWATTS_DATA as `justwatts serve`.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ The workout can be edited mid-ride: insert_steps, replace_step, delete_step, set
 extend_current_step. Prefer a real edit (add a rep, lengthen a recovery) over target tricks.
 """
 
-mcp = MCPServer("openspin", instructions=INSTRUCTIONS)
+mcp = MCPServer("justwatts", instructions=INSTRUCTIONS)
 _client: CoachClient | None = None
 
 

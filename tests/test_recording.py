@@ -10,17 +10,17 @@ import time
 import pytest
 
 from conftest import REPO
-from openspin import history as H
-from openspin.config import Config
-from openspin.devices import DeviceHub
-from openspin.engine import RideEngine
-from openspin.server import make_server
+from justwatts import history as H
+from justwatts.config import Config
+from justwatts.devices import DeviceHub
+from justwatts.engine import RideEngine
+from justwatts.server import make_server
 
 CHILD = textwrap.dedent(r"""
     import sys, time
     sys.path.insert(0, sys.argv[1])
-    from openspin.config import Config
-    from openspin.server import make_server
+    from justwatts.config import Config
+    from justwatts.server import make_server
     srv = make_server(Config(port=0, data=sys.argv[2]), quiet=True, ticker=False, devices=False)
     eng = srv.engine
     srv.hub.set_sim(True)
@@ -39,7 +39,7 @@ def test_kill_minus_nine_loses_nothing(tmp_path, kill_at):
     script.write_text(CHILD)
     data = tmp_path / "data"
     p = subprocess.Popen([sys.executable, str(script), str(REPO / "server"), str(data)], stdout=subprocess.PIPE, text=True,
-                         env={**__import__("os").environ, "OPENSPIN_BLE": "off", "OPENSPIN_GARMIN": "off"})
+                         env={**__import__("os").environ, "JUSTWATTS_BLE": "off", "JUSTWATTS_GARMIN": "off"})
     seen = 0
     for line in p.stdout:
         seen = int(line)
@@ -256,7 +256,7 @@ def test_intensity_limits_and_clamped_targets(tmp_path):
         eng.control("intensity", {"percent": 151})
     eng.control("intensity", {"percent": 150})
     assert eng.cur_target() == 150
-    from openspin import ftms
+    from justwatts import ftms
     assert ftms.cp_command({"k": "erg", "w": 5000}) == bytes([0x05, 0xD0, 0x07])  # never above 2000 W on the wire
 
 

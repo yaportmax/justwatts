@@ -1,4 +1,4 @@
-// Web Bluetooth device hub for the web build (same interface as server/openspin/devices.py).
+// Web Bluetooth device hub for the web build (same interface as server/justwatts/devices.py).
 // A page reload drops the GATT link, so after a reload the user clicks Reconnect once; where the
 // browser allows it (navigator.bluetooth.getDevices + watchAdvertisements) we reconnect by ourselves.
 const FTMS = 0x1826, IBD = 0x2ad2, CP = 0x2ad9, HRS = 'heart_rate', HRM = 'heart_rate_measurement';

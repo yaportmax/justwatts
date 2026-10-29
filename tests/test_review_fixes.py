@@ -1,5 +1,5 @@
 """Fixes from the first real-browser review."""
-from openspin import history as H
+from justwatts import history as H
 
 from conftest import REPO
 
@@ -40,7 +40,7 @@ def test_meter_needs_a_real_agent_this_ride(srv):
     srv.req("GET", "/api/state", headers=srv.bearer)  # the CLI or curl with the token: not an agent
     st = srv.server.engine_state()
     assert st["ride"]["agent"]["seen"] is False and st["agent"]["connected"] is False
-    srv.req("GET", "/api/state", headers={**srv.bearer, "X-OpenSpin-Client": "agent"})  # the MCP server
+    srv.req("GET", "/api/state", headers={**srv.bearer, "X-JustWatts-Client": "agent"})  # the MCP server
     st = srv.server.engine_state()
     assert st["ride"]["agent"]["seen"] is True and st["agent"]["connected"] is True
     ctl(srv, "end")
@@ -53,8 +53,8 @@ def test_meter_needs_a_real_agent_this_ride(srv):
 def test_mcp_client_identifies_as_agent():
     import pytest
     pytest.importorskip("mcp")
-    from openspin import mcp_server as M
-    from openspin.client import CoachClient
+    from justwatts import mcp_server as M
+    from justwatts.client import CoachClient
     c = CoachClient(token="t")
     M.set_client(c)
     try:

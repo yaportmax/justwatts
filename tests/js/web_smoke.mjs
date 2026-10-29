@@ -70,7 +70,7 @@ async function until(fn, what, ms = 10000) { const t0 = Date.now(); while (!fn()
 
 async function boot(n) {
   els = {}; M = multi(); globalThis.document = mkDoc();
-  globalThis.__openspinWeb = { tickMs: 0 };
+  globalThis.__justwattsWeb = { tickMs: 0 };
   const mod = pathToFileURL(`${DIST}/js/app.js`).href + `?boot=${n}`;
   await import(mod);
   const hw = window.__hw; await until(() => hw.state(), 'first state');

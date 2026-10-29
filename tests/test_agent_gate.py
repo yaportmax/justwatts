@@ -5,8 +5,8 @@ import time
 
 import pytest
 
-from openspin import events as E
-from openspin.agent_gate import AgentGate, LocalCoach
+from justwatts import events as E
+from justwatts.agent_gate import AgentGate, LocalCoach
 
 
 class Clock:
@@ -253,7 +253,7 @@ def test_server_agent_stream_and_usage(srv):
 
 
 def test_cli_tail_agent(srv, capsys):
-    from openspin.cli import main
+    from justwatts.cli import main
     srv.server.log_event("FEEL GOOD | step - | 30s 0W | HR -")
     srv.server.gate.flush()
     assert main(["tail", "--agent", "--port", str(srv.port), "--data", str(srv.cfg.data)]) == 0
@@ -263,7 +263,7 @@ def test_cli_tail_agent(srv, capsys):
 
 def test_mcp_wait_for_events_and_report_usage(srv):
     pytest.importorskip("mcp")
-    from openspin import mcp_server as M
+    from justwatts import mcp_server as M
     M.set_client(srv.client)
     try:
         ride_on(srv)

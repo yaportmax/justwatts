@@ -6,8 +6,8 @@ import subprocess
 import pytest
 
 from conftest import REPO
-from openspin import events as E
-from openspin.engine import RideEngine
+from justwatts import events as E
+from justwatts.engine import RideEngine
 
 SCRIPT = REPO / "tests" / "js" / "engine_parity.mjs"
 

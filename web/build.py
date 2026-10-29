@@ -1,4 +1,4 @@
-"""Build the static web version of OpenSpin into dist-web/ (deploy that folder, e.g. on Vercel).
+"""Build the static web version of Just Watts into dist-web/ (deploy that folder, e.g. on Vercel).
 
     python web/build.py [--out dist-web]
 

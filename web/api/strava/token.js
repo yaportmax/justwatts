@@ -1,4 +1,4 @@
-// OpenSpin's shared Strava app: exchanges an OAuth code or refresh token for access tokens.
+// Just Watts's shared Strava app: exchanges an OAuth code or refresh token for access tokens.
 // The client secret lives only in this function's environment (STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET),
 // never in the open-source app. Stateless: nothing is stored or logged. Only token fields go back.
 const TOKEN_URL = 'https://www.strava.com/oauth/token';

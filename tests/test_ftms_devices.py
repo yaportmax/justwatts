@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from openspin import ftms
-from openspin.devices import DeviceHub
+from justwatts import ftms
+from justwatts.devices import DeviceHub
 
 
 # ---------- codecs ----------

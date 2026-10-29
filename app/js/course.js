@@ -1,5 +1,5 @@
 // Courses: GPX/TCX import, a compact elevation profile (one point every 10 m), grade lookup and
-// virtual speed from power. Pure: no DOM, no globals. server/openspin/course.py mirrors every
+// virtual speed from power. Pure: no DOM, no globals. server/justwatts/course.py mirrors every
 // function here; tests/test_course.py checks they agree.
 //
 // course = { name, dist: metres, gain: metres climbed, ele: [m every STEP_M from 0], ll: [[lat, lon]] }

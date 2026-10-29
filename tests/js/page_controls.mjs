@@ -101,7 +101,7 @@ let hw = null;
 async function boot(n) {
   for (const s of streams) s.close();
   streams = []; els = {}; M = multi(); keydown = []; globalThis.document = mkDoc();
-  globalThis.__openspinWeb = { tickMs: 0 };
+  globalThis.__justwattsWeb = { tickMs: 0 };
   const src = WEB ? pathToFileURL(`${ARG}/js/app.js`).href : new URL('../../app/js/app.js', import.meta.url).href;
   await import(src + `?boot=${n}`);
   hw = window.__hw; await until(() => hw.state(), 'first state');

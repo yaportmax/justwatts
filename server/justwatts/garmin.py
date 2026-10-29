@@ -1,6 +1,6 @@
 """Garmin Connect link via the unofficial python-garminconnect package (optional extra [garmin]).
 
-Tokens live in a directory created by `openspin login-garmin`. Nothing here runs unless the
+Tokens live in a directory created by `justwatts login-garmin`. Nothing here runs unless the
 page asks for an upload or HR zones. FIT files are always saved locally first.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ class GarminError(Exception):
     pass
 
 
-DISABLED_MSG = "Garmin is disabled for this server (OPENSPIN_GARMIN=off, or a non-default data dir without OPENSPIN_GARMIN_TOKENS)"
+DISABLED_MSG = "Garmin is disabled for this server (JUSTWATTS_GARMIN=off, or a non-default data dir without JUSTWATTS_GARMIN_TOKENS)"
 
 
 class GarminLink:
@@ -33,7 +33,7 @@ class GarminLink:
             try:
                 from garminconnect import Garmin
             except ImportError as e:  # pragma: no cover - depends on install
-                raise GarminError("garminconnect not installed: pip install 'openspin[garmin]'") from e
+                raise GarminError("garminconnect not installed: pip install 'justwatts[garmin]'") from e
             g = Garmin()
             g.login(str(self.tokens))
             self._client = g
@@ -122,7 +122,7 @@ def interactive_login(tokens: Path) -> None:
     try:
         from garminconnect import Garmin
     except ImportError:
-        raise SystemExit("garminconnect not installed: pip install 'openspin[garmin]'")
+        raise SystemExit("garminconnect not installed: pip install 'justwatts[garmin]'")
     try:
         g = Garmin()
         g.login(str(tokens))

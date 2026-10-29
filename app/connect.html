@@ -8,22 +8,22 @@
 <style>main{max-width:760px}pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;font-size:13px}code{font-family:ui-monospace,Consolas,monospace}p,li{color:var(--dim)}</style>
 </head>
 <body>
-<header><div class="brand">OpenSpin</div><nav><a href="/" style="color:var(--dim)">Back to the app</a></nav></header>
+<header><div class="brand">Just Watts</div><nav><a href="/" style="color:var(--dim)">Back to the app</a></nav></header>
 <main>
 <h2>Connect an agent</h2>
 <p>Optional. The built-in coach handles intervals, recaps and Easier/Harder. An agent also reads your HR trend and speech and edits the workout mid-ride.</p>
 <ol>
-<li>Install the extra: <code>pip install "openspin[mcp]"</code></li>
-<li>Keep <code>openspin serve</code> running.</li>
+<li>Install the extra: <code>pip install "justwatts[mcp]"</code></li>
+<li>Keep <code>justwatts serve</code> running.</li>
 <li>Add the MCP server to your agent.</li>
 </ol>
 <p>Claude Code:</p>
-<pre><code>claude mcp add openspin -- openspin mcp</code></pre>
+<pre><code>claude mcp add justwatts -- justwatts mcp</code></pre>
 <p>Codex (<code>~/.codex/config.toml</code>):</p>
-<pre><code>[mcp_servers.openspin]
-command = "openspin"
+<pre><code>[mcp_servers.justwatts]
+command = "justwatts"
 args = ["mcp"]</code></pre>
-<p>Any other MCP client: run <code>openspin mcp</code> over stdio. Without MCP, any tool can use the HTTP API with the token in <code>~/.openspin/token</code>.</p>
+<p>Any other MCP client: run <code>justwatts mcp</code> over stdio. Without MCP, any tool can use the HTTP API with the token in <code>~/.justwatts/token</code>.</p>
 <p>Then ask: <i>"Coach my ride. Read the playbook, wait for events, keep me in zone."</i> The agent loops on <code>wait_for_events</code>, which wakes it only for segment summaries, your presses and speech, and alerts. The ride header shows wakes and cost.</p>
 <p>The coaching playbook and safety limits are in <code>docs/COACHING.md</code>; the API is in <code>docs/PROTOCOL.md</code>.</p>
 </main>

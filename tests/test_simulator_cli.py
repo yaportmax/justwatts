@@ -1,8 +1,8 @@
 """Headless simulator end to end, and the CLI subcommands, against a test server."""
 import json
 
-from openspin.cli import main
-from openspin.simulator import Simulator
+from justwatts.cli import main
+from justwatts.simulator import Simulator
 
 
 def test_simulated_ride_full_loop(srv):

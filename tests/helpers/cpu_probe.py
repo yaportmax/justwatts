@@ -2,9 +2,9 @@
 Usage: cpu_probe.py <port> <seconds> idle|ride [calib|-] [server dir]"""
 import os, sys, time, json, threading, tempfile, http.client
 sys.path.insert(0, sys.argv[5] if len(sys.argv) > 5 else "server")
-os.environ.update(OPENSPIN_BLE="off", OPENSPIN_GARMIN="off")
-from openspin.config import Config
-from openspin.server import make_server
+os.environ.update(JUSTWATTS_BLE="off", JUSTWATTS_GARMIN="off")
+from justwatts.config import Config
+from justwatts.server import make_server
 port = int(sys.argv[1]); secs = float(sys.argv[2]); ride = sys.argv[3] == "ride"
 srv = make_server(Config(port=port, data=tempfile.mkdtemp()), quiet=True)
 threading.Thread(target=srv.serve_forever, daemon=True).start()

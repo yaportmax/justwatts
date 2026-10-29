@@ -1,6 +1,6 @@
 """Hands-free voice input: mic -> local Whisper (faster-whisper) -> `SAID (whisper): "..."` events.
 
-Started by `openspin serve --voice` (or run alone: `openspin voice`). Needs the [voice]
+Started by `justwatts serve --voice` (or run alone: `justwatts voice`). Needs the [voice]
 extra (faster-whisper, sounddevice, numpy). Speech is cut into phrases by an adaptive energy gate
 that learns the fan/trainer noise floor. Transcripts are dropped when Whisper doubts them
 (no_speech_prob >= 0.5 or avg_logprob <= -0.9), when they are silence hallucinations ("Thank you.",
@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .client import CoachClient
 
-    ap = argparse.ArgumentParser(prog="openspin voice")
+    ap = argparse.ArgumentParser(prog="justwatts voice")
     ap.add_argument("--model", default="small.en")
     ap.add_argument("--device", default=None, help="sounddevice input device name or index")
     args = ap.parse_args(argv)
@@ -176,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         import sounddevice as sd
         from faster_whisper import WhisperModel
     except ImportError as e:
-        print(f"voice needs the [voice] extra ({e}): pip install 'openspin[voice]'", file=sys.stderr)
+        print(f"voice needs the [voice] extra ({e}): pip install 'justwatts[voice]'", file=sys.stderr)
         return 1
     c = CoachClient()
     print(f"voice: loading {args.model}...", flush=True)

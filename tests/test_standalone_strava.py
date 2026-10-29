@@ -22,9 +22,9 @@ NO_EXTRAS = textwrap.dedent(r"""
             return None
     sys.meta_path.insert(0, Block())
     sys.path.insert(0, sys.argv[1])
-    from openspin.cli import main
-    from openspin.config import Config
-    from openspin.server import make_server
+    from justwatts.cli import main
+    from justwatts.config import Config
+    from justwatts.server import make_server
     out = {"mcp_cmd": main(["mcp", "--port", "8797", "--data", tempfile.mkdtemp()]),
            "voice_cmd": main(["voice", "--port", "8797", "--data", tempfile.mkdtemp()])}
     import socket
@@ -37,7 +37,7 @@ NO_EXTRAS = textwrap.dedent(r"""
     for _ in range(70):
         eng.tick(1.0); srv.after_tick()
     res = eng.control("end", {})
-    from openspin import history as H
+    from justwatts import history as H
     r = srv.load_ride(res["id"])
     out.update(saved=res["saved"], samples=len(r["samples"]), fit=H.fit_encode(r)[8:12].decode(),
                cues=r["agent"]["local_cues"], wakes=r["agent"]["wakes"],
@@ -51,8 +51,8 @@ def test_runs_and_rides_without_optional_extras(tmp_path):
     script = tmp_path / "noextras.py"
     script.write_text(NO_EXTRAS)
     p = subprocess.run([sys.executable, "-I", str(script), str(REPO / "server")], capture_output=True, text=True,
-                       timeout=120, env={**{k: v for k, v in __import__("os").environ.items() if not k.startswith(("OPENSPIN_", "HW_"))},
-                                         "OPENSPIN_BLE": "off", "OPENSPIN_GARMIN": "off", "USERPROFILE": str(tmp_path), "HOME": str(tmp_path)})
+                       timeout=120, env={**{k: v for k, v in __import__("os").environ.items() if not k.startswith(("JUSTWATTS_", "HW_"))},
+                                         "JUSTWATTS_BLE": "off", "JUSTWATTS_GARMIN": "off", "USERPROFILE": str(tmp_path), "HOME": str(tmp_path)})
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout.strip().splitlines()[-1])
     assert out["mcp_cmd"] == 1 and out["voice_cmd"] == 1        # clear message, no crash
@@ -122,8 +122,8 @@ class ProfileGarmin(FakeGarmin):
 
 def test_garmin_profile_import(tmp_path):
     from conftest import free_port
-    from openspin.config import Config
-    from openspin.server import make_server
+    from justwatts.config import Config
+    from justwatts.server import make_server
     s = make_server(Config(port=free_port(), data=tmp_path), garmin=ProfileGarmin(), quiet=True, ticker=False, devices=True)
     try:
         for _ in range(100):
@@ -145,7 +145,7 @@ def test_garmin_profile_import(tmp_path):
 
 
 def test_garmin_link_profile_parsing(tmp_path):
-    from openspin.garmin import GarminLink
+    from justwatts.garmin import GarminLink
 
     class C:
         def get_heart_rate_zones(self):
@@ -163,8 +163,8 @@ def test_garmin_link_profile_parsing(tmp_path):
 # ---------- HR strap that hides its HR service until it feels a heartbeat ----------
 def test_hr_strap_waits_for_heartbeat(tmp_path):
     from test_ftms_devices import FakeBle, until
-    from openspin import ftms
-    from openspin.devices import DeviceHub
+    from justwatts import ftms
+    from justwatts.devices import DeviceHub
     ble = FakeBle()
     misses = {"n": 3}
     orig = ble.BleakClient.start_notify
@@ -215,9 +215,9 @@ class FakeStrava:
 def ssrv(tmp_path):
     import threading
     from conftest import SimpleNamespace, free_port, request
-    from openspin.client import CoachClient
-    from openspin.config import Config
-    from openspin.server import make_server
+    from justwatts.client import CoachClient
+    from justwatts.config import Config
+    from justwatts.server import make_server
     fake = FakeStrava()
     cfg = Config(port=free_port(), data=tmp_path / "d", app=REPO / "app")
     s = make_server(cfg, garmin=FakeGarmin(), quiet=True, ticker=False, devices=False, strava_http=fake)
@@ -285,7 +285,7 @@ def test_strava_oauth_upload_and_auto(ssrv):
     body = up[2].decode("latin-1")
     assert up[3]["Authorization"] == "Bearer AT1"
     for field in ('name="data_type"\r\n\r\nfit', f'name="external_id"\r\n\r\n{rid}', 'name="name"\r\n\r\nStrava ride',
-                  "Recorded with OpenSpin", "NP ", "TSS "):
+                  "Recorded with Just Watts", "NP ", "TSS "):
         assert field in body
     assert body.count(".FIT") == 1
     row = t.req("GET", "/api/rides")[1]["rides"][0]
@@ -299,7 +299,7 @@ def test_strava_oauth_upload_and_auto(ssrv):
 def test_strava_token_refresh_and_description(ssrv):
     t = ssrv
     t.req("POST", "/api/strava/config", {"client_id": "168528", "client_secret": "s3cret-value"}, headers=t.page)
-    from openspin.strava import _write_private, summary_text
+    from justwatts.strava import _write_private, summary_text
     _write_private(t.cfg.data / "strava_token.json", {"access_token": "OLD", "refresh_token": "RT1", "expires_at": 0, "scope": "activity:write"})
     assert t.server.strava.access_token() == "AT2"
     assert json.loads((t.cfg.data / "strava_token.json").read_text())["refresh_token"] == "RT2"
@@ -308,8 +308,8 @@ def test_strava_token_refresh_and_description(ssrv):
                   {"target_w": 250, "avg_w": 251, "free": False}]}
     text = summary_text(d, "https://x.example/share/r-1.png", "Strong finish.")
     assert text.splitlines() == ["Strong finish.", "", "NP 230 W | avg 210 W | IF 1.15 | TSS 80 | 600 kJ | HR 150 avg, 175 max",
-                                 "Intervals (2): 248, 251 W", "https://x.example/share/r-1.png", "Recorded with OpenSpin"]
-    assert summary_text(d).endswith("Recorded with OpenSpin") and "http" not in summary_text(d)
+                                 "Intervals (2): 248, 251 W", "https://x.example/share/r-1.png", "Recorded with Just Watts"]
+    assert summary_text(d).endswith("Recorded with Just Watts") and "http" not in summary_text(d)
 
 
 def test_strava_upload_refused_without_connection(ssrv):
@@ -340,7 +340,7 @@ def test_share_card_hosting(ssrv):
 
 
 def test_strava_shared_app_by_default_never_sends_a_secret(tmp_path):
-    from openspin.strava import StravaLink
+    from justwatts.strava import StravaLink
     calls = []
 
     def relay(method, url, data=None, headers=None):

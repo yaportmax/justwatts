@@ -1,4 +1,4 @@
-// Built-in rule coach for the web build: a port of LocalCoach in server/openspin/agent_gate.py.
+// Built-in rule coach for the web build: a port of LocalCoach in server/justwatts/agent_gate.py.
 import { parseLine } from './lines.js';
 
 const MANUAL_HOLD_S = 60;

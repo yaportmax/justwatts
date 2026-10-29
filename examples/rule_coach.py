@@ -1,8 +1,8 @@
 """A tiny rule-based coach over the HTTP API: a baseline to compare agents against, and a template
 for writing your own loop without MCP.
 
-  openspin serve                         # terminal 1
-  openspin simulate --scenario fade      # terminal 2 (or ride for real)
+  justwatts serve                         # terminal 1
+  justwatts simulate --scenario fade      # terminal 2 (or ride for real)
   python examples/rule_coach.py               # terminal 3
 
 Rules: on FEEL EASIER drop 5% FTP; if HR is in the top zone and rising in a step above 90% FTP drop
@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import time
 
-from openspin.client import ClientError, CoachClient
-from openspin.safety import GuardError, check_target
+from justwatts.client import ClientError, CoachClient
+from justwatts.safety import GuardError, check_target
 
 
 def main(poll_s: float = 5) -> None:

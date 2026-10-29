@@ -1,4 +1,4 @@
-"""Command line: openspin <serve|voice|login-garmin|coach|tail|status|simulate|mcp|token>."""
+"""Command line: justwatts <serve|voice|login-garmin|coach|tail|status|simulate|mcp|token>."""
 from __future__ import annotations
 
 import argparse
@@ -33,10 +33,10 @@ def cmd_serve(args) -> int:
         cfg.ble = False
     voice = None
     if args.voice:
-        env = {**os.environ, "OPENSPIN_PORT": str(cfg.port), "OPENSPIN_DATA": str(cfg.data)}
+        env = {**os.environ, "JUSTWATTS_PORT": str(cfg.port), "JUSTWATTS_DATA": str(cfg.data)}
         # the listener waits for the token file the server creates on start
         cfg.ensure_token()
-        voice = subprocess.Popen([sys.executable, "-m", "openspin", "voice", "--model", args.voice_model], env=env)
+        voice = subprocess.Popen([sys.executable, "-m", "justwatts", "voice", "--model", args.voice_model], env=env)
         print(f"voice listener started (pid {voice.pid}, model {args.voice_model})")
     try:
         serve(cfg)
@@ -50,7 +50,7 @@ def cmd_voice(args) -> int:
     import os
     from .voice import main as voice_main
     cfg = _cfg(args)
-    os.environ["OPENSPIN_PORT"], os.environ["OPENSPIN_DATA"] = str(cfg.port), str(cfg.data)
+    os.environ["JUSTWATTS_PORT"], os.environ["JUSTWATTS_DATA"] = str(cfg.port), str(cfg.data)
     argv = ["--model", args.model] + (["--device", args.device] if args.device else [])
     return voice_main(argv)
 
@@ -143,14 +143,14 @@ def cmd_mcp(args) -> int:
     try:
         from .mcp_server import main
     except ImportError as e:
-        print(f"MCP SDK missing ({e}): pip install 'openspin[mcp]'", file=sys.stderr)
+        print(f"MCP SDK missing ({e}): pip install 'justwatts[mcp]'", file=sys.stderr)
         return 1
     if args.port or args.data:
         import os
         if args.port:
-            os.environ["OPENSPIN_PORT"] = str(args.port)
+            os.environ["JUSTWATTS_PORT"] = str(args.port)
         if args.data:
-            os.environ["OPENSPIN_DATA"] = args.data
+            os.environ["JUSTWATTS_DATA"] = args.data
     main()
     return 0
 
@@ -163,18 +163,18 @@ def cmd_token(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="openspin", description="AI agent coaching for smart bike trainers.")
-    p.add_argument("--version", action="version", version=f"openspin {__version__}")
+    p = argparse.ArgumentParser(prog="justwatts", description="AI agent coaching for smart bike trainers.")
+    p.add_argument("--version", action="version", version=f"justwatts {__version__}")
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--port", type=int, help="server port (env OPENSPIN_PORT, default 8765)")
-    common.add_argument("--data", help="data dir (env OPENSPIN_DATA, default ~/.openspin)")
+    common.add_argument("--port", type=int, help="server port (env JUSTWATTS_PORT, default 8765)")
+    common.add_argument("--data", help="data dir (env JUSTWATTS_DATA, default ~/.justwatts)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sv = sub.add_parser("serve", parents=[common], help="run the local server + web app")
     sv.add_argument("--voice", action="store_true", help="also start the Whisper voice listener ([voice] extra)")
     sv.add_argument("--voice-model", default="small.en")
-    sv.add_argument("--no-garmin", action="store_true", help="disable Garmin entirely (also: OPENSPIN_GARMIN=off)")
-    sv.add_argument("--no-ble", action="store_true", help="disable Bluetooth (also: OPENSPIN_BLE=off)")
+    sv.add_argument("--no-garmin", action="store_true", help="disable Garmin entirely (also: JUSTWATTS_GARMIN=off)")
+    sv.add_argument("--no-ble", action="store_true", help="disable Bluetooth (also: JUSTWATTS_BLE=off)")
     sv.set_defaults(fn=cmd_serve)
     vo = sub.add_parser("voice", parents=[common], help="run only the Whisper voice listener")
     vo.add_argument("--model", default="small.en")

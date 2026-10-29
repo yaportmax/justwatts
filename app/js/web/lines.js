@@ -1,4 +1,4 @@
-// Event line parser for the web build: a port of parse_line() in server/openspin/events.py.
+// Event line parser for the web build: a port of parse_line() in server/justwatts/events.py.
 const T = '(\\d+(?::\\d\\d){1,2})', NUM = '(-?\\d+|-)';
 const parseT = t => t.split(':').reduce((a, p) => a * 60 + +p, 0);
 const int = v => (v == null || v === '-' || v === '?' || v === 'free') ? null : +v;

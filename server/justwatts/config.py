@@ -1,18 +1,19 @@
 """Paths, port and the local API token.
 
 Environment:
-  OPENSPIN_PORT            port of the local server (default 8765)
-  OPENSPIN_DATA            data dir for rides/, coach/ and the token (default ~/.openspin)
-  OPENSPIN_GARMIN_TOKENS   python-garminconnect token dir (default ~/.garminconnect)
-  OPENSPIN_TOKEN           API token for CLI/MCP callers (default: read from <data>/token)
-  OPENSPIN_APP             directory with the web UI (default: bundled app/)
-  OPENSPIN_GARMIN          off = Garmin disabled entirely (tests and dev servers). on = force enable.
-                     Default: enabled only for the default data dir or when OPENSPIN_GARMIN_TOKENS is set,
+  JUSTWATTS_PORT            port of the local server (default 8765)
+  JUSTWATTS_DATA            data dir for rides/, coach/ and the token (default ~/.justwatts)
+  JUSTWATTS_GARMIN_TOKENS   python-garminconnect token dir (default ~/.garminconnect)
+  JUSTWATTS_TOKEN           API token for CLI/MCP callers (default: read from <data>/token)
+  JUSTWATTS_APP             directory with the web UI (default: bundled app/)
+  JUSTWATTS_GARMIN          off = Garmin disabled entirely (tests and dev servers). on = force enable.
+                     Default: enabled only for the default data dir or when JUSTWATTS_GARMIN_TOKENS is set,
                      so a scratch server never reaches the real Garmin account by accident.
-  OPENSPIN_BLE             off = no Bluetooth (the server never imports bleak)
+  JUSTWATTS_BLE             off = no Bluetooth (the server never imports bleak)
 
-The old HW_* names (HW_PORT, HW_DATA, ...) are still read when the OPENSPIN_* name is not set.
-A data dir left at ~/.trainer-coach by earlier versions is moved to ~/.openspin on first start.
+Older names are still read when the JUSTWATTS_* name is not set: OPENSPIN_* (before the rename to Just Watts), then HW_*.
+An existing ~/.openspin data dir keeps being used while ~/.justwatts does not exist (never moved, so an older
+server still running on it is not disturbed). A ~/.trainer-coach dir from earlier versions is moved on first start.
 """
 from __future__ import annotations
 
@@ -22,13 +23,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_PORT = 8765
-DEFAULT_DATA = Path("~/.openspin").expanduser()
+OPENSPIN_DATA = Path("~/.openspin").expanduser()
+DEFAULT_DATA = Path("~/.justwatts").expanduser()
+if not DEFAULT_DATA.exists() and OPENSPIN_DATA.is_dir():
+    DEFAULT_DATA = OPENSPIN_DATA
 LEGACY_DATA = Path("~/.trainer-coach").expanduser()
 
 
 def env(name: str, default: str | None = None) -> str | None:
-    """OPENSPIN_<name>, falling back to the legacy HW_<name>."""
-    for key in (f"OPENSPIN_{name}", f"HW_{name}"):
+    """JUSTWATTS_<name>, falling back to the legacy OPENSPIN_<name> and HW_<name>."""
+    for key in (f"JUSTWATTS_{name}", f"OPENSPIN_{name}", f"HW_{name}"):
         v = os.environ.get(key)
         if v is not None and v != "":
             return v
@@ -36,7 +40,7 @@ def env(name: str, default: str | None = None) -> str | None:
 
 
 def _flag(name: str) -> str:
-    return (env(name.removeprefix("OPENSPIN_")) or "").strip().lower()
+    return (env(name.removeprefix("JUSTWATTS_")) or "").strip().lower()
 
 
 def migrate_legacy_data(new: Path | None = None, old: Path | None = None) -> bool:
@@ -63,7 +67,7 @@ def _app_dir() -> Path:
 @dataclass
 class Config:
     port: int = field(default_factory=lambda: int(env("PORT", str(DEFAULT_PORT))))
-    data: Path = field(default_factory=lambda: Path(env("DATA", "~/.openspin")).expanduser())
+    data: Path = field(default_factory=lambda: Path(env("DATA") or DEFAULT_DATA).expanduser())
     garmin_tokens: Path = field(default_factory=lambda: Path(env("GARMIN_TOKENS", "~/.garminconnect")).expanduser())
     app: Path = field(default_factory=_app_dir)
     garmin: bool | None = None  # None = decide from env + data dir (see garmin_enabled)
@@ -83,7 +87,7 @@ class Config:
     def garmin_enabled(self) -> bool:
         if self.garmin is not None:
             return self.garmin
-        f = _flag("OPENSPIN_GARMIN")
+        f = _flag("JUSTWATTS_GARMIN")
         if f in ("off", "0", "false", "no"):
             return False
         if f in ("on", "1", "true", "yes"):
@@ -94,7 +98,7 @@ class Config:
     def ble_enabled(self) -> bool:
         if self.ble is not None:
             return self.ble
-        return _flag("OPENSPIN_BLE") not in ("off", "0", "false", "no")
+        return _flag("JUSTWATTS_BLE") not in ("off", "0", "false", "no")
 
     @property
     def rides(self) -> Path:

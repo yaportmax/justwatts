@@ -9,8 +9,8 @@ pytest.importorskip("mcp")
 import anyio  # noqa: E402
 
 from conftest import REPO  # noqa: E402
-from openspin import mcp_server as M  # noqa: E402
-from openspin.simulator import Simulator  # noqa: E402
+from justwatts import mcp_server as M  # noqa: E402
+from justwatts.simulator import Simulator  # noqa: E402
 
 ToolError = M.ToolError
 WORKOUT = "2m 50%, 3m 100%, 2m 120%, 2m 50%"  # FTP 200 -> 100, 200, 240, 100 W
@@ -18,7 +18,7 @@ WORKOUT = "2m 50%, 3m 100%, 2m 120%, 2m 50%"  # FTP 200 -> 100, 200, 240, 100 W
 
 @pytest.fixture
 def ride(srv, monkeypatch):
-    for k in ("OPENSPIN_MAX_CHANGE_PCT", "OPENSPIN_MAX_PCT", "OPENSPIN_FEEL_GATE_PCT", "OPENSPIN_FEEL_WINDOW_S", "OPENSPIN_STALE_S"):
+    for k in ("JUSTWATTS_MAX_CHANGE_PCT", "JUSTWATTS_MAX_PCT", "JUSTWATTS_FEEL_GATE_PCT", "JUSTWATTS_FEEL_WINDOW_S", "JUSTWATTS_STALE_S"):
         monkeypatch.delenv(k, raising=False)
     M.set_client(srv.client)
     srv.server.update_settings({"localCoach": {"enabled": False}})  # only agent messages in these tests
@@ -103,7 +103,7 @@ def test_guard_feel_gate(ride):
 
 
 def test_guard_ceiling_past_free_and_range(ride, monkeypatch):
-    monkeypatch.setenv("OPENSPIN_MAX_PCT", "110")
+    monkeypatch.setenv("JUSTWATTS_MAX_PCT", "110")
     ride.feel("good")
     with pytest.raises(ToolError, match="ceiling"):
         M.set_step_target(3, 245)  # step already at 240 > 220, so 240 is the ceiling
@@ -141,8 +141,8 @@ def test_guard_free_step(srv):
 
 def test_server_down_is_a_tool_error(tmp_path):
     from conftest import free_port
-    from openspin.client import CoachClient
-    from openspin.config import Config
+    from justwatts.client import CoachClient
+    from justwatts.config import Config
     M.set_client(CoachClient(Config(port=free_port(), data=tmp_path), token="t"))
     try:
         with pytest.raises(ToolError, match="cannot reach"):
@@ -182,12 +182,12 @@ def test_tools_over_mcp_protocol_in_process(ride):
 
 
 def test_stdio_transport(ride, srv):
-    """Spawn `python -m openspin mcp` exactly like an agent client would."""
+    """Spawn `python -m justwatts mcp` exactly like an agent client would."""
     from mcp import Client, StdioServerParameters
 
-    env = {**os.environ, "OPENSPIN_PORT": str(srv.port), "OPENSPIN_DATA": str(srv.cfg.data),
+    env = {**os.environ, "JUSTWATTS_PORT": str(srv.port), "JUSTWATTS_DATA": str(srv.cfg.data),
            "PYTHONPATH": str(REPO / "server")}
-    params = StdioServerParameters(command=sys.executable, args=["-m", "openspin", "mcp"], env=env)
+    params = StdioServerParameters(command=sys.executable, args=["-m", "justwatts", "mcp"], env=env)
 
     async def go():
         async with Client(params) as c:
@@ -201,7 +201,7 @@ def test_stdio_transport(ride, srv):
 # ---------- mid-ride edits through MCP (server-side ride) ----------
 @pytest.fixture
 def eride(srv, monkeypatch):
-    for k in ("OPENSPIN_MAX_INSERT_S", "OPENSPIN_MAX_EXTEND_S", "OPENSPIN_FEEL_GATE_PCT", "OPENSPIN_MAX_PCT"):
+    for k in ("JUSTWATTS_MAX_INSERT_S", "JUSTWATTS_MAX_EXTEND_S", "JUSTWATTS_FEEL_GATE_PCT", "JUSTWATTS_MAX_PCT"):
         monkeypatch.delenv(k, raising=False)
     M.set_client(srv.client)
     srv.req("POST", "/api/devices", {"action": "sim", "kind": "trainer"}, headers=srv.bearer)

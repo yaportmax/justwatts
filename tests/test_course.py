@@ -11,9 +11,9 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from conftest import REPO, run_node
-from openspin import course as C
-from openspin import history as H
-from openspin.engine import RideEngine
+from justwatts import course as C
+from justwatts import history as H
+from justwatts.engine import RideEngine
 
 HARNESS = REPO / "tests" / "js" / "course_harness.mjs"
 GPX = (REPO / "tests" / "fixtures" / "course.gpx").read_text(encoding="utf-8")
@@ -394,7 +394,7 @@ def test_load_rejects_a_bad_course_without_ending_the_ride(tmp_path):
 
 
 def test_course_done_line_parses():
-    from openspin import events as E
+    from justwatts import events as E
     ev = E.parse_line("[10:00:00] COURSE DONE at T+1:02:03, riding on until End")
     assert ev["type"] == "course_done" and ev["elapsed_s"] == 3723
 

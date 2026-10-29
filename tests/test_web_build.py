@@ -22,7 +22,13 @@ def test_build_output(dist):
     files = {p.relative_to(dist).as_posix() for p in dist.rglob("*") if p.is_file()}
     assert {"index.html", "js/app.js", "js/core.js", "js/mode.js", "js/web/backend.js", "css/app.css", "vercel.json", "icon.svg"} <= files
     assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
-    assert {f for f in files if f.startswith("api/")} == {"api/strava/token.js"}     # only the Strava token service
+    api = {f for f in files if f.startswith("api/")}                                  # the Strava token relay + accounts API
+    assert {"api/strava/token.js", "api/auth/[...path].js", "api/sync/[...path].js", "api/community/index.js",
+            "api/community/[...path].js", "api/admin/[...path].js", "api/_lib/app.js"} <= api
+    assert all(f.startswith("api/_lib/") or f.count("/") == 2 for f in api)          # shared code only under _lib (not routed)
+    pkg = json.loads((dist / "package.json").read_text())                             # Vercel installs the one dependency
+    assert pkg["dependencies"] == {"@neondatabase/serverless": "1.2.0"} and (dist / "package-lock.json").exists()
+    assert "privacy.html" in files
     assert "MODE = 'web'" in (dist / "js/mode.js").read_text()
     assert "MODE = 'server'" in (REPO / "app/js/mode.js").read_text()                # the local app is untouched
 
@@ -34,7 +40,9 @@ def test_vercel_headers(dist):
     assert "default-src 'self'" in csp and "script-src 'self'" in csp and "connect-src 'self';" in csp
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
     assert h["X-Content-Type-Options"] == "nosniff" and "bluetooth=(self)" in h["Permissions-Policy"]
-    assert v["rewrites"] == [{"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the function
+    assert v["rewrites"] == [{"source": "/privacy", "destination": "/privacy.html"},
+                             {"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the functions
+    assert v["regions"] == ["pdx1"]                                                   # next to the Neon database
 
 
 def test_web_mode_ride_with_reload(dist, node):

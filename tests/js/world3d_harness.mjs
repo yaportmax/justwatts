@@ -1,7 +1,10 @@
 // The 3D world's pure parts (app/js/world3d): terrain grids from a synthetic Terrarium tile, the carve, ground classes,
 // road ribbons, landuse parsing and the compact forms, streaming bookkeeping, the baked tile format, the leg solver,
 // the view choice and the WebGL fallback, the open world's edge. stdout: JSON report for tests/test_world3d.py.
-import { heightsOf, makeSampler, makeGrid, gridHeight, carve, rasterClasses, gridMesh, gridFromHeights } from '../../app/js/world3d/terrain.js';
+import { heightsOf, makeSampler, makeGrid, gridHeight, carve, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks } from '../../app/js/world3d/terrain.js';
+import { cellPoints, cellsAround, clumpGeometry } from '../../app/js/world3d/grass.js';
+import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
+import { noisePixels, wavePixels } from '../../app/js/world3d/texgen.js';
 import { builder, ribbon, resample, roadStyle, clipLine, deckSides } from '../../app/js/world3d/ribbon.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
@@ -151,6 +154,47 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   const run = n => { for (let i = 0; i < n; i++) { t += 1; hub.r.last = t; eng.tick(1); } return eng.ride.cs.v * 3.6; };
   const solo = run(200), res = eng.control("draft", { k: 0.3 }), drafted = run(4), lapsed = run(90);
   out.engineDraft = { solo: r3(solo), res, drafted: drafted > solo + 0.3, lapsed: Math.abs(lapsed - solo) < 0.3, clamp: eng.control('draft', { k: 9 }).draft };
+}
+
+/* ---------- round 2: smooth terrain, grass scatter, sky colours, procedural textures ---------- */
+{
+  // a 5 x 5 grid, a plane rising 2 m per sample east and 1 m per sample south, a bump in the middle
+  const n = 5, hs = new Float32Array(n * n); for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) hs[j * n + i] = 10 + 2 * i + j;
+  const up = upsample(hs, n, 2), m = 9;
+  let through = true, linear = true;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (Math.abs(up[(2 * j) * m + 2 * i] - hs[j * n + i]) > 1e-4) through = false;
+  for (let J = 2; J < m - 2; J++) for (let I = 2; I < m - 2; I++) if (Math.abs(up[J * m + I] - (10 + I + J / 2)) > 1e-4) linear = false;  // a plane stays a plane inside
+  const bump = hs.slice(); bump[12] += 8; const ub = upsample(bump, n, 2), ext = upsample(bump, n, 2, () => 99);
+  // the east edge of one tile and the west edge of the next, each upsampled alone: the same heights on the shared edge
+  const A = new Float32Array(n * n), B = new Float32Array(n * n), f = (x, y) => 50 + 10 * Math.sin(x * 0.9) + 5 * Math.cos(y * 1.3);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { A[j * n + i] = f(i, j); B[j * n + i] = f(i + n - 1, j); }
+  const ua = upsample(A, n, 2), ubb = upsample(B, n, 2); let seam = 0; for (let J = 0; J < m; J++) seam = Math.max(seam, Math.abs(ua[J * m + m - 1] - ubb[J * m]));
+  const g = { segs: 4, xs: Float64Array.from([0, 10, 20, 30, 40]), zs: Float64Array.from([0, 10, 20, 30, 40]), hs: bump, raw: bump };
+  const nor = gridNormals(g), cv = gridCurvature(g, 10, 4), ix = 3 * 7;
+  const lu = Uint8Array.from([0, 6, 9, 2]), mk = classMasks(lu, Uint8Array.from([0, 0, 0, 1]));
+  out.smooth = { n: up.length, through, linear, peak: r3(ub[4 * m + 4]), overshoot: ub[4 * m + 4] > 18 && ub[4 * m + 3] > ub[4 * m + 2], extSame: ext[4 * m + 4] === ub[4 * m + 4], seam: r3(seam),
+    normal: [r3(nor[ix]), r3(nor[ix + 1]), r3(nor[ix + 2])], unit: r3(Math.hypot(nor[ix], nor[ix + 1], nor[ix + 2])),
+    ridge: r3(cv[12]), hollow: cv[0] > 0 ? 'up' : 'flat', masks: [mk[8 + 0], mk[16 + 6], mk[24 + 1], mk[24 + 4]] };
+}
+{
+  const a = cellPoints(3, -7, 20, 50), b = cellPoints(3, -7, 20, 50), c = cellPoints(4, -7, 20, 50);
+  const inside = a.every(([x, z, r]) => x >= 60 && x < 80 && z >= -140 && z < -120 && r >= 0 && r < 1);
+  const near = cellsAround(5, 5, 30, 20), cg = clumpGeometry(11);
+  out.scatter2 = { same: JSON.stringify(a) === JSON.stringify(b), differs: JSON.stringify(a) !== JSON.stringify(c), inside, n: a.length,
+    cells: near.length, first: near[0].slice(0, 2), sorted: near.every((q, i) => !i || near[i - 1][2] <= q[2]), within: near.every(q => q[2] < 30),
+    blades: cg.idx.length / 3, verts: cg.pos.length / 3 };
+}
+{
+  const sun = [0.7, Math.sin(13 * Math.PI / 180), -0.7], zen = skyRadiance([0, 1, 0], sun, { turbidity: 2.6, rayleigh: 1.6 }), hor = skyRadiance([-0.7, 0.03, 0.7], sun, { turbidity: 2.6, rayleigh: 1.6 });
+  const low = sunTint(3), high = sunTint(60);
+  out.sky = { zenBlue: zen[2] > zen[0], horPaler: hor[2] / hor[0] < zen[2] / zen[0], lowRed: low[0] === 1 && low[2] < 0.2, highWhite: high[2] > 0.6, finite: [...zen, ...hor].every(Number.isFinite) };
+}
+{
+  const S = 64, np = noisePixels(S), wp = wavePixels(S);
+  let wrap = 0, step = 0, mean = 0;
+  for (let y = 0; y < S; y++) { wrap = Math.max(wrap, Math.abs(np[(y * S + S - 1) * 4] - np[(y * S) * 4])); for (let x = 1; x < S; x++) step = Math.max(step, Math.abs(np[(y * S + x) * 4 + 3] - np[(y * S + x - 1) * 4 + 3])); }
+  for (let i = 0; i < S * S; i++) mean += wp[i * 4] / (S * S);
+  out.tex = { n: np.length, wrap, smooth: step, waveFlat: Math.round(mean), same: noisePixels(S).every((v, i) => v === np[i]) };
 }
 
 console.log(JSON.stringify(out));

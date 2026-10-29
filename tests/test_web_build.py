@@ -51,8 +51,17 @@ def test_web_mode_ride_with_reload(dist, node):
     assert f["rides"] == 1 and f["samples"] == 247 and f["fit"] == ".FIT" and f["backupRides"] == 1 and f["steps"] == 3
     assert f["garminStatus"] == 503 and f["agent"] == {"connected": False} and f["meter"] == "none"
     assert [e.split(" ")[0] + " " + e.split(" ")[1] for e in f["events"]] == ["RIDE START", "RIDE RESUMED", "EDIT insert", "WORKOUT DONE", "RIDE END"]
-    c = out["course"]                                                         # a course in use: Just ride rides it
-    assert c["name"] == c["course"] == "The climb" and c["done"] > 100 and c["profile"] == 300 and c["now"] == "Rides use The climb"
+    k = out["picks"]                                                          # per-ride course picks
+    assert out["oldCourse"] is False                                         # the old global course is dropped
+    assert k["flatWorkout"] == {"name": "Sweet spot 2x12", "course": None, "plan": True}
+    assert k["wPicker"] == {"sel": "lrow sel", "html": True}
+    assert k["workoutCourse"] == {"name": "Sweet spot 2x12", "course": "Rolling hills", "plan": True}
+    assert k["cPicker"] == {"sel": "lrow sel", "html": True}
+    assert k["courseWorkout"] == {"name": "Sweet spot 2x12", "course": "Hawk Hill, Marin", "plan": True}
+    assert k["test"]["course"] is None                                       # FTP tests never take a course
+    assert k["justFlat"]["course"] is None and not k["justFlat"]["plan"]      # Just ride: one click, flat
+    c = out["course"]                                                         # Just ride on the course picked next to it
+    assert c["name"] == c["course"] == "The climb" and c["done"] > 100 and c["profile"] == 300
     assert c["want"]["k"] == "sim" and c["strip"] == "" and "%" in c["text"]
     assert out["coachDefault"] is False                                       # no built-in coach on the web
     assert "Rep done" not in " ".join(out["spoken"])                        # and nothing coach-spoken

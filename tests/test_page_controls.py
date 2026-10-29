@@ -30,6 +30,9 @@ def run(node, *args):
 
 def check(out):
     assert out["undoShown"] == "" and out["sheetOpen"] and out["keysOpen"] and out["closed"]
+    assert out["tab0"] == {"w": "", "c": "none"}                             # Workouts tab first
+    assert out["tab1"] == {"w": "none", "c": "", "on": [False, True]}
+    assert out["tab2"] == out["tab1"]                                        # remembered after the reload
     toasts = dict(out["log"])
     assert toasts["plus button"] == "Intensity 101%" and toasts["shift up"] == "Intensity 106%"
     assert toasts["undo button"] == "Undone" and toasts["skip key"] == "Skipped segment 1"

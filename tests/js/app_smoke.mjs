@@ -2,6 +2,7 @@
 // Stubs only the DOM; fetch and the SSE stream go to the server. No browser, no Bluetooth.
 // Mode "ride" (default): Sim, load, start, coach command, FEEL, wait for the end, check History.
 // Mode "boot": just boot and report what the page shows (used to test a reload mid-ride).
+// Mode "pick": a workout with a course picked on its row, then a course with a workout picked on its row.
 const PORT = process.env.JUSTWATTS_SMOKE_PORT, MODE = process.argv[2] || 'ride';
 const BASE = `http://127.0.0.1:${PORT}`;
 const realFetch = globalThis.fetch;
@@ -18,7 +19,7 @@ class El {
   getContext() { return ctx; }
   click() { this.onclick?.(); }
 }
-const els = {};
+const els = {}, made = [];  // made: elements the page created (list rows)
 const multi = {
   '[data-feel]': ['easier', 'good', 'harder'].map(f => new El('feel', { feel: f })),
   'nav button': ['workouts', 'ride', 'history'].map(v => new El('nav', { v })),
@@ -28,7 +29,7 @@ const multi = {
 globalThis.document = {
   querySelector: s => els[s] ??= new El(s),
   querySelectorAll: s => multi[s] || [],
-  createElement: () => new El('new'),
+  createElement: () => { const e = new El('new'); made.push(e); return e; },
   addEventListener() {}, documentElement: new El('html'), body: new El('body'), activeElement: { tagName: 'BODY' }, hidden: false,
 };
 globalThis.window = globalThis;
@@ -93,6 +94,26 @@ if (MODE === 'boot') {
   await sleep(200);
   finish({ ride: S().ride.name, started: S().ride.started, rideOn: $('#rideOn').style.display, el: String($("#lE").textContent),
            tTxt: $('#tTxt').textContent, coachMsg: $('#coachMsg').textContent, said: $('#coachSaid').innerHTML, spoken, posts: posts.map(p => p.path) });
+}
+
+if (MODE === 'pick') {
+  const rowOf = name => made.findLast(e => e.className?.startsWith('lrow') && String(e.innerHTML).includes(`<div class="t">${name}</div>`));
+  const tap = el => el.onclick({ target: { closest: () => null } });
+  const ride = () => ({ name: S().ride.name, course: S().ride.course?.name ?? null });
+  const out = {};
+  tap(rowOf('Sweet spot 2x12'));
+  let row = rowOf('Sweet spot 2x12');
+  row.querySelector('[data-a=pick]').onchange({ target: { value: 's-climb' } });
+  row.querySelector('[data-a=ride]').onclick();
+  await until(() => S().ride?.course?.name === 'The climb', 'workout + course');
+  out.workoutCourse = ride();
+  tap(rowOf('Rolling hills'));
+  row = rowOf('Rolling hills');
+  row.querySelector('[data-a=pick]').onchange({ target: { value: 'l-ss-2x12' } });
+  row.querySelector('[data-a=ride]').onclick();
+  await until(() => S().ride?.course?.name === 'Rolling hills', 'course + workout');
+  out.courseWorkout = ride();
+  finish({ ...out, posts: posts.filter(p => p.body?.action === 'load').map(p => ({ w: p.body.workout?.name ?? null, c: p.body.course?.id ?? null })) });
 }
 
 await fetch('/api/devices', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });

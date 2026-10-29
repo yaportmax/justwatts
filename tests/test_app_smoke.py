@@ -68,6 +68,16 @@ def test_page_rides_a_workout_on_the_server_engine(node, srv):
     assert (srv.cfg.rides / f"{ride['id']}.json").exists()
 
 
+def test_page_picks_course_and_workout_per_ride(node, srv):
+    """Workouts tab: a course picked on a workout row. Courses tab: a workout picked on a course row."""
+    out = run_page(node, srv, "pick")
+    assert out["workoutCourse"] == {"name": "Sweet spot 2x12", "course": "The climb"}
+    assert out["courseWorkout"] == {"name": "Sweet spot 2x12", "course": "Rolling hills"}
+    assert out["posts"] == [{"w": "Sweet spot 2x12", "c": "s-climb"}, {"w": "Sweet spot 2x12", "c": "s-rolling"}]
+    r = srv.server.engine.ride
+    assert r.course["name"] == "Rolling hills" and not r.started
+
+
 def test_reload_mid_ride_keeps_riding(node, srv):
     """The page is only a view: a fresh page load shows the ride the server kept running."""
     eng = srv.server.engine

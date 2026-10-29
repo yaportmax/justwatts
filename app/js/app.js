@@ -91,7 +91,7 @@ function hoverable(cv) {
   cv.onpointerleave = () => { hoverT.delete(cv); redraw(); };
 }
 hoverable($('#rideChart')); hoverable($('#sumChart'));
-const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: c => loadRide(null, c) });
+const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts() });
 
 /* ---------- library + builder ---------- */
 // library filters are a per-browser convenience
@@ -116,27 +116,30 @@ $('#libQ').oninput = e => { libF.q = e.target.value; store.set('hw.libFilter', l
 $('#libDur').onchange = e => setLibF({ dur: e.target.value });
 $('#libLvl').onchange = e => setLibF({ lvl: e.target.value });
 const lvlDots = n => n ? `<span class="lvl" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
-let libSel = null;
+let libSel = null, libCourse = '';  // the selected workout row and the course picked on it (Flat: '')
 function renderLib() {
   const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = 0;
   for (const w of allWorkouts()) {
     const cw = cwOf(w); if (!cw || !libMatch(w, cw)) continue;
     shown++;
     const e = estimate(cw, ftp), mine = w.id.startsWith('c-');
-    const row = document.createElement('div'); row.className = 'lrow' + (libSel === w.id ? ' sel' : '');
+    const on = libSel === w.id, row = document.createElement('div'); row.className = 'lrow' + (on ? ' sel' : '');
     row.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(w.name)}</div>
       <div class="m num">${fmtT(cw.total)} · TSS ${Math.round(e.tss)} · ${mine ? 'mine' : esc(w.category || '')} ${lvlDots(w.level)}</div>
       ${w.purpose ? `<div class="p">${esc(w.purpose)}</div>` : ''}</div>
-      <div class="lact"><button class="pri" data-a="ride">Ride</button><button data-a="edit">Edit</button></div>`;
+      <div class="lact">${on ? `<select class="pick" data-a="pick" aria-label="Course">${courses.options(libCourse)}</select>` : ''}<button class="pri" data-a="ride">Ride</button><button data-a="edit">Edit</button></div>`;
     lib.appendChild(row);
     requestAnimationFrame(() => drawThumb(row.querySelector('canvas'), cw, ftp));
+    const go = () => loadRide(w, on ? courses.byId(libCourse) : null);
     row.onclick = ev => {
       const a = ev?.target?.closest?.('[data-a]')?.dataset.a;
-      if (a === 'ride') return loadRide(w);
+      if (a === 'ride') return go();
       if (a === 'edit') return editWorkout(w);
-      libSel = libSel === w.id ? null : w.id; renderLib();
+      if (a) return;
+      libSel = on ? null : w.id; libCourse = ''; renderLib();
     };
-    row.querySelector('[data-a=ride]').onclick = ev => { ev?.stopPropagation?.(); loadRide(w); };
+    row.querySelector('[data-a=ride]').onclick = ev => { ev?.stopPropagation?.(); go(); };
+    if (on) row.querySelector('[data-a=pick]').onchange = e => { libCourse = e.target.value; };
     row.querySelector('[data-a=edit]').onclick = ev => { ev?.stopPropagation?.(); editWorkout(w); };
   }
   $('#libEmpty').style.display = shown ? 'none' : '';
@@ -323,7 +326,8 @@ $('#btnHR').onclick = () => {
 
 /* ---------- ride ---------- */
 let loadArmed = 0;
-function loadRide(w, course = w?.test ? null : courses.selected()) {  // the course in use, if any (never for FTP tests)
+function loadRide(w, course = null) {  // course: the one picked for this ride, if any (never for FTP tests)
+  if (w?.test) course = null;
   // loading ends the ride in progress: a second tap within 4 s confirms
   if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return; }
   loadArmed = 0;
@@ -1017,14 +1021,24 @@ if (WEB) {
 function show(v) {
   $$('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
-  if (v === 'workouts') { renderLib(); renderBuilder(); }
+  if (v === 'workouts') showTab(wkTab);
   if (v === 'ride' && V) renderRide();
   if (v === 'history') renderHistory();
   if (v === 'settings') renderSettings();
 }
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
-$('#btnJust').onclick = $('#btnJust2').onclick = () => loadRide(null);
+$('#btnJust').onclick = () => loadRide(null, courses.byId($('#jrCourse').value));
+$('#btnJust2').onclick = () => loadRide(null);
+// Workouts page tabs: Workouts (library + builder) or Courses; the last one is remembered
+let wkTab = store.get('hw.wkTab', 'workouts') === 'courses' ? 'courses' : 'workouts';
+function showTab(t) {
+  wkTab = t; store.set('hw.wkTab', t);
+  $$('[data-tab]').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+  $('#tabWorkouts').style.display = t === 'workouts' ? '' : 'none'; $('#tabCourses').style.display = t === 'courses' ? '' : 'none';
+  if (t === 'workouts') { renderLib(); renderBuilder(); } else courses.render();
+}
+$$('[data-tab]').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $('#btnFtp').onclick = () => $('#ftpModal').classList.add('on');
 $('#ftpClose').onclick = () => $('#ftpModal').classList.remove('on');
 $('#ftpModal').onclick = e => {
@@ -1049,6 +1063,7 @@ async function syncHrZones() {
   } catch {}
 }
 $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3m 55%), 8m 50-40%';
+showTab(wkTab);
 renderVoice(); setStatus();
 loadSettings().then(syncHrZones);
 migrateLocalRides().then(renderHistory);
@@ -1056,5 +1071,5 @@ F('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() 
 connect();
 const setHH = () => document.documentElement.style.setProperty('--hh', document.querySelector('header').offsetHeight + 'px');
 setHH();
-window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) renderLib(); if (V) renderRide(); });
+window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) wkTab === 'workouts' ? renderLib() : courses.render(); if (V) renderRide(); });
 window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE };

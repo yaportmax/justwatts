@@ -321,3 +321,14 @@ body.web .agentcol{display:none}
 
 .bwords{gap:6px;margin:6px 0 8px;flex-wrap:nowrap}
 .bwords input{flex:1;min-width:0}
+/* Workouts page tabs: Workouts | Courses, underlined like the category chips */
+.tabs{display:flex;gap:22px;margin:18px 0 14px;border-bottom:1px solid var(--line)}
+.tabs button{background:none;border:0;border-radius:0;padding:8px 0;margin-bottom:-1px;color:var(--faint);font-size:15px;font-weight:600;border-bottom:2px solid transparent}
+.tabs button:hover{color:var(--ink)}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--acc)}
+/* per-ride pickers: course on a workout row, workout on a course row, course for Just ride */
+select.pick{background:none;border:1px solid var(--line);color:var(--dim);padding:6px 8px;max-width:240px;cursor:pointer}
+select.pick:hover,select.pick:focus{color:var(--ink)}
+select.pick option,select.pick optgroup{background:var(--panel);color:var(--ink)}
+.lrow .lact{align-items:center}
+#jrCourse{width:170px}

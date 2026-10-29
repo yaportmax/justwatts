@@ -52,6 +52,7 @@ const multi = () => ({
   '#jrMode button': ['g', 'w', 'r'].map(m => new El('jr', { m })),
   '#aMode button': ['e', 'w', 'g', 'r'].map(v => new El('mode', { v })),
   '.wk': [new El('wk'), new El('wk')],
+  '[data-tab]': ['workouts', 'courses'].map(t => new El('tab', { tab: t })),
 });
 const mkDoc = () => ({ querySelector: s => els[s] ??= new El(s), querySelectorAll: s => M[s] || [], createElement: () => new El('new'),
   addEventListener(t, f) { if (t === 'keydown') keydown.push(f); }, documentElement: new El('html'), body: new El('body'), activeElement: { tagName: 'BODY' }, hidden: false });
@@ -170,6 +171,10 @@ await step('space pauses', () => key('Space'), () => ride().paused);
 await step('space resumes', () => key('Space'), () => !ride().paused);
 key('Slash', { key: '?', shiftKey: true });
 out.keysOpen = $('#keysModal').classList.contains('on');
+// Workouts page tabs: Workouts by default; the last tab is remembered across reloads
+out.tab0 = { w: $('#tabWorkouts').style.display, c: $('#tabCourses').style.display };
+M['[data-tab]'][1].click();
+out.tab1 = { w: $('#tabWorkouts').style.display, c: $('#tabCourses').style.display, on: M['[data-tab]'].map(b => b.classList.contains('on')) };
 key('Escape', { key: 'Escape' });
 out.closed = !$('#keysModal').classList.contains('on') && !$('#adjPanel').classList.contains('on');
 await tick(2);
@@ -187,6 +192,7 @@ await boot(2);
 await until(() => ride()?.name === 'Hands', 'ride after reload');
 await sleep(50);
 out.after = pick(ride());
+out.tab2 = { w: $('#tabWorkouts').style.display, c: $('#tabCourses').style.display, on: M['[data-tab]'].map(b => b.classList.contains('on')) };
 out.shown = { adj: String($('#cAdj').textContent), target: String($('#lT').textContent), badge: String($('#rState').textContent) };
 for (const s of streams) s.close();
 process.stdout.write(JSON.stringify(out));

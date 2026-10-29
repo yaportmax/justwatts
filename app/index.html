@@ -38,16 +38,21 @@
       <label class="f">FTP (W)<input id="ftp" type="number" min="50" max="600" step="1"></label>
       <label class="f"><span>Weight (<span class="wUnit">lb</span>)</span><input id="weight" type="number" min="0" max="450" step="0.1"></label>
     </div>
-    <div class="row" style="gap:6px"><button id="btnFtp">FTP test</button><button id="btnJust" class="pri">Just ride</button></div>
+    <div class="row" style="gap:6px"><button id="btnFtp">FTP test</button><select id="jrCourse" class="pick" aria-label="Just ride course" title="Course for Just ride"></select><button id="btnJust" class="pri">Just ride</button></div>
   </div>
 
-  <h2>Courses</h2>
-  <div class="row crsbar"><span class="hint" id="crsNow"></span><button id="crsImport" title="GPX, TCX or FIT">Import route</button></div>
-  <div class="llist" id="crsList"></div>
-  <div class="hint" style="margin-top:6px">With a workout: watt segments stay ERG, free segments follow the road.</div>
-  <input type="file" id="crsFile" accept=".gpx,.tcx,.fit" hidden>
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tab="workouts" class="on" aria-selected="true">Workouts</button>
+    <button role="tab" data-tab="courses" aria-selected="false">Courses</button>
+  </div>
 
-  <h2>Library</h2>
+  <div class="tabpane" id="tabCourses" role="tabpanel" style="display:none">
+    <div class="row crsbar"><span class="hint">With a workout: watt segments stay ERG, free segments follow the road.</span><button id="crsImport" title="GPX, TCX or FIT">Import route</button></div>
+    <div class="llist" id="crsList"></div>
+    <input type="file" id="crsFile" accept=".gpx,.tcx,.fit" hidden>
+  </div>
+
+  <div class="tabpane" id="tabWorkouts" role="tabpanel">
   <div class="libbar">
     <input id="libQ" type="search" placeholder="Search" aria-label="Search workouts">
     <select id="libDur" aria-label="Length"><option value="">Any length</option><option value="0-45">Under 45 min</option><option value="45-75">45 to 75 min</option><option value="75-120">75 min to 2 h</option><option value="120-999">Over 2 h</option></select>
@@ -85,6 +90,7 @@
     </details>
     <div class="err" id="bErr"></div>
     <input type="file" id="zwoFile" accept=".zwo,.xml" hidden>
+  </div>
   </div>
 </section>
 

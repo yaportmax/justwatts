@@ -42,7 +42,7 @@ class El {
   getContext() { return ctx; }
   click() { this.onclick?.(); }
 }
-let els = {};
+let els = {}, made = [];  // made: elements the page created (list rows)
 const multi = () => ({
   '[data-feel]': ['easier', 'good', 'harder'].map(f => new El('feel', { feel: f })),
   'nav button': ['workouts', 'ride', 'history', 'settings'].map(v => new El('nav', { v })),
@@ -50,7 +50,7 @@ const multi = () => ({
   '#jrMode button': [], '[data-lc]': [],
 });
 let M = multi();
-const mkDoc = () => ({ querySelector: s => els[s] ??= new El(s), querySelectorAll: s => M[s] || [], createElement: () => new El('new'),
+const mkDoc = () => ({ querySelector: s => els[s] ??= new El(s), querySelectorAll: s => M[s] || [], createElement: () => { const e = new El('new'); made.push(e); return e; },
   addEventListener() {}, documentElement: new El('html'), body: new El('body'), activeElement: { tagName: 'BODY' }, hidden: false });
 globalThis.window = globalThis;
 globalThis.addEventListener = () => {};
@@ -121,11 +121,35 @@ const wk = { id: 'c-test1', name: 'Backup test', text: '10m 60%' }, crs = { id: 
 await $('#bkFile').onchange({ target: { files: [{ text: async () => JSON.stringify({ ...backup, local: { custom: [wk, { id: 'x', text: 1 }], courses: [crs, { id: 'k-bad' }] } }) }], value: '' } });
 out.restored = { custom: JSON.parse(mem.get('hw.custom')).map(w => w.id), courses: JSON.parse(mem.get('hw.courses')).map(c => c.id) };
 out.spoken = spoken.slice(0, 6);
-// ---------- boot 3: a course is in use, Just ride rides it ----------
-mem.set('hw.course', JSON.stringify('s-climb'));
+// ---------- boot 3: per-ride course picks ----------
+mem.set('hw.course', JSON.stringify('s-climb'));  // the old global course: dropped, rides are flat unless picked
 hw = await boot(3);
 await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => hw.state().devices.trainer === 'sim', 'sim 3');
+out.oldCourse = mem.has('hw.course');
+// rows are the last element made whose markup names it (lists re-render on every pick)
+const rowOf = name => made.findLast(e => e.className?.startsWith('lrow') && String(e.innerHTML).includes(`<div class="t">${name}</div>`));
+const tap = el => el.onclick({ target: { closest: () => null } });
+const load = async (go, what) => { go(); await until(() => hw.state().ride && what(hw.state().ride), 'load'); const r = hw.state().ride; return { name: r.name, course: r.course?.name ?? null, plan: !!r.steps?.length }; };
+out.picks = {};
+// a workout row: Ride alone is flat; selected, it offers a course picker
+out.picks.flatWorkout = await load(() => rowOf('Sweet spot 2x12').querySelector('[data-a=ride]').onclick(), r => r.name === 'Sweet spot 2x12');
+tap(rowOf('Sweet spot 2x12'));
+let row = rowOf('Sweet spot 2x12');
+out.picks.wPicker = { sel: row.className, html: String(row.innerHTML).includes('<option value="">Flat</option>') && String(row.innerHTML).includes('The climb · ') };
+row.querySelector('[data-a=pick]').onchange({ target: { value: 's-rolling' } });
+out.picks.workoutCourse = await load(() => row.querySelector('[data-a=ride]').onclick(), r => r.course?.name === 'Rolling hills');
+// a course row, selected: a workout picker; Ride starts the course with that workout
+tap(rowOf('Hawk Hill, Marin'));
+row = rowOf('Hawk Hill, Marin');
+out.picks.cPicker = { sel: row.className, html: String(row.innerHTML).includes('Free ride on this course') && String(row.innerHTML).includes('>Sweet spot 2x12</option>') };
+row.querySelector('[data-a=pick]').onchange({ target: { value: 'l-ss-2x12' } });
+out.picks.courseWorkout = await load(() => row.querySelector('[data-a=ride]').onclick(), r => r.course?.name === 'Hawk Hill, Marin' && r.name === 'Sweet spot 2x12');
+// FTP tests never take a course
+out.picks.test = await load(() => $('#ftpModal').onclick({ target: { closest: () => ({ dataset: { t: 't-ramp' } }) } }), r => /ramp/i.test(r.name));
+// Just ride: flat in one click, or on the course picked next to it
+out.picks.justFlat = await load(() => $('#btnJust').click(), r => !r.steps?.length && !r.course);
+$('#jrCourse').value = 's-climb';
 $('#btnJust').click();
 await until(() => hw.state().ride?.course, 'course loaded');
 $('#cStart').click();
@@ -134,6 +158,6 @@ for (let i = 0; i < 60; i++) hw.backend.tick();
 await sleep(20);
 const rc = hw.state().ride.course;
 out.course = { name: hw.state().ride.name, course: rc.name, done: rc.done_m, profile: rc.profile.length, want: hw.backend.engine?.hub?.wantCmd ?? null,
-  strip: $('#crsRide').style.display, text: $('#crsK').innerHTML, now: $('#crsNow').textContent };
+  strip: $('#crsRide').style.display, text: $('#crsK').innerHTML };
 process.stdout.write(JSON.stringify(out));
 process.exit(0);

@@ -1,4 +1,4 @@
-"""Local HTTP server: serves the web app and the coach API. Stdlib only.
+"""Local HTTP server: serves the web app and its API. Stdlib only.
 
 Binds 127.0.0.1. Every request must carry a localhost Host header (blocks DNS rebinding).
 Write endpoints accept either the page (same Origin + `X-HW: 1`) or a local caller with
@@ -13,7 +13,6 @@ import re
 import threading
 import time
 import uuid
-from collections import deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -21,18 +20,15 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from . import __version__
 from .config import Config
-from .events import line_coach, parse_line, tail_lines
+from .events import parse_line, tail_lines
 from .devices import DeviceHub
 from .engine import RideEngine
 from . import history as H
-from .agent_gate import AgentGate, LocalCoach
 from .strava import StravaError, StravaLink, summary_text
 from .garmin import DISABLED_MSG, GarminLink
 
 MAX_BODY = 64 * 1024 * 1024
-MAX_CMDS = 500
-HISTORY_LEN = 1200  # state snapshots kept (~1 h at one per 3 s)
-QUIET_PATHS = ("/api/state", "/api/event", "/api/current", "/api/coach?", "/api/health",
+QUIET_PATHS = ("/api/state", "/api/health",
                "/api/strava/callback")  # the callback query carries the OAuth code: keep it out of logs
 # A page served from here may never be framed (clickjacking) and runs only its own scripts.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; "
@@ -79,122 +75,8 @@ def read_retry(path: Path) -> bytes | None:
     return None
 
 
-class CoachState:
-    """In-memory command queue, latest page state and a short state history."""
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.cmds: list[dict] = []
-        self.state: dict | None = None
-        self.state_at: float | None = None
-        self.history: deque = deque(maxlen=HISTORY_LEN)
-
-    def add_cmd(self, fields: dict) -> dict:
-        with self.lock:
-            # ms-based seq keeps increasing across server restarts, so open pages never miss commands
-            seq = max(int(time.time() * 1000), (self.cmds[-1]["seq"] + 1) if self.cmds else 0)
-            cmd = {"seq": seq, **fields}
-            self.cmds.append(cmd)
-            del self.cmds[:-MAX_CMDS]
-            return cmd
-
-    def cmds_since(self, since: int) -> list[dict]:
-        with self.lock:
-            return [c for c in self.cmds if c["seq"] > since]
-
-    def put_state(self, st: dict) -> None:
-        now = time.time()
-        with self.lock:
-            self.state, self.state_at = st, now
-            ride, live = st.get("ride") or {}, st.get("live") or {}
-            if ride.get("started"):
-                step = ride.get("step") or {}
-                self.history.append({
-                    "t": round(now, 1), "elapsed_s": ride.get("elapsed_s"), "step": step.get("index"),
-                    "target_w": ride.get("target_w"), "power": live.get("power"), "power_3s": live.get("power_3s"),
-                    "cadence": live.get("cadence"), "hr": live.get("hr"), "paused": ride.get("paused"),
-                })
-
-    def add_history(self, st: dict) -> None:
-        """History row for the server-side ride (posted states add their own rows)."""
-        now = time.time()
-        ride, live = st.get("ride") or {}, st.get("live") or {}
-        with self.lock:
-            self.history.append({
-                "t": round(now, 1), "elapsed_s": ride.get("elapsed_s"), "step": (ride.get("step") or {}).get("index"),
-                "target_w": ride.get("target_w"), "power": live.get("power"), "power_3s": live.get("power_3s"),
-                "cadence": live.get("cadence"), "hr": live.get("hr"), "paused": ride.get("paused"),
-            })
-
-    def get_state(self) -> dict:
-        with self.lock:
-            age = None if self.state_at is None else round(time.time() - self.state_at, 1)
-            return {"state": self.state, "age_s": age, "received_at": self.state_at}
-
-    def get_history(self, seconds: float) -> list[dict]:
-        cut = time.time() - seconds
-        with self.lock:
-            return [h for h in self.history if h["t"] >= cut]
-
-
-def validate_cmd(body: Any) -> dict:
-    if not isinstance(body, dict):
-        raise ValueError("body must be an object")
-    out: dict = {}
-    if "msg" in body:
-        msg = str(body["msg"]).strip()
-        if msg:
-            out["msg"] = " ".join(msg.split())[:280]
-    if "set" in body and body["set"] is not None:
-        s = body["set"]
-        if not isinstance(s, dict):
-            raise ValueError("set must be {step, w}")
-        step = s.get("step")
-        if step != "cur":
-            if isinstance(step, str) and step.isdigit():
-                step = int(step)
-            if not isinstance(step, int) or isinstance(step, bool) or step < 1:
-                raise ValueError("set.step must be 'cur' or a 1-based step number")
-        w = s.get("w")
-        if isinstance(w, float) and w.is_integer():
-            w = int(w)
-        if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w <= 2000:
-            raise ValueError("set.w must be an integer 0..2000")
-        out["set"] = {"step": step, "w": w}
-    if "edit" in body and body["edit"] is not None:
-        e = body["edit"]
-        if not isinstance(e, dict) or e.get("op") not in ("insert", "replace", "delete", "duration", "extend", "total"):
-            raise ValueError("edit must be {op: insert|replace|delete|duration|extend|total, ...}")
-        ed = {"op": e["op"]}
-        for k in ("step", "after"):
-            if k in e and e[k] is not None:
-                v = e[k]
-                if v != "cur" and not (isinstance(v, int) and not isinstance(v, bool) and v >= 1):
-                    raise ValueError(f"edit.{k} must be 'cur' or a 1-based step number")
-                ed[k] = v
-        if e["op"] in ("insert", "replace"):
-            if not isinstance(e.get("steps"), str) or not e["steps"].strip():
-                raise ValueError("edit.steps must be workout text, e.g. '2x(5m 250w, 3m 50%)'")
-            ed["steps"] = " ".join(e["steps"].split())[:400]
-        if e["op"] == "delete" and "step" not in ed:
-            raise ValueError("edit.step required")
-        if e["op"] in ("duration", "extend", "total"):
-            sec = e.get("seconds")
-            if not isinstance(sec, int) or isinstance(sec, bool) or abs(sec) > 6 * 3600 or (e["op"] != "extend" and sec < 1):
-                raise ValueError("edit.seconds must be an integer (duration/total >= 1, |extend| <= 21600)")
-            ed["seconds"] = sec
-            if e["op"] == "total":
-                ed["how"] = "scale" if e.get("how") == "scale" else "last"
-        out["edit"] = ed
-    if not out:
-        raise ValueError("need msg, set and/or edit")
-    if "msg" in out:
-        out["important"] = bool(body.get("important")) or "set" in out or "edit" in out
-    return out
-
-
 class Handler(SimpleHTTPRequestHandler):
-    server: "CoachServer"
+    server: "AppServer"
     extensions_map = {
         **SimpleHTTPRequestHandler.extensions_map,
         ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
@@ -254,8 +136,6 @@ class Handler(SimpleHTTPRequestHandler):
     def trusted(self) -> bool:
         origin = self.headers.get("Origin")
         if self.token_ok():
-            if self.headers.get("X-JustWatts-Client") == "agent" or urlsplit(self.path).path in ("/api/agent-events", "/api/agent-usage"):
-                self.server.mark_agent()
             # a token caller is a local process, never a web page from another origin
             return origin is None or origin in self.origins()
         # The page itself: same origin plus a custom header (forces a CORS preflight we never answer).
@@ -331,10 +211,6 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(200, srv.settings_payload())
         if p == "/api/devices":
             return self.send_json(200, srv.hub.status())
-        if p == "/api/said":
-            return self.send_json(200, {"said": srv.said()})
-        if p == "/api/voice":
-            return self.send_json(200, {**srv.voice, "mode": srv.settings.get("voiceMode", "all")})
         if p == "/api/rides":
             return self.send_json(200, {"rides": srv.list_rides()})
         if p == "/api/trends":
@@ -368,28 +244,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(200, srv.garmin.zones())
             except Exception as e:  # noqa: BLE001 - not signed in, disabled, or Garmin unreachable
                 return self.send_json(502, {"error": str(e)[:200]})
-        if p == "/api/current":
-            return self.send_raw_json(read_retry(self.cfg.current) or b"null")
-        if p == "/api/coach":
-            try:
-                since = int(q.get("since", ["0"])[0])
-            except ValueError:
-                since = 0
-            return self.send_json(200, {"cmds": srv.coach.cmds_since(since)})
-        if p == "/api/agent-events":
-            if not self.trusted():
-                return self.send_json(403, {"error": "forbidden"})
-            since = int(q.get("since", ["0"])[0] or 0)
-            wait = float(q.get("wait", ["0"])[0] or 0)
-            return self.send_json(200, srv.gate.since(since, wait))
-        if p in ("/api/state", "/api/state/history", "/api/events"):
+        if p in ("/api/state", "/api/events"):
             if not self.trusted():
                 return self.send_json(403, {"error": "forbidden"})
             if p == "/api/state":
-                return self.send_json(200, srv.agent_state())
-            if p == "/api/state/history":
-                secs = float(q.get("seconds", ["300"])[0])
-                return self.send_json(200, {"samples": srv.coach.get_history(secs)})
+                return self.send_json(200, {"state": srv.engine_state()})
             n = max(1, min(2000, int(q.get("n", ["50"])[0])))
             return self.send_json(200, {"events": [parse_line(x) for x in tail_lines(self.cfg.events_log, n)]})
         if p.startswith("/api/"):
@@ -438,9 +297,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not self.host_ok():
             return self.send_json(421, {"error": "bad host"})
         p = urlsplit(self.path).path
-        routes = ("/api/event", "/api/coach", "/api/current", "/api/ride", "/api/state", "/api/garmin/upload",
-                  "/api/ride/control", "/api/settings", "/api/devices", "/api/voice", "/api/agent-usage",
-                  "/api/garmin/import", "/api/strava/config", "/api/strava/disconnect", "/api/strava/shared")
+        routes = ("/api/ride", "/api/garmin/upload", "/api/ride/control", "/api/settings", "/api/devices", "/api/garmin/import", "/api/strava/config", "/api/strava/disconnect", "/api/strava/shared")
         ride_action = re.fullmatch(r"/api/rides/([\w\-]+)/(garmin|delete|strava|card|description)", p)
         if p not in routes and not ride_action:
             return self.send_json(404, {"error": "not found"})
@@ -448,7 +305,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(403, {"error": "forbidden"})
         srv = self.server
         if p == "/api/strava/config":
-            # the client secret is the user's: only the page may set it, never an agent's token
+            # the client secret is the user's: only the page may set it, never a token caller
             if self.token_ok() or self.headers.get("X-HW") != "1":
                 return self.send_json(403, {"error": "enter the Strava client secret yourself in Settings"})
             try:
@@ -500,13 +357,6 @@ class Handler(SimpleHTTPRequestHandler):
             body = json.loads(raw or b"{}")
         except (ValueError, UnicodeDecodeError):
             return self.send_json(400, {"error": "bad json"})
-        if p == "/api/event":
-            line = " ".join((str((body or {}).get("line", "")) if isinstance(body, dict) else "").splitlines())
-            self.log_event(line)
-            ev = parse_line(line)
-            if ev["type"] == "said":
-                srv.on_said(ev["said"])
-            return self.send_json(200, {"ok": True})
         if p == "/api/garmin/import":
             if not srv.garmin_enabled or not srv.garmin.linked():
                 return self.send_json(503, {"error": DISABLED_MSG if not srv.garmin_enabled else "not signed in"})
@@ -514,72 +364,21 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(200, srv.import_garmin_profile(force=bool(body.get("force"))))
             except Exception as e:  # noqa: BLE001
                 return self.send_json(502, {"error": str(e)[:200]})
-        if p == "/api/agent-usage":
-            if not isinstance(body, dict):
-                return self.send_json(400, {"error": "body must be an object"})
-            usage = {k: body[k] for k in USAGE_KEYS if isinstance(body.get(k), (int, float)) and not isinstance(body.get(k), bool)}
-            if "model" in body:
-                usage_model = str(body["model"])[:60]
-            else:
-                usage_model = None
-            srv.engine.count_agent(usage=usage, total=bool(body.get("total")))
-            if usage_model and srv.engine.ride:
-                srv.engine.ride.usage["model"] = usage_model
-            with srv.engine.lock:
-                srv.engine._bump()
-            r = srv.engine.ride
-            return self.send_json(200, {"ok": True, "ride": bool(r), "usage": r.usage if r else None})
-        if p == "/api/voice":
-            try:
-                return self.send_json(200, srv.voice_event(str((body or {}).get("event", ""))))
-            except ValueError as e:
-                return self.send_json(400, {"error": str(e)})
-        if p == "/api/state":
-            if not isinstance(body, dict):
-                return self.send_json(400, {"error": "state must be an object"})
-            srv.coach.put_state(body)
-            return self.send_json(200, {"ok": True})
-        if p == "/api/coach":
-            try:
-                fields = validate_cmd(body)
-            except ValueError as e:
-                return self.send_json(400, {"error": str(e)})
-            result = None
-            if "edit" in fields:
-                if not (srv.engine.ride and srv.engine.ride.steps):
-                    return self.send_json(409, {"error": "workout edits need a structured workout running on the server"})
-                if self.token_ok():
-                    srv.gate.suppress_edits += 1
-                try:
-                    result = srv.engine.edit(fields["edit"])
-                except (ValueError, KeyError, TypeError) as e:
-                    return self.send_json(400, {"error": str(e)})
-            cmd = srv.coach.add_cmd(fields)
-            self.log_event(line_coach(cmd))
-            srv.engine.coach(cmd)  # the server-side ride applies msg/set right away
-            return self.send_json(200, {**cmd, "result": result} if result else cmd)
         if not isinstance(body, dict):
             return self.send_json(400, {"error": "body must be an object"})
         if p == "/api/ride/control":
             try:
-                # the page is the rider (MANUAL lines, wins over coaches); token holders are CLI or agents
-                res = srv.engine.control(str(body.get("action", "")), body, source="api" if self.token_ok() else "manual")
-            except ValueError as e:
+                res = srv.engine.control(str(body.get("action", "")), body)
+            except (ValueError, KeyError, TypeError) as e:  # a bad body, e.g. an edit without its fields
                 return self.send_json(400, {"error": str(e)})
             return self.send_json(200, {"ok": True, **res})
         if p == "/api/settings":
             return self.send_json(200, srv.update_settings(body))
         if p == "/api/devices":
             return self.devices(body)
-        if p == "/api/ride":
-            body["id"] = safe_id(body.get("id", "ride")) or "ride"  # the stored id is the file name: meta paths use it
-            dest = self.cfg.rides / (body["id"] + ".json")
-        elif not body.get("samples"):
-            self.cfg.current.unlink(missing_ok=True)
-            return self.send_json(200, {"ok": True})
-        else:
-            dest = self.cfg.current
-        atomic_write(dest, json.dumps(body).encode("utf-8"))
+        # /api/ride: archive a finished ride (the page moves rides kept in old browser storage here)
+        body["id"] = safe_id(body.get("id", "ride")) or "ride"  # the stored id is the file name: meta paths use it
+        atomic_write(self.cfg.rides / (body["id"] + ".json"), json.dumps(body).encode("utf-8"))
         return self.send_json(200, {"ok": True})
 
     def devices(self, body: dict):
@@ -630,18 +429,11 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
-                     "hrZonesSrc": None, "cadRange": [85, 95], "voiceMode": "all", "afterWorkout": "hold",
-                     "agentGate": {}, "localCoach": {}, "ftpSrc": None, "profileImported": False,
+                     "hrZonesSrc": None, "cadRange": [85, 95], "afterWorkout": "hold", "ftpSrc": None, "profileImported": False,
                      "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False, "units": "imperial"}
-AGENT_RECENT_S = 300  # an agent (or CLI tool) used the token this recently: show agent-only UI
-USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "turns")
-VOICE_MODES = ("all", "important", "silent")
-# spoken commands that change how much the coach talks (checked on every voice transcript)
-_UNMUTE = re.compile(r"\b(unmute|voice on|talk to me|speak again|you can talk)\b", re.I)
-_MUTE = re.compile(r"\b(mute|quiet|stop talking|shut up|silence|be silent|no talking)\b", re.I)
 
 
-class CoachServer(ThreadingHTTPServer):
+class AppServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, cfg: Config, garmin: GarminLink | None = None, quiet: bool = False,
@@ -654,25 +446,18 @@ class CoachServer(ThreadingHTTPServer):
         self.token = cfg.ensure_token()
         self.garmin_enabled = cfg.garmin_enabled if garmin is None else getattr(garmin, "enabled", True)
         self.garmin = garmin or GarminLink(cfg.garmin_tokens, enabled=cfg.garmin_enabled)
-        self.coach = CoachState()
         self.log_lock = threading.Lock()
         self.quiet = quiet
         self.stopping = False
-        self._said_cache: tuple[float, list] = (-1.0, [])
         self._rides_cache: dict[str, tuple[float, dict]] = {}
         self.settings_lock = threading.Lock()
-        # voice: barge counts athlete speech onsets (the page stops TTS when it rises); tts = page speaking
-        self.voice = {"barge": 0, "barge_at": None, "tts": False, "tts_at": None, "listener_at": None}
         self.settings = self._load_settings()
         self.hub = hub or DeviceHub(cfg.data / "devices.json", ble_enabled=cfg.ble_enabled,
                                     log=(lambda m: None) if quiet else (lambda m: print("ble:", m, flush=True)))
+        cfg.live_dir  # moves the ride in progress from an older data layout before the engine resumes it
         self.engine = RideEngine(self.hub, cfg.data, self.log_event, lambda: self.settings)
         self.engine.on_finish = self._after_finish
-        self.agent_seen: float | None = None
         self.strava = StravaLink(cfg.data, http=strava_http) if strava_http else StravaLink(cfg.data)
-        self.gate = AgentGate(lambda: self.settings, on_wake=lambda b: self.engine.count_agent(wakes=1))
-        self.local = LocalCoach(lambda: self.settings, self._local_say, adjust=self._local_adjust,
-                                agent_connected=self.agent_connected)
         super().__init__(("127.0.0.1", cfg.port), Handler)
         self.engine.resume()
         if devices:
@@ -691,26 +476,6 @@ class CoachServer(ThreadingHTTPServer):
         eng = getattr(self, "engine", None)
         if eng is not None:
             eng.note(line[:400])
-        if getattr(self, "gate", None) is not None:
-            self.gate.on_event(line[:400])
-            self.local.on_event(line[:400])
-
-    def mark_agent(self) -> None:
-        self.agent_seen = time.time()
-        r = self.engine.ride
-        if r is not None and r.started:
-            r.agent_seen = True
-
-    def agent_connected(self) -> bool:
-        seen = max(self.agent_seen or 0, self.gate.agent_seen or 0)
-        return bool(seen) and time.time() - seen < AGENT_RECENT_S
-
-    def _local_adjust(self, step: int, watts: int, why: str) -> None:
-        """The built-in coach changes a target (FEEL press or HR cap) when no agent is coaching."""
-        cmd = self.coach.add_cmd({"set": {"step": step, "w": watts}, "msg": why, "important": True, "local": True})
-        self.engine.coach(cmd)
-        self.engine.count_agent(cues=1)
-        self.log_event(f"CUE set step {step} {watts}W | {why}")
 
     def import_garmin_profile(self, force: bool = False) -> dict:
         """Copy FTP, weight and HR zones from Garmin into settings (only fields the athlete did not set).
@@ -738,34 +503,6 @@ class CoachServer(ThreadingHTTPServer):
             except Exception as e:  # noqa: BLE001
                 self.log_event(f"GARMIN profile import failed: {e}"[:200])
         threading.Thread(target=go, name="garmin-profile", daemon=True).start()
-
-    def _local_say(self, text: str, important: bool = False) -> None:
-        """A routine cue from the local coach: shown and spoken like a coach message, no agent wake."""
-        cmd = self.coach.add_cmd({"msg": text, "important": important, "local": True})
-        self.engine.coach(cmd)
-        self.engine.count_agent(cues=1)
-        self.log_event(f"CUE {text}")
-
-    def after_tick(self) -> None:
-        """Per-second hooks: history row, agent gate alerts and batching, local coach."""
-        st = self.engine_state()
-        if st.get("ride") and st["ride"].get("started"):
-            self.coach.add_history(st)
-        self.gate.observe(st)
-        self.local.observe(st)
-
-    def said(self) -> list[dict]:
-        """Last 8 voice transcripts, newest first (cached on log mtime)."""
-        f = self.cfg.events_log
-        try:
-            mt = f.stat().st_mtime_ns
-        except OSError:
-            return []
-        if mt != self._said_cache[0]:
-            evs = [parse_line(x) for x in tail_lines(f, 400)]
-            said = [{"time": e["time"], "text": e["said"], "source": e.get("source")} for e in evs if e["type"] == "said"]
-            self._said_cache = (mt, said[-8:][::-1])
-        return self._said_cache[1]
 
     # ---------- settings ----------
     @property
@@ -803,8 +540,6 @@ class CoachServer(ThreadingHTTPServer):
                         continue
                 if k == "autoGarmin" and not self.garmin_enabled:
                     v = False
-                if k == "voiceMode" and v not in VOICE_MODES:
-                    continue
                 if k == "afterWorkout" and v not in ("hold", "grade0"):
                     continue
                 if k == "units" and v not in ("imperial", "metric"):
@@ -813,10 +548,6 @@ class CoachServer(ThreadingHTTPServer):
                     continue
                 if k == "shareBaseUrl" and not (isinstance(v, str) and (v == "" or re.match(r"https?://", v))):
                     continue
-                if k in ("agentGate", "localCoach"):
-                    if not isinstance(v, dict):
-                        continue
-                    v = {**(new.get(k) or {}), **v}
                 new[k] = v
             self.settings = new
             atomic_write(self.settings_file, json.dumps(new).encode())
@@ -830,50 +561,7 @@ class CoachServer(ThreadingHTTPServer):
 
     # ---------- state ----------
     def engine_state(self) -> dict:
-        st = self.engine.state(self.athlete(), self.said()[:3])
-        st["voice"] = {**self.voice, "mode": self.settings.get("voiceMode", "all")}
-        st["agent"] = {"connected": self.agent_connected(), "last_seen": max(self.agent_seen or 0, self.gate.agent_seen or 0) or None}
-        return st
-
-    def voice_event(self, ev: str) -> dict:
-        now = time.time()
-        v = self.voice
-        if ev == "speech_start":  # athlete started talking: interrupt coach speech
-            v["barge"] += 1
-            v["barge_at"] = now
-        elif ev in ("tts_start", "tts_end"):
-            v["tts"], v["tts_at"] = ev == "tts_start", now
-        elif ev == "listening":
-            v["listener_at"] = now
-        else:
-            raise ValueError("event must be speech_start, tts_start, tts_end or listening")
-        with self.engine.lock:
-            self.engine._bump()
-        return dict(v)
-
-    def on_said(self, text: str) -> None:
-        """Voice commands that control the coach voice itself."""
-        if _UNMUTE.search(text):
-            self.update_settings({"voiceMode": "all"})
-            self.log_event("VOICE UNMUTED (said)")
-        elif _MUTE.search(text):
-            self.update_settings({"voiceMode": "silent"})
-            self.voice_event("speech_start")  # also cut any sentence in progress
-            self.log_event("VOICE MUTED (said)")
-        else:
-            return
-        with self.engine.lock:
-            self.engine._bump()
-
-    def agent_state(self) -> dict:
-        """What agents see at GET /api/state: the server ride, or a page/simulator that posts its own state."""
-        posted = self.coach.get_state()
-        if self.engine.ride is None and posted["state"] is not None:
-            # a browser-Bluetooth page or the headless simulator owns the ride: report its state,
-            # with its real age so agents can tell when it went away
-            if posted["state"].get("ride") or posted["age_s"] < 10:
-                return posted
-        return {"state": self.engine_state(), "age_s": 0.0, "received_at": time.time()}
+        return self.engine.state(self.athlete())
 
     def live_payload(self, rid: str | None, n: int) -> dict:
         new_rid, samples = self.engine.samples_since(rid, n)
@@ -981,7 +669,6 @@ class CoachServer(ThreadingHTTPServer):
             time.sleep(max(0.0, nxt - time.monotonic()))
             try:
                 self.engine.tick()
-                self.after_tick()
             except Exception as e:  # noqa: BLE001 - never let the ride loop die
                 print("tick error:", e, flush=True)
             if time.monotonic() - nxt > 5:
@@ -1004,8 +691,8 @@ class CoachServer(ThreadingHTTPServer):
 
 
 def make_server(cfg: Config | None = None, garmin: GarminLink | None = None, quiet: bool = False,
-                ticker: bool = True, devices: bool = True, hub: DeviceHub | None = None, strava_http=None) -> CoachServer:
-    return CoachServer(cfg or Config(), garmin, quiet, ticker=ticker, devices=devices, hub=hub, strava_http=strava_http)
+                ticker: bool = True, devices: bool = True, hub: DeviceHub | None = None, strava_http=None) -> AppServer:
+    return AppServer(cfg or Config(), garmin, quiet, ticker=ticker, devices=devices, hub=hub, strava_http=strava_http)
 
 
 def serve(cfg: Config | None = None) -> None:

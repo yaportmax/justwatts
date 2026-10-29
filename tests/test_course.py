@@ -190,7 +190,7 @@ def run_python(tmp_path, script, settings=None):
             s.update(a)
         else:
             try:
-                eng.control(op, a or {}, source="manual")
+                eng.control(op, a or {})
                 res = "ok"
             except ValueError as e:
                 res = f"error: {e}"

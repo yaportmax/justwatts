@@ -1,6 +1,6 @@
 // Headless smoke test of app/js/app.js against a real justwatts test server (JUSTWATTS_SMOKE_PORT).
 // Stubs only the DOM; fetch and the SSE stream go to the server. No browser, no Bluetooth.
-// Mode "ride" (default): Sim, load, start, coach command, FEEL, wait for the end, check History.
+// Mode "ride" (default): Sim, load, start, a target change, wait for the end, check History.
 // Mode "boot": just boot and report what the page shows (used to test a reload mid-ride).
 // Mode "pick": a workout with a course picked on its row, then a course with a workout picked on its row.
 const PORT = process.env.JUSTWATTS_SMOKE_PORT, MODE = process.argv[2] || 'ride';
@@ -21,7 +21,6 @@ class El {
 }
 const els = {}, made = [];  // made: elements the page created (list rows)
 const multi = {
-  '[data-feel]': ['easier', 'good', 'harder'].map(f => new El('feel', { feel: f })),
   'nav button': ['workouts', 'ride', 'history'].map(v => new El('nav', { v })),
   '.view': ['workouts', 'ride', 'history'].map(v => Object.assign(new El('view'), { id: 'v-' + v })),
   '#jrMode button': ['g', 'w'].map(m => new El('jr', { m })),
@@ -39,11 +38,6 @@ globalThis.requestAnimationFrame = f => setTimeout(f, 0);
 globalThis.getComputedStyle = () => ({ getPropertyValue: () => '#38bdf8' });
 const mem = new Map();
 globalThis.localStorage = { getItem: k => mem.has(k) ? mem.get(k) : null, setItem: (k, v) => mem.set(k, String(v)), removeItem: k => mem.delete(k) };
-mem.set('hw.voice', 'true');
-const spoken = [];
-globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
-let cancels = 0;
-globalThis.speechSynthesis = { getVoices: () => [], speak: u => { spoken.push(u.text); u.onstart?.(); }, cancel: () => { cancels++; } };
 
 const posts = [];
 globalThis.fetch = (path, opt = {}) => {
@@ -93,7 +87,7 @@ if (MODE === 'boot') {
   await until(() => S().ride && $('#rName').textContent, 'ride shown');
   await sleep(200);
   finish({ ride: S().ride.name, started: S().ride.started, rideOn: $('#rideOn').style.display, el: String($("#lE").textContent),
-           tTxt: $('#tTxt').textContent, coachMsg: $('#coachMsg').textContent, said: $('#coachSaid').innerHTML, spoken, posts: posts.map(p => p.path) });
+           tTxt: $('#tTxt').textContent, posts: posts.map(p => p.path) });
 }
 
 if (MODE === 'pick') {
@@ -125,20 +119,10 @@ await until(() => S().ride?.name === 'Smoke', 'ride loaded');
 $('#cStart').click();
 await until(() => S().ride?.started, 'started');
 await until(() => S().ride && S().ride.el > 70, 'into step 2');
-await fetch('/api/coach', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ msg: 'Hold 230', set: { step: 'cur', w: 230 } }) });
-await until(() => S().ride?.target_w === 230 && $('#coachMsg').textContent === 'Hold 230', 'coach applied');
-const meter = $('#agentMeter').style.display + '|' + ($('#srvState').attrs?.['aria-hidden'] ?? 'unset');
-const during = { meter, target: String($("#lT").textContent), cad: $('#lCs').textContent, cadColor: $('#cadTile').style.props['--hrc'], tiles: $('#lP').textContent, interval: String($("#lIs").textContent) };
-multi['[data-feel]'][2].click();
-// barge-in: the voice listener reports speech, the page cancels coach speech
-await fetch('/api/voice', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ event: 'speech_start' }) });
-await until(() => cancels > 0, 'speech cancelled');
-// mute: messages still show but are not spoken
-$('#coachMute').click();
-await until(() => S().voice.mode === 'silent', 'muted');
-await fetch('/api/coach', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ msg: 'Quiet message', important: true }) });
-await until(() => $('#coachMsg').textContent === 'Quiet message', 'muted message shown');
-const muteBtn = $('#coachMute').textContent;
+await fetch('/api/ride/control', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'target', w: 230 }) });
+await until(() => S().ride?.target_w === 230 && String($("#lT").textContent) === '230', 'target applied');
+const offline = $('#srvState').attrs?.['aria-hidden'] ?? 'unset';
+const during = { offline, target: String($("#lT").textContent), cad: $('#lCs').textContent, cadColor: $('#cadTile').style.props['--hrc'], tiles: $('#lP').textContent, interval: String($("#lIs").textContent) };
 // the plan ends: the ride keeps going as a free ride until End (two taps)
 await until(() => S().ride?.overtime, 'workout done');
 const overBadge = $('#rState').textContent;
@@ -150,12 +134,12 @@ const stillRiding = !!S().ride;
 $('#cEnd').click();
 await until(() => S().last_finished, 'ride end');
 await until(() => $('#sName').textContent === 'Smoke', 'summary opened');
-await until(() => String($('#sLaps').innerHTML).includes('<tr>') && String($('#sEvents').innerHTML).includes('COACH'), 'detail rendered');
+await until(() => String($('#sLaps').innerHTML).includes('<tr>'), 'detail rendered');
 const rides = (await (await fetch('/api/rides')).json()).rides;
 const raw = await (await fetch('/api/rides/' + rides[0].id)).json();
 finish({
-  during, spoken, cancels, muteBtn, overBadge, stillRiding, sName: $('#sName').textContent,
-  laps: String($('#sLaps').innerHTML).split('<tr>').length - 1, events: String($('#sEvents').innerHTML).includes('FEEL'),
+  during, overBadge, stillRiding, sName: $('#sName').textContent,
+  laps: String($('#sLaps').innerHTML).split('<tr>').length - 1,
   histRides: [{ id: raw.id, n: raw.samples.length, ov: raw.ov }],
   posts: posts.map(p => p.path + (p.body?.action ? ':' + p.body.action : '')), settings: JSON.parse(mem.get('hw.settings')),
 });

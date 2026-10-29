@@ -1,3 +1,3 @@
-"""justwatts: a local server, CLI and MCP bridge that lets an AI agent coach a smart-trainer ride."""
+"""justwatts: a local server and CLI for indoor smart-trainer rides."""
 
 __version__ = "0.1.0"

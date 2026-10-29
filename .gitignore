@@ -1,6 +1,6 @@
-# ride data and coach logs (personal)
+# ride data and logs (personal)
 rides/
-coach/
+live/
 *.fit
 *.tcx
 data/

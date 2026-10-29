@@ -1,5 +1,4 @@
-"""Everything the rider can change by hand mid-ride: each control, the edge cases, and that manual
-changes win over the built-in coach and agents (and that both see them)."""
+"""Everything the rider can change by hand mid-ride: each control and the edge cases."""
 import time
 
 import pytest
@@ -10,7 +9,7 @@ from justwatts.server import make_server
 
 
 def ctl(srv, action, page=True, **kw):
-    """A control from the rider's page (page=True) or from a token holder (CLI, agent)."""
+    """A control from the rider's page (page=True) or from a token holder (the CLI)."""
     return srv.req("POST", "/api/ride/control", {"action": action, **kw}, headers=srv.page if page else srv.bearer)
 
 
@@ -25,7 +24,6 @@ def ride(srv, text="1m 50%, 2m 100%, 1m 50%", n=0, test=False):
 def ticks(srv, n):
     for _ in range(n):
         srv.server.engine.tick(1.0)
-        srv.server.after_tick()
 
 
 def st(srv):
@@ -37,16 +35,14 @@ def manual_lines(srv):
 
 
 # ---------- each control ----------
-def test_intensity_logged_as_manual_only_from_the_page(srv):
+def test_intensity_logged_as_manual(srv):
     eng = ride(srv, n=5)
     assert ctl(srv, "adjust", dir=1)[0] == 200
     assert ctl(srv, "adjust", dir=1, big=True)[0] == 200
     assert st(srv)["intensity"] == 1.06 and st(srv)["target_w"] == 106
     assert ctl(srv, "intensity", percent=95)[0] == 200
-    assert ctl(srv, "intensity", page=False, percent=97)[0] == 200  # an agent or the CLI: no MANUAL line
-    assert manual_lines(srv) == ["MANUAL intensity 101%", "MANUAL intensity 106%", "MANUAL intensity 95%"]
-    m = st(srv)["manual"]
-    assert m["what"] == "intensity" and m["ago_s"] < 5
+    assert ctl(srv, "intensity", page=False, percent=97)[0] == 200  # the CLI too
+    assert manual_lines(srv) == ["MANUAL intensity 101%", "MANUAL intensity 106%", "MANUAL intensity 95%", "MANUAL intensity 97%"]
     assert eng.hub.wanted_cmd == {"k": "erg", "w": 97}
 
 
@@ -78,15 +74,15 @@ def test_step_target_is_the_watts_the_trainer_gets_now(srv):
     assert st(srv)["target_w"] == 220
     assert ctl(srv, "target", w=250)[1]["w"] == 250
     r = st(srv)
-    assert r["target_w"] == 250 and eng.hub.wanted_cmd == {"k": "erg", "w": 250} and r["steps"][1]["manual"]
+    assert r["target_w"] == 250 and eng.hub.wanted_cmd == {"k": "erg", "w": 250} and r["steps"][1]["override_w"]
     assert ctl(srv, "target", delta=-5)[1]["w"] == 245
     assert ctl(srv, "target", step=3, w=90)[0] == 200 and st(srv)["steps"][2]["start_w"] == 90
     assert ctl(srv, "target", step=1, w=90)[0] == 400  # already ridden
     ctl(srv, "intensity", percent=100)  # later intensity changes still scale a step set by hand
     assert st(srv)["target_w"] == round(round(245 / 1.1) * 1.0)
-    # an agent's set uses the same meaning: the watts the trainer gets now
+    # w is the watts the trainer gets now, at any intensity
     ctl(srv, "intensity", percent=120)
-    srv.client.coach(step="cur", watts=200)
+    srv.client.control("target", step="cur", w=200)
     assert st(srv)["target_w"] == 200
     assert manual_lines(srv)[1:4] == ["MANUAL target step 2 250W", "MANUAL target step 2 245W", "MANUAL target step 3 90W"]
 
@@ -134,7 +130,6 @@ def test_step_length_in_the_last_seconds_of_a_step(srv):
     ctl(srv, "edit", edit={"op": "extend", "seconds": -120})  # never ends a step in the past
     r = st(srv)
     assert r["steps"][0]["duration_s"] == 58 and r["step"]["index"] == 2  # ended now, step 2 starts
-    assert st(srv)["manual"]["what"] == "edit"
 
 
 def test_workout_length_and_next_steps_box(srv):
@@ -276,7 +271,7 @@ def test_last_seconds_skip_and_target(srv):
 
 
 def test_every_manual_change_survives_a_restart(srv):
-    eng = ride(srv, "1m 50%, 2m 100%, 1m 50%, 1m free", n=70)
+    ride(srv, "1m 50%, 2m 100%, 1m 50%, 1m free", n=70)
     ctl(srv, "intensity", percent=105)
     ctl(srv, "target", w=240)
     ctl(srv, "target", step=3, w=90)
@@ -290,61 +285,8 @@ def test_every_manual_change_survives_a_restart(srv):
         after = s2.engine.state({"ftp": 200})["ride"]
         for k in ("intensity", "jr", "control", "ov", "total_s", "steps"):
             assert after[k] == before[k], k
-        assert after["manual"]["what"] == "grade" and s2.engine.ride.manual == eng.ride.manual
     finally:
         s2.server_close()
-
-
-# ---------- manual wins, coaches see it ----------
-def test_local_coach_leaves_a_step_set_by_hand_alone(srv):
-    srv.server.update_settings({"hrMax": 150, "localCoach": {"enabled": True}})  # sim HR climbs past the cap
-    ride(srv, "1m 50%, 10m 100%", n=62)
-    ctl(srv, "target", w=210)
-    ticks(srv, 200)
-    cues = [e["text"] for e in srv.client.events(400) if e["text"].startswith("CUE set")]
-    assert cues == [] and st(srv)["target_w"] == 210
-
-
-def test_local_coach_hr_guard_still_works_without_manual_changes(srv):
-    srv.server.update_settings({"hrMax": 150, "localCoach": {"enabled": True}})
-    ride(srv, "1m 50%, 10m 100%", n=262)
-    assert [e for e in srv.client.events(400) if e["text"].startswith("CUE set step 2")]
-    assert st(srv)["target_w"] < 200
-
-
-def test_agent_stream_sees_manual_changes_coalesced(srv):
-    ride(srv, n=5)
-    srv.server.gate.flush()
-    n = srv.server.gate.seq
-    for _ in range(4):
-        ctl(srv, "adjust", dir=1)
-    ctl(srv, "skip")
-    srv.server.gate.flush()
-    evs = [e for b in srv.server.gate.since(n)["batches"] for e in b["events"] if e["kind"] == "manual"]
-    assert [e["text"] for e in evs] == ["MANUAL intensity 104%", "MANUAL skip step 1"]
-    assert evs[0]["data"] == {"type": "manual", "action": "intensity", "detail": "104%"}
-
-
-def test_mcp_waits_after_a_manual_change(srv):
-    pytest.importorskip("mcp")
-    from justwatts import mcp_server as M
-    M.set_client(srv.client)
-    try:
-        eng = ride(srv, "2m 50%, 5m 100%, 2m 50%", n=130)
-        ctl(srv, "adjust", dir=-1)
-        for call in (lambda: M.set_current_target(190), lambda: M.set_intensity(98),
-                     lambda: M.extend_current_step(30), lambda: M.set_step_target(3, 95)):
-            with pytest.raises(M.ToolError, match="by hand"):
-                call()
-        eng.ride.manual["ts"] -= 61_000  # a minute later the agent may coach again
-        assert M.set_step_target(3, 95)["sent"]
-        ctl(srv, "target", step=3, w=90)
-        eng.ride.manual["ts"] -= 61_000
-        with pytest.raises(M.ToolError, match="set step 3 by hand"):
-            M.set_step_target(3, 100)
-        assert M.set_current_target(190)["sent"]
-    finally:
-        M.set_client(None)
 
 
 def test_manual_line_parses_the_same_in_js(node):

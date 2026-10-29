@@ -2,9 +2,9 @@
 
 Environment:
   JUSTWATTS_PORT            port of the local server (default 8765)
-  JUSTWATTS_DATA            data dir for rides/, coach/ and the token (default ~/.justwatts)
+  JUSTWATTS_DATA            data dir for rides/, live/ and the token (default ~/.justwatts)
   JUSTWATTS_GARMIN_TOKENS   python-garminconnect token dir (default ~/.garminconnect)
-  JUSTWATTS_TOKEN           API token for CLI/MCP callers (default: read from <data>/token)
+  JUSTWATTS_TOKEN           API token for CLI callers (default: read from <data>/token)
   JUSTWATTS_APP             directory with the web UI (default: bundled app/)
   JUSTWATTS_GARMIN          off = Garmin disabled entirely (tests and dev servers). on = force enable.
                      Default: enabled only for the default data dir or when JUSTWATTS_GARMIN_TOKENS is set,
@@ -105,16 +105,20 @@ class Config:
         return self.data / "rides"
 
     @property
-    def coach_dir(self) -> Path:
-        return self.data / "coach"
+    def live_dir(self) -> Path:
+        """The ride in progress (engine.json + journal) and the event log."""
+        d = self.data / "live"
+        old = self.data / "coach"  # name used by earlier versions
+        if not d.exists() and old.is_dir():
+            try:
+                old.rename(d)
+            except OSError:
+                return old
+        return d
 
     @property
     def events_log(self) -> Path:
-        return self.coach_dir / "events.log"
-
-    @property
-    def current(self) -> Path:
-        return self.coach_dir / "current.json"
+        return self.live_dir / "events.log"
 
     @property
     def token_file(self) -> Path:

@@ -1,8 +1,8 @@
 """Server-side ride engine: a port of the page's ride loop so the ride survives page reloads.
 
-One tick per second reads the device hub, records a sample, auto-pauses, writes the coach event
-lines, applies ERG/grade targets and coach overrides. The ride in progress is written to
-<data>/coach/engine.json (atomic) every 5 samples and after every control action, and is resumed
+One tick per second reads the device hub, records a sample, auto-pauses, writes the ride event
+lines and applies ERG/grade targets. The ride in progress is written to
+<data>/live/engine.json (atomic) every 30 samples and after every control action, and is resumed
 (paused, waiting for pedaling) when the server restarts.
 """
 from __future__ import annotations
@@ -55,15 +55,9 @@ class Ride:
         self.ov: dict[int, int] = {}
         self.last_step = -1
         self.acc: dict | None = None
-        self.last_line = 0.0
-        self.events: list[list] = []  # [epoch_ms, line] for this ride's transcript
+        self.events: list[list] = []  # [epoch_ms, line]: this ride's event log
         self.last_mono: float | None = None  # monotonic time of the last sample (None after a restart)
         self.overtime = False  # the plan ended; riding free until the athlete ends the ride
-        self.agent_wakes = 0   # agent-stream batches during this ride (one batch = one agent turn)
-        self.agent_seen = False  # an agent connected during this ride (shows the usage meter)
-        self.local_cues = 0    # cues the local rule coach spoke instead of waking the agent
-        self.usage: dict = {}  # token usage the agent reported for this ride
-        self.manual: dict | None = None  # the rider's last change by hand: {what, step, ts}
         # course: the road under the rider. cs = {d: metres ridden, v: virtual speed m/s, up: metres climbed,
         # end: reached the finish}. sg/st: last grade sent and when (ride seconds), for rate limiting.
         self.course: dict | None = None
@@ -112,10 +106,8 @@ class Ride:
 
     def payload(self) -> dict:
         return {"id": self.id, "name": self.name, "text": self.text, "steps": self.plain_steps(), "test": self.test, "ftp": self.ftp,
-                "events": self.events, "overtime": self.overtime,
-                "agent": {"wakes": self.agent_wakes, "local_cues": self.local_cues, "usage": self.usage, "seen": self.agent_seen},
-                "start": self.start_ts, "samples": self.samples, "el": self.el, "k": self.k, "jr": self.jr,
-                "ov": {str(k): v for k, v in self.ov.items()}, "manual": self.manual, "source": "server",
+                "events": self.events, "overtime": self.overtime, "start": self.start_ts, "samples": self.samples, "el": self.el, "k": self.k, "jr": self.jr,
+                "ov": {str(k): v for k, v in self.ov.items()}, "source": "server",
                 "course": self.course, "cs": self.cs}
 
 
@@ -132,7 +124,6 @@ class RideEngine:
         self.changed = threading.Condition(self.lock)
         self.ride: Ride | None = None
         self.p_hist: list[float] = []
-        self.messages: list[dict] = []  # newest last: {seq, msg, ts}
         self.last_finished: dict | None = None  # {id, name, samples, ts, saved}
         self.last_saved: dict | None = None
         self.on_finish: Callable[[dict], None] | None = None  # server hook (auto Garmin upload)
@@ -157,36 +148,23 @@ class RideEngine:
     # ---------- paths ----------
     @property
     def current_file(self) -> Path:
-        return self.data / "coach" / "engine.json"
+        return self.data / "live" / "engine.json"
 
     @property
     def journal_file(self) -> Path:
         """One JSON sample per line, appended every second; folded into engine.json on each snapshot."""
-        return self.data / "coach" / "engine.journal"
+        return self.data / "live" / "engine.journal"
 
     @property
     def rides_dir(self) -> Path:
         return self.data / "rides"
 
     def note(self, line: str) -> None:
-        """Called for every event line: keep a per-ride transcript (archived with the ride)."""
+        """Called for every event line: keep a per-ride log (archived with the ride)."""
         with self.lock:
             r = self.ride
             if r is not None and (r.started or line.startswith("RIDE START")):
                 r.events.append([int(self.wall() * 1000), line])
-
-    def count_agent(self, wakes: int = 0, cues: int = 0, usage: dict | None = None, total: bool = False) -> None:
-        with self.lock:
-            r = self.ride
-            if r is None:
-                return
-            r.agent_wakes += wakes
-            r.local_cues += cues
-            if usage:
-                for k, v in usage.items():
-                    if isinstance(v, (int, float)) and not isinstance(v, bool):
-                        r.usage[k] = v if total else round(r.usage.get(k, 0) + v, 6)
-                r.usage["reports"] = r.usage.get("reports", 0) + 1
 
     def _bump(self):
         self.version += 1
@@ -269,11 +247,7 @@ class RideEngine:
             r.start_ts = cur.get("start")
             r.events = cur.get("events") or []
             r.overtime = bool(cur.get("overtime"))
-            ag = cur.get("agent") or {}
-            r.agent_wakes, r.local_cues, r.usage = ag.get("wakes", 0), ag.get("local_cues", 0), ag.get("usage") or {}
-            r.agent_seen = bool(ag.get("seen"))
             r.ov = {int(k): v for k, v in (cur.get("ov") or {}).items()}
-            r.manual = cur.get("manual")
             if cur.get("course"):
                 try:
                     r.set_course(check_course(cur["course"]))
@@ -349,37 +323,30 @@ class RideEngine:
         return r.sg
 
     # ---------- controls (HTTP threads) ----------
-    def control(self, action: str, body: dict, source: str = "manual") -> dict:
-        """source: "manual" for the rider's page (logged as MANUAL lines; wins over coaches for a while),
-        "api" for token holders (CLI, agents)."""
+    def control(self, action: str, body: dict) -> dict:
+        """One rider action. Target and plan changes are logged as MANUAL lines and echoed as `did`."""
         with self.lock:
             fn = {"load": self.load, "start": self.start, "pause": self.toggle_pause, "skip": self.skip,
                   "back": self.back, "end": self.finish, "adjust": self.adjust, "mode": self.set_mode,
-                  "feel": self.feel, "dismiss": self.dismiss, "resume": self.resume_ride, "hold": self.hold,
+                  "dismiss": self.dismiss, "resume": self.resume_ride, "hold": self.hold,
                   "intensity": self.set_intensity, "free": self.set_free, "target": self.set_target,
                   "save": self.save_copy, "edit": lambda b: self.edit(b.get("edit") or {})}.get(action)
             if not fn:
                 raise ValueError(f"unknown action {action!r}")
-            self._src, self._did = source, None
-            try:
-                res = fn(body) or {}
-            finally:
-                self._src = "api"
+            self._did = None
+            res = fn(body) or {}
             if self._did:
                 res = {**res, "did": self._did}  # the page confirms exactly what changed
             self.save()
             self._bump()
             return res
 
-    _src = "api"  # who is calling: set by control() for the duration of one action
-    _did: str | None = None
+    _did: str | None = None  # what the current control action changed
 
-    def _changed(self, what: str, step: int | None = None) -> None:
-        """A target or plan change: the rider's own ones are logged as MANUAL lines and remembered."""
-        r = self.ride
-        if r is None or self._src != "manual":
+    def _changed(self, what: str) -> None:
+        """A target or plan change by the rider: logged as a MANUAL line."""
+        if self.ride is None:
             return
-        r.manual = {"what": what.split(" ")[0], "step": step, "ts": int(self.wall() * 1000)}
         self._did = what
         self.log_event(f"MANUAL {what}")
 
@@ -408,7 +375,6 @@ class RideEngine:
         r.started = True
         r.start_ts = int(self.wall() * 1000)
         r.pp = False
-        self.messages = []  # the coach bar starts clean: no messages from the previous ride
         self.log_event(E.line_ride_start(r.name, r.ftp, len(r.steps) if r.steps else None, r.total if r.steps else None))
         if self.hub.mode == "ble" and not (self.hub.r.cadence > 0 or self.hub.r.power > 0):
             r.paused = r.auto = True
@@ -509,9 +475,8 @@ class RideEngine:
             r.apply_override(idx, [max(0, E.js_round(plan(s["a"]) + d)), max(0, E.js_round(plan(s["b"]) + d))])
         else:
             r.apply_override(idx, E.js_round(w / kk))
-        s["m"] = 1  # set by hand: the built-in coach leaves this step alone
         self.apply_target()
-        self._changed(f"target step {idx + 1} {w}W", idx + 1)
+        self._changed(f"target step {idx + 1} {w}W")
         return {"step": idx + 1, "w": w}
 
     def skip(self, body: dict | None = None):
@@ -530,7 +495,7 @@ class RideEngine:
             if into >= 1:
                 r.el = max(r.el, s["t0"] + s["d"] + 0.01)
             self.apply_target()
-            self._changed(f"skip step {at[0] + 1}", at[0] + 1)
+            self._changed(f"skip step {at[0] + 1}")
 
     def back(self, body: dict | None = None):
         """Like a music player's previous button: restart the current step, or in its first 10 s go back to
@@ -571,7 +536,7 @@ class RideEngine:
         r.retime()
         r.text = to_text(r.plain_steps())
         self.apply_target()
-        self._changed(f"back step {src + 1}", src + 1)
+        self._changed(f"back step {src + 1}")
 
     def adjust(self, body: dict):
         """+/-: intensity 1 % in ERG workouts, else grade 0.5 %, level 0.5 or 5 W; big: five times that."""
@@ -615,16 +580,6 @@ class RideEngine:
         self.apply_target()
         self._changed(f"mode {self.MODE_NAMES[m]}")
 
-    def feel(self, body: dict):
-        f = str(body.get("feel", "")).lower()
-        if f not in ("easier", "good", "harder"):
-            raise ValueError("feel must be easier, good or harder")
-        r = self.ride
-        l30 = r.samples[-30:] if r else []
-        at = step_at(r.steps, r.el) if r and r.steps else None
-        hr = self.hub.r.hr
-        self.log_event(E.line_feel(f, at[0] + 1 if at else None, l30, hr))
-
     def save_copy(self, body: dict | None = None):
         """Save the ride so far to History without ending it (the final save overwrites it)."""
         r = self.ride
@@ -660,7 +615,7 @@ class RideEngine:
             self.on_finish(p)
         return {"saved": True, "id": p["id"]}
 
-    # ---------- workout edits (coach API) ----------
+    # ---------- workout edits ----------
     def edit(self, e: dict) -> dict:
         """Insert, delete or retime steps of the running workout. Raises ValueError."""
         with self.lock:
@@ -811,30 +766,10 @@ class RideEngine:
             r.retime()
             r.text = to_text(r.plain_steps())
             self.log_event(f"EDIT {desc} | {len(r.steps)} steps, {E.fmt_t(r.total)}")
-            if self._src == "manual":  # the EDIT line already tells the coaches; remember who made it
-                r.manual = {"what": "edit", "step": None, "ts": int(self.wall() * 1000)}
             self.apply_target()
             self.save()
             self._bump()
             return {"op": op, "detail": desc, "steps": len(r.steps), "total_s": r.total}
-
-    # ---------- coach commands ----------
-    def coach(self, cmd: dict) -> None:
-        with self.lock:
-            if cmd.get("msg"):
-                self.messages.append({"seq": cmd["seq"], "msg": cmd["msg"], "ts": int(self.wall() * 1000),
-                                      "important": bool(cmd.get("important"))})
-                del self.messages[:-10]
-            s = cmd.get("set")
-            r = self.ride
-            if s and r and r.steps:
-                at = step_at(r.steps, r.el)
-                idx = (at[0] if at else None) if s["step"] == "cur" else s["step"] - 1
-                kk = 1 if r.test else r.k  # w is what the trainer gets now; later intensity changes still scale it
-                if idx is not None and r.apply_override(idx, E.js_round(s["w"] / kk)):
-                    self.apply_target()
-                    self.save()
-            self._bump()
 
     # ---------- tick ----------
     def _sim_step(self):
@@ -882,7 +817,7 @@ class RideEngine:
                     r.el += dt
                     self._course_tick(dt)
                     self._record()
-                    self._coach_tick()
+                    self._step_tick()
                     if r.steps and r.el >= r.total and not r.overtime:
                         r.overtime = True
                         if r.acc and r.acc["p"]:
@@ -945,7 +880,8 @@ class RideEngine:
         else:
             self._journal(r.samples[-1])  # every other sample: one fsync'd line
 
-    def _coach_tick(self):
+    def _step_tick(self):
+        """START/END lines per step, with the step's averages."""
         r = self.ride
         if not r.steps:
             return
@@ -953,24 +889,21 @@ class RideEngine:
         at = step_at(r.steps, r.el)
         if not at:
             return
-        i, s, into = at
+        i, s = at[0], at[1]
         if i != r.last_step:
             if r.acc and r.acc["p"]:
                 self.log_event(E.line_step_end(**r.acc))
             r.acc = {"i": i, "p": [], "h": [], "c": [], "tg": []}
-            r.last_step, r.last_line = i, r.el
+            r.last_step = i
             self.log_event(E.line_step_start(i, len(r.steps), s["d"], self.cur_target()))
         r.acc["p"].append(x[2])
         if x[4]:
             r.acc["h"].append(x[4])
         r.acc["c"].append(x[3])
         r.acc["tg"].append(x[6])
-        if r.el - r.last_line >= 30:
-            r.last_line = r.el
-            self.log_event(E.line_tick(r.el, i, len(r.steps), into, s["d"], self.cur_target(), r.samples[-30:], r.acc["p"]))
 
     # ---------- state ----------
-    def state(self, athlete: dict, said: list | None = None) -> dict:
+    def state(self, athlete: dict) -> dict:
         with self.lock:
             d = self.hub.r
             st: dict[str, Any] = {
@@ -978,8 +911,7 @@ class RideEngine:
                 "devices": self.hub.status(),
                 "live": {"power": round(d.power), "power_3s": round(_mean(self.p_hist)) if self.p_hist else 0,
                          "cadence": round(d.cadence), "hr": self._hr_now() or None, "speed_kmh": round(d.speed, 1)},
-                "ride": None, "messages": self.messages[-3:], "said": said or [],
-                "last_finished": self.last_finished, "last_saved": self.last_saved, "notice": self.notice, "notice_id": self.notice_id,
+                "ride": None, "last_finished": self.last_finished, "last_saved": self.last_saved, "notice": self.notice, "notice_id": self.notice_id,
                 "version": self.version,
             }
             r = self.ride
@@ -995,10 +927,8 @@ class RideEngine:
                 "ftp": r.ftp, "intensity": r.k, "test": r.test, "target_w": self.cur_target(),
                 "grade": None if r.steps else r.jr["g"], "level": None if r.steps else r.jr.get("r"),
                 "overtime": r.overtime, "after_workout": self.settings().get("afterWorkout", "hold"),
-                "agent": {"wakes": r.agent_wakes, "local_cues": r.local_cues, "usage": r.usage, "seen": r.agent_seen},
                 "jr": r.jr, "samples": len(r.samples), "control": self.control_mode(),
                 "ov": {str(k): v for k, v in r.ov.items()},
-                "manual": {**r.manual, "ago_s": max(0, round(self.wall() - r.manual["ts"] / 1000))} if r.manual else None,
                 "last30": {"power": E.js_round(_mean([x[2] for x in l30])), "cadence": E.js_round(_mean([x[3] for x in l30])),
                            "hr": h[-1] if h else None, "hr_delta": (h[-1] - h[0]) if h else None},
                 "total_s": None, "step": None, "steps": None, "course": None,
@@ -1018,7 +948,7 @@ class RideEngine:
                 ride["steps"] = [{"index": i + 1, "start_s": s["t0"], "duration_s": s["d"], "free": bool(s.get("free")),
                                   "start_w": step_watts(s, 0, r.ftp, kk), "end_w": step_watts(s, s["d"], r.ftp, kk),
                                   "planned": None if s.get("free") else {"a": s["a"], "b": s["b"], "unit": s["u"]},
-                                  "override_w": r.ov.get(i), "manual": bool(s.get("m"))} for i, s in enumerate(r.steps)]
+                                  "override_w": r.ov.get(i)} for i, s in enumerate(r.steps)]
             return st
 
     def samples_since(self, ride_id: str | None, n: int) -> tuple[str | None, list]:

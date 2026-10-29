@@ -55,18 +55,16 @@ export function detail(r, floors, meta = {}) {
     summary: { time_s: m.dur, elapsed_s: jsr(m.elapsed), avg_w: jsr(m.avgP), np: jsr(m.np), max_w: m.maxP, if: +m.IF.toFixed(2), tss: jsr(m.tss), kJ: jsr(m.kJ),
       avg_hr: jsr(m.avgHR) || null, max_hr: m.maxHR || null, avg_cad: jsr(m.avgC), distance_km: +(m.dist / 1000).toFixed(2), elevation_gain_m: climbed(r.samples) },
     best: bestEfforts(P), power_zones_s: Object.fromEntries(ZONES.map((z, i) => [z[2], m.zt[i]])),
-    hr_zones_s: floors ? Object.fromEntries(hz.map((t, i) => [`Z${i + 1}`, t])) : null, laps: laps(r), events: r.events || [],
-    garmin: null, strava: meta.strava || null, description: meta.description || null, agent: r.agent || { wakes: null, local_cues: null, usage: {} } };
+    hr_zones_s: floors ? Object.fromEntries(hz.map((t, i) => [`Z${i + 1}`, t])) : null, laps: laps(r),
+    garmin: null, strava: meta.strava || null, description: meta.description || null };
   const est = ftpEstimate(r, m, P); if (est) out.ftp_estimate = est;
   return out;
 }
 export function metaRow(r, meta = {}) {
-  const m = summarize(r), P = r.samples.map(x => x[2]), a = r.agent || {}, u = a.usage || {};
-  const tokens = ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens'].reduce((s, k) => s + (u[k] || 0), 0);
+  const m = summarize(r), P = r.samples.map(x => x[2]);
   return { id: r.id, name: r.name, start: r.start || r.samples[0]?.[0], samples: r.samples.length, source: r.source, ftp: r.ftp, test: !!r.test,
     time_s: m.dur, avg_w: jsr(m.avgP), np: jsr(m.np), tss: jsr(m.tss), if: +m.IF.toFixed(2), kJ: jsr(m.kJ), avg_hr: jsr(m.avgHR) || null,
-    best: bestEfforts(P), ftp_estimate: ftpEstimate(r, m, P), garmin: null, strava: meta.strava || null,
-    agent_wakes: a.wakes ?? null, local_cues: a.local_cues ?? null, agent_tokens: tokens || null, agent_cost_usd: u.cost_usd ?? null };
+    best: bestEfforts(P), ftp_estimate: ftpEstimate(r, m, P), garmin: null, strava: meta.strava || null };
 }
 const iso = d => d.toISOString().slice(0, 10);
 export function trends(rows, weeks = 12, today = new Date()) {
@@ -85,9 +83,9 @@ export function trends(rows, weeks = 12, today = new Date()) {
   }
   return { weeks: buckets, ftp_history: ftpHist, best };
 }
-export function summaryText(d, link, coach) {
+export function summaryText(d, link, note) {
   const s = d.summary, lines = [];
-  if (coach) lines.push(coach.trim(), '');
+  if (note) lines.push(note.trim(), '');
   lines.push(`NP ${s.np} W | avg ${s.avg_w} W | IF ${s.if.toFixed(2)} | TSS ${s.tss} | ${s.kJ} kJ` + (s.avg_hr ? ` | HR ${s.avg_hr} avg, ${s.max_hr} max` : ''));
   const work = (d.laps || []).filter(l => l.target_w && !l.free && d.ftp && l.target_w >= 0.88 * d.ftp);
   if (work.length) lines.push(`Intervals (${work.length}): ${work.slice(0, 12).map(l => l.avg_w).join(', ')} W`);

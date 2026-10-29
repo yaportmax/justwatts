@@ -1,5 +1,5 @@
 """Server-backed history (Python FIT/TCX parity with JS, laps, trends), crash journal, overtime,
-workout length, resistance mode, voice mute/barge-in, and the full-control MCP tools."""
+workout length and resistance mode."""
 import base64
 import io
 import json
@@ -41,7 +41,6 @@ def test_laps_detail_and_trends():
     assert [(l["index"], l["time_s"], l["avg_w"], l["overtime"]) for l in laps] == [(1, 60, 100, False), (2, 120, 250, False), (3, 20, 250, True)]
     d = H.detail(r, [100, 120, 140, 160, 180])
     assert d["best"]["1m"] == 250 and d["summary"]["time_s"] == 200 and d["hr_zones_s"]["Z2"] > 0
-    assert d["events"][0][1].startswith("RIDE START")
     row = H.ride_meta_row(r)
     t = H.trends([row, {**row, "id": "r-2", "start": t0 + 86400000 * 8, "tss": 50, "ftp": 210, "best": {"5m": 260}}],
                  weeks=4, today=__import__("datetime").date(2026, 1, 15))
@@ -66,8 +65,7 @@ def ride(srv, text, n):
 
 def test_history_endpoints(srv):
     ride(srv, "1m 50%, 1m 90%", 60)
-    srv.client.coach(msg="Halfway")
-    srv.server.log_event('SAID (whisper): "feeling good today"')
+    ctl(srv, "target", w=190)
     for _ in range(70):
         srv.server.engine.tick(1.0)
     rid = ctl(srv, "end")[1]["id"]
@@ -75,9 +73,9 @@ def test_history_endpoints(srv):
     assert rows[0]["id"] == rid and rows[0]["time_s"] == 130 and rows[0]["tss"] >= 1 and rows[0]["garmin"] is None
     d = srv.req("GET", f"/api/rides/{rid}/detail")[1]
     assert len(d["laps"]) == 3 and d["laps"][2]["overtime"]
-    lines = [l for _, l in d["events"]]
+    lines = [l for _, l in srv.req("GET", f"/api/rides/{rid}")[1]["events"]]  # the ride keeps its event log
     assert lines[0].startswith("RIDE START") and lines[-1].startswith("RIDE END")
-    assert any("Halfway" in l for l in lines) and any("feeling good today" in l for l in lines)
+    assert "MANUAL target step 2 190W" in lines
     code, fit, ctype = srv.req("GET", f"/api/rides/{rid}/fit", raw=True)
     assert code == 200 and fit[8:12] == b".FIT"
     assert srv.req("GET", f"/api/rides/{rid}/tcx", raw=True)[1].startswith(b"<?xml")
@@ -129,7 +127,7 @@ def test_journal_recovers_samples_after_crash(srv):
 
 # ---------- overtime, length, resistance ----------
 def edit(srv, **e):
-    return srv.req("POST", "/api/coach", {"edit": e}, headers=srv.bearer)
+    return ctl(srv, "edit", edit=e)
 
 
 def test_overtime_then_insert_more(srv):
@@ -173,77 +171,3 @@ def test_resistance_mode(srv):
     ctl(srv, "free", m="g", value=3.5)
     assert eng.hub.wanted_cmd == {"k": "sim", "g": 3.5}
     assert ctl(srv, "intensity", percent=110)[0] == 200  # allowed on free rides too (no effect)
-
-
-# ---------- voice: mute by voice, barge-in, important messages ----------
-def test_voice_mute_barge_and_important(srv):
-    v = srv.req("GET", "/api/voice")[1]
-    assert v["mode"] == "all" and v["barge"] == 0
-    srv.req("POST", "/api/event", {"line": 'SAID (whisper): "please stop talking"'}, headers=srv.bearer)
-    v = srv.req("GET", "/api/voice")[1]
-    assert v["mode"] == "silent" and v["barge"] == 1
-    srv.req("POST", "/api/event", {"line": 'SAID (whisper): "ok you can talk again"'}, headers=srv.bearer)
-    assert srv.req("GET", "/api/voice")[1]["mode"] == "all"
-    assert srv.req("POST", "/api/voice", {"event": "speech_start"}, headers=srv.bearer)[1]["barge"] == 2
-    assert srv.req("POST", "/api/voice", {"event": "tts_start"}, headers=srv.page)[1]["tts"] is True
-    assert srv.req("POST", "/api/voice", {"event": "nope"}, headers=srv.page)[0] == 400
-    assert srv.req("POST", "/api/voice", {"event": "tts_end"})[0] == 403
-    types = [e.get("state") for e in srv.client.events(10) if e["type"] == "voice"]
-    assert types == ["muted", "unmuted"]
-    assert srv.client.coach(msg="fyi")["important"] is False
-    assert srv.client.coach(msg="drop", step="cur", watts=100)["important"] is True
-    assert srv.client.coach(msg="safety", important=True)["important"] is True
-    st = srv.client.state()["state"]
-    assert st["voice"]["mode"] == "all" and [m["important"] for m in st["messages"]] == [False, True, True]
-
-
-# ---------- MCP: the agent can do what the athlete can ----------
-@pytest.fixture
-def mcp(srv):
-    pytest.importorskip("mcp")
-    from justwatts import mcp_server as M
-    M.set_client(srv.client)
-    yield M
-    M.set_client(None)
-
-
-def test_mcp_full_control(mcp, srv):
-    M = mcp
-    srv.req("POST", "/api/devices", {"action": "sim", "kind": "trainer"}, headers=srv.bearer)
-    assert M.devices()["trainer"] == "sim"
-    M.load_workout("1m 50%, 3m 90%", name="Agent")
-    M.ride_control("start")
-    eng = srv.server.engine
-    for _ in range(70):
-        eng.tick(1.0)
-    with pytest.raises(M.ToolError, match="end_current"):
-        M.load_workout("5m 50%")
-    with pytest.raises(M.ToolError, match="confirm"):
-        M.ride_control("end")
-    M.ride_control("pause")
-    assert eng.ride.paused
-    M.ride_control("resume")
-    assert not eng.ride.paused
-    assert M.set_intensity(95)["ok"]
-    with pytest.raises(M.ToolError, match="needs a recent FEEL"):
-        M.set_intensity(105)
-    with pytest.raises(M.ToolError, match="exceeds"):
-        M.set_intensity(60)
-    assert M.set_workout_length(300)["result"]["total_s"] == 300
-    assert M.set_voice_mode("important")["voiceMode"] == "important"
-    assert M.update_settings(ftp=230, hr_zone_floors=[100, 120, 140, 160, 180], after_workout="grade0")["ftp"] == 230
-    with pytest.raises(M.ToolError):
-        M.update_settings(hr_zone_floors=[1, 2])
-    assert M.ride_control("save")["saved"]
-    M.ride_control("end", confirm=True)
-    rows = M.list_rides()
-    assert rows[0]["name"] == "Agent"
-    assert M.get_ride_detail(rows[0]["id"])["laps"]
-    assert "weeks" in M.get_trends(4)
-    assert M.upload_ride_to_garmin(rows[0]["id"])["ok"]
-    M.load_workout(None)
-    with pytest.raises(M.ToolError, match="ceiling"):
-        M.free_ride("erg", 600)
-    with pytest.raises(M.ToolError, match="FEEL"):
-        M.free_ride("grade", 12)
-    assert M.free_ride("resistance", 6)["ok"] and eng.hub.wanted_cmd == {"k": "res", "r": 6.0}

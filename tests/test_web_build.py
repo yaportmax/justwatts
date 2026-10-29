@@ -49,7 +49,7 @@ def test_web_mode_ride_with_reload(dist, node):
     f = out["final"]
     assert out["restored"] == {"custom": ["c-test1"], "courses": ["k-test1"]}
     assert f["rides"] == 1 and f["samples"] == 247 and f["fit"] == ".FIT" and f["backupRides"] == 1 and f["steps"] == 3
-    assert f["garminStatus"] == 503 and f["agent"] == {"connected": False} and f["meter"] == "none"
+    assert f["garminStatus"] == 503 and out["oldKeys"] == []
     assert [e.split(" ")[0] + " " + e.split(" ")[1] for e in f["events"]] == ["RIDE START", "RIDE RESUMED", "EDIT insert", "WORKOUT DONE", "RIDE END"]
     k = out["picks"]                                                          # per-ride course picks
     assert out["oldCourse"] is False                                         # the old global course is dropped
@@ -63,5 +63,3 @@ def test_web_mode_ride_with_reload(dist, node):
     c = out["course"]                                                         # Just ride on the course picked next to it
     assert c["name"] == c["course"] == "The climb" and c["done"] > 100 and c["profile"] == 300
     assert c["want"]["k"] == "sim" and c["strip"] == "" and "%" in c["text"]
-    assert out["coachDefault"] is False                                       # no built-in coach on the web
-    assert "Rep done" not in " ".join(out["spoken"])                        # and nothing coach-spoken

@@ -32,8 +32,6 @@ function run(r) {
         resumed: core.lineResumed(r.el, r.n),
         stepStart: core.lineStepStart(r.i, r.count, r.d, r.tgt),
         stepEnd: core.lineStepEnd(r.acc),
-        tick: core.lineTick(r.el, r.i, r.count, r.into, r.d, r.tgt, r.l30, r.stepP),
-        feel: core.lineFeel(r.feel, r.stepNo, r.l30, r.hr),
       };
     case 'fmtT':
       return r.values.map(core.fmtT);

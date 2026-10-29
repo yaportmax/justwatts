@@ -1,7 +1,7 @@
 // In-page ride engine for the web build: a port of server/justwatts/engine.py.
-// Same state shape, controls, coach commands, mid-ride edits, overtime and persistence semantics;
+// Same state shape, controls, mid-ride edits, overtime and persistence semantics;
 // persistence goes to IndexedDB (snapshot every 30 s + a sample journal every 5 s, see backend.js).
-import { parseWorkout, toText, stepAt, stepWatts, fmtT, lineRideStart, lineRideEnd, lineStepStart, lineStepEnd, lineTick, lineFeel } from '../core.js';
+import { parseWorkout, toText, stepAt, stepWatts, fmtT, lineRideStart, lineRideEnd, lineStepStart, lineStepEnd } from '../core.js';
 import { G_MIN, G_MAX, checkCourse, eleAt, gradeAt, massOf, profileOf, speedStep } from '../course.js';
 
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
@@ -11,8 +11,7 @@ const r1 = x => Math.floor(x * 10 + 0.5) / 10;
 export class Ride {
   constructor(name, text, test, ftp) {
     Object.assign(this, { name, text, test, ftp, steps: null, total: 0, el: 0, started: false, paused: false, auto: false, pp: false, idle: 0, k: 1,
-      samples: [], jr: { m: 'g', g: 0, w: jsr(ftp * 0.6), r: 5, wm: 'e' }, startTs: null, ov: {}, lastStep: -1, acc: null, lastLine: 0, events: [],
-      overtime: false, agentWakes: 0, localCues: 0, usage: {}, agentSeen: false, manual: null,
+      samples: [], jr: { m: 'g', g: 0, w: jsr(ftp * 0.6), r: 5, wm: 'e' }, startTs: null, ov: {}, lastStep: -1, acc: null, events: [], overtime: false,
       // course: cs = {d: metres ridden, v: virtual speed m/s, up: metres climbed, end}; sg/st: grade rate limit
       course: null, cs: { d: 0, v: 0, up: 0, end: false }, prof: null, sg: null, st: -1e9 });
     if (text) { this.steps = parseWorkout(text); this.retime(); }
@@ -32,8 +31,7 @@ export class Ride {
   }
   payload() {
     return { id: this.id, name: this.name, text: this.text, steps: this.plainSteps(), test: this.test, ftp: this.ftp, events: this.events,
-      overtime: this.overtime, agent: { wakes: this.agentWakes, local_cues: this.localCues, usage: this.usage, seen: this.agentSeen },
-      start: this.startTs, samples: this.samples, el: this.el, k: this.k, jr: this.jr, ov: Object.fromEntries(Object.entries(this.ov)), manual: this.manual, source: 'web',
+      overtime: this.overtime, start: this.startTs, samples: this.samples, el: this.el, k: this.k, jr: this.jr, ov: Object.fromEntries(Object.entries(this.ov)), source: 'web',
       course: this.course, cs: this.cs };
   }
 }
@@ -41,7 +39,7 @@ export class Ride {
 export class Engine {
   constructor({ hub, logEvent, settings, save, archive, clock = () => performance.now() / 1000, wall = () => Date.now() }) {
     Object.assign(this, { hub, logEvent, settings, saveFn: save, archiveFn: archive, clock, wall });
-    this.ride = null; this.pHist = []; this.messages = []; this.lastFinished = null; this.lastSaved = null; this._notice = null; this.noticeId = 0;
+    this.ride = null; this.pHist = []; this.lastFinished = null; this.lastSaved = null; this._notice = null; this.noticeId = 0;
     this.version = 0; this.simT = 0; this.listeners = new Set(); this.onFinish = null;
   }
   get notice() { return this._notice; }
@@ -59,8 +57,7 @@ export class Engine {
     if (cur.steps) { r.steps = cur.steps.map(s => ({ ...s })); r.retime(); }
     Object.assign(r, { el: Math.max(cur.el || 0, cur.samples.at(-1)[1]), started: true, paused: true, auto: true, pp: true, k: cur.k || 1,
       samples: cur.samples, jr: { ...r.jr, ...(cur.jr || {}) }, startTs: cur.start, events: cur.events || [], overtime: !!cur.overtime });
-    r.ov = Object.fromEntries(Object.entries(cur.ov || {}).map(([k, v]) => [+k, v])); r.manual = cur.manual || null;
-    const ag = cur.agent || {}; r.agentWakes = ag.wakes || 0; r.localCues = ag.local_cues || 0; r.usage = ag.usage || {};
+    r.ov = Object.fromEntries(Object.entries(cur.ov || {}).map(([k, v]) => [+k, v]));
     if (cur.course) { try { r.setCourse(checkCourse(cur.course)); r.cs = { ...r.cs, ...(cur.cs || {}) }; r.resumeCourse(); } catch {} }
     this.ride = r;
     this.log(`RIDE RESUMED after reload at T+${fmtT(r.el)} (${r.samples.length} samples kept)`);
@@ -103,18 +100,18 @@ export class Engine {
   // ---------- controls ----------
   control(action, body = {}) {
     const fn = { load: this.load, start: this.start, pause: this.togglePause, hold: this.hold, resume: this.resumeRide, skip: this.skip, back: this.back, end: this.finish,
-      adjust: this.adjust, mode: this.setMode, intensity: this.setIntensity, free: this.setFree, target: this.setTarget, feel: this.feel, save: this.saveCopy,
+      adjust: this.adjust, mode: this.setMode, intensity: this.setIntensity, free: this.setFree, target: this.setTarget, save: this.saveCopy,
       dismiss: () => { this.notice = null; }, edit: b => this.edit(b.edit || {}) }[action];
     if (!fn) throw new Error(`unknown action ${action}`);
-    this.src = 'manual'; this.did = null;   // in the web build every control comes from the rider's page
-    let res; try { res = fn.call(this, body) || {}; } finally { this.src = 'api'; }
+    this.did = null;
+    let res = fn.call(this, body) || {};
     if (this.did) res = { ...res, did: this.did };   // the page confirms exactly what changed
     this.save(); this.bump(); return res;
   }
-  // a target or plan change by the rider: logged as a MANUAL line and remembered (coaches hold off)
-  changed(what, step = null) {
-    const r = this.ride; if (!r || this.src !== 'manual') return;
-    r.manual = { what: what.split(' ')[0], step, ts: this.wall() }; this.did = what; this.log(`MANUAL ${what}`);
+  // a target or plan change by the rider: logged as a MANUAL line
+  changed(what) {
+    if (!this.ride) return;
+    this.did = what; this.log(`MANUAL ${what}`);
   }
   jrText(m) { const v = this.ride.jr[m]; return m === 'g' ? `grade ${(+v).toFixed(1)}%` : m === 'r' ? `level ${(+v).toFixed(1)}` : `erg ${v}W`; }
   // {workout, course}: a course alone is a free ride on it; with a workout, ERG segments keep their watts
@@ -129,7 +126,7 @@ export class Engine {
   }
   start() {
     const r = this.ride; if (!r || r.started) return;
-    r.started = true; r.startTs = this.wall(); r.pp = false; this.messages = [];
+    r.started = true; r.startTs = this.wall(); r.pp = false;
     this.log(lineRideStart(r.name, r.ftp, r.steps ? { steps: r.steps, total: r.total } : null));
     if (this.hub.mode === 'ble' && !(this.hub.r.cadence > 0 || this.hub.r.power > 0)) r.paused = r.auto = true;
   }
@@ -146,7 +143,7 @@ export class Engine {
     if (at.into >= 1) at.s.d = Math.max(1, Math.ceil(at.into));
     else { r.steps.splice(at.i, 1); const ov = {}; for (const [k, v] of Object.entries(r.ov)) if (+k !== at.i) ov[+k > at.i ? +k - 1 : k] = v; r.ov = ov; }
     r.retime(); if (at.into >= 1) r.el = Math.max(r.el, at.s.t0 + at.s.d + 0.01);
-    this.applyTarget(); this.changed(`skip step ${at.i + 1}`, at.i + 1);
+    this.applyTarget(); this.changed(`skip step ${at.i + 1}`);
   }
   // like a music player's previous button: restart the current step, or in its first 10 s go back to the
   // previous one, by inserting copies now (time only moves forward). After the plan: the last step again.
@@ -167,7 +164,7 @@ export class Engine {
     const old = { ...r.ov }; r.steps.splice(pos, 0, ...nw);
     r.ov = {}; for (const [k, v] of Object.entries(old)) r.ov[+k >= pos ? +k + nw.length : +k] = v;
     nw.forEach((_, j) => { if (old[src + j] != null) r.ov[pos + j] = old[src + j]; });
-    r.retime(); r.text = toText(r.plainSteps()); this.applyTarget(); this.changed(`back step ${src + 1}`, src + 1);
+    r.retime(); r.text = toText(r.plainSteps()); this.applyTarget(); this.changed(`back step ${src + 1}`);
   }
   // +/-: intensity 1 % in ERG workouts, else grade 0.5 %, level 0.5 or 5 W; big: five times that
   adjust(body) {
@@ -213,13 +210,7 @@ export class Engine {
     let w = body.w != null ? +body.w : (now || 0) + +(body.delta || 0); w = Math.max(0, Math.min(2000, jsr(w)));
     if (s.a !== s.b && now) { const plan = x => s.u === 'w' ? x : x * r.ftp, d = (w - now) / kk; r.applyOverride(idx, [Math.max(0, jsr(plan(s.a) + d)), Math.max(0, jsr(plan(s.b) + d))]); }
     else r.applyOverride(idx, jsr(w / kk));
-    s.m = 1;  // set by hand: the built-in coach leaves this step alone
-    this.applyTarget(); this.changed(`target step ${idx + 1} ${w}W`, idx + 1); return { step: idx + 1, w };
-  }
-  feel(body) {
-    const f = String(body.feel || '').toLowerCase(); if (!['easier', 'good', 'harder'].includes(f)) throw new Error('feel must be easier, good or harder');
-    const r = this.ride, at = r?.steps ? stepAt({ steps: r.steps }, r.el) : null;
-    this.log(lineFeel(f, at ? at.i + 1 : null, r ? r.samples.slice(-30) : [], this.hub.r.hr));
+    this.applyTarget(); this.changed(`target step ${idx + 1} ${w}W`); return { step: idx + 1, w };
   }
   saveCopy() {
     const r = this.ride; if (!r?.started || r.samples.length < 10) throw new Error('nothing to save yet');
@@ -237,16 +228,7 @@ export class Engine {
     return { saved: true, id: p.id };
   }
 
-  // ---------- coach commands + edits ----------
-  coach(cmd) {
-    if (cmd.msg) { this.messages.push({ seq: cmd.seq, msg: cmd.msg, ts: this.wall(), important: !!cmd.important }); this.messages = this.messages.slice(-10); }
-    const s = cmd.set, r = this.ride;
-    if (s && r?.steps) {
-      const at = stepAt({ steps: r.steps }, r.el), idx = s.step === 'cur' ? at?.i : s.step - 1;
-      if (idx != null && r.applyOverride(idx, jsr(s.w / (r.test ? 1 : r.k)))) { this.applyTarget(); this.save(); }  // w = watts now
-    }
-    this.bump();
-  }
+  // ---------- edits ----------
   edit(e) {
     const r = this.ride; if (!r?.steps) throw new Error('no structured workout loaded');
     let at = stepAt({ steps: r.steps }, r.el), cur, into;
@@ -312,7 +294,6 @@ export class Engine {
     } else throw new Error('edit.op must be insert, replace, delete, duration, extend, total or rest');
     r.retime(); r.text = toText(r.plainSteps());
     this.log(`EDIT ${desc} | ${r.steps.length} steps, ${fmtT(r.total)}`);
-    if (this.src === 'manual') r.manual = { what: 'edit', step: null, ts: this.wall() };
     this.applyTarget(); this.save(); this.bump();
     return { op, detail: desc, steps: r.steps.length, total_s: r.total };
   }
@@ -346,7 +327,7 @@ export class Engine {
         const x = [this.wall(), +r.el.toFixed(1), jsr(d.power), jsr(d.cadence), this.hrNow(), +(+d.speed).toFixed(2), this.curTarget() || 0];
         if (r.course) { x[5] = Math.floor(r.cs.v * 360 + 0.5) / 100; x.push(r1(eleAt(r.course, r.cs.d)), r1(r.cs.d)); }  // virtual speed, altitude, distance
         r.samples.push(x);
-        this.coachTick();
+        this.stepTick();
         if (r.steps && r.el >= r.total && !r.overtime) {
           r.overtime = true;
           if (r.acc?.p.length) this.log(lineStepEnd(r.acc));
@@ -370,31 +351,30 @@ export class Engine {
       this.notice = 'Course done. Keep riding or press End ride.';
     }
   }
-  coachTick() {
+  // START/END lines per step, with the step's averages
+  stepTick() {
     const r = this.ride; if (!r.steps) return;
     const x = r.samples.at(-1), at = stepAt({ steps: r.steps }, r.el); if (!at) return;
     if (at.i !== r.lastStep) {
       if (r.acc?.p.length) this.log(lineStepEnd(r.acc));
-      r.acc = { i: at.i, p: [], h: [], c: [], tg: [] }; r.lastStep = at.i; r.lastLine = r.el;
+      r.acc = { i: at.i, p: [], h: [], c: [], tg: [] }; r.lastStep = at.i;
       this.log(lineStepStart(at.i, r.steps.length, at.s.d, this.curTarget()));
     }
     r.acc.p.push(x[2]); if (x[4]) r.acc.h.push(x[4]); r.acc.c.push(x[3]); r.acc.tg.push(x[6]);
-    if (r.el - r.lastLine >= 30) { r.lastLine = r.el; this.log(lineTick(r.el, at.i, r.steps.length, at.into, at.s.d, this.curTarget(), r.samples.slice(-30), r.acc.p)); }
   }
 
   // ---------- state (same shape as the server's) ----------
-  state(athlete, extra = {}) {
+  state(athlete) {
     const d = this.hub.r, st = { v: 1, source: 'web', ts: this.wall(), athlete, devices: this.hub.status(),
       live: { power: jsr(d.power), power_3s: this.pHist.length ? jsr(mean(this.pHist)) : 0, cadence: jsr(d.cadence), hr: this.hrNow() || null, speed_kmh: +(+d.speed).toFixed(1) },
-      ride: null, messages: this.messages.slice(-3), said: [], last_finished: this.lastFinished, last_saved: this.lastSaved, notice: this.notice, notice_id: this.noticeId, version: this.version, ...extra };
+      ride: null, last_finished: this.lastFinished, last_saved: this.lastSaved, notice: this.notice, notice_id: this.noticeId, version: this.version };
     const r = this.ride; if (!r) return st;
     const l30 = r.samples.slice(-30), h = l30.map(x => x[4]).filter(Boolean), kk = r.test ? 1 : r.k;
     const ride = st.ride = { id: r.id, name: r.name, text: r.text, mode: r.steps ? 'workout' : { w: 'erg', r: 'resistance' }[r.jr.m] || 'grade',
       started: r.started, paused: r.paused, auto_paused: r.auto, elapsed_s: jsr(r.el), el: r.el, ftp: r.ftp, intensity: r.k, test: r.test,
       target_w: this.curTarget(), grade: r.steps ? null : r.jr.g, level: r.steps ? null : r.jr.r, overtime: r.overtime,
-      after_workout: this.settings().afterWorkout || 'hold', agent: { wakes: r.agentWakes, local_cues: r.localCues, usage: r.usage, seen: r.agentSeen },
+      after_workout: this.settings().afterWorkout || 'hold',
       jr: r.jr, samples: r.samples.length, control: this.controlMode(), ov: Object.fromEntries(Object.entries(r.ov)),
-      manual: r.manual ? { ...r.manual, ago_s: Math.max(0, jsr((this.wall() - r.manual.ts) / 1000)) } : null,
       last30: { power: jsr(mean(l30.map(x => x[2]))), cadence: jsr(mean(l30.map(x => x[3]))), hr: h.at(-1) || null, hr_delta: h.length ? h.at(-1) - h[0] : null },
       total_s: null, step: null, steps: null, course: null };
     if (r.course) {
@@ -406,7 +386,7 @@ export class Engine {
       const at = stepAt({ steps: r.steps }, r.el); ride.total_s = r.total;
       if (at) ride.step = { index: at.i + 1, count: r.steps.length, duration_s: at.s.d, into_s: jsr(at.into), left_s: jsr(at.s.d - at.into), free: !!at.s.free };
       ride.steps = r.steps.map((s, i) => ({ index: i + 1, start_s: s.t0, duration_s: s.d, free: !!s.free, start_w: s.free ? null : stepWatts(s, 0, r.ftp, kk),
-        end_w: s.free ? null : stepWatts(s, s.d, r.ftp, kk), planned: s.free ? null : { a: s.a, b: s.b, unit: s.u }, override_w: r.ov[i] ?? null, manual: !!s.m }));
+        end_w: s.free ? null : stepWatts(s, s.d, r.ftp, kk), planned: s.free ? null : { a: s.a, b: s.b, unit: s.u }, override_w: r.ov[i] ?? null }));
     }
     return st;
   }

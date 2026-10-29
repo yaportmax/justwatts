@@ -13,7 +13,7 @@ module.exports = (req, res) => {
   handler = handler || makeHandler({
     store: accountsStore(() => app.storeOrNull(), { fallback: memoryStore() }),  // fallback: the dev user without a database
     key: loadKey(), userId, fetch: (...a) => globalThis.fetch(...a),
-    log: m => console.error(m),
+    log: m => console.error(m), cronSecret: () => process.env.CRON_SECRET || null,  // op=cron: Vercel Cron retries due uploads
   });
   return handler(req, res);
 };

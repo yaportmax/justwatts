@@ -2,6 +2,7 @@
 //   getSecret(userId, service) -> string|null        setSecret(userId, service, string|null)   (ciphertext only)
 //   getState(userId, key) -> object|null             setState(userId, key, object|null)        (jobs, status: no secrets)
 //   getFile(userId, name) -> Buffer|null             putFile(userId, name, Buffer|null)        (FIT files for retries + fallback)
+//   retryUsers(limit) -> [userId]                    users with uploads waiting (state "retry"), for the cron
 // userStore() gives connectors one user's view: plain objects in, sealed ciphertext stored.
 'use strict';
 const { seal, open } = require('./crypto');
@@ -19,6 +20,7 @@ function memoryStore() {
     async setState(u, key, v) { put(u, 'state', key, v === null ? null : JSON.stringify(v)); },
     async getFile(u, n) { return get(u, 'file', n); },
     async putFile(u, n, b) { put(u, 'file', n, b ? Buffer.from(b) : null); },
+    async retryUsers(limit) { return [...m.keys()].map(x => x.split('\u0000')).filter(([, ns, n]) => ns === 'state' && n === 'retry').map(([u]) => u).slice(0, limit); },
   };
 }
 
@@ -42,6 +44,7 @@ function accountsStore(getStore, { fallback = null, now = () => Date.now(), prun
     async setState(u, k, v) { await put(u, 'state', k, v === null || v === undefined ? null : Buffer.from(JSON.stringify(v), 'utf8')); },
     async getFile(u, n) { return get(u, 'file', n); },
     async putFile(u, n, b) { await put(u, 'file', n, b ? Buffer.from(b) : null); },
+    async retryUsers(limit) { return db().integrationUsers('state', 'retry', limit); },
   };
   if (!fallback) return real;
   const pick = () => (getStore() ? real : fallback);

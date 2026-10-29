@@ -125,6 +125,9 @@ function memoryStore() {
     async pruneIntegrationData(before) {
       for (const [k, v] of integ) { const [, ns, name] = k.split('\n'); if (v.at < before && (ns === 'file' || (ns === 'state' && name.startsWith('meta:')))) integ.delete(k); }
     },
+    async integrationUsers(ns, name, limit) {  // oldest first
+      return [...integ].filter(([k]) => { const [, a, b] = k.split('\n'); return a === ns && b === name; }).sort((a, b) => a[1].at - b[1].at).slice(0, limit).map(([k]) => k.split('\n')[0]);
+    },
     async countIntegrationData(uid) { return [...integ.keys()].filter(k => k.split('\n')[0] === uid).length; },
     /* one-time tokens (hashed) */
     async putToken(t) {

@@ -2,11 +2,15 @@
 // Pure: everything it needs is injected (fetch, raw store, key, userId), so tests drive it with fakes.
 'use strict';
 const { IntegrationError, AUTH, scrub } = require('./base');
+const crypto = require('node:crypto');
 const { userStore } = require('./store');
 const { hub } = require('./hub');
 
 const MAX_JSON = 16 * 1024, MAX_FIT = 4 * 1024 * 1024;  // Vercel caps request bodies at 4.5 MB
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+// op=cron (Vercel Cron, every 15 min, Authorization: Bearer $CRON_SECRET): retries due uploads for users with jobs
+// waiting, at most CRON_MAX uploads and CRON_MS per run; the hub's own rules (3 tries, a day at most) end each job.
+const CRON_USERS = 50, CRON_MAX = 4, CRON_MS = 8000;
 
 function send(res, code, obj, type = 'application/json') {
   res.statusCode = code;
@@ -35,10 +39,31 @@ function sameOrigin(req) {
   return !!host && (origin === `https://${host}` || origin === `http://${host}`) && req.headers['x-hw'] === '1';
 }
 
-function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep, log = () => {} }) {
+function bearerOk(req, secret) {
+  const a = Buffer.from(String(req.headers.authorization || '')), b = Buffer.from(`Bearer ${secret}`);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep, log = () => {}, cronSecret = () => null }) {
+  async function cron(req, res) {
+    const secret = cronSecret();
+    if (!secret || secret.length < 16) return send(res, 503, { error: 'cron is not set up' });
+    if (!bearerOk(req, secret)) return send(res, 401, { error: 'unauthorized' });
+    if (req.method !== 'GET') return send(res, 405, { error: 'GET' });
+    const until = Date.now() + CRON_MS, more = () => Date.now() < until;
+    let users = 0, tried = 0;
+    for (const uid of await store.retryUsers(CRON_USERS)) {
+      if (tried >= CRON_MAX || !more()) break;
+      users++;
+      try { tried += (await hub({ fetch, store: userStore(store, key, uid), now, sleep }).retryDue(CRON_MAX - tried, more)).tried; }
+      catch (e) { log('integrations cron: ' + String(e && e.message).slice(0, 200)); }
+    }
+    return send(res, 200, { users, tried });
+  }
   return async function handler(req, res) {
     const url = new URL(req.url, 'http://x'), q = url.searchParams, op = q.get('op') || 'list';
     if (!key) return send(res, 503, { error: 'integrations are not set up on this server' });
+    if (op === 'cron') return cron(req, res);
     const uid = await userId(req);
     if (!uid) return send(res, 401, { error: 'sign in to connect services' });
     const write = req.method === 'POST';
@@ -95,4 +120,4 @@ function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep,
   };
 }
 
-module.exports = { makeHandler, sameOrigin };
+module.exports = { makeHandler, sameOrigin, CRON_MAX };

@@ -1,6 +1,7 @@
 // Web integrations hub: same rules as server/justwatts/integrations (__init__.py, jobs.py), per signed-in user.
-// Serverless functions keep no worker, so retries run when the page (or a cron, once accounts exist) calls
-// retry() after next_retry_at. Jobs live in the user's state ("jobs"), FIT files in the user's files.
+// Serverless functions keep no worker, so retries run when the page calls retry() after next_retry_at, or when the
+// cron (http.js op=cron) calls retryDue() for users flagged with state "retry" (set while a job is pending or running).
+// Jobs live in the user's state ("jobs"), FIT files in the user's files.
 'use strict';
 const { AUTH, BLOCKED, TEMPORARY, DUPLICATE, ACTION, IntegrationError, MANUAL, describe, scrub } = require('./base');
 const { garmin } = require('./garmin');
@@ -8,6 +9,7 @@ const { trainingpeaks } = require('./trainingpeaks');
 const { intervals } = require('./intervals');
 
 const DELAYS = [120, 480], MAX_TRIES = DELAYS.length + 1, MAX_RETRY_AFTER = 1800;
+const STUCK_S = 600, GIVE_UP_S = 86400;  // a 'running' job this old died mid-upload; a job still pending after a day gives up
 const ORDER = ['garmin', 'strava', 'trainingpeaks', 'intervals', 'coros', 'polar', 'suunto', 'wahoo'];
 const MANUAL_ONLY = { strava: 'Strava', coros: 'COROS', polar: 'Polar', suunto: 'Suunto', wahoo: 'Wahoo' };
 const GARMIN_REASON = 'Uploads here can sync on to apps you link in Garmin Connect.';
@@ -28,7 +30,11 @@ function hub({ fetch, store, now = () => Date.now() / 1000, sleep, fitUrl = rid 
   const state = async () => (await store.state('integrations')) || {};
   async function patch(svc, kw) { const s = await state(); s[svc] = { ...(s[svc] || {}), ...kw }; await store.setState('integrations', s); }
   const jobs = async () => (await store.state('jobs')) || {};
-  const saveJobs = j => store.setState('jobs', j);
+  async function saveJobs(j) {
+    await store.setState('jobs', j);
+    const open = Object.values(j).filter(x => x.state === 'pending' || x.state === 'running');
+    await store.setState('retry', open.length ? { at: Math.min(...open.map(x => x.next_at || 0)) } : null);  // the cron's index
+  }
   async function connected(svc) { try { return !!(await conns[svc].status(store)).connected; } catch { return false; } }
   async function secretsOf(svc) { try { return conns[svc].secrets(await store.secret(svc)); } catch { return []; } }
   function syncsTo(s) { const v = s.garmin && s.garmin.syncs_to; return Array.isArray(v) ? v.filter(x => SYNC_OPTIONS.includes(x)) : null; }
@@ -150,6 +156,28 @@ function hub({ fetch, store, now = () => Date.now() / 1000, sleep, fitUrl = rid 
       for (const k of Object.keys(all)) if (all[k].state === 'pending' && all[k].next_at <= t && (!rid || all[k].ride_id === rid)) await attempt(all, k);
       return rid ? api.targets(rid) : { ok: true };
     },
+    // the cron: at most `max` due uploads for this user while more() holds; stuck and day-old jobs give up
+    async retryDue(max = 3, more = () => true) {
+      const all = await jobs(), t = now();
+      let changed = false, tried = 0;
+      const giveUp = async (j, msg) => {
+        Object.assign(j, { state: 'failed', kind: TEMPORARY, error: msg, next_at: null, updated: t }); changed = true;
+        await patch(j.service, { last_error: { ride_id: j.ride_id, kind: TEMPORARY, error: msg, at: Math.round(t * 1000), final: true } });
+      };
+      for (const j of Object.values(all)) {
+        if (j.state === 'running' && t - (j.updated || 0) > STUCK_S) {
+          if (j.tries >= MAX_TRIES) await giveUp(j, 'upload stopped part way; gave up');
+          else { Object.assign(j, { state: 'pending', next_at: t, updated: t }); changed = true; }
+        }
+        if (j.state === 'pending' && t - (j.created || j.updated || t) > GIVE_UP_S) await giveUp(j, 'not uploaded within a day; gave up');
+      }
+      if (changed) await saveJobs(all);
+      for (const k of Object.keys(all)) {
+        if (tried >= max || !more()) break;
+        if (all[k].state === 'pending' && all[k].next_at <= t) { await attempt(all, k); tried++; }
+      }
+      return { tried };
+    },
     async targets(rid) {
       const all = await jobs(), rows = [];
       for (const d of await api.list()) {
@@ -181,4 +209,4 @@ function hub({ fetch, store, now = () => Date.now() / 1000, sleep, fitUrl = rid 
   return api;
 }
 
-module.exports = { hub, DELAYS, MAX_TRIES, SYNC_QUESTION };
+module.exports = { hub, DELAYS, MAX_TRIES, SYNC_QUESTION, STUCK_S, GIVE_UP_S };

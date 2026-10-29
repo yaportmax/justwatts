@@ -297,6 +297,50 @@ async function call(handler, method, url, { body, headers = {} } = {}) {
   eq((await call(H, 'GET', '/api/integrations?op=bogus', { headers: auth })).code, 404, 'unknown op');
 }
 
+// ---------- cron: Vercel Cron retries due uploads with the page closed; bearer secret, bounded, gives up ----------
+{
+  const c = clock(), raw = memoryStore(), SECRET = 'cron-secret-0123456789';
+  const uploads = [json(503, {}), json(503, {}), json(201, { id: 'i6', activities: [{ id: 'i6' }] })];
+  const f = fakeFetch([['POST', '/activities', uploads]]);
+  const logs = [];
+  const H = makeHandler({ fetch: f, store: raw, key: KEY, userId: async () => null, now: c.now, sleep: async () => {}, log: m => logs.push(m), cronSecret: () => SECRET });
+  const cronCall = (h = H, headers = { authorization: `Bearer ${SECRET}` }) => call(h, 'GET', '/api/integrations?op=cron', { headers });
+  eq((await cronCall(H, {})).code, 401, 'cron: no bearer');
+  eq((await cronCall(H, { authorization: 'Bearer wrong' })).code, 401, 'cron: wrong bearer');
+  eq((await cronCall(makeHandler({ store: raw, key: KEY, userId: async () => null }))).code, 503, 'cron: no CRON_SECRET');
+  eq((await cronCall()).body, { users: 0, tried: 0 }, 'cron: nothing waiting');
+  // u1: an upload fails while the page is open, then the page closes
+  const u1 = userStore(raw, KEY, 'u1');
+  await u1.setSecret('intervals', { athlete_id: 'i1', api_key: ICU_KEY });
+  const h = hub({ fetch: f, store: u1, now: c.now, sleep: async () => {} });
+  await h.upload('r1', FIT, { name: 'R' });
+  ok(await u1.state('retry'), 'cron: flagged while pending');
+  eq((await cronCall()).body, { users: 1, tried: 0 }, 'cron: not due yet');
+  c.t += DELAYS[0];
+  eq((await cronCall()).body, { users: 1, tried: 1 }, 'cron: due, tried');
+  c.t += DELAYS[1];
+  eq((await cronCall()).body, { users: 1, tried: 1 }, 'cron: third try');
+  eq((await u1.state('jobs'))['r1:intervals'].state, 'done', 'cron: uploaded');
+  eq(await u1.state('retry'), null, 'cron: flag cleared');
+  eq((await cronCall()).body, { users: 0, tried: 0 }, 'cron: nothing left');
+  // bounded: many due uploads, a few per run
+  const u2 = userStore(raw, KEY, 'u2');
+  await u2.setSecret('intervals', { athlete_id: 'i2', api_key: ICU_KEY });
+  const jobs = {};
+  for (let i = 0; i < 9; i++) { await u2.putFile(`fit:q${i}`, FIT); jobs[`q${i}:intervals`] = { ride_id: `q${i}`, service: 'intervals', state: 'pending', tries: 1, next_at: c.t, created: c.t, updated: c.t, meta: { ride_id: `q${i}` } }; }
+  // stuck mid-upload and a day old: give up; stuck with tries left: retried
+  jobs['old:intervals'] = { ride_id: 'old', service: 'intervals', state: 'pending', tries: 1, next_at: c.t, created: c.t - 90000, updated: c.t - 1000 };
+  jobs['dead:intervals'] = { ride_id: 'dead', service: 'intervals', state: 'running', tries: 3, next_at: null, created: c.t - 2000, updated: c.t - 1000 };
+  await u2.setState('jobs', jobs); await u2.setState('retry', { at: c.t });
+  const r = await cronCall();
+  eq(r.body, { users: 1, tried: 4 }, 'cron: at most 4 per run');
+  const after = await u2.state('jobs');
+  eq([after['old:intervals'].state, after['dead:intervals'].state], ['failed', 'failed'], 'cron: gave up on stale jobs');
+  eq(Object.values(after).filter(j => j.state === 'pending').length, 5, 'cron: the rest wait for the next run');
+  ok(await u2.state('retry'), 'cron: still flagged');
+  ok(!JSON.stringify(r.body).includes(ICU_KEY) && !logs.join('').includes(ICU_KEY), 'cron: no secrets out');
+}
+
 // ---------- planned: same fixtures as Python, and core.js must read the result ----------
 const fx = JSON.parse(readFileSync(`${root}/tests/fixtures/planned.json`, 'utf8'));
 const planned = { intervals: fx.intervals.map(c => P.fromIntervals(c.doc)), trainingpeaks: fx.trainingpeaks.map(c => P.fromTrainingPeaks(c.structure)) };

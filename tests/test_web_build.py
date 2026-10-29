@@ -51,6 +51,7 @@ def test_vercel_headers(dist):
                              {"source": "/api/(auth|sync|community|social|admin)(/.*)?", "destination": "/api/accounts?__path=/api/$1$2"},
                              {"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the functions
     assert v["regions"] == ["pdx1"]                                                   # next to the Neon database
+    assert v["crons"] == [{"path": "/api/integrations?op=cron", "schedule": "*/15 * * * *"}]  # retries uploads with the page closed
 
 
 def test_web_mode_ride_with_reload(dist, node):

@@ -200,6 +200,9 @@ function pgStore(db) {
     async pruneIntegrationData(before) {
       await q(`DELETE FROM ${S}.integration_data WHERE updated_at < $1 AND (ns = 'file' OR (ns = 'state' AND name LIKE 'meta:%'))`, [before]);
     },
+    async integrationUsers(ns, name, limit) {  // oldest first
+      return (await q(`SELECT user_id FROM ${S}.integration_data WHERE ns = $1 AND name = $2 ORDER BY updated_at LIMIT $3`, [ns, name, limit])).map(r => r.user_id);
+    },
     async countIntegrationData(uid) { return one(await q(`SELECT count(*)::int AS n FROM ${S}.integration_data WHERE user_id = $1`, [uid])).n; },
     /* one-time tokens */
     async putToken(t) {

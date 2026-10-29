@@ -3,14 +3,13 @@
 A free, open-source smart-trainer app.
 
 Just Watts connects to any Bluetooth FTMS smart trainer and heart rate strap, runs your workouts in
-ERG mode or lets you ride free by grade, watts or resistance level, coaches you with a built-in
-rule-based coach, and keeps your history: NP, TSS, zones, intervals, trends. It runs on your own
-computer, with no account and no API keys. The trainer connection lives in a small local server,
-so reloading or closing the browser never drops the trainer or the ride.
+ERG mode or lets you ride free by grade, watts or resistance level, and keeps your history: NP, TSS,
+zones, intervals, trends. It runs on your own computer, with no account and no API keys. The trainer
+connection lives in a small local server, so reloading or closing the browser never drops the trainer or the ride.
 
 Try it in the browser, no install: **[openspin.maxyaport.com](https://openspin.maxyaport.com)** (Chrome or
 Edge, Web Bluetooth; rides stay in the browser, no uploads). The local app below adds Garmin and Strava
-upload, voice, agent coaching, and a trainer connection that survives closing the tab.
+upload and a trainer connection that survives closing the tab.
 
 ## Quick start
 
@@ -28,7 +27,7 @@ pick it from the scan list. The server remembers it and reconnects by itself. A 
 controller at a time: close Zwift or any other app using it first. `start.cmd` (Windows) or
 `./start.sh` (macOS, Linux) starts the server and opens the browser.
 
-No trainer? `justwatts simulate` drives a fake ride through the server.
+No trainer? `justwatts simulate` starts a workout on the server's fake trainer; watch it in the page.
 
 ## What you get
 
@@ -36,17 +35,10 @@ No trainer? `justwatts simulate` drives a fake ride through the server.
   .zwo import and export, an FTP ramp test.
 - **Ride modes**: structured ERG workouts, free ride by grade (simulation), ERG watts or FTMS
   resistance level. When the plan ends you keep riding free until you press End.
-- **Manual control mid-ride**: anything the built-in coach or an agent can change, in one or two
-  taps (see [Ride controls](#ride-controls)). Your change wins: the coaches see it
-  and hold off.
-- **Built-in coach** (no agent needed): interval start and 10 s countdown, rep recaps, recovery heart
-  rate, cadence reminders, and automatic adjustments: Easier lowers the segment 5% FTP, Harder
-  raises it 3% (not in HR zone 5), 30 s over your HR cap eases it 5%. Each cue can be turned off in
-  Settings.
+- **Manual control mid-ride**: intensity, segment watts and time, the rest of the plan, trainer
+  mode, in one or two taps (see [Ride controls](#ride-controls)).
 - **Ride screen** on one page: power, target, cadence against your target range, HR with zones,
   interval timer, the chart with a right-hand HR axis.
-- **Voice** (optional): coach messages read aloud with Mute and an "important only" mode; with the
-  `[voice]` extra, talk back through local Whisper, and the coach stops talking when you start.
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.
@@ -71,8 +63,7 @@ and intensity, watts, segment time, length, trainer mode and settings can be und
 | Trainer: ERG, or ERG off by grade or level (the plan keeps showing) | Adjust | 1 2 3 |
 | Edit the plan from the current segment | Adjust | |
 | After the plan: hold the last target or ride flat | Adjust | |
-| Cadence range, built-in coach on/off, beeps | Adjust | |
-| Mute, voice level, Easier/Good/Harder | coach bar | M |
+| Cadence range | Adjust | |
 | Undo, Save, End (two taps) | bar | Z, S |
 | Reconnect trainer or HR | header | |
 
@@ -118,60 +109,11 @@ Strava description links the card.
 Every FIT file is saved to `~/.justwatts/rides/` before any upload, and History can always export
 .fit and .tcx.
 
-## Optional: AI agent coaching
-
-An agent reads your heart rate trend and what you say, and edits the workout mid-ride. Agent features in the UI (the usage meter,
-the History agent column) only appear when an agent is connected.
-
-```sh
-pip install "justwatts[mcp]"
-claude mcp add justwatts -- justwatts mcp           # Claude Code
-```
-
-Codex (`~/.codex/config.toml`):
-
-```toml
-[mcp_servers.justwatts]
-command = "justwatts"
-args = ["mcp"]
-```
-
-Then: *"Coach my ride. Read the playbook, wait for events, keep me in zone."*
-
-An event gate wakes the agent only for segment summaries, FEEL presses, speech, alerts
-(HR cap, zone jump, low cadence, power off target, pause, device lost) and a status every few
-minutes, in 5 s batches, while the built-in coach handles countdowns and recaps. The ride header
-shows wakes, tokens and cost; `justwatts tail --agent` shows what wakes the coach. Guard rails limit
-changes per command, cap watts at 150% FTP, and require your FEEL HARDER or GOOD before anything
-harder. Playbook: [docs/COACHING.md](docs/COACHING.md). API: [docs/PROTOCOL.md](docs/PROTOCOL.md).
-
-| Area | MCP tools |
-|---|---|
-| Wait (do not poll) | `wait_for_events`, `report_usage` |
-| Read | `get_ride_status`, `get_workout`, `get_recent_events`, `get_telemetry_history`, `get_athlete_profile`, `get_coaching_playbook` |
-| Coach | `send_message`, `set_step_target`, `set_current_target`, `set_intensity`, `set_voice_mode` |
-| Edit the workout | `insert_steps`, `replace_step`, `delete_step`, `set_step_duration`, `extend_current_step`, `set_workout_length` |
-| Ride | `load_workout`, `ride_control`, `free_ride` |
-| Devices, settings | `devices`, `update_settings` |
-| History | `list_rides`, `get_ride_detail`, `get_trends`, `upload_ride_to_garmin`, `upload_ride_to_strava`, `set_ride_description` |
-
-Without MCP, use the CLI (`justwatts coach msg|set|insert|replace|delete|duration|extend`,
-`justwatts tail -f`, `justwatts status`) or the HTTP API with the token in `~/.justwatts/token`. Agents
-can never set the Strava secret.
-
-## Voice
-
-`pip install "justwatts[voice]"`, then `justwatts serve --voice`. It transcribes the default mic
-locally with faster-whisper `small.en` (CPU, int8). Silence hallucinations ("Thank you."),
-low-confidence segments, fragments under three words without a command word (easier, harder, stop,
-pause, skip, help, mute) and echoes of the coach are dropped. Say "mute" or "quiet" to silence the
-coach, "unmute" to bring it back.
-
 ## Security model
 
 The server binds `127.0.0.1` and rejects any non-localhost `Host` header (the only exception is
 `/share/<ride>.png` when you set a public base URL). The page proves itself with its own `Origin`
-plus an `X-HW: 1` header; local tools use a bearer token from a 0600 file. Details in
+plus an `X-HW: 1` header; the CLI uses a bearer token from a 0600 file. Details in
 [docs/PROTOCOL.md](docs/PROTOCOL.md#auth).
 
 ## Data and configuration
@@ -181,15 +123,14 @@ plus an `X-HW: 1` header; local tools use a bearer token from a 0600 file. Detai
 | `JUSTWATTS_PORT` | `8765` | server port |
 | `JUSTWATTS_DATA` | `~/.justwatts` | settings, devices, rides, the ride in progress, logs, token, Strava tokens |
 | `JUSTWATTS_GARMIN_TOKENS` | `~/.garminconnect` | Garmin session tokens |
-| `JUSTWATTS_TOKEN` | from `<data>/token` | API token for CLI/MCP |
+| `JUSTWATTS_TOKEN` | from `<data>/token` | API token for the CLI |
 | `JUSTWATTS_GARMIN` | auto | `off` disables Garmin, `on` forces it for a non-default data dir |
 | `JUSTWATTS_BLE` | `on` | `off` disables Bluetooth |
 | `JUSTWATTS_STRAVA_RELAY` | openspin.maxyaport.com | Strava token service for the shared app; `off` allows only your own API app |
 | `JUSTWATTS_STRAVA_CLIENT_ID` | `168528` | Strava client ID used with that token service |
-| `JUSTWATTS_MAX_CHANGE_PCT`, `JUSTWATTS_MAX_PCT`, `JUSTWATTS_FEEL_GATE_PCT`, `JUSTWATTS_FEEL_WINDOW_S`, `JUSTWATTS_STALE_S`, `JUSTWATTS_MAX_INSERT_S`, `JUSTWATTS_MAX_EXTEND_S`, `JUSTWATTS_MANUAL_HOLD_S` | 15, 150, 105, 600, 15, 1800, 600, 60 | agent guard rails |
 
-Older `HW_*` and `TC_*` names still work, and a `~/.trainer-coach` data dir from earlier versions
-moves to `~/.justwatts` on first start.
+Older `OPENSPIN_*` and `HW_*` names still work. An existing `~/.openspin` data dir keeps being used,
+and older data dirs move to `~/.justwatts` on first start.
 
 ## Development
 

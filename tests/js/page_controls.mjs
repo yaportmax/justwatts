@@ -46,7 +46,6 @@ class El {
 }
 let els = {}, M = {}, keydown = [];
 const multi = () => ({
-  '[data-feel]': ['easier', 'good', 'harder'].map(f => new El('feel', { feel: f })),
   'nav button': ['workouts', 'ride', 'history', 'settings'].map(v => new El('nav', { v })),
   '.view': ['workouts', 'ride', 'history', 'settings'].map(v => Object.assign(new El('view'), { id: 'v-' + v })),
   '#jrMode button': ['g', 'w', 'r'].map(m => new El('jr', { m })),
@@ -62,8 +61,6 @@ globalThis.requestAnimationFrame = f => setTimeout(f, 0);
 globalThis.getComputedStyle = () => ({ getPropertyValue: () => '#38bdf8' });
 const mem = new Map();
 globalThis.localStorage = { getItem: k => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: k => mem.delete(k) };
-globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
-globalThis.speechSynthesis = { getVoices: () => [], speak() {}, cancel() {} };
 
 let streams = [];
 if (WEB) {
@@ -163,9 +160,8 @@ await step('next steps', () => press('next'), () => ride().steps.length === cur 
 $('#aNext').value = '5m bogus'; $('#aNext').oninput(); press('next');
 out.nextErr = String($('#aNextErr').textContent);
 await step('after plan: flat', () => press('after', 'grade0'), () => hw.state().ride.after_workout === 'grade0');
-press('cad', '0,5'); press('coach', '0'); press('beeps', '0');
+press('cad', '0,5'); press('beeps', '0');
 await sleep(50);
-await step('mute key', () => key('KeyM'), () => hw.state().voice.mode === 'silent');
 await step('space pauses', () => key('Space'), () => ride().paused);
 await step('space resumes', () => key('Space'), () => !ride().paused);
 key('Slash', { key: '?', shiftKey: true });
@@ -174,7 +170,7 @@ key('Escape', { key: 'Escape' });
 out.closed = !$('#keysModal').classList.contains('on') && !$('#adjPanel').classList.contains('on');
 await tick(2);
 const pick = r => ({ name: r.name, intensity: r.intensity, jr: r.jr, control: r.control, total_s: r.total_s, ov: r.ov, after_workout: r.after_workout,
-  steps: r.steps.map(s => [s.duration_s, s.free, s.start_w, s.manual]), manual: r.manual?.what });
+  steps: r.steps.map(s => [s.duration_s, s.free, s.start_w]) });
 out.before = pick(ride());
 const F2 = WEB ? (u, o) => hw.backend.fetch(u, o) : (u, o) => fetch(u, o);
 out.settings = (await (await F2('/api/settings')).json()).settings;

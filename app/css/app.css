@@ -87,11 +87,11 @@ body.dragging,body.dragging *{cursor:grabbing !important;user-select:none}
 /* ride view fills exactly one screen: the chart takes whatever height is left */
 #v-ride.on{display:flex;flex-direction:column;height:calc(100vh - var(--hh,58px) - 24px)}
 #rideOn{display:flex;flex-direction:column;flex:1;min-height:0}
-#rideOn>.panel:not(.coach){flex:1;min-height:140px;display:flex}
+#rideOn>.panel{flex:1;min-height:140px;display:flex}
 #rideChart{width:100%;height:100%;display:block}
 #rideOn .controls{margin-top:8px}
 #rideOn>*:not(.panel){flex:none}  /* only the chart panel gives up height */
-@media (max-width:700px){#v-ride.on{height:auto}#rideOn>.panel:not(.coach){flex:none}}
+@media (max-width:700px){#v-ride.on{height:auto}#rideOn>.panel{flex:none}}
 #v-ride main,#v-ride{padding-bottom:0}
 
 .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
@@ -117,12 +117,6 @@ tbody tr:hover{background:var(--panel2)}
 .zlegend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:6px}
 .zlegend b{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .empty{color:var(--dim);padding:40px 0;text-align:center}
-.coach{margin:0 0 10px;padding:10px 12px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-.coach .k{font-size:11px;color:var(--acc);text-transform:uppercase;letter-spacing:.8px;margin-right:8px}
-#coachMsg{font-size:16px;font-weight:600}
-#coachPrev{font-size:13px;color:var(--dim);margin-top:4px}
-#coachPrev div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.coach.flash{border-color:var(--acc)}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:9px 14px;border-radius:10px;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.on{opacity:1}
 @media (max-width:900px){
@@ -131,12 +125,6 @@ tbody tr:hover{background:var(--panel2)}
   #rideChart{height:240px}
   .conn{margin-left:0}
 }
-/* server mode additions */
-#coachSaid{font-size:13px;color:var(--dim);margin-top:4px}
-#coachSaid b{color:var(--ink);font-weight:500}
-#coachMute{font-weight:700;min-width:84px}
-#coachMute.muted{background:var(--warn);border-color:var(--warn);color:#1a1204}
-#coachVerb{padding:6px 8px}
 .pill.off{color:var(--bad)}
 .modal{position:fixed;inset:0;z-index:20;display:none;align-items:flex-start;justify-content:center;padding:70px 16px 16px;background:rgba(0,0,0,.55)}
 .modal.on{display:flex}
@@ -144,17 +132,6 @@ tbody tr:hover{background:var(--panel2)}
 .devlist{display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto}
 .devlist button{display:flex;justify-content:space-between;gap:10px;text-align:left}
 .devlist .m{color:var(--dim);font-size:12px}
-/* coach bar: long messages and transcripts wrap and clamp; tap to expand, full text on hover */
-.coach{flex-wrap:nowrap;align-items:flex-start}
-.coach>div:first-child{flex:1;min-width:0;cursor:pointer}
-.coach>.row{flex-shrink:0}
-#coachMsg,#coachSaid{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
-#coachMsg{-webkit-line-clamp:3;line-clamp:3}
-#coachSaid{-webkit-line-clamp:2;line-clamp:2}
-#coachPrev div{max-width:100%}
-.coach.open #coachMsg,.coach.open #coachSaid{-webkit-line-clamp:unset;line-clamp:unset}
-@media (max-width:640px){.coach{flex-wrap:wrap}.coach>.row{width:100%}}
-.pill.meter{font-variant-numeric:tabular-nums;border:1px solid var(--line);border-radius:999px;padding:2px 9px}
 /* build modes: .webonly shows only in the hosted web build, .serveronly only with the local server */
 body:not(.web) .webonly{display:none !important}
 body.web .serveronly{display:none !important}
@@ -165,11 +142,8 @@ body.web .serveronly{display:none !important}
 details.adv>summary{cursor:pointer;color:var(--dim);font-size:13px;margin-top:10px}
 details.panel.adv>summary{margin-top:0;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.8px}
 .setgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:14px}
-.checks{display:flex;flex-direction:column;gap:6px}
-.checks label{display:flex;gap:8px;align-items:center}
 .warnbox{margin-top:8px;font-size:12px;color:var(--dim);border-left:3px solid var(--line);padding:4px 8px}
 .warnbox.hot{color:var(--warn);border-color:var(--warn)}
-.noagent .agentcol{display:none}
 /* ride controls */
 .controls button.big{padding:9px 18px;font-weight:700}
 #cEnd.confirm{background:var(--bad);border-color:var(--bad);color:#fff}
@@ -178,9 +152,6 @@ details.panel.adv>summary{margin-top:0;font-size:13px;font-weight:600;text-trans
 #trendChart{width:100%;height:120px;display:block;margin-top:8px}
 table.laps td,table.laps th{padding:6px 8px}
 table.laps tbody tr{cursor:default}
-.transcript{max-height:260px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace;color:var(--dim)}
-.transcript div{white-space:pre-wrap;overflow-wrap:anywhere}
-.transcript .c{color:var(--acc)}.transcript .s{color:var(--ink)}.transcript .f{color:var(--warn)}
 /* ride controls: big touch targets; everything else in one Adjust sheet */
 .controls button{min-height:44px;min-width:44px}
 .controls .grp{display:inline-flex;gap:8px}
@@ -207,7 +178,7 @@ kbd{display:inline-block;min-width:22px;padding:1px 6px;border:1px solid var(--l
 /* phones: the ride view scrolls; the control bar stays pinned to the bottom, always one tap away */
 @media (max-width:900px){
   #v-ride.on{height:auto}
-  #rideOn>.panel:not(.coach){flex:none}
+  #rideOn>.panel{flex:none}
   #rideOn .controls{position:sticky;bottom:0;z-index:4;background:var(--bg);padding:8px 0;margin-top:8px;border-top:1px solid var(--line)}
 }
 @media (min-width:1100px){.sheet{left:auto;right:16px;transform:none;bottom:84px;width:600px;max-height:calc(100vh - var(--hh,58px) - 110px);border-radius:14px;border-bottom:1px solid var(--line)}}
@@ -216,7 +187,6 @@ kbd{display:inline-block;min-width:22px;padding:1px 6px;border:1px solid var(--l
 .nextrow canvas{width:100%;height:110px;display:block;touch-action:none;user-select:none}
 .nextrow .brow button,.nextrow .chip{min-height:0;min-width:0}
 .nextrow .blist{max-height:34vh;overflow:auto}
-body.web .agentcol{display:none}
 .testcue{border-color:var(--acc);margin:0 0 10px}
 .tcm{font-size:22px;font-weight:700}
 .tcs{color:var(--dim);font-size:14px;margin-top:2px;font-variant-numeric:tabular-nums}
@@ -238,7 +208,7 @@ body.web .agentcol{display:none}
 #v-ride .tile.flash .v{color:var(--acc)}
 #v-ride .iv{margin:4px 0 8px}
 #v-ride .bar{height:3px;border-radius:2px}
-#v-ride #rideOn>.panel:not(.coach):not(.testcue){background:none;border:0;padding:0}
+#v-ride #rideOn>.panel:not(.testcue){background:none;border:0;padding:0}
 #v-ride .testcue{background:none;border:0;border-left:3px solid var(--acc);border-radius:0;padding:2px 0 2px 12px;margin:2px 0 10px}
 #v-ride .controls{border-top:1px solid var(--line);padding-top:10px}
 #v-ride .controls button:not(.pri):not(.danger){background:none;border-color:transparent;color:var(--dim)}

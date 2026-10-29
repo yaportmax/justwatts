@@ -205,12 +205,12 @@ def test_edits_at_a_step_boundary(tmp_path):
     eng.control("load", {"workout": {"name": "B", "text": "1m 50%, 1m 100%, 1m 50%"}})
     eng.control("start", {})
     ride_ticks(eng, clk, 60)  # el = 60.0: exactly the start of step 2
-    assert eng.state({}, [])["ride"]["step"]["index"] == 2 and eng.state({}, [])["ride"]["step"]["into_s"] == 0
+    assert eng.state({})["ride"]["step"]["index"] == 2 and eng.state({})["ride"]["step"]["into_s"] == 0
     eng.edit({"op": "delete", "step": "cur"})  # nothing of it ridden yet: removed, not a 1 s sliver
-    st = eng.state({}, [])["ride"]
+    st = eng.state({})["ride"]
     assert [s["duration_s"] for s in st["steps"]] == [60, 60] and st["step"]["index"] == 2 and st["target_w"] == 100
     eng.edit({"op": "replace", "step": "cur", "steps": "30s 150%"})
-    st = eng.state({}, [])["ride"]
+    st = eng.state({})["ride"]
     assert [s["duration_s"] for s in st["steps"]] == [60, 30] and st["target_w"] == 300
     ride_ticks(eng, clk, 1)
     starts = [e for e in events if e.startswith("START step 2/")]
@@ -242,7 +242,7 @@ def test_only_step_delete_ends_it_and_last_insert_in_overtime(tmp_path):
     ride_ticks(eng, clk, 3)
     assert eng.ride.overtime and len(eng.ride.steps) == 1
     eng.edit({"op": "insert", "steps": "1m 100%"})
-    st = eng.state({}, [])["ride"]
+    st = eng.state({})["ride"]
     assert not st["overtime"] and st["target_w"] == 200 and st["steps"][1]["free"]
 
 

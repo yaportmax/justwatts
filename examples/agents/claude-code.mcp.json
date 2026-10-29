@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "justwatts": {
-      "command": "justwatts",
-      "args": ["mcp"],
-      "env": { "JUSTWATTS_PORT": "8765" }
-    }
-  }
-}

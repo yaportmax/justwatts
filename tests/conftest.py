@@ -24,7 +24,7 @@ os.environ.pop("JUSTWATTS_TOKEN", None)
 os.environ["JUSTWATTS_GARMIN"] = "off"  # tests must never reach a real Garmin account
 os.environ["JUSTWATTS_BLE"] = "off"     # ...or real Bluetooth hardware
 
-from justwatts.client import CoachClient  # noqa: E402
+from justwatts.client import Client  # noqa: E402
 from justwatts.config import Config  # noqa: E402
 from justwatts.server import make_server  # noqa: E402
 
@@ -98,7 +98,7 @@ def srv(tmp_path):
     url = f"http://127.0.0.1:{port}"
     ns = SimpleNamespace(
         cfg=cfg, server=server, port=port, url=url, token=server.token, garmin=g,
-        client=CoachClient(cfg),
+        client=Client(cfg),
         page={"Origin": url, "X-HW": "1"},
         bearer={"Authorization": f"Bearer {server.token}"},
         req=lambda *a, **kw: request(port, *a, **kw),

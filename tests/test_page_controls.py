@@ -40,11 +40,11 @@ def check(out):
     assert out["nextErr"]  # a typo is caught before anything is sent
     b = out["before"]
     assert b["intensity"] == 1.0 and b["control"] == "k" and b["jr"]["wm"] == "e" and b["jr"]["g"] == 3
-    assert b["steps"][1][3] and b["steps"][1][2] == 205  # step 2 set by hand
+    assert "1" in b["ov"] and b["steps"][1][2] == 205  # step 2 set by hand
     assert b["steps"][-1][0] == 60 and 100 <= b["steps"][-2][0] <= 120  # typed in the sheet: this segment becomes 2m in total, then 1m
     assert b["after_workout"] == "grade0"
     s = out["settings"]
-    assert s["cadRange"] == [90, 95] and s["localCoach"]["enabled"] is False and s["beeps"] is False and s["voiceMode"] == "silent"
+    assert s["cadRange"] == [90, 95] and s["beeps"] is False
     m = out["manual"]
     for line in ("MANUAL intensity 101%", "MANUAL skip step 1", "MANUAL target step 2 205W", "MANUAL mode grade",
                  "MANUAL grade 2.5%", "MANUAL mode level", "MANUAL mode erg", "MANUAL back step 2"):
@@ -60,7 +60,7 @@ def test_page_controls_on_the_local_server(node, srv):
         out = run(node, "server", srv.port)
     assert out["mode"] == "server"
     check(out)
-    # the server logged the rider's changes as MANUAL lines, and the agent stream carries them
+    # the server logged the rider's changes as MANUAL lines
     evs = srv.client.events(400)
     assert any(e["type"] == "manual" for e in evs)
 

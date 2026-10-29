@@ -5,7 +5,7 @@ service (web/api/strava/token.js, at JUSTWATTS_STRAVA_RELAY) holds it and only s
 refresh tokens for access tokens. Uploads go straight from this computer to Strava.
 
 Advanced: the user's own API app. Client ID and secret are entered in Settings (the page only; the
-API refuses to take the secret from a token caller such as an agent) and live in
+API refuses to take the secret from a token caller) and live in
 <data>/strava_app.json; then the token service is not used at all. Tokens are in
 <data>/strava_token.json (mode 0600). OAuth returns to http://localhost:<port>/api/strava/callback
 (Strava always allows localhost callbacks).
@@ -207,12 +207,12 @@ class StravaLink:
         return {"ok": False, "upload_id": body["id"], "error": "Strava is still processing; check later"}
 
 
-def summary_text(detail: dict, link: str | None = None, coach_text: str | None = None) -> str:
-    """Strava description: optional coach note, numbers, the intervals, the card link, the app line."""
+def summary_text(detail: dict, link: str | None = None, note: str | None = None) -> str:
+    """Strava description: the rider's optional note, numbers, the intervals, the card link, the app line."""
     s = detail["summary"]
     lines = []
-    if coach_text:
-        lines += [coach_text.strip(), ""]
+    if note:
+        lines += [note.strip(), ""]
     hr = f" | HR {s['avg_hr']} avg, {s['max_hr']} max" if s.get("avg_hr") else ""
     lines.append(f"NP {s['np']} W | avg {s['avg_w']} W | IF {s['if']:.2f} | TSS {s['tss']} | {s['kJ']} kJ{hr}")
     work = [lp for lp in detail.get("laps", []) if lp.get("target_w") and not lp.get("free")

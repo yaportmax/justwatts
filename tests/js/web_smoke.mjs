@@ -44,10 +44,9 @@ class El {
 }
 let els = {};
 const multi = () => ({
-  '[data-feel]': ['easier', 'good', 'harder'].map(f => new El('feel', { feel: f })),
   'nav button': ['workouts', 'ride', 'history', 'settings'].map(v => new El('nav', { v })),
   '.view': ['workouts', 'ride', 'history', 'settings'].map(v => Object.assign(new El('view'), { id: 'v-' + v })),
-  '#jrMode button': [], '[data-lc]': [],
+  '#jrMode button': [],
 });
 let M = multi();
 const mkDoc = () => ({ querySelector: s => els[s] ??= new El(s), querySelectorAll: s => M[s] || [], createElement: () => new El('new'),
@@ -59,9 +58,6 @@ globalThis.requestAnimationFrame = f => setTimeout(f, 0);
 globalThis.getComputedStyle = () => ({ getPropertyValue: () => '#38bdf8' });
 const mem = new Map();
 globalThis.localStorage = { getItem: k => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: k => mem.delete(k) };
-const spoken = [];
-globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
-globalThis.speechSynthesis = { getVoices: () => [], speak: u => spoken.push(u.text), cancel() {} };
 globalThis.fetch = async u => { throw new Error('network used in web mode: ' + u); };   // the web build must not need a server
 globalThis.EventSource = undefined;
 
@@ -83,8 +79,8 @@ const out = {};
 let hw = await boot(1);
 out.mode = hw.mode; out.webClass = document.body.classList.contains('web');
 out.notice = $('#webNotice').style.display;            // no navigator.bluetooth in node
-out.coachDefault = hw.backend.coach !== null;  // the web build has no built-in coach
-hw.backend.updateSettings({ localCoach: { enabled: true } });  // even if a setting asks for it
+hw.backend.updateSettings({ voiceMode: 'all', localCoach: { enabled: true } });  // keys from older versions are ignored
+out.oldKeys = ['voiceMode', 'localCoach'].filter(k => k in hw.backend.settings);
 await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => hw.state().devices.trainer === 'sim', 'sim');
 $('#bText').value = '1m 50%, 2m 100%'; $('#bName').value = 'Web ride';
@@ -94,7 +90,7 @@ $('#cStart').click();
 await until(() => hw.state().ride?.started, 'started');
 for (let i = 0; i < 47; i++) hw.backend.tick();
 await sleep(20);
-out.before = { samples: hw.state().ride.samples, spoken: spoken.slice() };
+out.before = { samples: hw.state().ride.samples };
 // ---------- boot 2: the page reloads ----------
 hw = await boot(2);
 await until(() => hw.state().ride, 'resumed ride');
@@ -102,7 +98,7 @@ const r = hw.state().ride;
 out.resumed = { name: r.name, samples: r.samples, paused: r.paused, auto: r.auto_paused, notice: hw.state().notice };
 await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => hw.state().devices.trainer === 'sim', 'sim again');
-await hw.backend.fetch('/api/coach', { method: 'POST', body: JSON.stringify({ edit: { op: 'insert', steps: '30s 120%' } }) });
+await hw.backend.fetch('/api/ride/control', { method: 'POST', body: JSON.stringify({ action: 'edit', edit: { op: 'insert', steps: '30s 120%' } }) });
 for (let i = 0; i < 200; i++) hw.backend.tick();
 await sleep(20);
 out.overtime = hw.state().ride?.overtime;
@@ -114,13 +110,11 @@ const fit = await hw.backend.exportFile(rides.rides[0].id, 'fit');
 const backup = await (await hw.backend.fetch('/api/backup')).json();
 const garmin = await hw.backend.fetch(`/api/rides/${rides.rides[0].id}/garmin`, { method: 'POST', body: '{}' });
 out.final = { rides: rides.rides.length, samples: rides.rides[0].samples, fit: Buffer.from(fit.slice(8, 12)).toString(), backupRides: backup.rides.length,
-  steps: backup.rides[0].steps.length, garminStatus: garmin.status, events: backup.rides[0].events.map(e => e[1]).filter(l => /^(RIDE|EDIT|WORKOUT)/.test(l)),
-  agent: hw.state().agent, meter: $('#agentMeter').style.display };
+  steps: backup.rides[0].steps.length, garminStatus: garmin.status, events: backup.rides[0].events.map(e => e[1]).filter(l => /^(RIDE|EDIT|WORKOUT)/.test(l)) };
 // a backup carries custom workouts and imported courses (localStorage) next to the rides (IndexedDB)
 const wk = { id: 'c-test1', name: 'Backup test', text: '10m 60%' }, crs = { id: 'k-test1', name: 'Backup hill', dist: 2000, gain: 80, ele: Array.from({ length: 201 }, (_, i) => i * 0.4), ll: [] };
 await $('#bkFile').onchange({ target: { files: [{ text: async () => JSON.stringify({ ...backup, local: { custom: [wk, { id: 'x', text: 1 }], courses: [crs, { id: 'k-bad' }] } }) }], value: '' } });
 out.restored = { custom: JSON.parse(mem.get('hw.custom')).map(w => w.id), courses: JSON.parse(mem.get('hw.courses')).map(c => c.id) };
-out.spoken = spoken.slice(0, 6);
 // ---------- boot 3: a course is in use, Just ride rides it ----------
 mem.set('hw.course', JSON.stringify('s-climb'));
 hw = await boot(3);

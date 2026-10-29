@@ -197,7 +197,7 @@ export function summarize(r) {
   return { dur: n, avgP: avg(P), np, IF, tss: n * np * IF / (r.ftp * 3600) * 100, maxP: Math.max(0, ...P), kJ: P.reduce((a, b) => a + b, 0) / 1000, avgHR: avg(hr), maxHR: Math.max(0, ...hr), avgC: avg(cad), dist, best60, zt, elapsed: n ? (s[n - 1][0] - s[0][0]) / 1000 + 1 : 0 };
 }
 
-/* ---------- coach event lines (format documented in docs/PROTOCOL.md) ---------- */
+/* ---------- ride event lines (format documented in docs/PROTOCOL.md) ---------- */
 export const lineRideStart = (name, ftp, cw) => `RIDE START ${name} | FTP ${ftp} | ${cw ? cw.steps.length + ' steps, ' + fmtT(cw.total) : 'free'}`;
 export const lineRideEnd = el => `RIDE END ${fmtT(el)}`;
 export const lineResumed = (el, n) => `RIDE RESUMED after reload at T+${fmtT(el)} (${n} samples kept)`;
@@ -206,12 +206,6 @@ export const lineStepStart = (i, n, d, tgt) => `START step ${i + 1}/${n} ${fmtT(
 export function lineStepEnd(a) {
   return `END step ${a.i + 1}: avg ${Math.round(mean(a.p))}W (tgt ${Math.round(mean(a.tg))}) | HR avg ${Math.round(mean(a.h)) || '-'} max ${Math.max(0, ...a.h) || '-'} end ${a.h.at(-1) || '-'} | cad ${Math.round(mean(a.c))}`;
 }
-// l30 = last 30 samples; stepP = watts recorded so far in this step
-export function lineTick(el, i, n, into, d, tgt, l30, stepP) {
-  const h = l30.map(s => s[4]).filter(Boolean);
-  return `T+${fmtT(el)} step ${i + 1}/${n} ${fmtT(into)} in, ${fmtT(d - into)} left | tgt ${tgt ?? 'free'} | 30s ${Math.round(mean(l30.map(s => s[2])))}W | step avg ${Math.round(mean(stepP))}W | HR ${h.at(-1) || '-'} (${h.length ? (h.at(-1) - h[0] >= 0 ? '+' : '') + (h.at(-1) - h[0]) : '?'}/30s) | cad ${Math.round(mean(l30.map(s => s[3])))}`;
-}
-export const lineFeel = (feel, stepNo, l30, hr) => `FEEL ${feel.toUpperCase()} | step ${stepNo ?? '-'} | 30s ${Math.round(mean(l30.map(s => s[2])))}W | HR ${hr || '-'}`;
 
 /* ---------- FIT encoder ---------- */
 export const FIT_EPOCH = 631065600;

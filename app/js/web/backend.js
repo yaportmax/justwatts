@@ -8,9 +8,8 @@ import { detail, metaRow, trends } from './history.js';
 import { parseLine } from './lines.js';
 
 const SETTINGS_DEFAULTS = { ftp: 200, weight: 0, beeps: true, autoGarmin: false, hrZones: null, hrMax: null, hrZonesSrc: null, cadRange: [85, 95],
-  voiceMode: 'all', afterWorkout: 'hold', localCoach: {}, ftpSrc: null, hideVirtualDistance: false, units: 'imperial' };
+  afterWorkout: 'hold', ftpSrc: null, hideVirtualDistance: false, units: 'imperial' };
 const NOT_WEB = 'not available in the web version; use the local app';
-const UNMUTE = /\b(unmute|voice on|talk to me|speak again|you can talk)\b/i, MUTE = /\b(mute|quiet|stop talking|shut up|silence|be silent|no talking)\b/i;
 const pad = n => String(n).padStart(2, '0'), hms = d => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 const resp = (status, obj, type = 'application/json') => new Response(type === 'application/json' ? JSON.stringify(obj) : obj, { status, headers: { 'Content-Type': type } });
 
@@ -18,17 +17,16 @@ export class WebBackend {
   constructor({ store, nav = globalThis.navigator, location = globalThis.location, tickMs = 1000 } = {}) {
     this.store = store; this.location = location; this.tickMs = tickMs;
     this.settings = { ...SETTINGS_DEFAULTS }; this.settingsStored = false;
-    this.log = []; this.said = []; this.seq = 0; this.voice = { barge: 0, barge_at: null, tts: false, tts_at: null, listener_at: null };
+    this.log = [];
     this.hub = new WebHub({ store });
     this.engine = new Engine({ hub: this.hub, logEvent: l => this.logEvent(l), settings: () => this.settings,
       save: p => this.persist(p), archive: p => this.store.putRide(p).then(() => this.bump()) });
     this.engine.onFinish = p => this.afterFinish(p);
-    this.coach = null;  // no built-in coach on the public site for now (the local server keeps it)
     this.lastSnap = 0;
   }
   async init() {
     const s = await this.store.get('settings');
-    if (s) { this.settings = { ...this.settings, ...s }; this.settingsStored = true; }
+    if (s) { for (const k in SETTINGS_DEFAULTS) if (k in s) this.settings[k] = s[k]; this.settingsStored = true; }  // keys from older versions are dropped
     const cur = await this.store.get('current');
     if (cur) {
       const j = (await this.store.get('journal')) || [];
@@ -44,7 +42,6 @@ export class WebBackend {
   bump() { this.engine.bump(); }
   tick() {
     this.engine.tick(1);
-    const st = this.state(); this.coach?.observe(st);
     // crash safety: a snapshot at the first sample and every 30 s, the samples since then every second
     const r = this.engine.ride;
     if (r?.started && r.samples.length) {
@@ -60,23 +57,7 @@ export class WebBackend {
     const now = new Date();
     this.log.push(`[${hms(now)}] ${line}`); if (this.log.length > 2000) this.log.splice(0, 500);
     this.engine.note(line);
-    const ev = parseLine(line);
-    if (ev.type === 'said') {
-      this.said.unshift({ time: hms(now), text: ev.said, source: ev.source }); this.said = this.said.slice(0, 8);
-      if (UNMUTE.test(ev.said)) { this.updateSettings({ voiceMode: 'all' }); this.logEvent('VOICE UNMUTED (said)'); }
-      else if (MUTE.test(ev.said)) { this.updateSettings({ voiceMode: 'silent' }); this.voiceEvent('speech_start'); this.logEvent('VOICE MUTED (said)'); }
-    }
-    this.coach?.onEvent(line);
     this.bump();
-  }
-  addCmd(fields) { this.seq = Math.max(Date.now(), this.seq + 1); return { seq: this.seq, ...fields }; }
-  localSay(text, important) { const c = this.addCmd({ msg: text, important: !!important, local: true }); this.engine.coach(c); this.countCue(); this.logEvent(`CUE ${text}`); }
-  localAdjust(step, w, why) { const c = this.addCmd({ set: { step, w }, msg: why, important: true, local: true }); this.engine.coach(c); this.countCue(); this.logEvent(`CUE set step ${step} ${w}W | ${why}`); }
-  countCue() { if (this.engine.ride) this.engine.ride.localCues++; }
-  voiceEvent(ev) {
-    const v = this.voice, now = Date.now();
-    if (ev === 'speech_start') { v.barge++; v.barge_at = now; } else if (ev === 'tts_start' || ev === 'tts_end') { v.tts = ev === 'tts_start'; v.tts_at = now; } else throw new Error('bad voice event');
-    this.bump(); return { ...v };
   }
   updateSettings(body) {
     for (const [k, v] of Object.entries(body)) {
@@ -84,19 +65,14 @@ export class WebBackend {
       if (k === 'ftp' && !(+v >= 50 && +v <= 600)) continue;
       if (k === 'units' && v !== 'imperial' && v !== 'metric') continue;
       if (k === 'hrZonesSrc' && ![null, 'default', 'manual', 'garmin'].includes(v)) continue;
-      this.settings[k] = k === 'localCoach' ? { ...(this.settings[k] || {}), ...v } : v;
+      this.settings[k] = v;
     }
     this.settingsStored = true; this.store.set('settings', this.settings);
     this.bump(); return this.settingsPayload();
   }
   settingsPayload() { return { settings: { ...this.settings, autoGarmin: false }, stored: this.settingsStored, garmin: false, web: true, ble_supported: this.hub.supported }; }
   athlete() { const s = this.settings, z = activeHrZones(s); return { ftp: s.ftp, weight_kg: s.weight || null, hr_zones: z.floors, hr_max: s.hrMax, hr_zones_source: z.src, cadence_range: s.cadRange }; }
-  state() {
-    const st = this.engine.state(this.athlete(), { said: this.said.slice(0, 3) });
-    st.voice = { ...this.voice, mode: this.settings.voiceMode || 'all' };
-    st.agent = { connected: false };
-    return st;
-  }
+  state() { return this.engine.state(this.athlete()); }
   live(rid, n) { const [nr, samples] = this.engine.samplesSince(rid, n); const reset = nr !== rid; return { state: this.state(), ride_id: nr, reset, samples, n: (reset ? 0 : n) + samples.length }; }
   async rides() {
     const all = await this.store.allRides(), meta = (await this.store.get('meta')) || {};
@@ -118,7 +94,7 @@ export class WebBackend {
     const E = this.engine;
     if (p === '/api/health') return resp(200, { ok: true, app: 'justwatts', web: true, garmin: false, ble: this.hub.supported });
     if (p === '/api/live') return resp(200, this.live(q.get('ride') || null, +(q.get('n') || 0)));
-    if (p === '/api/state') return resp(200, { state: this.state(), age_s: 0, received_at: Date.now() / 1000 });
+    if (p === '/api/state') return resp(200, { state: this.state() });
     if (p === '/api/settings') return resp(200, method === 'POST' ? this.updateSettings(body) : this.settingsPayload());
     if (p === '/api/devices') {
       if (method === 'GET') return resp(200, this.hub.status());
@@ -131,14 +107,6 @@ export class WebBackend {
       return resp(200, { ...this.hub.status(), devices: [] });
     }
     if (p === '/api/ride/control') return resp(200, { ok: true, ...E.control(String(body.action || ''), body) });
-    if (p === '/api/coach' && method === 'POST') {
-      const c = this.addCmd(Object.fromEntries(['msg', 'set', 'edit', 'important'].filter(k => k in body).map(k => [k, body[k]])));
-      let result = null; if (c.edit) result = E.edit(c.edit);
-      E.coach(c); return resp(200, result ? { ...c, result } : c);
-    }
-    if (p === '/api/voice') return resp(200, method === 'POST' ? this.voiceEvent(body.event) : { ...this.voice, mode: this.settings.voiceMode });
-    if (p === '/api/said') return resp(200, { said: this.said });
-    if (p === '/api/event' && method === 'POST') { this.logEvent(String(body.line || '').split('\n').join(' ')); return resp(200, { ok: true }); }
     if (p === '/api/events') return resp(200, { events: this.log.slice(-(+(q.get('n') || 50))).map(l => { const m = l.match(/^\[(\d\d:\d\d:\d\d)\] (.*)$/); return parseLine(m[2], m[1]); }) });
     if (p === '/api/ride' && method === 'POST') { if (body.id && body.samples?.length) await this.store.putRide({ ...body, source: body.source || 'browser' }); return resp(200, { ok: true }); }
     if (p === '/api/rides') return resp(200, { rides: await this.rides() });

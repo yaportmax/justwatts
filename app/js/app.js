@@ -30,8 +30,8 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
-// Settings live on the server (agents read the athlete profile there); localStorage is only migrated once.
-const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95], voiceMode: 'all', units: 'imperial' }, store.get('hw.settings', {}));
+// Settings live on the server; localStorage is only migrated once.
+const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95], units: 'imperial' }, store.get('hw.settings', {}));
 let garminOn = false;
 const api = (path, body) => F(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const apiJson = async (path, body) => { const r = await api(path, body); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
@@ -45,7 +45,7 @@ async function loadSettings() {
     const j = await (await F('/api/settings')).json();
     garminOn = !!j.garmin;
     if (j.stored) Object.assign(settings, j.settings);
-    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'voiceMode', 'units']);
+    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'units']);
     if (!garminOn) settings.autoGarmin = false;
     store.set('hw.settings', settings);
   } catch {}
@@ -216,7 +216,7 @@ function onLive(msg) {
   setOnline(true);
   const r = S.ride;
   if (r) {
-    // the server sends the live step list (coach overrides and mid-ride edits included); rebuild on change
+    // the server sends the live step list (target changes and mid-ride edits included); rebuild on change
     const key = JSON.stringify(r.steps?.map(s => [s.duration_s, s.free, s.planned]) ?? null);
     if (key !== cwKey || !V) {
       cwKey = key; let cw = null;
@@ -232,29 +232,10 @@ function onLive(msg) {
   if (!prev || !!prev.ride !== !!r) rideShell();
   // each server notice is shown once per browser; viewing never changes server state
   if (S.notice && S.notice_id && S.notice_id !== store.get('hw.noticeId', 0)) { toast(S.notice); store.set('hw.noticeId', S.notice_id); }
-  coachUpdate();
-  voiceUpdate();
   beeps();
   testGuide();
   if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) finishedRide(S.last_finished);
-  setStatus(); renderLive(); renderMeter(); if (V) renderRide();
-}
-// live LLM usage: wakes counted by the server; tokens and cost when the agent reports them
-const kfmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n);
-function usageText(wakes, cues, u) {
-  const tok = ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens'].reduce((a, k) => a + (u?.[k] || 0), 0);
-  let t = `Agent ${wakes ?? 0} wake${wakes === 1 ? '' : 's'}`;
-  if (tok) t += ` · ${kfmt(tok)} tok`;
-  if (u?.cost_usd) t += ` · $${u.cost_usd.toFixed(2)}`;
-  if (cues) t += ` · ${cues} local cues`;
-  return t;
-}
-function renderMeter() {
-  const a = S?.ride?.agent, el = $('#agentMeter');
-  // only once an agent has connected during this ride; built-in cues are counted in the ride summary
-  const on = !!(a?.seen && S.ride.started);
-  el.style.display = on ? '' : 'none'; el.setAttribute('aria-hidden', on ? 'false' : 'true');
-  if (a?.seen) el.textContent = usageText(a.wakes, 0, a.usage);
+  setStatus(); renderLive(); if (V) renderRide();
 }
 function setOnline(on) {
   $('#srvState').setAttribute('aria-hidden', on ? 'true' : 'false');
@@ -348,15 +329,14 @@ function beeps() {  // 3-2-1 countdown to the next step, computed from server st
   const i = r.step.index - 1, left = Math.ceil(V.cw.steps[i].t0 + V.cw.steps[i].d - r.el);
   if (left <= 3 && left >= 1 && i < r.step.count - 1 && lastBeep !== i * 10 + left) { lastBeep = i * 10 + left; beep(left === 1 ? 1320 : 880, left === 1 ? 0.25 : 0.09); }
 }
-/* ---------- FTP test guide: prompts on screen and spoken, from the plan and the live samples ---------- */
-const TG = { id: null, said: new Set(), low: 0, est: null };
+/* ---------- FTP test guide: prompts on screen, from the plan and the live samples ---------- */
+const TG = { id: null, ended: false, low: 0, est: null };
 const meanOver = (t0, t1) => { let s = 0, n = 0; for (const x of samples) if (x[1] >= t0 && x[1] < t1) { s += x[2]; n++; } return n ? s / n : 0; };
 function bestMinute() { let best = 0, sum = 0; for (let i = 0; i < samples.length; i++) { sum += samples[i][2]; if (i >= 60) sum -= samples[i - 60][2]; if (i >= 59) best = Math.max(best, sum / 60); } return best; }
 function testGuide() {
   const box = $('#testCue');
   if (!V?.test || !V.cw) { box.style.display = 'none'; return; }
-  if (TG.id !== rideId) Object.assign(TG, { id: rideId, said: new Set(), low: 0, est: null });
-  const once = (k, t) => { if (!TG.said.has(k)) { TG.said.add(k); if (V.started) say(t, true); } };
+  if (TG.id !== rideId) Object.assign(TG, { id: rideId, ended: false, low: 0, est: null });
   const steps = V.cw.steps, kind = testKind(steps), at = stepAt(V.cw, V.el), left = at ? Math.round(at.s.d - at.into) : 0;
   let main = '', sub = '';
   if (!V.started) {
@@ -366,42 +346,29 @@ function testGuide() {
     const b = bestMinute(), est = Math.round(b * 0.75);
     if (!at || at.i === 0) {
       main = 'Warm up'; sub = at ? `Ramp starts in ${fmtT(left)}` : '';
-      once('w', 'Warm up easy. The ramp starts in 5 minutes.');
-      if (at && left <= 10) once('w10', 'Ramp starts in 10 seconds. Power goes up 20 watts every minute.');
     } else {
       const tgt = S.ride.target_w ?? stepWatts(at.s, 0, V.ftp);
       main = `${tgt} W · segment ${at.i}`; sub = `Best minute ${Math.round(b)} W · FTP ≈ ${est} W`;
-      once('r' + at.i, `${tgt} watts`);
       // failure: under 60% of the target (or stopped) for 8 s ends the test
       const p3 = S.live?.power_3s || 0;
       if (V.paused || p3 < tgt * 0.6) TG.low ||= Date.now(); else TG.low = 0;
-      if (TG.low && Date.now() - TG.low >= 8000 && !TG.said.has('end')) { once('end', `Test over. Your FTP is about ${est} watts.`); toast(`FTP ≈ ${est} W`); control('end').catch(() => {}); }
+      if (TG.low && Date.now() - TG.low >= 8000 && !TG.ended) { TG.ended = true; toast(`FTP ≈ ${est} W`); control('end').catch(() => {}); }
     }
   } else {
     const E = steps.findIndex(s => s.free && s.d >= 1200), eff = steps[E];
     const i = at ? at.i : steps.length;
     if (i < E - 2) {
       main = 'Warm up'; sub = `20 min effort in ${fmtT(eff.t0 - V.el)}`;
-      once('w', 'Warm up easy. About 20 minutes, with a few short pickups.');
-      if (!at.s.free && at.s.a >= 1 && at.s.d <= 60) once('s' + i, 'One minute faster.');
     } else if (i === E - 2) {
       main = '5 min hard'; sub = `${fmtT(left)} left · steady, not a sprint`;
-      once('h', 'Five minutes hard. Steady, not a sprint.'); if (left <= 60) once('h1', 'One minute left.');
     } else if (i === E - 1) {
       main = 'Recover'; sub = `20 min effort in ${fmtT(left)}`;
-      once('rec', 'Easy now. Ten minutes to recover.');
-      if (left <= 60) once('rec1', 'One minute. In the effort, plus and minus or your gears set the resistance.');
-      if (left <= 10) once('rec10', 'Ten seconds.');
     } else if (i === E) {
       const avg = Math.round(meanOver(eff.t0, eff.t0 + eff.d));
       main = `${fmtT(left)} left`; sub = `Avg ${avg} W · FTP ≈ ${Math.round(avg * 0.95)} W · + and − change resistance`;
-      once('go', 'Go. Twenty minutes, as hard as you can hold steady. Start a little easy.');
-      for (const q of [5, 10, 15]) if (at.into >= q * 60) once('q' + q, `${20 - q} minutes left. Average ${avg} watts.`);
-      if (left <= 60) once('last', 'One minute left.');
     } else {
       TG.est ??= Math.round(meanOver(eff.t0, eff.t0 + eff.d) * 0.95);
       main = `FTP ≈ ${TG.est} W`; sub = 'Cool down. End the ride to save it and set FTP.';
-      once('done', `Done. Your FTP is about ${TG.est} watts. Cool down easy.`);
     }
   }
   box.style.display = ''; $('#tcMain').textContent = main; $('#tcSub').textContent = sub;
@@ -475,9 +442,9 @@ function renderRide() {
 const gradeText = () => { const c = S?.ride?.course, g = +V.jr.g; return c ? `road ${c.grade.toFixed(1)}%${g ? ` ${g > 0 ? '+' : ''}${g.toFixed(1)}` : ''}` : `grade ${g.toFixed(1)}%`; };
 const valText = m => m === 'r' ? `level ${(+V.jr.r).toFixed(1)}` : m === 'w' ? `${V.jr.w} W` : gradeText();
 
-/* ---------- ride controls: everything a coach or an agent can change, by hand, mid-ride ---------- */
-// Each control is one request; the engine applies it at once, logs it as a MANUAL line (coaches see
-// it and hold off) and echoes what changed. Cheap inverses become a 15 s Undo.
+/* ---------- ride controls: change anything by hand, mid-ride ---------- */
+// Each control is one request; the engine applies it at once, logs it as a MANUAL line and echoes
+// what changed. Cheap inverses become a 15 s Undo.
 let undo = null;
 function renderUndo() {
   const b = $('#cUndo'), on = !!undo && Date.now() < undo.until;
@@ -491,9 +458,9 @@ function doUndo() {
 }
 const didText = d => d.replace(/^target step (\d+) (\d+)W$/, 'Segment $1: $2 W').replace(/^skip step (\d+)$/, 'Skipped segment $1')
   .replace(/^back step (\d+)$/, 'Again: segment $1').replace(/^mode (\w+)$/, 'Trainer: $1').replace(/^erg (\d+)W$/, '$1 W').replace(/^\w/, c => c.toUpperCase());
-function act(action, body = {}, undoLabel = null, inverse = null, say = null) {
+function act(action, body = {}, undoLabel = null, inverse = null, msg = null) {
   return control(action, body).then(j => {
-    toast(say ? say(j) : j.did ? didText(j.did) : j.detail || 'Done');
+    toast(msg ? msg(j) : j.did ? didText(j.did) : j.detail || 'Done');
     if (inverse) { undo = { label: undoLabel, run: inverse, until: Date.now() + 15000 }; renderUndo(); setTimeout(renderUndo, 15100); }
     flash(); return j;
   }).catch(() => {});
@@ -538,7 +505,6 @@ function setSetting(key, val, label) {
   settings[key] = val; saveSettings([key]); renderAdjust(); renderLive();
   undo = { label, run: () => { settings[key] = old; saveSettings([key]); renderAdjust(); renderLive(); }, until: Date.now() + 15000 }; renderUndo();
 }
-const lcOn = () => ({ ...LC_DEFAULTS, ...(settings.localCoach || {}) }).enabled;
 
 $('#cStart').onclick = () => control('start').catch(() => {});
 $('#cPause').onclick = pauseAct;
@@ -609,7 +575,6 @@ $('#adjPanel').onclick = e => {
     if (cr[0] >= cr[1]) return;
     return setSetting('cadRange', cr, 'cadence');
   }
-  if (a === 'coach') return setSetting('localCoach', { ...(settings.localCoach || {}), enabled: v === '1' }, 'coach');
   if (a === 'beeps') return setSetting('beeps', v === '1', 'beeps');
 };
 // End needs a second tap within 3 s so a stray tap never ends the ride
@@ -626,7 +591,7 @@ const KEYS = {
   ArrowRight: skipAct, ArrowLeft: backAct, BracketRight: () => stepTimeBy(timeSteps(R()?.step?.duration_s ?? 600)[1]), BracketLeft: () => stepTimeBy(-timeSteps(R()?.step?.duration_s ?? 600)[1]),
   Equal: () => stepWattsBy(5), NumpadAdd: () => stepWattsBy(5), Minus: () => stepWattsBy(-5), NumpadSubtract: () => stepWattsBy(-5),
   Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
-  KeyA: () => sheet(), KeyZ: doUndo, KeyM: () => $('#coachMute').click(),
+  KeyA: () => sheet(), KeyZ: doUndo,
 };
 function onKey(e) {
   if (e.key === 'Escape') { sheet(false); $('#keysModal').classList.remove('on'); return; }
@@ -640,85 +605,15 @@ function onKey(e) {
   e.preventDefault(); f(e);
 }
 document.addEventListener('keydown', onKey);
-$$('[data-feel]').forEach(b => b.onclick = () => control('feel', { feel: b.dataset.feel }).then(() => toast('Sent: ' + b.dataset.feel)).catch(() => {}));
-
-/* ---------- coach bar + voice (speech out; Whisper transcripts in) ---------- */
-// The coach voice mode lives in server settings (voiceMode: all | important | silent), so the athlete
-// can also change it by saying "mute" / "unmute" and agents can see it. Muted messages still show.
-let spokenSeq = null, lastBarge = null, speakingN = 0, lastLoud = 'all';
-const voiceMode = () => S?.voice?.mode || settings.voiceMode || 'all';
-function bestVoice() {
-  const vs = (window.speechSynthesis?.getVoices() || []).filter(v => v.lang.startsWith('en'));
-  for (const re of [/Google US English/, /Natural/i, /Google UK English Male/, /Online/i, /en-US/]) { const v = vs.find(x => re.test(x.name) || re.test(x.lang)); if (v) return v; }
-  return vs[0] || null;
-}
-const voicePost = event => api('/api/voice', { event }).catch(() => {});
-function say(text, important) {
-  const mode = voiceMode();
-  if (!window.speechSynthesis || mode === 'silent' || (mode === 'important' && !important)) return;
-  const u = new SpeechSynthesisUtterance(text); const v = bestVoice(); if (v) u.voice = v;
-  // tell the listener the coach is talking, so its own echo is not taken as the athlete barging in
-  u.onstart = () => { if (speakingN++ === 0) voicePost('tts_start'); };
-  u.onend = u.onerror = () => { if (--speakingN <= 0) { speakingN = 0; voicePost('tts_end'); } };
-  speechSynthesis.speak(u);
-}
-function hush() { try { window.speechSynthesis?.cancel(); } catch {} if (speakingN) { speakingN = 0; voicePost('tts_end'); } }
-function setVoiceMode(m) {
-  if (m !== 'silent') lastLoud = m;
-  settings.voiceMode = m; if (S?.voice) S.voice.mode = m;
-  saveSettings(['voiceMode']); renderVoice();
-  if (m === 'silent') hush();
-}
-function renderVoice() {
-  const m = voiceMode(), b = $('#coachMute');
-  b.textContent = m === 'silent' ? 'Unmute' : 'Mute'; b.classList.toggle('muted', m === 'silent');
-  $('#coachVerb').value = m;
-}
-$('#coachMute').onclick = () => setVoiceMode(voiceMode() === 'silent' ? lastLoud : 'silent');
-$('#coachVerb').onchange = e => setVoiceMode(e.target.value);
-// barge-in: the voice listener reports the athlete starting to speak; stop talking at once
-function voiceUpdate() {
-  const v = S.voice || {};
-  if (lastBarge !== null && v.barge > lastBarge) hush();
-  lastBarge = v.barge ?? 0;
-  if (v.mode === 'silent' && speakingN) hush();
-  renderVoice();
-}
-const hm = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-function coachUpdate() {
-  $('#coach').style.display = S.agent?.connected ? '' : 'none';  // the coach bar is for a connected agent only
-  const ms = S.messages || [], top = ms.at(-1);
-  if (top) {
-    $('#coachMsg').textContent = top.msg; $('#coachMsg').title = top.msg;
-    $('#coachPrev').innerHTML = ms.slice(0, -1).reverse().map(x => `<div title="${esc(x.msg)}">${hm(x.ts)} · ${esc(x.msg)}</div>`).join('');
-  } else {  // new ride: nothing left over from the last one
-    $('#coachMsg').textContent = 'Watching'; $('#coachMsg').title = ''; $('#coachPrev').innerHTML = '';
-  }
-  // only speak and flash messages that arrive while the page is open, never replay old ones
-  const newest = top?.seq ?? 0;
-  if (spokenSeq === null) spokenSeq = newest;
-  else if (newest > spokenSeq) {
-    for (const m of ms) if (m.seq > spokenSeq) say(m.msg, m.important);
-    spokenSeq = newest; beep(1046, 0.12);
-    $('#coach').classList.add('flash'); setTimeout(() => $('#coach').classList.remove('flash'), 4000);
-  }
-  const said = S.said || [];
-  $('#coachSaid').innerHTML = said.length ? `You: <b>${esc(said[0].text)}</b>` + (said[1] ? ` · ${esc(said[1].text)}` : '') : '';
-  $('#coachSaid').title = said.map(x => x.text).join('\n');
-}
-// tap the coach text to expand clamped messages, tap again to collapse
-$('#coachMsg').parentElement.onclick = () => $('#coach').classList.toggle('open');
-
 /* ---------- history (server archive is the source of truth) ---------- */
 let rows = [];
 async function renderHistory() {
   try { rows = (await (await F('/api/rides')).json()).rides; } catch { return; }
   const tb = $('#hist'); tb.innerHTML = '';
   $('#histEmpty').style.display = rows.length ? 'none' : '';
-  document.body.classList.toggle('noagent', !rows.some(r => r.agent_wakes > 0));
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${esc(fmtT(r.time_s))}</td><td class="num">${esc(r.avg_w)}</td><td class="num">${esc(r.np)}</td><td class="num">${esc(r.tss)}</td><td class="num">${esc(r.kJ)}</td><td class="num">${esc(r.avg_hr ?? '–')}</td><td class="num">${esc(r.best?.['5m'] ?? '–')}</td><td class="num agentcol" title="agent wakes / tokens">${esc(r.agent_wakes ?? '–')}${r.agent_tokens ? ' · ' + esc(kfmt(r.agent_tokens)) : ''}</td>`;
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${esc(fmtT(r.time_s))}</td><td class="num">${esc(r.avg_w)}</td><td class="num">${esc(r.np)}</td><td class="num">${esc(r.tss)}</td><td class="num">${esc(r.kJ)}</td><td class="num">${esc(r.avg_hr ?? '–')}</td><td class="num">${esc(r.best?.['5m'] ?? '–')}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
   renderTrends();
@@ -767,8 +662,6 @@ async function openSummary(id) {
   const rest = [['TSS', m.tss], ['IF', m.if.toFixed(2)], ['Max', m.max_w + ' W'], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'],
     ...(m.avg_hr ? [['HR', `${m.avg_hr} avg · ${m.max_hr} max`]] : []),
     ['Best', ['1m', '5m', '20m'].filter(k => d.best[k]).map(k => `${k.replace('m', ' min')} ${d.best[k]} W`).join(' · ') || '–']];
-  if (d.agent?.local_cues) rest.push(['Coach cues', d.agent.local_cues]);
-  if (d.agent?.wakes > 0) rest.push(['Coach', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
   const heroHtml = hero.map(([k, v]) => `<div><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
   const restHtml = rest.map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('');
   $('#sStats').innerHTML = `<div class="shero">${heroHtml}</div><div class="srest">${restHtml}</div>`;
@@ -797,8 +690,6 @@ async function openSummary(id) {
     $('#sHZleg').innerHTML = hz.map((t, i) => `<span><b style="background:var(${HRZ_COLORS[i]})"></b>Z${i + 1} ${esc(fl[i])}+ · ${esc(fmtT(t))}</span>`).join('');
   }
   $('#sLaps').innerHTML = d.laps.map(l => `<tr><td>${esc(l.overtime ? 'free' : l.index)}</td><td class="num">${esc(fmtT(l.time_s))}</td><td class="num">${esc(l.target_w ?? (l.free ? 'free' : '–'))}</td><td class="num">${esc(l.avg_w)}</td><td class="num">${esc(l.max_w)}</td><td class="num">${esc(l.np)}</td><td class="num">${esc(l.avg_hr ?? '–')}</td><td class="num">${esc(l.max_hr ?? '–')}</td><td class="num">${esc(l.avg_cad ?? '–')}</td></tr>`).join('');
-  const cls = l => /^COACH|^EDIT/.test(l) ? 'c' : /^SAID/.test(l) ? 's' : /^FEEL|^PAUSED/.test(l) ? 'f' : '';
-  $('#sEvents').innerHTML = d.events.length ? d.events.map(([ts, l]) => `<div class="${cls(l)}">${new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}  ${esc(l)}</div>`).join('') : '<div class="hint">No transcript for this ride.</div>';
   renderGarminBtn(d.garmin);
   renderStravaBtn(d.strava);
   $('#summary').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -861,18 +752,15 @@ function download(name, data, type) {
 
 
 /* ---------- settings tab ---------- */
-const LC_DEFAULTS = { enabled: !WEB,  // the web build starts with the coach off
-  countdown: true, cadence: true, recap: true, recovery: true, auto_adjust: 'no_agent' };
 let strava = {};
 async function renderSettings() {
-  const lc = { ...LC_DEFAULTS, ...(settings.localCoach || {}) }, cr = settings.cadRange || [85, 95];
+  const cr = settings.cadRange || [85, 95];
   $('#cadLo').value = cr[0]; $('#cadHi').value = cr[1];
   $('#sFtp').value = settings.ftp; $('#sWeight').value = weightShow(settings.weight, settings.units);
   $('#units').value = settings.units || 'imperial'; showUnits();
   renderHrZones();
   $('#virtDist').value = settings.hideVirtualDistance ? '1' : '0';
-  $$('[data-lc]').forEach(b => { b.checked = !!lc[b.dataset.lc]; });
-  $('#lcAuto').value = lc.auto_adjust; $('#afterWk').value = settings.afterWorkout || 'hold';
+  $('#afterWk').value = settings.afterWorkout || 'hold';
   $('#autoGarmin2').value = settings.autoGarmin ? '1' : '0'; $('#autoGarmin2').disabled = !garminOn;
   $('#gImport').style.display = garminOn ? '' : 'none';
   $('#garminState').textContent = garminOn ? '' : 'Garmin is off on this server (see README: Garmin upload)';
@@ -887,7 +775,6 @@ async function renderSettings() {
   $('#stState').textContent = strava.connected ? `Connected${strava.athlete?.name ? ' as ' + strava.athlete.name : ''}` : strava.configured ? 'Not connected' : 'Set up your own Strava API app below';
   $('#autoStrava').value = settings.autoStrava ? '1' : '0'; $('#autoStrava').disabled = !strava.connected;
   $('#stDup').classList.toggle('hot', !!(settings.autoGarmin && settings.autoStrava));
-  $('#agentState').textContent = S?.agent?.connected ? 'Connected' : 'Not connected';
 }
 // Settings > Athlete and the Workouts tab shortcuts edit the same values
 $('#sFtp').onchange = e => { $('#ftp').value = e.target.value; $('#ftp').onchange({ target: $('#ftp') }); renderSettings(); };
@@ -921,9 +808,6 @@ $$('[data-hz]').forEach(x => x.onchange = () => {
   else { toast('Zones must rise'); renderHrZones(); }
 });
 $('#virtDist').onchange = e => { settings.hideVirtualDistance = e.target.value === '1'; saveSettings(['hideVirtualDistance']); };
-const setLC = patch => { settings.localCoach = { ...(settings.localCoach || {}), ...patch }; saveSettings(['localCoach']); };
-$$('[data-lc]').forEach(b => b.onchange = () => setLC({ [b.dataset.lc]: b.checked }));
-$('#lcAuto').onchange = e => setLC({ auto_adjust: e.target.value });
 $('#afterWk').onchange = e => { settings.afterWorkout = e.target.value; saveSettings(['afterWorkout']); };
 const cadSave = () => { const lo = +$('#cadLo').value, hi = +$('#cadHi').value; if (lo >= 40 && hi > lo && hi <= 130) { settings.cadRange = [lo, hi]; saveSettings(['cadRange']); } else toast('Cadence range: low < high'); };
 $('#cadLo').onchange = cadSave; $('#cadHi').onchange = cadSave;
@@ -1049,7 +933,7 @@ async function syncHrZones() {
   } catch {}
 }
 $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3m 55%), 8m 50-40%';
-renderVoice(); setStatus();
+setStatus();
 loadSettings().then(syncHrZones);
 migrateLocalRides().then(renderHistory);
 F('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() => {});

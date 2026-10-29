@@ -5,28 +5,26 @@ build-backend = "hatchling.build"
 [project]
 name = "justwatts"
 version = "0.1.0"
-description = "A free, open-source smart-trainer app: ERG workouts, free ride, history, built-in coach. Optional AI agent coaching over MCP."
+description = "A free, open-source smart-trainer app: ERG workouts, free ride, courses, history, FIT export, Garmin and Strava upload."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Just Watts contributors" }]
-keywords = ["cycling", "smart trainer", "ftms", "erg", "mcp", "ai agent", "coaching", "zwift hub"]
+keywords = ["cycling", "smart trainer", "ftms", "erg", "zwift hub"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Human Machine Interfaces",
 ]
-# bleak drives real trainers; everything else (voice, agents, Garmin) is an optional extra
+# bleak drives real trainers; Garmin is an optional extra
 dependencies = ["bleak>=0.22"]
 
 [project.optional-dependencies]
 ble = []  # kept for older install commands; bleak is a core dependency now
 garmin = ["garminconnect>=0.2.19"]
-mcp = ["mcp>=1.2"]
-voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.24"]
-all = ["bleak>=0.22", "garminconnect>=0.2.19", "mcp>=1.2", "faster-whisper>=1.0", "sounddevice>=0.4", "numpy>=1.24"]
-dev = ["pytest>=8", "fitdecode>=0.10", "mcp>=1.2"]
+all = ["bleak>=0.22", "garminconnect>=0.2.19"]
+dev = ["pytest>=8", "fitdecode>=0.10"]
 
 [project.scripts]
 justwatts = "justwatts.cli:main"
@@ -36,7 +34,6 @@ packages = ["server/justwatts"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "app" = "justwatts/app"
-"docs/COACHING.md" = "justwatts/COACHING.md"
 
 [tool.hatch.build.targets.sdist]
 include = ["server", "app", "docs", "tests", "examples", "README.md", "LICENSE", "AGENTS.md", "start.cmd", "start.sh"]

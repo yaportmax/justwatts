@@ -21,7 +21,7 @@ export function view(e) {
   if (!r) return null;
   return { el: Math.round(r.el), intensity: r.intensity, target_w: r.target_w, control: r.control, overtime: r.overtime, total_s: r.total_s,
     paused: r.paused, jr: r.jr, ov: r.ov, step: r.step && [r.step.index, r.step.duration_s, r.step.into_s],
-    steps: r.steps && r.steps.map(x => [x.duration_s, x.free, x.start_w, x.manual]), manual: r.manual && r.manual.what, want: hub.wantCmd };
+    steps: r.steps && r.steps.map(x => [x.duration_s, x.free, x.start_w]), want: hub.wantCmd };
 }
 const out = [];
 for (const [op, ...a] of script) {

@@ -46,8 +46,7 @@ def run_python(tmp_path, workout, settings, script):
         return {"el": E.js_round(r["el"]), "intensity": r["intensity"], "target_w": r["target_w"], "control": r["control"],
                 "overtime": r["overtime"], "total_s": r["total_s"], "paused": r["paused"], "jr": r["jr"], "ov": r["ov"],
                 "step": r["step"] and [r["step"]["index"], r["step"]["duration_s"], r["step"]["into_s"]],
-                "steps": r["steps"] and [[x["duration_s"], x["free"], x["start_w"], x["manual"]] for x in r["steps"]],
-                "manual": r["manual"] and r["manual"]["what"], "want": hub.wanted_cmd}
+                "steps": r["steps"] and [[x["duration_s"], x["free"], x["start_w"]] for x in r["steps"]], "want": hub.wanted_cmd}
     out = []
     for op, *a in script:
         res = None
@@ -60,7 +59,7 @@ def run_python(tmp_path, workout, settings, script):
             s.update(a[0])
         else:
             try:
-                eng.control(op, a[0] if a else {}, source="manual")
+                eng.control(op, a[0] if a else {})
                 res = "ok"
             except ValueError:
                 res = "error"

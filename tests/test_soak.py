@@ -155,7 +155,7 @@ def test_three_hour_soak(tmp_path, seed):
                 paused_ticks += 1
             # the trainer must hold the engine's target: checked mid-way through every steady step and
             # 15 s after every reconnect (writes can be lost or misreported; the hub re-asserts every 10 s)
-            st = eng.state({}, [])["ride"]
+            st = eng.state({})["ride"]
             step = st["step"]
             if step and step["index"] != last_step:
                 last_step = step["index"]

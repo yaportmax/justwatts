@@ -1,4 +1,4 @@
-"""Server-side ride engine: controls, auto-pause, coach commands, mid-ride edits, persistence, streams."""
+"""Server-side ride engine: controls, auto-pause, mid-ride edits, persistence, streams."""
 import json
 import time
 
@@ -44,11 +44,9 @@ def test_controls_and_targets(srv):
     ctl(srv, "skip")
     ticks(eng, 1)
     assert state(srv)["ride"]["step"]["index"] == 2
-    assert ctl(srv, "feel", feel="harder")[0] == 200
-    assert ctl(srv, "feel", feel="meh")[0] == 400
     assert ctl(srv, "warp")[0] == 400
     types = [e["type"] for e in srv.client.events(50)]
-    assert types.count("paused") == 1 and "resumed" in types and "feel" in types
+    assert types.count("paused") == 1 and "resumed" in types
 
 
 def test_just_ride_modes(srv):
@@ -102,28 +100,27 @@ def test_finish_archives_and_short_rides_are_dropped(srv):
     assert not eng.current_file.exists()
 
 
-def test_coach_commands_apply_on_server(srv):
+def test_step_targets_apply_on_server(srv):
     eng = ride(srv)
     ticks(eng, 70)
-    srv.client.coach(msg="Hold 230", step="cur", watts=230)
-    srv.client.coach(step=3, watts=90)
+    srv.client.control("target", step="cur", w=230)
+    srv.client.control("target", step=3, w=90)
     st = state(srv)
     assert st["ride"]["target_w"] == 230 and eng.hub.wanted_cmd == {"k": "erg", "w": 230}
     assert [s["override_w"] for s in st["ride"]["steps"]] == [None, 230, 90]
-    assert st["messages"][-1]["msg"] == "Hold 230"
 
 
 # ---------- mid-ride workout edits ----------
 def edit(srv, **e):
-    return srv.req("POST", "/api/coach", {"edit": e}, headers=srv.bearer)
+    return ctl(srv, "edit", edit=e)
 
 
 def test_insert_reps_after_current_step(srv):
     eng = ride(srv, "2m 50%, 10m 90%, 5m 50%")
     ticks(eng, 150)  # 30 s into step 2
-    srv.client.coach(step=3, watts=95)
+    srv.client.control("target", step=3, w=95)
     code, res = edit(srv, op="insert", steps="2x(5m 250w, 3m 50%)", after="cur")
-    assert code == 200 and res["result"]["steps"] == 7 and res["result"]["total_s"] == 17 * 60 + 16 * 60
+    assert code == 200 and res["steps"] == 7 and res["total_s"] == 17 * 60 + 16 * 60
     st = state(srv)["ride"]
     assert [s["duration_s"] for s in st["steps"]] == [120, 600, 300, 180, 300, 180, 300]
     assert [s["start_w"] for s in st["steps"]] == [100, 180, 250, 100, 250, 100, 95]
@@ -162,11 +159,11 @@ def test_delete_duration_extend_replace(srv):
 
 
 def test_edit_validation(srv):
-    assert edit(srv, op="insert", steps="2x(5m 250w)")[0] == 409  # no ride on the server
+    assert edit(srv, op="insert", steps="2x(5m 250w)")[0] == 400  # no ride on the server
     eng = ride(srv, "2m 50%, 2m 100%, 2m 50%")
     ticks(eng, 150)
     bad = [dict(op="insert", steps="banana"), dict(op="insert", steps="1m 50%", after=1), dict(op="delete", step=1),
-           dict(op="delete", step=9), dict(op="duration", step=3, seconds=0), dict(op="warp"),
+           dict(op="delete", step=9), dict(op="duration", step=3), dict(op="warp"),
            dict(op="extend", seconds="x"), dict(op="insert")]
     for b in bad:
         assert edit(srv, **b)[0] == 400, b
@@ -176,7 +173,7 @@ def test_edit_validation(srv):
 def test_edits_survive_restart(srv, tmp_path):
     eng = ride(srv, "1m 50%, 5m 90%")
     ticks(eng, 80)
-    srv.client.coach(step="cur", watts=170)
+    srv.client.control("target", w=170)
     edit(srv, op="insert", steps="3m 200w")
     eng.save()
     cfg = Config(port=srv.port + 50, data=srv.cfg.data)
@@ -210,7 +207,7 @@ def test_stale_unfinished_ride_is_archived(srv):
         s2.server_close()
 
 
-# ---------- streams, settings, voice transcripts ----------
+# ---------- streams, settings ----------
 def test_live_poll_and_sse(srv):
     eng = ride(srv, "5m 50%")
     ticks(eng, 12)
@@ -246,10 +243,28 @@ def test_settings_roundtrip_and_garmin_forced_off(tmp_path):
         s.server_close()
 
 
-def test_said_endpoint(srv):
-    srv.server.log_event('SAID (whisper): "make it easier"')
-    srv.server.log_event("FEEL GOOD | step - | 30s 0W | HR -")
-    srv.server.log_event('SAID (whisper): "thanks coach"')
-    said = srv.req("GET", "/api/said")[1]["said"]
-    assert [x["text"] for x in said] == ["thanks coach", "make it easier"] and said[0]["source"] == "whisper"
-    assert state(srv)["said"][0]["text"] == "thanks coach"
+
+def test_old_files_with_removed_fields_still_load(srv, tmp_path):
+    """Rides and settings saved by older versions carry fields that no longer exist: they are ignored."""
+    t0 = 1767250800000
+    old = {"id": "r-old", "name": "Old", "ftp": 200, "start": t0, "text": "1m 50%", "steps": [{"d": 60, "a": 0.5, "b": 0.5, "u": "%"}],
+           "samples": [[t0 + i * 1000, i + 1, 100, 90, 120, 30, 100] for i in range(60)],
+           "events": [[t0, "RIDE START Old | FTP 200 | 1 steps, 1:00"], [t0, "FEEL GOOD | step 1 | 30s 100W | HR 120"]],
+           "agent": {"wakes": 3, "local_cues": 2, "usage": {"input_tokens": 10}, "seen": True},
+           "manual": {"what": "intensity", "step": None, "ts": t0}}
+    srv.req("POST", "/api/ride", old, headers=srv.page)
+    assert srv.req("GET", "/api/rides")[1]["rides"][0]["id"] == "r-old"
+    assert srv.req("GET", "/api/rides/r-old/detail")[1]["summary"]["time_s"] == 60
+    assert srv.req("GET", "/api/rides/r-old/fit", raw=True)[0] == 200
+    data = tmp_path / "old"
+    (data / "coach").mkdir(parents=True)  # the ride in progress, where older versions kept it
+    now = int(time.time() * 1000)
+    (data / "coach" / "engine.json").write_text(json.dumps({**old, "id": "r-1", "start": now - 60000,
+                                                            "samples": [[now - 60000 + i * 1000, i + 1, 100, 90, 0, 30, 100] for i in range(60)]}))
+    (data / "settings.json").write_text(json.dumps({"ftp": 230, "voiceMode": "silent", "localCoach": {"enabled": True}, "agentGate": {}}))
+    s2 = make_server(Config(port=srv.port + 51, data=data), quiet=True, ticker=False, devices=False)
+    try:
+        assert s2.engine.ride and len(s2.engine.ride.samples) == 60 and s2.settings["ftp"] == 230
+        assert "voiceMode" not in s2.settings and (data / "live" / "engine.json").exists()
+    finally:
+        s2.server_close()

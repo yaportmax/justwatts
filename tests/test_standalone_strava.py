@@ -1,5 +1,5 @@
-"""Works with no agent and no extras; built-in coach adjustments; Garmin profile import; HR strap
-retry; Strava upload (mocked, never the real API); share cards."""
+"""Works with no optional extras; Garmin profile import; HR strap retry; Strava upload (mocked,
+never the real API); share cards."""
 import json
 import subprocess
 import sys
@@ -14,7 +14,7 @@ from conftest import REPO, FakeGarmin
 # ---------- no optional extras installed ----------
 NO_EXTRAS = textwrap.dedent(r"""
     import importlib.abc, json, sys, tempfile
-    BLOCK = ("mcp", "faster_whisper", "sounddevice", "garminconnect", "numpy")
+    BLOCK = ("garminconnect",)
     class Block(importlib.abc.MetaPathFinder):
         def find_spec(self, name, path=None, target=None):
             if name.split(".")[0] in BLOCK:
@@ -22,11 +22,9 @@ NO_EXTRAS = textwrap.dedent(r"""
             return None
     sys.meta_path.insert(0, Block())
     sys.path.insert(0, sys.argv[1])
-    from justwatts.cli import main
     from justwatts.config import Config
     from justwatts.server import make_server
-    out = {"mcp_cmd": main(["mcp", "--port", "8797", "--data", tempfile.mkdtemp()]),
-           "voice_cmd": main(["voice", "--port", "8797", "--data", tempfile.mkdtemp()])}
+    out = {}
     import socket
     s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
     srv = make_server(Config(port=port, data=tempfile.mkdtemp()), quiet=True, ticker=False)
@@ -35,12 +33,11 @@ NO_EXTRAS = textwrap.dedent(r"""
     eng.control("load", {"workout": {"name": "Plain", "text": "30s 50%, 30s 100%"}})
     eng.control("start", {})
     for _ in range(70):
-        eng.tick(1.0); srv.after_tick()
+        eng.tick(1.0)
     res = eng.control("end", {})
     from justwatts import history as H
     r = srv.load_ride(res["id"])
     out.update(saved=res["saved"], samples=len(r["samples"]), fit=H.fit_encode(r)[8:12].decode(),
-               cues=r["agent"]["local_cues"], wakes=r["agent"]["wakes"],
                loaded=sorted(m for m in sys.modules if m.split(".")[0] in BLOCK))
     srv.server_close()
     print(json.dumps(out))
@@ -55,63 +52,8 @@ def test_runs_and_rides_without_optional_extras(tmp_path):
                                          "JUSTWATTS_BLE": "off", "JUSTWATTS_GARMIN": "off", "USERPROFILE": str(tmp_path), "HOME": str(tmp_path)})
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout.strip().splitlines()[-1])
-    assert out["mcp_cmd"] == 1 and out["voice_cmd"] == 1        # clear message, no crash
     assert out["saved"] and out["samples"] == 70 and out["fit"] == ".FIT"
-    assert out["cues"] >= 2 and out["wakes"] == 0                # built-in coach spoke, no agent woke
     assert out["loaded"] == []
-    assert "pip install" in p.stderr                             # the hint for the missing extras
-
-
-# ---------- built-in coach auto-adjust ----------
-def ride(srv, text="1m 50%, 5m 100%", n=90):
-    srv.req("POST", "/api/devices", {"action": "sim", "kind": "trainer"}, headers=srv.page)
-    srv.req("POST", "/api/ride/control", {"action": "load", "workout": {"name": "S", "text": text}}, headers=srv.page)
-    srv.req("POST", "/api/ride/control", {"action": "start"}, headers=srv.page)
-    for _ in range(n):
-        srv.server.engine.tick(1.0)
-        srv.server.after_tick()
-    return srv.server.engine
-
-
-def feel(srv, f):
-    srv.req("POST", "/api/ride/control", {"action": "feel", "feel": f}, headers=srv.page)
-    srv.server.engine.tick(1.0)
-    srv.server.after_tick()
-
-
-def target(srv):
-    return srv.server.engine_state()["ride"]["target_w"]
-
-
-def test_local_coach_adjusts_without_agent(srv):
-    ride(srv)
-    assert target(srv) == 200
-    feel(srv, "easier")
-    assert target(srv) == 190 and srv.server.engine.messages[-1]["msg"] == "Easier: 190 watts."
-    feel(srv, "harder")
-    assert target(srv) == 195
-    feel(srv, "good")
-    assert target(srv) == 195
-    assert any(l.startswith("CUE set step 2 190W") for _, l in srv.server.engine.ride.events)
-
-
-def test_local_coach_leaves_targets_to_a_connected_agent(srv):
-    ride(srv)
-    srv.req("GET", "/api/agent-events", headers=srv.bearer)  # an agent shows up
-    assert srv.server.engine_state()["agent"]["connected"]
-    feel(srv, "easier")
-    assert target(srv) == 200
-    srv.server.update_settings({"localCoach": {"auto_adjust": "always"}})
-    feel(srv, "easier")
-    assert target(srv) == 190
-
-
-def test_local_coach_hr_cap_eases_once_per_step(srv):
-    srv.server.update_settings({"hrMax": 150})  # cap 142; the sim HR reaches ~165 at 100 %
-    ride(srv, "30s 50%, 10m 100%", n=400)
-    st = srv.server.engine_state()["ride"]
-    assert st["target_w"] == 190 and st["steps"][1]["override_w"] == 190
-    assert sum(1 for _, l in srv.server.engine.ride.events if "Easing to" in l) == 1
 
 
 # ---------- Garmin profile import ----------
@@ -215,7 +157,7 @@ class FakeStrava:
 def ssrv(tmp_path):
     import threading
     from conftest import SimpleNamespace, free_port, request
-    from justwatts.client import CoachClient
+    from justwatts.client import Client
     from justwatts.config import Config
     from justwatts.server import make_server
     fake = FakeStrava()
@@ -224,7 +166,7 @@ def ssrv(tmp_path):
     s.strava.sleep = lambda _s: None
     threading.Thread(target=s.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{cfg.port}"
-    yield SimpleNamespace(server=s, cfg=cfg, port=cfg.port, fake=fake, client=CoachClient(cfg),
+    yield SimpleNamespace(server=s, cfg=cfg, port=cfg.port, fake=fake, client=Client(cfg),
                           page={"Origin": url, "X-HW": "1"}, bearer={"Authorization": f"Bearer {s.token}"},
                           req=lambda *a, **kw: request(cfg.port, *a, **kw))
     s.shutdown()
@@ -234,7 +176,7 @@ def ssrv(tmp_path):
 def test_strava_config_is_user_only_and_secret_never_leaks(ssrv):
     t = ssrv
     code, body = t.req("POST", "/api/strava/config", {"client_id": "168528", "client_secret": "s3cret-value"}, headers=t.bearer)
-    assert code == 403 and "yourself" in body["error"]  # an agent's token cannot set the secret
+    assert code == 403 and "yourself" in body["error"]  # a token caller cannot set the secret
     assert t.req("POST", "/api/strava/config", {"client_id": "abc"}, headers=t.page)[0] == 400
     code, st = t.req("POST", "/api/strava/config", {"client_id": "168528", "client_secret": "s3cret-value"}, headers=t.page)
     assert code == 200 and st == {**st, "client_id": "168528", "has_secret": True, "configured": True, "connected": False}

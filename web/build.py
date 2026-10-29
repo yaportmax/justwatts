@@ -3,9 +3,9 @@
     python web/build.py [--out dist-web]
 
 Same app/ sources as the local app; the build only switches js/mode.js to 'web', drops the
-server-only pages and adds vercel.json (static, SPA fallback, security headers). No Node or
-bundler needed. Minimal on purpose: Web Bluetooth, the in-page ride engine, IndexedDB history and
-the built-in coach; uploads and agents stay in the local app.
+server-only files and adds vercel.json (static, SPA fallback, security headers). No Node or
+bundler needed. Minimal on purpose: Web Bluetooth, the in-page ride engine and IndexedDB history;
+uploads stay in the local app.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "app"
 WEB = ROOT / "web"
-SERVER_ONLY = {"connect.html", "js/package.json"}
+SERVER_ONLY = {"js/package.json"}
 
 
 def build(out: Path) -> dict:

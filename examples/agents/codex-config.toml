@@ -1,5 +1,0 @@
-# Append to ~/.codex/config.toml
-[mcp_servers.justwatts]
-command = "justwatts"
-args = ["mcp"]
-env = { JUSTWATTS_PORT = "8765" }

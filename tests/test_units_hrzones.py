@@ -68,11 +68,3 @@ def test_settings_units_and_zone_source(srv):
     s.update_settings({"hrZonesSrc": "default", "hrZones": None})
     assert s.athlete()["hr_zones"] == [100, 120, 140, 160, 180]
     assert '"units": "metric"' in s.settings_file.read_text(encoding="utf-8")
-
-
-def test_default_zones_set_no_hr_cap():
-    from justwatts.agent_gate import hr_cap
-    z = [93, 111, 130, 148, 167]
-    assert hr_cap({"hr_zones": z, "hr_zones_source": "default"}) is None
-    assert hr_cap({"hr_zones": z, "hr_zones_source": "manual"}) == 167
-    assert hr_cap({"hr_zones": z, "hr_zones_source": "default", "hr_max": 200}) == 190

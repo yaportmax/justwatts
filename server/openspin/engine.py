@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import events as E
+from .course import G_MAX, G_MIN, check_course, ele_at, grade_at, mass_of, profile_of, speed_step
 from .devices import DeviceHub
 from .workout import WorkoutError, compile_workout, parse_workout, step_at, step_watts, to_text
 
@@ -26,6 +27,10 @@ STALE_RESUME_S = 6 * 3600
 
 def _mean(a):
     return sum(a) / len(a) if a else 0
+
+
+def _r1(x: float) -> float:
+    return math.floor(x * 10 + 0.5) / 10
 
 
 class Ride:
@@ -59,6 +64,25 @@ class Ride:
         self.local_cues = 0    # cues the local rule coach spoke instead of waking the agent
         self.usage: dict = {}  # token usage the agent reported for this ride
         self.manual: dict | None = None  # the rider's last change by hand: {what, step, ts}
+        # course: the road under the rider. cs = {d: metres ridden, v: virtual speed m/s, up: metres climbed,
+        # end: reached the finish}. sg/st: last grade sent and when (ride seconds), for rate limiting.
+        self.course: dict | None = None
+        self.cs = {"d": 0.0, "v": 0.0, "up": 0.0, "end": False}
+        self.prof: list | None = None
+        self.sg: float | None = None
+        self.st = -1e9
+
+    def set_course(self, c: dict | None) -> None:
+        self.course = c
+        self.prof = profile_of(c) if c else None
+
+    def resume_course(self) -> None:
+        """Position from the last recorded sample (the journal is newer than the snapshot's cs)."""
+        s = [x for x in self.samples if len(x) > 8]
+        if not s:
+            return
+        up = max(0.0, s[0][7] - self.course["ele"][0]) + sum(max(0.0, b[7] - a[7]) for a, b in zip(s, s[1:]))
+        self.cs.update(d=float(s[-1][8]), v=s[-1][5] / 3.6, up=up, end=bool(self.cs["end"] or s[-1][8] >= self.course["dist"]))
 
     @property
     def id(self) -> str:
@@ -91,7 +115,8 @@ class Ride:
                 "events": self.events, "overtime": self.overtime,
                 "agent": {"wakes": self.agent_wakes, "local_cues": self.local_cues, "usage": self.usage, "seen": self.agent_seen},
                 "start": self.start_ts, "samples": self.samples, "el": self.el, "k": self.k, "jr": self.jr,
-                "ov": {str(k): v for k, v in self.ov.items()}, "manual": self.manual, "source": "server"}
+                "ov": {str(k): v for k, v in self.ov.items()}, "manual": self.manual, "source": "server",
+                "course": self.course, "cs": self.cs}
 
 
 class RideEngine:
@@ -233,7 +258,7 @@ class RideEngine:
                         x = json.loads(ln)
                     except ValueError:
                         continue  # a torn last line after a crash
-                    if isinstance(x, list) and len(x) == 7 and x[1] > last_el:
+                    if isinstance(x, list) and len(x) in (7, 9) and x[1] > last_el:
                         r.samples.append(x)
                         last_el = x[1]
                 if r.samples[-1][1] > r.el:
@@ -249,6 +274,13 @@ class RideEngine:
             r.agent_seen = bool(ag.get("seen"))
             r.ov = {int(k): v for k, v in (cur.get("ov") or {}).items()}
             r.manual = cur.get("manual")
+            if cur.get("course"):
+                try:
+                    r.set_course(check_course(cur["course"]))
+                    r.cs = {**r.cs, **(cur.get("cs") or {})}
+                    r.resume_course()
+                except ValueError:
+                    pass
             self.ride = r
             self.log_event(f"RIDE RESUMED after restart at T+{E.fmt_t(r.el)} ({len(r.samples)} samples kept)")
             self.notice = "Ride restored. Pedal to continue."
@@ -303,7 +335,18 @@ class RideEngine:
         elif m == "r":
             self.hub.want({"k": "res", "r": r.jr["r"]})
         else:
-            self.hub.want({"k": "sim", "g": r.jr["g"]})
+            self.hub.want({"k": "sim", "g": self.course_grade() if r.course else r.jr["g"]})
+
+    def course_grade(self) -> float:
+        """Grade sent on a course: the road under the rider plus the rider's +/- offset (jr.g). After the finish
+        it holds the last grade, or 0 % with afterWorkout grade0. Rate limited: a change over 0.1 % goes out
+        at once, smaller ones at most every 2 s (many trainers dislike floods)."""
+        r = self.ride
+        base = 0.0 if r.cs["end"] and self.settings().get("afterWorkout", "hold") != "hold" else grade_at(r.course, r.cs["d"])
+        want = _r1(min(G_MAX, max(G_MIN, base + r.jr["g"])))
+        if r.sg is None or abs(want - r.sg) > 0.1 + 1e-9 or r.el - r.st >= 2:
+            r.sg, r.st = want, r.el
+        return r.sg
 
     # ---------- controls (HTTP threads) ----------
     def control(self, action: str, body: dict, source: str = "manual") -> dict:
@@ -341,14 +384,18 @@ class RideEngine:
         self.log_event(f"MANUAL {what}")
 
     def load(self, body: dict):
+        """{workout: {name, text, test} | null, course: course | null}. A course alone is a free ride on it;
+        with a workout, ERG segments keep their watts and free segments ride the course grade."""
         w = body.get("workout")
+        c = check_course(body["course"]) if body.get("course") else None
         if self.ride and self.ride.started:
             self.finish({})
         ftp = int(self.settings().get("ftp") or 200)
         try:
-            r = Ride(w["name"], w["text"], bool(w.get("test")), ftp) if w else Ride("Just ride", "", False, ftp)
+            r = Ride(w["name"], w["text"], bool(w.get("test")), ftp) if w else Ride(c["name"] if c else "Just ride", "", False, ftp)
         except ValueError as e:
             raise ValueError(str(e)) from None
+        r.set_course(c)
         self.ride = r
         self.notice = None
         self.apply_target()
@@ -832,6 +879,7 @@ class RideEngine:
                     r.paused = r.auto = False
                 if not r.paused:
                     r.el += dt
+                    self._course_tick(dt)
                     self._record()
                     self._coach_tick()
                     if r.steps and r.el >= r.total and not r.overtime:
@@ -847,6 +895,21 @@ class RideEngine:
                     self.log_event(("PAUSED (stopped pedaling)" if r.auto else "PAUSED") if r.paused else "RESUMED")
                 self.apply_target()
             self._bump()
+
+    def _course_tick(self, dt: float) -> None:
+        """Move along the course at the speed the rider's power gives on the road under them."""
+        r = self.ride
+        if not r.course:
+            return
+        c, cs = r.course, r.cs
+        cs["v"] = speed_step(cs["v"], self.hub.r.power, grade_at(c, cs["d"]), mass_of(self.settings().get("weight")), dt)
+        e0 = ele_at(c, cs["d"])
+        cs["d"] += cs["v"] * dt
+        cs["up"] += max(0.0, ele_at(c, cs["d"]) - e0)
+        if cs["d"] >= c["dist"] and not cs["end"]:
+            cs["end"] = True
+            self.log_event(f"COURSE DONE at T+{E.fmt_t(r.el)}, riding on until End")
+            self.notice = "Course done. Keep riding or press End ride."
 
     def _hr_now(self) -> int:
         d = self.hub.r
@@ -869,8 +932,12 @@ class RideEngine:
 
     def _record(self):
         r, d = self.ride, self.hub.r
-        r.samples.append([self._timestamp(r), round(r.el, 1), round(d.power), round(d.cadence), self._hr_now(),
-                          round(d.speed, 2), self.cur_target() or 0])
+        x = [self._timestamp(r), round(r.el, 1), round(d.power), round(d.cadence), self._hr_now(),
+             round(d.speed, 2), self.cur_target() or 0]
+        if r.course:  # virtual speed, then altitude and distance on the course
+            x[5] = math.floor(r.cs["v"] * 360 + 0.5) / 100
+            x += [_r1(ele_at(r.course, r.cs["d"])), _r1(r.cs["d"])]
+        r.samples.append(x)
         n = len(r.samples)
         if n == 1 or n % 30 == 0:
             self.save()  # snapshot (the first one at once: the journal needs it to resume from)
@@ -933,8 +1000,14 @@ class RideEngine:
                 "manual": {**r.manual, "ago_s": max(0, round(self.wall() - r.manual["ts"] / 1000))} if r.manual else None,
                 "last30": {"power": E.js_round(_mean([x[2] for x in l30])), "cadence": E.js_round(_mean([x[3] for x in l30])),
                            "hr": h[-1] if h else None, "hr_delta": (h[-1] - h[0]) if h else None},
-                "total_s": None, "step": None, "steps": None,
+                "total_s": None, "step": None, "steps": None, "course": None,
             }
+            if r.course:
+                c, cs = r.course, r.cs
+                ride["course"] = {"name": c["name"], "dist_m": c["dist"], "gain_m": c["gain"], "done_m": _r1(min(cs["d"], c["dist"])),
+                                  "odo_m": _r1(cs["d"]), "ele_m": _r1(ele_at(c, cs["d"])), "climbed_m": _r1(cs["up"]),
+                                  "grade": grade_at(c, cs["d"]), "speed_kmh": _r1(cs["v"] * 3.6), "end": cs["end"],
+                                  "profile": r.prof}
             if r.steps:
                 at = step_at(r.steps, r.el)
                 ride["total_s"] = r.total

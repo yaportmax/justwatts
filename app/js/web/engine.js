@@ -2,16 +2,26 @@
 // Same state shape, controls, coach commands, mid-ride edits, overtime and persistence semantics;
 // persistence goes to IndexedDB (snapshot every 30 s + a sample journal every 5 s, see backend.js).
 import { parseWorkout, toText, stepAt, stepWatts, fmtT, lineRideStart, lineRideEnd, lineStepStart, lineStepEnd, lineTick, lineFeel } from '../core.js';
+import { G_MIN, G_MAX, checkCourse, eleAt, gradeAt, massOf, profileOf, speedStep } from '../course.js';
 
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 const jsr = Math.round;
+const r1 = x => Math.floor(x * 10 + 0.5) / 10;
 
 export class Ride {
   constructor(name, text, test, ftp) {
     Object.assign(this, { name, text, test, ftp, steps: null, total: 0, el: 0, started: false, paused: false, auto: false, pp: false, idle: 0, k: 1,
       samples: [], jr: { m: 'g', g: 0, w: jsr(ftp * 0.6), r: 5, wm: 'e' }, startTs: null, ov: {}, lastStep: -1, acc: null, lastLine: 0, events: [],
-      overtime: false, agentWakes: 0, localCues: 0, usage: {}, agentSeen: false, manual: null });
+      overtime: false, agentWakes: 0, localCues: 0, usage: {}, agentSeen: false, manual: null,
+      // course: cs = {d: metres ridden, v: virtual speed m/s, up: metres climbed, end}; sg/st: grade rate limit
+      course: null, cs: { d: 0, v: 0, up: 0, end: false }, prof: null, sg: null, st: -1e9 });
     if (text) { this.steps = parseWorkout(text); this.retime(); }
+  }
+  setCourse(c) { this.course = c; this.prof = c ? profileOf(c) : null; }
+  resumeCourse() {  // position from the last recorded sample (the journal is newer than the snapshot's cs)
+    const s = this.samples.filter(x => x.length > 8); if (!s.length) return;
+    let up = Math.max(0, s[0][7] - this.course.ele[0]); for (let i = 1; i < s.length; i++) up += Math.max(0, s[i][7] - s[i - 1][7]);
+    Object.assign(this.cs, { d: s.at(-1)[8], v: s.at(-1)[5] / 3.6, up, end: !!(this.cs.end || s.at(-1)[8] >= this.course.dist) });
   }
   get id() { return `r-${this.startTs || 0}`; }
   retime() { let t = 0; for (const s of this.steps || []) { s.t0 = t; t += s.d; } this.total = t; }
@@ -23,7 +33,8 @@ export class Ride {
   payload() {
     return { id: this.id, name: this.name, text: this.text, steps: this.plainSteps(), test: this.test, ftp: this.ftp, events: this.events,
       overtime: this.overtime, agent: { wakes: this.agentWakes, local_cues: this.localCues, usage: this.usage, seen: this.agentSeen },
-      start: this.startTs, samples: this.samples, el: this.el, k: this.k, jr: this.jr, ov: Object.fromEntries(Object.entries(this.ov)), manual: this.manual, source: 'web' };
+      start: this.startTs, samples: this.samples, el: this.el, k: this.k, jr: this.jr, ov: Object.fromEntries(Object.entries(this.ov)), manual: this.manual, source: 'web',
+      course: this.course, cs: this.cs };
   }
 }
 
@@ -50,6 +61,7 @@ export class Engine {
       samples: cur.samples, jr: { ...r.jr, ...(cur.jr || {}) }, startTs: cur.start, events: cur.events || [], overtime: !!cur.overtime });
     r.ov = Object.fromEntries(Object.entries(cur.ov || {}).map(([k, v]) => [+k, v])); r.manual = cur.manual || null;
     const ag = cur.agent || {}; r.agentWakes = ag.wakes || 0; r.localCues = ag.local_cues || 0; r.usage = ag.usage || {};
+    if (cur.course) { try { r.setCourse(checkCourse(cur.course)); r.cs = { ...r.cs, ...(cur.cs || {}) }; r.resumeCourse(); } catch {} }
     this.ride = r;
     this.log(`RIDE RESUMED after reload at T+${fmtT(r.el)} (${r.samples.length} samples kept)`);
     this.notice = 'Ride restored. Reconnect the trainer, then pedal to continue.';
@@ -77,7 +89,15 @@ export class Engine {
   applyTarget() {
     const r = this.ride; if (!r) return;
     const m = this.controlMode();
-    this.hub.want(m === 'k' ? { k: 'erg', w: this.curTarget() } : m === 'w' ? { k: 'erg', w: r.jr.w } : m === 'r' ? { k: 'res', r: r.jr.r } : { k: 'sim', g: r.jr.g });
+    this.hub.want(m === 'k' ? { k: 'erg', w: this.curTarget() } : m === 'w' ? { k: 'erg', w: r.jr.w } : m === 'r' ? { k: 'res', r: r.jr.r } : { k: 'sim', g: r.course ? this.courseGrade() : r.jr.g });
+  }
+  // grade sent on a course: the road under the rider plus the +/- offset (jr.g); after the finish the last grade,
+  // or 0 % with afterWorkout grade0. Rate limited: over 0.1 % at once, smaller changes at most every 2 s.
+  courseGrade() {
+    const r = this.ride, base = r.cs.end && (this.settings().afterWorkout || 'hold') !== 'hold' ? 0 : gradeAt(r.course, r.cs.d);
+    const want = r1(Math.min(G_MAX, Math.max(G_MIN, base + r.jr.g)));
+    if (r.sg == null || Math.abs(want - r.sg) > 0.1 + 1e-9 || r.el - r.st >= 2) { r.sg = want; r.st = r.el; }
+    return r.sg;
   }
 
   // ---------- controls ----------
@@ -97,11 +117,14 @@ export class Engine {
     r.manual = { what: what.split(' ')[0], step, ts: this.wall() }; this.did = what; this.log(`MANUAL ${what}`);
   }
   jrText(m) { const v = this.ride.jr[m]; return m === 'g' ? `grade ${(+v).toFixed(1)}%` : m === 'r' ? `level ${(+v).toFixed(1)}` : `erg ${v}W`; }
+  // {workout, course}: a course alone is a free ride on it; with a workout, ERG segments keep their watts
+  // and free segments ride the course grade
   load(body) {
-    const w = body.workout;
+    const w = body.workout, c = body.course ? checkCourse(body.course) : null;
     if (this.ride?.started) this.finish();
     const ftp = +(this.settings().ftp || 200);
-    this.ride = w ? new Ride(w.name, w.text, !!w.test, ftp) : new Ride('Just ride', '', false, ftp);
+    const r = w ? new Ride(w.name, w.text, !!w.test, ftp) : new Ride(c ? c.name : 'Just ride', '', false, ftp);
+    r.setCourse(c); this.ride = r;
     this.notice = null; this.applyTarget(); return { loaded: this.ride.name };
   }
   start() {
@@ -319,7 +342,10 @@ export class Engine {
       } else if (r.auto) r.paused = r.auto = false;  // the simulated rider always pedals (e.g. after a resume)
       if (!r.paused) {
         r.el += dt;
-        r.samples.push([this.wall(), +r.el.toFixed(1), jsr(d.power), jsr(d.cadence), this.hrNow(), +(+d.speed).toFixed(2), this.curTarget() || 0]);
+        this.courseTick(dt);
+        const x = [this.wall(), +r.el.toFixed(1), jsr(d.power), jsr(d.cadence), this.hrNow(), +(+d.speed).toFixed(2), this.curTarget() || 0];
+        if (r.course) { x[5] = Math.floor(r.cs.v * 360 + 0.5) / 100; x.push(r1(eleAt(r.course, r.cs.d)), r1(r.cs.d)); }  // virtual speed, altitude, distance
+        r.samples.push(x);
         this.coachTick();
         if (r.steps && r.el >= r.total && !r.overtime) {
           r.overtime = true;
@@ -333,6 +359,16 @@ export class Engine {
       this.applyTarget();
     }
     this.bump();
+  }
+  // move along the course at the speed the rider's power gives on the road under them
+  courseTick(dt) {
+    const r = this.ride, c = r.course, cs = r.cs; if (!c) return;
+    cs.v = speedStep(cs.v, this.hub.r.power, gradeAt(c, cs.d), massOf(+this.settings().weight), dt);
+    const e0 = eleAt(c, cs.d); cs.d += cs.v * dt; cs.up += Math.max(0, eleAt(c, cs.d) - e0);
+    if (cs.d >= c.dist && !cs.end) {
+      cs.end = true; this.log(`COURSE DONE at T+${fmtT(r.el)}, riding on until End`);
+      this.notice = 'Course done. Keep riding or press End ride.';
+    }
   }
   coachTick() {
     const r = this.ride; if (!r.steps) return;
@@ -360,7 +396,12 @@ export class Engine {
       jr: r.jr, samples: r.samples.length, control: this.controlMode(), ov: Object.fromEntries(Object.entries(r.ov)),
       manual: r.manual ? { ...r.manual, ago_s: Math.max(0, jsr((this.wall() - r.manual.ts) / 1000)) } : null,
       last30: { power: jsr(mean(l30.map(x => x[2]))), cadence: jsr(mean(l30.map(x => x[3]))), hr: h.at(-1) || null, hr_delta: h.length ? h.at(-1) - h[0] : null },
-      total_s: null, step: null, steps: null };
+      total_s: null, step: null, steps: null, course: null };
+    if (r.course) {
+      const c = r.course, cs = r.cs;
+      ride.course = { name: c.name, dist_m: c.dist, gain_m: c.gain, done_m: r1(Math.min(cs.d, c.dist)), odo_m: r1(cs.d), ele_m: r1(eleAt(c, cs.d)),
+        climbed_m: r1(cs.up), grade: gradeAt(c, cs.d), speed_kmh: r1(cs.v * 3.6), end: cs.end, profile: r.prof };
+    }
     if (r.steps) {
       const at = stepAt({ steps: r.steps }, r.el); ride.total_s = r.total;
       if (at) ride.step = { index: at.i + 1, count: r.steps.length, duration_s: at.s.d, into_s: jsr(at.into), left_s: jsr(at.s.d - at.into), free: !!at.s.free };

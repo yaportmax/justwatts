@@ -112,6 +112,11 @@ def best_efforts(P: list[float]) -> dict:
     return {f"{w // 60}m": (round(best_mean(P, w)) if len(P) >= w else None) for w in BEST_WINDOWS}
 
 
+def _on_course(s: list) -> bool:
+    """Course rides add [altitude m, distance m] to every sample."""
+    return bool(s) and len(s[-1]) > 8
+
+
 def summarize(r: dict) -> dict:
     """Same numbers as core.js summarize()."""
     s = r["samples"]
@@ -123,7 +128,7 @@ def summarize(r: dict) -> dict:
     IF = np_ / ftp
     hr = [x[4] for x in s if x[4] > 0]
     cad = [x[3] for x in s if x[3] > 0]
-    dist = sum(x[5] / 3.6 for x in s)
+    dist = s[-1][8] if _on_course(s) else sum(x[5] / 3.6 for x in s)
     zt = [0] * len(ZONES)
     for p in P:
         zt[zone_idx(p / ftp)] += 1
@@ -317,7 +322,8 @@ def fit_encode(r: dict, tz_offset_s: float | None = None) -> bytes:
     msg(0, [4, 255, 1, 0x48554221, t0])
     define(1, 21, [(253, U32), (0, ENUM), (1, ENUM)])
     msg(1, [t0, 0, 0])
-    define(2, 20, [(253, U32), (7, U16), (4, U8), (3, U8), (6, U16), (5, U32)])
+    crs = _on_course(s)  # a course ride also records altitude (scale 5, offset 500) and its own distance
+    define(2, 20, [(253, U32), (7, U16), (4, U8), (3, U8), (6, U16), (5, U32)] + ([(2, U16)] if crs else []))
     dist, prev = 0.0, None
     for x in s:
         t = ts(x[0])
@@ -326,8 +332,8 @@ def fit_encode(r: dict, tz_offset_s: float | None = None) -> bytes:
             msg(1, [t, 0, 0])
         if t == prev:
             continue
-        dist += x[5] / 3.6
-        msg(2, [t, x[2], x[3], x[4] or None, x[5] / 3.6 * 1000, dist * 100])
+        dist = x[8] if crs else dist + x[5] / 3.6
+        msg(2, [t, x[2], x[3], x[4] or None, x[5] / 3.6 * 1000, dist * 100] + ([(x[7] + 500) * 5] if crs else []))
         prev = t
     msg(1, [t_end, 0, 4])
     kcal = m["kJ"]
@@ -369,10 +375,12 @@ def tcx(r: dict) -> str:
     iso = lambda ms: dt.datetime.fromtimestamp(ms / 1000, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
     dist = 0.0
     pts = []
+    crs = _on_course(s)
     for x in s:
-        dist += x[5] / 3.6
+        dist = x[8] if crs else dist + x[5] / 3.6
         hr = f"<HeartRateBpm><Value>{x[4]}</Value></HeartRateBpm>" if x[4] else ""
-        pts.append(f"<Trackpoint><Time>{iso(x[0])}</Time><DistanceMeters>{_fixed(dist, 1)}</DistanceMeters>{hr}"
+        alt = f"<AltitudeMeters>{_fixed(x[7], 1)}</AltitudeMeters>" if crs else ""
+        pts.append(f"<Trackpoint><Time>{iso(x[0])}</Time>{alt}<DistanceMeters>{_fixed(dist, 1)}</DistanceMeters>{hr}"
                    f"<Cadence>{x[3]}</Cadence><Extensions><ns3:TPX><ns3:Speed>{_fixed(x[5] / 3.6, 2)}</ns3:Speed>"
                    f"<ns3:Watts>{x[2]}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>")
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'

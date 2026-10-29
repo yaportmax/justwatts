@@ -44,7 +44,7 @@ function bearerOk(req, secret) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep, log = () => {}, cronSecret = () => null }) {
+function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep, log = () => {}, cronSecret = () => null, env = process.env }) {
   async function cron(req, res) {
     const secret = cronSecret();
     if (!secret || secret.length < 16) return send(res, 503, { error: 'cron is not set up' });
@@ -55,22 +55,36 @@ function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep,
     for (const uid of await store.retryUsers(CRON_USERS)) {
       if (tried >= CRON_MAX || !more()) break;
       users++;
-      try { tried += (await hub({ fetch, store: userStore(store, key, uid), now, sleep }).retryDue(CRON_MAX - tried, more)).tried; }
+      try { tried += (await hub({ fetch, store: userStore(store, key, uid), now, sleep, log, env, key }).retryDue(CRON_MAX - tried, more)).tried; }
       catch (e) { log('integrations cron: ' + String(e && e.message).slice(0, 200)); }
     }
     return send(res, 200, { users, tried });
+  }
+  // Strava sends the browser back here; the page then opens Settings (and the import step) with the outcome
+  async function stravaCallback(req, res, q, uid) {
+    const back = o => { res.statusCode = 302; res.setHeader('Location', '/?' + new URLSearchParams({ integration: 'strava', ...o }) + '#settings'); res.setHeader('Cache-Control', 'no-store'); res.end(); };
+    if (!uid) return back({ result: 'error', reason: 'signed_out' });
+    try {
+      const r = await hub({ fetch, store: userStore(store, key, uid), now, sleep, log, env, key }).stravaCallback(uid, { code: q.get('code'), state: q.get('state'), scope: q.get('scope'), error: q.get('error') });
+      return back({ result: 'connected', ...(r.upload ? {} : { scope: 'missing' }) });
+    } catch (e) {
+      const reason = e instanceof IntegrationError ? (['strava_capped', 'bad_state', 'denied'].includes(e.message) ? e.message : e.kind) : 'error';
+      if (!(e instanceof IntegrationError)) log('integrations strava callback: ' + String(e && e.message).slice(0, 120));
+      return back({ result: 'error', reason });
+    }
   }
   return async function handler(req, res) {
     const url = new URL(req.url, 'http://x'), q = url.searchParams, op = q.get('op') || 'list';
     if (!key) return send(res, 503, { error: 'integrations are not set up on this server' });
     if (op === 'cron') return cron(req, res);
     const uid = await userId(req);
+    if (op === 'strava_callback') return stravaCallback(req, res, q, uid);
     if (!uid) return send(res, 401, { error: 'sign in to connect services' });
     const write = req.method === 'POST';
     if (write && !sameOrigin(req)) return send(res, 403, { error: 'forbidden' });
     if (!write && req.method !== 'GET') return send(res, 405, { error: 'GET or POST' });
     const us = userStore(store, key, uid);
-    const h = hub({ fetch, store: us, now, sleep });
+    const h = hub({ fetch, store: us, now, sleep, log, env, key });
     const svc = q.get('service') || '', rid = q.get('ride') || '';
     let body = {};
     try {
@@ -84,6 +98,19 @@ function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep,
         const day = q.get('date') || new Date().toISOString().slice(0, 10);
         if (!DAY_RE.test(day)) return send(res, 400, { error: 'date must be YYYY-MM-DD' });
         return send(res, 200, await h.planned(day));
+      }
+      if (!write && op === 'strava_start') { res.statusCode = 302; res.setHeader('Location', h.stravaStart(uid)); res.setHeader('Cache-Control', 'no-store'); return res.end(); }
+      if (!write && op === 'import_profile') return send(res, 200, await h.importProfile(svc));
+      if (!write && op === 'import_list') {
+        const since = q.get('since') || '', until = q.get('until') || new Date().toISOString().slice(0, 10), start = Number(q.get('start') || 0);
+        if (!DAY_RE.test(since) || !DAY_RE.test(until)) return send(res, 400, { error: 'since and until must be YYYY-MM-DD' });
+        if (!Number.isInteger(start) || start < 0 || start > 100000) return send(res, 400, { error: 'bad start' });
+        return send(res, 200, await h.importList(svc, { since, until, start }));
+      }
+      if (!write && op === 'import_fit') {
+        const fit = await h.importFit(svc, q.get('activity') || '');
+        if (fit.wait > 0) res.setHeader('X-JW-Wait', String(Math.round(fit.wait)));  // rate limit: rest before the next one
+        return send(res, 200, fit, 'application/octet-stream');
       }
       if (!write && op === 'fit') {
         const fit = await h.fit(rid);
@@ -115,7 +142,8 @@ function makeHandler({ fetch = globalThis.fetch, store, key, userId, now, sleep,
     } catch (e) {
       if (!(e instanceof IntegrationError)) { log('integrations error: ' + String(e && e.message).slice(0, 200)); return send(res, 500, { error: 'server error' }); }
       const secrets = [...(svc && h.conns[svc] ? await h.secretsOf(svc) : []), ...(e.extraSecrets || [])];
-      return send(res, e.kind === AUTH ? 401 : 502, { error: scrub(e.message, secrets).slice(0, 300), kind: e.kind });
+      if (e.retryAfter) res.setHeader('Retry-After', String(Math.round(e.retryAfter)));
+      return send(res, e.kind === AUTH ? 401 : 502, { error: scrub(e.message, secrets).slice(0, 300), kind: e.kind, ...(e.retryAfter ? { retry_after: Math.round(e.retryAfter) } : {}) });
     }
   };
 }

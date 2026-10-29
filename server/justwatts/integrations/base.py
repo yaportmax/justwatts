@@ -202,9 +202,21 @@ class Connector:
         """Every secret value this connector holds, so error text can be scrubbed before it is stored or logged."""
         return []
 
+    # import (profile, past rides): connectors with imports = True answer these; see importing.py
+    imports = False
+
+    def import_profile(self) -> dict:
+        raise IntegrationError(BLOCKED, f"{self.name} has no import")
+
+    def import_list(self, since: str, until: str, start: int = 0) -> dict:
+        raise IntegrationError(BLOCKED, f"{self.name} has no import")
+
+    def import_fit(self, activity_id: str) -> bytes:
+        raise IntegrationError(BLOCKED, f"{self.name} has no import")
+
     def describe(self) -> dict:
         d = {"id": self.id, "name": self.name, "official": self.official,
-             "caps": {"upload": self.uploads, "planned": self.planned_workouts},
+             "caps": {"upload": self.uploads, "planned": self.planned_workouts, "import": self.imports},
              "connect": {"kind": self.connect_kind, "fields": [dict(f) for f in self.fields]} if self.connect_kind else None,
              "manual": MANUAL.get(self.id)}
         if not self.official:

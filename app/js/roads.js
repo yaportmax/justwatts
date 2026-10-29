@@ -29,7 +29,8 @@ export function overpassQuery(key, box = cellBox(key)) {
     + `["access"!~"^(private|no)$"]["bicycle"!~"^(no|dismount|use_sidepath)$"]["motorroad"!="yes"]["area"!="yes"]["service"!~"^(parking_aisle|driveway|drive-through|emergency_access)$"](${bb});`
     + `way["highway"~"^(path|footway|pedestrian|bridleway)$"]["bicycle"~"^(yes|designated|permissive)$"]["area"!="yes"](${bb}););out body geom qt;`;
 }
-// Overpass JSON -> compact ways { id, hw, name, ref, ow: 1 | -1 | 0, br: bridge or tunnel, rb: roundabout, nodes, pts }
+// Overpass JSON -> compact ways { id, hw, name, ref, ow: 1 | -1 | 0, br: bridge or tunnel, rb: roundabout, nodes, pts },
+// and for the 3D world: tn: 1 on a tunnel, ln: lanes when tagged, up: 1 when unpaved
 export function parseWays(j) {
   const out = [];
   for (const e of j?.elements || []) {
@@ -39,7 +40,9 @@ export function parseWays(j) {
     const rb = t.junction === 'roundabout' || t.junction === 'circular';
     const ow = t['oneway:bicycle'] === 'no' || /^opposite/.test(t.cycleway || '') ? 0 : t.oneway === '-1' ? -1 : /^(yes|1|true)$/.test(t.oneway || '') || (rb && t.oneway !== 'no') ? 1 : 0;
     out.push({ id: e.id, hw: t.highway, name: (t.name || '').slice(0, 60), ref: (t.ref || '').slice(0, 20), ow,
-      br: (t.bridge && t.bridge !== 'no') || (t.tunnel && t.tunnel !== 'no') ? 1 : 0, rb: rb ? 1 : 0, nodes: e.nodes, pts: e.geometry.map(g => [g.lat, g.lon]) });
+      br: (t.bridge && t.bridge !== 'no') || (t.tunnel && t.tunnel !== 'no') ? 1 : 0, rb: rb ? 1 : 0, ...(t.tunnel && t.tunnel !== 'no' ? { tn: 1 } : {}),
+      ...(+t.lanes >= 1 && +t.lanes <= 8 ? { ln: Math.round(+t.lanes) } : {}), ...(/^(unpaved|gravel|fine_gravel|dirt|ground|compacted|earth|grass|sand|mud)$/.test(t.surface || '') ? { up: 1 } : {}),
+      nodes: e.nodes, pts: e.geometry.map(g => [g.lat, g.lon]) });
   }
   return out;
 }
@@ -55,8 +58,9 @@ export const turn = (inB, outB) => ((outB - inB) % 360 + 540) % 360 - 180;  // -
 
 // nodes: id -> { lat, lon, adj: [{ to, w, f }] } (f: along the way's node order). A node is complete when its cell
 // is loaded: every way through it is known, so a choice there is safe. Ways seen twice (cell edges) are added once.
+// inside(lat, lon): where routes may go (the open world's edge); a way to a node outside is no option.
 export class RoadGraph {
-  constructor() { this.nodes = new Map(); this.cells = new Set(); this.ways = new Set(); }
+  constructor({ inside = null } = {}) { this.nodes = new Map(); this.cells = new Set(); this.ways = new Set(); this.inside = inside; }
   addCell(key, ways) {
     this.cells.add(key);
     for (const w of ways) {
@@ -77,7 +81,7 @@ export class RoadGraph {
   options(prev, cur) {
     const n = this.nodes.get(cur); if (!n) return [];
     const seen = new Set([prev]), all = [];
-    for (const e of n.adj) if (!seen.has(e.to)) { seen.add(e.to); all.push(e); }
+    for (const e of n.adj) if (!seen.has(e.to)) { seen.add(e.to); if (!this.inside || this.inside(...this.pos(e.to))) all.push(e); }
     const ok = all.filter(e => !e.w.ow || (e.w.ow === 1) === (e.f === 1));
     return ok.length ? ok : all;
   }
@@ -96,7 +100,7 @@ export class RoadGraph {
     const k = Math.cos(lat * Math.PI / 180), X = p => [(p[1] - lon) * k, p[0] - lat];
     let best = null;
     for (const n of this.nodes.values()) for (const e of n.adj) {
-      if (!e.f) continue;
+      if (!e.f || (this.inside && !(this.inside(n.lat, n.lon) && this.inside(...this.pos(e.to))))) continue;
       const a = X([n.lat, n.lon]), b = X(this.pos(e.to)), dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
       const t = L ? Math.max(0.02, Math.min(0.98, -(a[0] * dx + a[1] * dy) / L)) : 0, x = a[0] + dx * t, y = a[1] + dy * t, d2 = x * x + y * y;
       if (!best || d2 < best.d2) best = { d2, a: n.id, b: e.to, w: e.w, t };

@@ -191,6 +191,7 @@ def test_preset_roads_are_baked_in(node):
     p = subprocess.run([node, str(REPO / "tests/js/seed_harness.mjs")], capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
-    assert out.pop("asked") == ["/roads/bay.json", "/roads/alpe.json"]  # one file per area, never Overpass
+    asked = out.pop("asked")
+    assert asked and all(a.startswith("/roads/marin/") for a in asked) and len(asked) == len(set(asked))  # baked blocks, each once, never Overpass
     for pid, r in out.items():
         assert r["here"] > 0 and r["around"], pid

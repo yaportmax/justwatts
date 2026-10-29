@@ -79,3 +79,12 @@ def test_web_mode_ride_with_reload(dist, node):
     c = out["course"]                                                         # Just ride on the course picked next to it
     assert c["name"] == c["course"] == "The climb" and c["done"] > 100 and c["profile"] == 300
     assert c["want"]["k"] == "sim" and c["strip"] == "" and "%" in c["text"]
+    w = out["web"]                                                            # integrations through the real web handler
+    assert w["signedOut"] == {"connects": 0, "manual": True, "steps": True}   # signed out: sign in + manual upload only
+    assert w["panelOut"] == {"signin": True, "fit": True, "steps": True} and w["signIns"] == 1
+    assert w["connectStep"] == {"title": "Connect your services", "first": "garmin", "skip": True}
+    assert w["after"] == {"button": "Uploaded", "line": True}                # connect with the ride: it went up
+    assert w["posts"] == [{"op": "connect", "services": None, "fit": False, "key": True},
+                          {"op": "upload", "services": "intervals", "fit": True, "key": False}]
+    assert w["auto"] == [{"op": "upload", "services": None, "fit": True}]     # later rides go up by themselves
+    assert w["today"] and not w["leak"]

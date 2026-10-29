@@ -52,3 +52,14 @@ def test_unstructured_and_garbage_inputs():
     assert P.from_intervals(None) is None and P.from_intervals({"steps": []}) is None
     assert P.from_trainingpeaks("{not json") is None and P.from_trainingpeaks({"structure": []}) is None
     assert P.free_for(5400) == "90m free" and P.free_for(0) is None
+
+
+def test_page_manual_copy_matches(node):
+    """The page keeps a copy of the manual routes for signed-out and offline use (app/js/connect.js)."""
+    url = (REPO / "app/js/connect.js").as_uri()
+    p = subprocess.run([node, "--input-type=module", "-e", f"import {{ MANUAL }} from '{url}'; process.stdout.write(JSON.stringify(MANUAL))"],
+                       capture_output=True, text=True, timeout=60, encoding="utf-8")
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout) == MANUAL
+    src = (REPO / "app/js/connect.js").read_text(encoding="utf-8")
+    assert "\u2014" not in src and "console.log" not in src

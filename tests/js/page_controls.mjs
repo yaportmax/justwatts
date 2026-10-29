@@ -72,6 +72,7 @@ if (WEB) {
   globalThis.fetch = (path, opt = {}) => {
     const headers = { ...(opt.headers || {}) };
     if (opt.method === 'POST') headers.Origin = BASE;   // the page: its controls are the rider's (MANUAL)
+    else headers['Sec-Fetch-Site'] = 'same-origin';  // a browser's own GET carries no Origin
     return realFetch(BASE + path, { ...opt, headers });
   };
   globalThis.EventSource = class {

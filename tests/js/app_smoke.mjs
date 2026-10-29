@@ -3,6 +3,8 @@
 // Mode "ride" (default): Sim, load, start, a target change, wait for the end, check History.
 // Mode "boot": just boot and report what the page shows (used to test a reload mid-ride).
 // Mode "pick": a workout with a course picked on its row, then a course with a workout picked on its row.
+// Mode "connect": Settings > Integrations, the Upload panel with nothing connected, connect-with-ride, mixed
+// upload states, the manual fallback and the Today row (Python stubs intervals.icu behind the test server).
 const PORT = process.env.JUSTWATTS_SMOKE_PORT, MODE = process.argv[2] || 'ride';
 const BASE = `http://127.0.0.1:${PORT}`;
 const realFetch = globalThis.fetch;
@@ -13,7 +15,7 @@ class El {
   constructor(sel, data = {}) { this.sel = sel; this.dataset = data; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } }; this.classList = new ClassList(); this.kids = {}; this.value = ''; this.textContent = ''; this.innerHTML = ''; this.tagName = 'DIV'; this.width = 0; this.height = 0; this.offsetHeight = 50; }
   querySelector(s) { return this.kids[s] ??= new El(s); }
   get parentElement() { return this._parent ??= new El("parent"); }
-  appendChild() {} scrollIntoView() {} addEventListener() {}
+  appendChild() {} scrollIntoView() {} addEventListener() {} querySelectorAll() { return this.qsa || []; }
   setAttribute(k, v) { (this.attrs ??= {})[k] = v; }
   getBoundingClientRect() { return { width: 300, height: 100 }; }
   getContext() { return ctx; }
@@ -21,12 +23,12 @@ class El {
 }
 const els = {}, made = [];  // made: elements the page created (list rows)
 const multi = {
-  'nav button': ['workouts', 'ride', 'history'].map(v => new El('nav', { v })),
-  '.view': ['workouts', 'ride', 'history'].map(v => Object.assign(new El('view'), { id: 'v-' + v })),
+  'nav button': ['workouts', 'ride', 'history', 'settings'].map(v => new El('nav', { v })),
+  '.view': ['workouts', 'ride', 'history', 'settings'].map(v => Object.assign(new El('view'), { id: 'v-' + v })),
   '#jrMode button': ['g', 'w'].map(m => new El('jr', { m })),
 };
 globalThis.document = {
-  querySelector: s => els[s] ??= new El(s),
+  querySelector: s => els[s] ??= new El(s), getElementById: id => els['#' + id] ??= new El('#' + id),
   querySelectorAll: s => multi[s] || [],
   createElement: () => { const e = new El('new'); made.push(e); return e; },
   addEventListener() {}, documentElement: new El('html'), body: new El('body'), activeElement: { tagName: 'BODY' }, hidden: false,
@@ -43,6 +45,7 @@ const posts = [];
 globalThis.fetch = (path, opt = {}) => {
   const headers = { ...(opt.headers || {}) };
   if (opt.method === 'POST') { headers.Origin = BASE; posts.push({ path, body: typeof opt.body === 'string' ? JSON.parse(opt.body) : '(binary)' }); }
+  else headers['Sec-Fetch-Site'] = 'same-origin';  // what a browser adds to the page's own GET (it sends no Origin)
   return realFetch(BASE + path, { ...opt, headers });
 };
 let es = null;
@@ -108,6 +111,75 @@ if (MODE === 'pick') {
   await until(() => S().ride?.course?.name === 'Rolling hills', 'course + workout');
   out.courseWorkout = ride();
   finish({ ...out, posts: posts.filter(p => p.body?.action === 'load').map(p => ({ w: p.body.workout?.name ?? null, c: p.body.course?.id ?? null })) });
+}
+
+if (MODE === 'connect') {
+  const KEY = process.env.JUSTWATTS_SMOKE_KEY, out = {};
+  const nav = v => document.querySelectorAll('nav button').find(b => b.dataset.v === v).click();
+  const tapIn = (sel, act, svc) => $(sel).onclick({ target: { closest: () => ({ dataset: { act, svc }, disabled: false }) } });
+  const html = sel => String($(sel).innerHTML);
+  const text = sel => html(sel).replace(/<[^>]+>/g, ' ').replace(/&#0?39;|&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  const order = h => [...h.matchAll(/data-svc="(\w+)"/g)].map(m => m[1]).filter((x, i, a) => a.indexOf(x) === i);
+  // Settings > Integrations: Garmin first and recommended, unofficial note, manual-only services last
+  nav('settings');
+  await until(() => html('#intList').includes('data-svc="wahoo"'), 'integrations listed');
+  const st = html('#intList');
+  out.settings = { order: order(st), recommended: (st.match(/class="rec"/g) || []).length, garminRecommended: st.split('data-svc="strava"')[0].includes('Recommended'),
+    note: text('#intList').includes("Unfortunately Garmin Connect doesn't allow official integrations, so we use a little workaround. It can break. If it does, upload the .fit file manually:"),
+    manualHead: st.includes('Upload by hand'), connectButtons: (st.match(/data-conn="/g) || []).length, polar: st.includes('Polar Flow has no file import.') };
+  // the ride summary with nothing connected: one Upload button, the Garmin nudge, the panel
+  nav('history');
+  const rideId = process.env.JUSTWATTS_SMOKE_RIDE;
+  await until(() => made.some(e => String(e.innerHTML).includes('Smoke ride')), 'history row');
+  made.find(e => String(e.innerHTML).includes('Smoke ride')).onclick();
+  await until(() => $('#sName').textContent === 'Smoke ride' && $('#sUpload').textContent, 'summary');
+  await until(() => $('#sNudge').style.display === '', 'nudge');
+  out.summary0 = { button: $('#sUpload').textContent, cls: $('#sUpload').className, line: $('#sUpLine').style.display, nudge: $('#sNudge').style.display };
+  $('#sUpload').onclick();
+  const p0 = html('#upBody');
+  out.panel0 = { on: $('#upPanel').classList.contains('on'), order: order(p0), fit: p0.includes('Download .fit'), steps: p0.includes('Drop the file in and click Import Data.'),
+    link: p0.includes('href="https://connect.garmin.com/modern/import-data"'), connects: (p0.match(/data-act="connect"/g) || []).length, title: $('#upTitle').textContent };
+  tapIn('#upBody', 'man', 'coros');
+  out.manualCoros = html('#upBody').includes('Open COROS Training Hub') && html('#upBody').includes('Click Import Data and choose the file.');
+  const before = made.length;
+  tapIn('#upBody', 'fit');
+  await until(() => made.slice(before).some(e => String(e.href || '').endsWith(`/api/rides/${rideId}/fit`)), 'fit download');
+  out.fitHref = made.slice(before).find(e => e.href).href;
+  // connect from the panel uploads this ride at once (connect with ride_id)
+  tapIn('#upBody', 'connect', 'intervals');
+  out.form = { open: $('#connModal').classList.contains('on'), title: $('#connTitle').textContent, fields: ['athlete_id', 'api_key'].every(n => html('#connBody').includes(`name="${n}"`)),
+    keyIsPassword: /name="api_key" type="password"/.test(html('#connBody')), help: html('#connBody').includes('Developer Settings') };
+  const inputs = [{ name: 'athlete_id', value: 'i123' }, { name: 'api_key', value: KEY }];
+  $('#connBody').qsa = inputs;
+  await $('#connGo').onclick();
+  await until(() => !$('#connModal').classList.contains('on'), 'form closed');
+  out.cleared = inputs.every(i => i.value === '');
+  out.connectPost = posts.filter(p => p.path === '/api/integrations/intervals/connect').map(p => ({ ride: p.body.ride_id, hasKey: p.body.api_key === KEY }));
+  await until(() => html('#sUpLine').includes('Uploaded'), 'uploaded line');
+  out.summary1 = { button: $('#sUpload').textContent, cls: $('#sUpload').className, line: text('#sUpLine') };
+  // mixed: a retry that fails for now (503), one the service refuses (blocked), one signed out (401)
+  const states = [];
+  for (const want of ['Retrying', 'Upload by hand', 'Reconnect']) {
+    tapIn('#sUpLine', 'retry', 'intervals');
+    await until(() => html('#sUpLine').includes(want), want);
+    states.push({ line: text('#sUpLine'), button: $('#sUpload').textContent, panel: text('#upBody') });
+  }
+  out.states = states;
+  tapIn('#sUpLine', 'manual', 'intervals');
+  out.fallback = html('#upBody').includes('Open intervals.icu') && html('#upBody').includes('Click the upload arrow and drop the file in.');
+  nav('settings');
+  await until(() => html('#intList').includes('Signed out. Reconnect.'), 'settings reconnect');
+  out.settingsReconnect = /data-svc="intervals".*?data-conn="intervals"/s.test(html('#intList'));
+  // Today: intervals.icu has a planned ride; one click rides it
+  nav('workouts');
+  await until(() => made.some(e => e.className === 'lrow today'), 'today row');
+  const today = made.findLast(e => e.className === 'lrow today');
+  out.today = String(today.innerHTML).includes('Tempo') && String(today.innerHTML).includes('intervals.icu') && String(today.innerHTML).includes('>Today<');
+  today.querySelector('[data-a=ride]').onclick();
+  await until(() => S().ride?.name === 'Tempo', 'planned ride loaded');
+  out.loaded = { name: S().ride.name, text: S().ride.text };
+  out.leak = Object.values(els).some(e => String(e.innerHTML).includes(KEY) || String(e.textContent).includes(KEY)) || made.some(e => String(e.innerHTML).includes(KEY));
+  finish(out);
 }
 
 await fetch('/api/devices', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });

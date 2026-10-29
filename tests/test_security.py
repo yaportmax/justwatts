@@ -92,7 +92,7 @@ SAFE_RAW = {  # interpolations in app.js HTML templates that are constants, numb
     "${fmtT(t)}", "${hm(x.ts)}", "${hz + 1}", "${i + 1}", "${k}", "${t / hn * 100}", "${t / tot * 100}",
     "${r.garmin ? ' <span class=\"badge\">Garmin</span>' : ''}", "${r.strava ? ' <span class=\"badge\">Strava</span>' : ''}",
     "${r.test ? ' <span class=\"badge\">test</span>' : ''}", "${w.id.startsWith('c-') ? ' · custom' : ''}",
-    "${r.agent_tokens ? ' · ' + esc(kfmt(r.agent_tokens)) : ''}",
+    "${r.agent_tokens ? ' · ' + esc(kfmt(r.agent_tokens)) : ''}", "${libF.cat === v ? ' on' : ''}",
 }
 
 

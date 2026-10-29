@@ -42,7 +42,14 @@
   </div>
 
   <h2>Library</h2>
+  <div class="libbar">
+    <input id="libQ" type="search" placeholder="Search" aria-label="Search workouts">
+    <select id="libDur" aria-label="Length"><option value="">Any length</option><option value="0-45">Under 45 min</option><option value="45-75">45 to 75 min</option><option value="75-120">75 min to 2 h</option><option value="120-999">Over 2 h</option></select>
+    <select id="libLvl" aria-label="Difficulty"><option value="">Any difficulty</option><option value="1-2">Easy</option><option value="3-3">Moderate</option><option value="4-5">Hard</option></select>
+  </div>
+  <div class="chips" id="libCat" role="group" aria-label="Category"></div>
   <div class="grid" id="lib"></div>
+  <div class="empty" id="libEmpty" style="display:none">No workouts match.</div>
 
   <h2>Builder</h2>
   <div class="panel builder">
@@ -109,35 +116,27 @@
       <span class="grp wk"><button id="cBack" title="Restart this segment; in its first 10 s, go to the previous one (←)">Back</button><button id="cSkip" title="End this segment now and start the next (→)">Skip</button></span>
       <span class="seg" id="jrMode" style="display:none"><button data-m="g" class="on">Grade</button><button data-m="w">Watts</button><button data-m="r">Level</button></span>
       <div class="adj" id="adjBox" title="↑ ↓, Shift ×5"><button id="cMinus" aria-label="Easier">−</button><span class="num" id="cAdj">100%</span><button id="cPlus" aria-label="Harder">+</button></div>
-      <div class="adj wk" id="stepAdj" title="This segment ([ ])"><button id="cStepShort">−1m</button><span class="num">Segment</span><button id="cStepLong">+1m</button></div>
       <button id="cUndo" style="display:none">Undo</button>
       <span style="flex:1"></span>
       <button id="cMore" title="All controls (A)">Adjust</button>
       <button id="cKeys" title="Keys (?)" aria-label="Keyboard shortcuts">?</button>
-      <button id="cSave" title="Keeps recording. Puts a copy of the ride so far in History, in case you want it before you finish.">Save so far</button>
       <button id="cEnd" class="danger big" title="Finish: saves the ride to History and uploads it">End ride</button>
     </div>
   </div>
   <div class="sheet" id="adjPanel" role="dialog" aria-label="Adjust">
     <div class="row shead"><b>Adjust</b><span class="hint">changes apply now · hover a label for help</span><span style="flex:1"></span><button data-a="close">Close</button></div>
     <div class="sgrid">
-      <h3 class="sh wk">This segment</h3>
-      <div class="r wk" id="rowTgt"><span class="l" title="Target for the segment you are on. Later segments keep their plan. A ramp moves up or down as a whole.">Watts</span><div class="b"><button data-a="tgt" data-v="-10">−10</button><button data-a="tgt" data-v="-5">−5</button><b class="num" id="aTgt">–</b><button data-a="tgt" data-v="5">+5</button><button data-a="tgt" data-v="10">+10</button></div></div>
-      <div class="r wk" id="rowStep"><span class="l" title="Makes this segment longer or shorter. Everything after it moves.">Time left</span><div class="b"><button data-a="ext" data-v="-60">−1m</button><button data-a="ext" data-v="-30">−30s</button><b class="num" id="aStep">–</b><button data-a="ext" data-v="30">+30s</button><button data-a="ext" data-v="60">+1m</button></div></div>
-      <div class="r wk"><span class="l" title="Back restarts this segment (in its first 10 s, the previous one). Skip ends this segment now.">Go to</span><div class="b"><button data-a="back">Back</button><button data-a="skip">Skip</button></div></div>
-      <h3 class="sh wk">Whole workout</h3>
-      <div class="r wk" id="rowInt"><span class="l" title="Scales every target, now and later. 95% = all 5% easier.">Intensity</span><div class="b"><button data-a="int" data-v="-5">−5</button><button data-a="int" data-v="-1">−1</button><b class="num" id="aInt">100%</b><button data-a="int" data-v="1">+1</button><button data-a="int" data-v="5">+5</button><button data-a="int0">100%</button></div></div>
-      <div class="r wk nextrow" id="rowNext"><span class="l" title="This segment and everything after it. Drag a block's top for watts, its right edge for time, then Apply.">Edit the plan</span><div class="b col">
+      <h3 class="sh wk">Coming up</h3>
+      <div class="r wk nextrow" id="rowNext"><span class="l" title="Everything after the segment you are on. Drag a block's top for watts, its right edge for time, then Apply. The dimmed part is done or in progress.">Edit the rest of the plan</span><div class="b col">
         <canvas id="aNextChart"></canvas>
         <div class="pal" id="aNextPal"></div>
         <div class="blist" id="aNextList"></div>
         <details class="adv"><summary>Edit as text</summary><textarea id="aNext" spellcheck="false" rows="2" placeholder="5m 55%, 3x(3m 110%, 2m 50%)"></textarea></details>
         <div class="row"><button data-a="next" class="pri">Apply</button><button data-a="nextReset">Reset</button><span class="err" id="aNextErr"></span></div></div></div>
       <h3 class="sh">Trainer</h3>
-      <div class="r"><span class="l" title="ERG: the trainer holds the target watts. Grade or Level: ERG off, you set the resistance and ride by feel or gears.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
+      <div class="r" id="rowMode"><span class="l" title="ERG: the trainer holds the target watts. Grade or Level: ERG off, you set the resistance and ride by feel or gears.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
       <div class="r" id="rowVal"><span class="l" id="aValL">Grade</span><div class="b"><button data-a="adj" data-v="-5">−−</button><button data-a="adj" data-v="-1">−</button><b class="num" id="aVal">–</b><button data-a="adj" data-v="1">+</button><button data-a="adj" data-v="5">++</button></div></div>
       <div class="r"><span class="l" title="The cadence tile turns green inside this range.">Cadence</span><div class="b"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></div></div>
-      <div class="r"><span class="l">Sound</span><div class="b"><span class="seg serveronly" id="aCoach" title="Built-in coach voice"><button data-a="coach" data-v="1">Coach on</button><button data-a="coach" data-v="0">Off</button></span><span class="seg" id="aBeeps" title="Beeps in the last 3 s of each step"><button data-a="beeps" data-v="1">Beeps</button><button data-a="beeps" data-v="0">No beeps</button></span></div></div>
     </div>
   </div>
 </section>
@@ -322,13 +321,12 @@
       <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Intensity ±1% (grade, watts, level when not in ERG)</td></tr>
       <tr><td><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></td><td>±5 steps</td></tr>
       <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Back, skip</td></tr>
-      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Segment −1m, +1m</td></tr>
+      <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Segment shorter, longer</td></tr>
       <tr><td><kbd>-</kbd> <kbd>=</kbd></td><td>Segment watts −5, +5</td></tr>
       <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>ERG, grade, level</td></tr>
       <tr><td><kbd>A</kbd></td><td>Adjust</td></tr>
       <tr><td><kbd>Z</kbd></td><td>Undo</td></tr>
       <tr><td><kbd>M</kbd></td><td>Mute</td></tr>
-      <tr><td><kbd>S</kbd></td><td>Save</td></tr>
       <tr><td><kbd>Esc</kbd></td><td>Close</td></tr>
     </table>
   </div>

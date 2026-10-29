@@ -121,7 +121,7 @@ const muteBtn = $('#coachMute').textContent;
 // the plan ends: the ride keeps going as a free ride until End (two taps)
 await until(() => S().ride?.overtime, 'workout done');
 const overBadge = $('#rState').textContent;
-$('#cSave').click();
+await fetch('/api/ride/control', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'save' }) });
 await until(() => S().last_saved, 'saved copy');
 $('#cEnd').click();
 await sleep(100);

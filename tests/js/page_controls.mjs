@@ -141,9 +141,9 @@ await step('step watts +5', () => press('tgt', '5'), () => ride().target_w === 2
 await step('= key', () => key('Equal'), () => ride().target_w === 210);
 await step('- key', () => key('Minus'), () => ride().target_w === 205);
 out.tgtShown = String($('#lT').textContent);
-await step('] key', () => key('BracketRight'), () => ride().step.duration_s === 1260);
-await step('step -1m button', () => $('#cStepShort').click(), () => ride().step.duration_s === 1200);
-await step('step +30s', () => press('ext', '30'), () => ride().step.duration_s === 1230);
+await step('] key', () => key('BracketRight'), () => ride().step.duration_s === 1500);  // a 20 min segment moves in 5 min
+await step('[ key', () => key('BracketLeft'), () => ride().step.duration_s === 1200);
+await step('step +1m', () => press('ext', '60'), () => ride().step.duration_s === 1260);
 await step('Z undoes it', () => key('KeyZ'), () => ride().step.duration_s === 1200);
 await step('ERG off: grade', () => press('mode', 'g'), () => ride().control === 'g');
 await step('grade ++', () => press('adj', '5'), () => ride().jr.g === 2.5);

@@ -25,7 +25,7 @@ const startsWith = (p, pre) => pre && p.length >= pre.length && pre.every((x, i)
 const pkey = p => p.join('.');
 const unkey = k => k === '' ? [] : k.split('.').map(Number);
 
-export function createBuilder({ list, chart: cv, palette: pal, fit, css, ftp, onEdit }) {
+export function createBuilder({ list, chart: cv, palette: pal, fit, css, ftp, onEdit, prefix = () => [], now = () => null }) {
   let tree = [], text = null, sel = null, hover = null, chartDrag = null, listDrag = null, geom = null;
   const undo = [];
 
@@ -219,13 +219,17 @@ export function createBuilder({ list, chart: cv, palette: pal, fit, css, ftp, on
   function draw() {
     const [c, w, h] = fit(cv), f = ftp();
     const steps = flattenTree(tree), paths = flattenPaths(tree);
-    let t = 0; for (const s of steps) { s.t0 = t; t += s.d; }
+    // locked steps before the editable ones (in a ride: what is done and the segment in progress), dimmed
+    let t = 0; const pre = prefix().map(s => { const x = { ...s, t0: t }; t += s.d; return x; });
+    for (const s of steps) { s.t0 = t; t += s.d; }
     const total = chartDrag?.total || t || 1;
-    let mx = 0; for (const s of steps) if (!s.free) mx = Math.max(mx, stepWatts(s, 0, f), stepWatts(s, s.d, f));
+    let mx = 0; for (const s of [...pre, ...steps]) if (!s.free) mx = Math.max(mx, stepWatts(s, 0, f), stepWatts(s, s.d, f));
     const yMax = chartDrag?.yMax || Math.max(mx * 1.08, f * 1.2);
     const X = v => v / total * w, Y = v => h - v / yMax * h;
     geom = { w, h, X, Y, steps, paths, total, yMax };
+    if (pre.length) drawBlocks(c, { steps: pre }, f, X, Y, 0.28, 1, css);
     drawBlocks(c, { steps }, f, X, Y, 0.9, 1, css);
+    const el = now(); if (el != null && pre.length) { c.strokeStyle = css('--acc'); c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(el), 0); c.lineTo(X(el), h); c.stroke(); c.lineWidth = 1; }
     c.strokeStyle = 'rgba(255,255,255,.18)'; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(0, Y(f)); c.lineTo(w, Y(f)); c.stroke(); c.setLineDash([]);
     if (sel) {
       c.strokeStyle = 'rgba(255,255,255,.85)'; c.lineWidth = 1.5;

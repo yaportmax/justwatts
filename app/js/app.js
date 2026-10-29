@@ -9,6 +9,7 @@ import {
 import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
 import { createBuilder } from './builder.js';
+import { LIBRARY, CATEGORIES } from './library.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -54,7 +55,7 @@ const hrZ = () => activeHrZones(settings);  // manual, Garmin or % of max HR
 const hrZone = h => hrZoneOf(h, hrZ().floors);
 
 let custom = store.get('hw.custom', []);
-const allWorkouts = () => [...custom, ...PRESETS];
+const allWorkouts = () => [...custom, ...LIBRARY];
 
 /* ---------- canvas ---------- */
 function fit(cv) {
@@ -88,20 +89,47 @@ function hoverable(cv) {
 hoverable($('#rideChart')); hoverable($('#sumChart'));
 
 /* ---------- library + builder ---------- */
+// library filters are a per-browser convenience
+const libF = Object.assign({ q: '', cat: '', dur: '', lvl: '' }, store.get('hw.libFilter', {}));
+const compiled = new Map();
+function cwOf(w) { const k = w.id + '|' + w.text; if (!compiled.has(k)) { try { compiled.set(k, compile(w)); } catch { compiled.set(k, null); } } return compiled.get(k); }
+function libMatch(w, cw) {
+  if (libF.cat === 'Mine' ? !w.id.startsWith('c-') : libF.cat && w.category !== libF.cat) return false;
+  if (libF.dur) { const [lo, hi] = libF.dur.split('-').map(Number), m = cw.total / 60; if (m < lo || m >= hi) return false; }
+  if (libF.lvl) { const [lo, hi] = libF.lvl.split('-').map(Number); if (!w.level || w.level < lo || w.level > hi) return false; }
+  if (libF.q) { const q = libF.q.toLowerCase(); if (![w.name, w.category, w.purpose, ...(w.tags || [])].some(x => x && String(x).toLowerCase().includes(q))) return false; }
+  return true;
+}
+function renderLibBar() {
+  const cats = [['', 'All'], ...(custom.length ? [['Mine', 'Mine']] : []), ...CATEGORIES.map(c => [c, c])];
+  $('#libCat').innerHTML = cats.map(([v, t]) => `<button class="chip${libF.cat === v ? ' on' : ''}" data-cat="${esc(v)}">${esc(t)}</button>`).join('');
+  $('#libQ').value = libF.q; $('#libDur').value = libF.dur; $('#libLvl').value = libF.lvl;
+}
+const setLibF = patch => { Object.assign(libF, patch); store.set('hw.libFilter', libF); renderLibBar(); renderLib(); };
+$('#libCat').onclick = e => { const b = e.target?.closest?.('[data-cat]'); if (b) setLibF({ cat: b.dataset.cat }); };
+$('#libQ').oninput = e => { libF.q = e.target.value; store.set('hw.libFilter', libF); renderLib(); };
+$('#libDur').onchange = e => setLibF({ dur: e.target.value });
+$('#libLvl').onchange = e => setLibF({ lvl: e.target.value });
+const lvlDots = n => n ? `<span class="lvl" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
 function renderLib() {
-  const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = '';
+  const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = 0;
   for (const w of allWorkouts()) {
-    let cw; try { cw = compile(w); } catch { continue; }
-    const e = estimate(cw, ftp);
+    const cw = cwOf(w); if (!cw || !libMatch(w, cw)) continue;
+    shown++;
+    const e = estimate(cw, ftp), mine = w.id.startsWith('c-');
     const card = document.createElement('div'); card.className = 'card';
-    card.innerHTML = `<canvas></canvas><div><div class="t">${esc(w.name)}</div><div class="m num">${w.test ? 'until failure · ~' + fmtT(cw.total / 2) : fmtT(cw.total) + ' · TSS ' + Math.round(e.tss) + ' · IF ' + e.IF.toFixed(2)}${w.id.startsWith('c-') ? ' · custom' : ''}</div></div>
+    card.innerHTML = `<canvas></canvas><div><div class="t">${esc(w.name)}</div>
+      <div class="m num">${fmtT(cw.total)} · TSS ${Math.round(e.tss)} · ${mine ? 'mine' : esc(w.category || '')} ${lvlDots(w.level)}</div>
+      ${w.purpose ? `<div class="p">${esc(w.purpose)}</div>` : ''}</div>
       <div class="row"><button class="pri" data-a="ride">Ride</button><button data-a="edit">Edit</button></div>`;
     lib.appendChild(card);
     requestAnimationFrame(() => drawThumb(card.querySelector('canvas'), cw, ftp));
     card.querySelector('[data-a=ride]').onclick = () => loadRide(w);
     card.querySelector('[data-a=edit]').onclick = () => editWorkout(w);
   }
+  $('#libEmpty').style.display = shown ? 'none' : '';
 }
+renderLibBar();
 let editing = null;
 function editWorkout(w) {
   editing = w.id.startsWith('c-') ? w.id : null;
@@ -124,9 +152,9 @@ $('#bUndo').onclick = () => { if (!builder.undo()) toast('Nothing to undo'); };
 $('#bSave').onclick = () => {
   const w = builderWorkout(); if (!renderBuilder()) return;
   const i = custom.findIndex(x => x.id === w.id); i >= 0 ? custom[i] = w : custom.unshift(w);
-  editing = w.id; $('#bDel').style.display = ''; store.set('hw.custom', custom); renderLib(); toast('Saved');
+  editing = w.id; $('#bDel').style.display = ''; store.set('hw.custom', custom); renderLibBar(); renderLib(); toast('Saved');
 };
-$('#bDel').onclick = () => { custom = custom.filter(x => x.id !== editing); store.set('hw.custom', custom); editing = null; $('#bDel').style.display = 'none'; renderLib(); toast('Deleted'); };
+$('#bDel').onclick = () => { custom = custom.filter(x => x.id !== editing); store.set('hw.custom', custom); editing = null; $('#bDel').style.display = 'none'; renderLibBar(); renderLib(); toast('Deleted'); };
 $('#bRide').onclick = () => { if (renderBuilder()) loadRide(builderWorkout()); };
 $('#bZwo').onclick = () => { const cw = renderBuilder(); if (cw) download(cw.name.replace(/[^\w\- ]+/g, '') + '.zwo', toZwoCore(cw, settings.ftp), 'application/xml'); };
 $('#bImport').onclick = () => $('#zwoFile').click();
@@ -376,6 +404,15 @@ function renderLive() {
   const hmax = hrZ().max;
   $('#lHs').innerHTML = hrNow ? (hz >= 0 ? `<span class="zn">Z${hz + 1}</span>` : 'below Z1') + (hmax ? ` · ${Math.round(hrNow / hmax * 100)}% max` : '') : 'bpm';
 }
+// "Interval 4 of 18" counts the efforts (local peaks at or above 80% FTP), not warm-up ramps or recoveries
+function intervalText(cw, i, ftp) {
+  const mid = s => s.free ? 0 : (stepWatts(s, 0, ftp) + stepWatts(s, s.d, ftp)) / 2 / ftp, st = cw.steps;
+  const work = st.map((s, j) => !s.free && mid(s) >= 0.8 && mid(s) >= mid(st[j - 1] || { free: true }) && mid(s) >= mid(st[j + 1] || { free: true }) && (mid(s) > mid(st[j - 1] || { free: true }) || mid(s) > mid(st[j + 1] || { free: true })));
+  const n = work.filter(Boolean).length;
+  if (n < 2) return `Segment ${i + 1} of ${st.length}`;
+  const k = work.slice(0, i + 1).filter(Boolean).length;
+  return work[i] ? `Interval ${k} of ${n}` : k < n ? `Next: interval ${k + 1} of ${n}` : 'Intervals done';
+}
 function renderRide() {
   if (!V) return;
   const t = curTarget(), m = S.ride.control; $('#lT').textContent = t ?? '–';
@@ -386,19 +423,17 @@ function renderRide() {
   $('#rState').textContent = st[0]; $('#rState').className = 'badge ' + st[1];
   $('#cStart').style.display = V.started ? 'none' : ''; $('#cPause').style.display = V.started ? '' : 'none';
   $('#cPause').textContent = V.paused && !V.auto ? 'Resume' : 'Pause';  // auto-paused: Pause makes it stick
-  $('#cSave').style.display = V.started ? '' : 'none';
   $('#cAdj').textContent = m === 'k' ? Math.round(V.k * 100) + '%' : m === 'w' ? V.jr.w + ' W' : valText(m).replace(/^\w/, c => c.toUpperCase());
   $('#adjBox').style.display = V.test && m === 'k' ? 'none' : '';  // an FTP test keeps its targets
   $$('#jrMode button').forEach(b => b.classList.toggle('on', b.dataset.m === V.jr.m));
   const kk = V.test ? 1 : V.k;
   if (V.cw) {
     const at = stepAt(V.cw, V.el) || { i: V.cw.steps.length - 1, s: V.cw.steps.at(-1), into: V.cw.steps.at(-1).d };
-    $('#lI').textContent = fmtT(at.s.d - at.into); $('#lIs').textContent = `${at.i + 1} / ${V.cw.steps.length}`;
+    $('#lI').textContent = fmtT(at.s.d - at.into); $('#lIs').textContent = intervalText(V.cw, at.i, V.ftp);
     $('#lEs').textContent = fmtT(V.cw.total - V.el) + ' left';
-    $('#ivNow').textContent = `${fmtT(at.s.d)} · ${at.s.free ? 'free' : stepWatts(at.s, 0, V.ftp, kk) + (at.s.a !== at.s.b ? '→' + stepWatts(at.s, at.s.d, V.ftp, kk) : '') + ' W'}`;
+    $('#ivNow').textContent = at.s.a !== at.s.b && !at.s.free ? `Ramp to ${stepWatts(at.s, at.s.d, V.ftp, kk)} W` : '';
     const nx = V.cw.steps[at.i + 1];
-    $('#ivNext').textContent = nx ? `Next ${fmtT(nx.d)} · ${nx.free ? 'free' : stepWatts(nx, 0, V.ftp, kk) + ' W'}` : 'Last segment';
-    if (nx && !(V.jr.wm && V.jr.wm !== 'e')) $('#lTs').textContent += ` · next ${nx.free ? 'free' : stepWatts(nx, 0, V.ftp, kk) + ' W'} in ${fmtT(at.s.d - at.into)}`;
+    $('#ivNext').textContent = nx ? `Next: ${nx.free ? 'free' : stepWatts(nx, 0, V.ftp, kk) + ' W'} for ${fmtT(nx.d)}` : 'Last segment';
     $('#ivBar').style.width = (at.into / at.s.d * 100) + '%';
     $('#ivBar').style.background = at.s.free ? css('--z1') : zoneColor(stepWatts(at.s, at.into, V.ftp, V.k) / V.ftp);
   } else {
@@ -454,6 +489,7 @@ function stepWattsBy(delta) {
   const i = r.step.index, w0 = r.target_w;
   return act('target', { step: i, delta }, 'step watts', () => control('target', { step: i, w: w0 }));
 }
+const timeSteps = d => d < 120 ? [5, 15] : d < 600 ? [15, 60] : [60, 300];  // small and big change for a segment this long
 function stepTimeBy(sec) {
   const r = R(); if (!r?.step) { toast('Workout done'); return; }
   const i = r.step.index, d0 = r.step.duration_s;
@@ -479,13 +515,10 @@ const lcOn = () => ({ ...LC_DEFAULTS, ...(settings.localCoach || {}) }).enabled;
 
 $('#cStart').onclick = () => control('start').catch(() => {});
 $('#cPause').onclick = pauseAct;
-$('#cSave').onclick = () => control('save').then(j => toast(`Saved to History (${fmtT(j.samples)})`)).catch(() => {});
 $('#cSkip').onclick = skipAct;
 $('#cBack').onclick = backAct;
 $('#cMinus').onclick = () => plusMinus(-1);
 $('#cPlus').onclick = () => plusMinus(1);
-$('#cStepShort').onclick = () => stepTimeBy(-60);
-$('#cStepLong').onclick = () => stepTimeBy(60);
 $('#cUndo').onclick = doUndo;
 $('#cMore').onclick = () => sheet();
 $('#cKeys').onclick = () => $('#keysModal').classList.add('on');
@@ -506,27 +539,20 @@ function nextText() {
 function renderAdjust() {
   if (!V || !$('#adjPanel').classList.contains('on')) return;
   const r = R(), m = r.control, wk = !!V.cw;
-  $('#rowInt').style.display = wk && !V.test ? '' : 'none';
-  $('#aInt').textContent = Math.round(V.k * 100) + '%';
-  const tgtOk = wk && r.step && !r.step.free && r.target_w != null;
-  $('#rowTgt').style.display = tgtOk ? '' : 'none';
-  $('#aTgt').textContent = tgtOk ? r.target_w + ' W' : '–';
-  $('#rowStep').style.display = wk && r.step ? '' : 'none';
-  $('#aStep').textContent = r.step ? fmtT(r.step.left_s) + ' left' : '–';
   const cur = wk ? (V.jr.wm || 'e') : V.jr.m;
   $$('#aMode button').forEach(b => { const v = b.dataset.v; b.style.display = (wk ? v !== 'w' : v !== 'e') ? '' : 'none'; b.classList.toggle('on', v === cur); });
-  $('#rowVal').style.display = m === 'k' ? 'none' : '';
+  $('#rowMode').style.display = wk ? 'none' : '';  // in a workout ERG follows the plan; free segments use + and −
+  $('#rowVal').style.display = m === 'k' || wk ? 'none' : '';
   $('#aValL').textContent = { g: 'Grade', w: 'Watts', r: 'Level' }[m] || '';
   $('#aVal').textContent = m === 'k' ? '' : valText(m).replace(/^(grade|level) /, '');
   if (!nextDirty) { const [txt, base] = nextText(); $('#aNext').value = txt; nextBase = base; $('#aNextErr').textContent = ''; nextBuilder.load(txt); nextBuilder.draw(); }
-  else if (nextBase != null && curStep() !== nextBase) { $('#aNextErr').textContent = 'Step changed. Reset to see the new plan.'; }
+  else if (nextBase != null && curStep() !== nextBase) { $('#aNextErr').textContent = 'Segment changed. Reset to see the new plan.'; }
   const [lo, hi] = settings.cadRange || [85, 95];
   $('#aCadLo').textContent = lo; $('#aCadHi').textContent = hi;
-  $$('#aCoach button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!lcOn()));
-  $$('#aBeeps button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!settings.beeps));
 }
 $('#aNext').oninput = () => { nextDirty = true; $('#aNextErr').textContent = ''; nextBuilder.load($('#aNext').value); nextBuilder.draw(); };
 const nextBuilder = createBuilder({ list: $('#aNextList'), chart: $('#aNextChart'), palette: $('#aNextPal'), fit, css, ftp: () => V?.ftp || settings.ftp,
+  prefix: () => V?.cw && nextBase != null ? V.cw.steps.slice(0, nextBase) : [], now: () => V?.el ?? null,
   onEdit: text => { $('#aNext').value = text; nextDirty = true; $('#aNextErr').textContent = ''; nextBuilder.draw(); } });
 function applyNext() {
   const txt = $('#aNext').value.trim();
@@ -570,10 +596,10 @@ $$('#jrMode button').forEach(b => b.onclick = () => setMode(b.dataset.m));
 // keyboard: documented in the "?" overlay (index.html #keysModal) and the README
 const KEYS = {
   Space: pauseAct, ArrowUp: e => plusMinus(1, e.shiftKey), ArrowDown: e => plusMinus(-1, e.shiftKey),
-  ArrowRight: skipAct, ArrowLeft: backAct, BracketRight: () => stepTimeBy(60), BracketLeft: () => stepTimeBy(-60),
+  ArrowRight: skipAct, ArrowLeft: backAct, BracketRight: () => stepTimeBy(timeSteps(R()?.step?.duration_s ?? 600)[1]), BracketLeft: () => stepTimeBy(-timeSteps(R()?.step?.duration_s ?? 600)[1]),
   Equal: () => stepWattsBy(5), NumpadAdd: () => stepWattsBy(5), Minus: () => stepWattsBy(-5), NumpadSubtract: () => stepWattsBy(-5),
   Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
-  KeyA: () => sheet(), KeyZ: doUndo, KeyM: () => $('#coachMute').click(), KeyS: () => $('#cSave').click(),
+  KeyA: () => sheet(), KeyZ: doUndo, KeyM: () => $('#coachMute').click(),
 };
 function onKey(e) {
   if (e.key === 'Escape') { sheet(false); $('#keysModal').classList.remove('on'); return; }

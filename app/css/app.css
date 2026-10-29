@@ -232,7 +232,7 @@ body.web .agentcol{display:none}
 #v-ride .tile .v{font-weight:600;letter-spacing:-1px}
 #v-ride .tile.big .v{font-size:60px;font-weight:700}
 #v-ride .tile.hrz{border:0}
-#v-ride .tile.hrz .v{text-decoration:underline 3px var(--hrc,transparent);text-underline-offset:8px}
+#v-ride .tile.hrz .v{display:inline-block;border-bottom:3px solid var(--hrc,transparent);padding-bottom:2px;margin-bottom:4px}
 #v-ride .tile.flash .v{color:var(--acc)}
 #v-ride .iv{margin:4px 0 8px}
 #v-ride .bar{height:3px;border-radius:2px}
@@ -251,3 +251,13 @@ body.web .agentcol{display:none}
   #v-ride .tile:nth-child(3n+1){box-shadow:none;padding-left:0}
   #v-ride .tile.big .v{font-size:42px}
 }
+/* library */
+.libbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.libbar input{flex:1;min-width:160px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chips .chip{cursor:pointer;background:none;color:var(--dim);border-color:var(--line);border-radius:999px;padding:4px 11px}
+.chips .chip.on{color:var(--ink);border-color:var(--acc)}
+.card .p{color:var(--dim);font-size:13px;margin-top:4px;line-height:1.35}
+.lvl{display:inline-flex;gap:2px;margin-left:4px;vertical-align:1px}
+.lvl i{width:4px;height:9px;border-radius:1px;background:var(--line)}
+.lvl i.on{background:var(--warn)}

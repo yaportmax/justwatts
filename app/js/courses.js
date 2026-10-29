@@ -9,7 +9,8 @@ import { track } from './analytics.js';
 const FT = 3.28084;
 
 // ride(course, workout|null) starts a ride; workouts() lists what the course row can pair with.
-export function createCourses({ $, store, toast, fit, css, units, ride, workouts, relayout }) {
+// mineOnly() lists imported courses only; publish(c) returns a handler when the course may be published (web, signed in).
+export function createCourses({ $, store, toast, fit, css, units, ride, workouts, relayout, mineOnly = () => false, publish = () => null }) {
   let mine = store.get('hw.courses', []);
   store.del('hw.course');  // the old "use this course for every ride" choice: rides now pick a course each time
   let sel = '', pickW = '';  // the selected course row and the workout picked on it
@@ -47,12 +48,14 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     if (jr) { const v = byId(jr.value) ? jr.value : ''; jr.innerHTML = options(v); jr.value = v; }
     const box = $('#crsList'); if (!box) return;
     box.innerHTML = '';
-    for (const c of all()) {
-      const own = c.id.startsWith('k-'), on = c.id === sel;
+    const list = mineOnly() ? mine : all();
+    if (!list.length) box.innerHTML = '<div class="empty">No imported routes yet. Import route adds a GPX, TCX or FIT file.</div>';
+    for (const c of list) {
+      const own = c.id.startsWith('k-'), on = c.id === sel, pub = own && publish(c);
       const card = document.createElement('div'); card.className = 'lrow' + (on ? ' sel' : '');
       card.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(c.name)}</div>${own ? '<div class="p">Imported</div>' : ''}</div>
         <div class="m num r">${distText(c.dist / 1000, units())}</div><div class="m num r">${upText(c.gain)}</div>
-        <div class="lact">${on ? `<select class="pick" data-a="pick" aria-label="Workout">${wOptions(pickW)}</select>` : ''}<button class="pri" data-a="ride">Ride</button>${own ? '<button data-a="del" class="danger">Delete</button>' : ''}</div>`;
+        <div class="lact">${on ? `<select class="pick" data-a="pick" aria-label="Workout">${wOptions(pickW)}</select>` : ''}<button class="pri" data-a="ride">Ride</button>${pub ? '<button data-a="pub">Publish</button>' : ''}${own ? '<button data-a="del" class="danger">Delete</button>' : ''}</div>`;
       box.appendChild(card);
       requestAnimationFrame(() => draw(card.querySelector('canvas'), c.ele, c.dist, null));
       const go = () => ride(c, on ? workouts().find(w => w.id === pickW) || null : null);
@@ -64,6 +67,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
       };
       card.querySelector('[data-a=ride]').onclick = ev => { ev?.stopPropagation?.(); go(); };
       if (on) card.querySelector('[data-a=pick]').onchange = e => { pickW = e.target.value; };
+      if (pub) card.querySelector('[data-a=pub]').onclick = ev => { ev?.stopPropagation?.(); pub(); };
       if (own) card.querySelector('[data-a=del]').onclick = ev => { ev?.stopPropagation?.(); mine = mine.filter(x => x.id !== c.id); if (sel === c.id) sel = ''; store.set('hw.courses', mine); render(); };
     }
   }
@@ -94,5 +98,11 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
   }
 
   render();
-  return { byId, options, render, renderRide, map, upText, reload: () => { mine = store.get('hw.courses', []); render(); } };
+  // a copy of a course (community "Save to mine"): imported like a file
+  function add(c) {
+    const k = { id: 'k-' + Date.now().toString(36), name: c.name, dist: c.dist, gain: c.gain, ele: c.ele, ll: c.ll || [], updatedAt: Date.now() };
+    if (!store.set('hw.courses', [k, ...mine])) { toast('No room to save it'); return null; }
+    mine = [k, ...mine]; render(); return k;
+  }
+  return { byId, options, render, renderRide, map, upText, draw, add, reload: () => { mine = store.get('hw.courses', []); render(); } };
 }

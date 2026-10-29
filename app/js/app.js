@@ -26,9 +26,12 @@ const ES = B ? WB.makeEventSource(B) : globalThis.EventSource;
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
+let onSaved = () => {};  // web build with an account: a synced key changed (custom workouts, courses, settings)
+const SYNCED = new Set(['hw.custom', 'hw.courses', 'hw.settingsAt']);
+let account = null, community = null, libSrc = 'lib';  // web build: accounts and the community library
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED.has(k)) onSaved(k); return true; } catch { return false; } },
   del(k) { try { localStorage.removeItem(k); } catch {} },
 };
 // Settings live on the server; localStorage is only migrated once.
@@ -37,8 +40,8 @@ const cadOn = () => settings.cadOn !== false;  // cadence off: no readout, targe
 let garminOn = false;
 const api = (path, body) => F(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const apiJson = async (path, body) => { const r = await api(path, body); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
-function saveSettings(keys) {
-  store.set('hw.settings', settings);
+function saveSettings(keys, stamp = true) {
+  store.set('hw.settings', settings); if (stamp) store.set('hw.settingsAt', Date.now());  // the time decides which device's settings win
   const patch = {}; for (const k of keys || Object.keys(settings)) patch[k] = settings[k];
   api('/api/settings', patch).catch(() => {});
 }
@@ -47,7 +50,7 @@ async function loadSettings() {
     const j = await (await F('/api/settings')).json();
     garminOn = !!j.garmin;
     if (j.stored) Object.assign(settings, j.settings);
-    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'units']);
+    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'units'], false);  // first run: defaults never beat synced settings
     if (!garminOn) settings.autoGarmin = false;
     store.set('hw.settings', settings);
   } catch {}
@@ -93,22 +96,27 @@ function hoverable(cv) {
   cv.onpointerleave = () => { hoverT.delete(cv); redraw(); };
 }
 hoverable($('#rideChart')); hoverable($('#sumChart'));
-const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide() });
+const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide(),
+  mineOnly: () => libSrc === 'mine', publish: c => community && account?.me() ? () => community.openPublish({ kind: 'course', course: c }) : null });
 
 /* ---------- library + builder ---------- */
 // library filters are a per-browser convenience
 const libF = Object.assign({ q: '', cat: '', dur: '', lvl: '', sort: '' }, store.get('hw.libFilter', {}));
+// the source above both tabs: the built-in library (with yours), only yours, or the community (web build)
+libSrc = libF.cat === 'Mine' ? 'mine' : store.get('hw.libSrc', 'lib');
+if (libF.cat === 'Mine') libF.cat = '';
 const compiled = new Map();
 function cwOf(w) { const k = w.id + '|' + w.text; if (!compiled.has(k)) { try { compiled.set(k, compile(w)); } catch { compiled.set(k, null); } } return compiled.get(k); }
 function libMatch(w, cw) {
-  if (libF.cat === 'Mine' ? !w.id.startsWith('c-') : libF.cat && w.category !== libF.cat) return false;
+  if (libSrc === 'mine' ? !w.id.startsWith('c-') : libF.cat && w.category !== libF.cat) return false;
   if (libF.dur) { const [lo, hi] = libF.dur.split('-').map(Number), m = cw.total / 60; if (m < lo || m >= hi) return false; }
   if (libF.lvl) { const [lo, hi] = libF.lvl.split('-').map(Number); if (!w.level || w.level < lo || w.level > hi) return false; }
   if (libF.q) { const q = libF.q.toLowerCase(); if (![w.name, w.category, w.purpose, ...(w.tags || [])].some(x => x && String(x).toLowerCase().includes(q))) return false; }
   return true;
 }
 function renderLibBar() {
-  const cats = [['', 'All'], ...(custom.length ? [['Mine', 'Mine']] : []), ...CATEGORIES.map(c => [c, c])];
+  const cats = [['', 'All'], ...CATEGORIES.map(c => [c, c])];
+  $('#libCat').style.display = libSrc === 'mine' ? 'none' : '';
   $('#libCat').innerHTML = cats.map(([v, t]) => `<button class="chip${libF.cat === v ? ' on' : ''}" data-cat="${esc(v)}">${esc(t)}</button>`).join('');
   $('#libQ').value = libF.q; $('#libDur').value = libF.dur; $('#libLvl').value = libF.lvl; $('#libSort').value = libF.sort || '';
 }
@@ -156,13 +164,14 @@ function renderLib() {
     row.querySelector('[data-a=edit]').onclick = ev => { ev?.stopPropagation?.(); editWorkout(w); };
   }
   $('#libEmpty').style.display = shown ? 'none' : '';
+  $('#libEmpty').textContent = libSrc === 'mine' && !custom.length ? 'No workouts of your own yet. New workout starts one.' : 'No workouts match.';
 }
 renderLibBar();
 let editing = null;
 function editWorkout(w) {
   editing = w.id.startsWith('c-') ? w.id : null;
   $('#bName').value = editing ? w.name : w.name + (w.id.startsWith('p-') ? ' (mine)' : '');
-  $('#bText').value = w.text; $('#bDel').style.display = editing ? '' : 'none';
+  $('#bText').value = w.text; $('#bDel').style.display = editing ? '' : 'none'; pubBtn();
   openBuilder(true);
 }
 // the builder is its own page inside Workouts: New workout or Edit opens it, the crumb goes back
@@ -172,7 +181,7 @@ function openBuilder(on) {
 }
 $('#btnNew').onclick = () => {
   editing = null; $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3m 55%), 8m 50-40%';
-  $('#bDel').style.display = 'none'; openBuilder(true);
+  $('#bDel').style.display = 'none'; pubBtn(); openBuilder(true);
 };
 $('#bBack').onclick = () => openBuilder(false);
 function builderWorkout() { return { id: editing || 'c-' + Date.now().toString(36), name: $('#bName').value.trim() || 'Untitled', text: $('#bText').value }; }
@@ -198,10 +207,14 @@ $('#bWords').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); bui
 $('#bUndo').onclick = () => { if (!builder.undo()) toast('Nothing to undo'); };
 $('#bSave').onclick = () => {
   const w = builderWorkout(); if (!renderBuilder()) return;
+  w.updatedAt = Date.now();
   const i = custom.findIndex(x => x.id === w.id); i >= 0 ? custom[i] = w : custom.unshift(w);
-  editing = w.id; $('#bDel').style.display = ''; track('workout_save'); store.set('hw.custom', custom); renderLibBar(); renderLib(); toast('Saved');
+  editing = w.id; $('#bDel').style.display = ''; pubBtn(); track('workout_save'); store.set('hw.custom', custom); renderLibBar(); renderLib(); toast('Saved');
 };
-$('#bDel').onclick = () => { custom = custom.filter(x => x.id !== editing); store.set('hw.custom', custom); editing = null; $('#bDel').style.display = 'none'; renderLibBar(); renderLib(); toast('Deleted'); };
+$('#bDel').onclick = () => { custom = custom.filter(x => x.id !== editing); store.set('hw.custom', custom); editing = null; $('#bDel').style.display = 'none'; pubBtn(); renderLibBar(); renderLib(); toast('Deleted'); };
+// web build, signed in: a saved workout of your own can go to the community library
+function pubBtn() { $('#bPub').style.display = community && account?.me() && editing ? '' : 'none'; }
+$('#bPub').onclick = () => { const w = custom.find(x => x.id === editing); if (w && community) community.openPublish({ kind: 'workout', name: w.name, text: w.text }); };
 $('#bRide').onclick = () => { if (renderBuilder()) loadRide(builderWorkout()); };
 $('#bZwo').onclick = () => { const cw = renderBuilder(); if (cw) download(cw.name.replace(/[^\w\- ]+/g, '') + '.zwo', toZwoCore(cw, settings.ftp), 'application/xml'); };
 $('#bImport').onclick = () => $('#zwoFile').click();
@@ -262,6 +275,7 @@ function onLive(msg) {
   beeps();
   testGuide();
   if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) finishedRide(S.last_finished);
+  if (prev?.ride && !r && account) { account.sync.applyPending(); account.sync.kick(); }  // ride over: pending settings apply, the ride syncs
   setStatus(); renderLive(); if (V) renderRide();
 }
 function setOnline(on) {
@@ -335,10 +349,10 @@ let loadArmed = 0;
 function loadRide(w, course = null) {  // course: the one picked for this ride, if any (never for FTP tests)
   if (w?.test) course = null;
   // loading ends the ride in progress: a second tap within 4 s confirms
-  if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return; }
+  if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return Promise.resolve(false); }
   loadArmed = 0;
-  track('ride_load', { workout: workoutTag(w), course: !course ? 'flat' : String(course.id).startsWith('k-') ? 'imported' : course.id });
-  control('load', { workout: w ? { name: w.name, text: w.text, test: !!w.test } : null, course }).then(() => show('ride')).catch(() => {});
+  track('ride_load', { workout: workoutTag(w), course: !course ? 'flat' : String(course.id).startsWith('k-') ? 'imported' : String(course.id).startsWith('m-') ? 'community' : course.id });
+  return control('load', { workout: w ? { name: w.name, text: w.text, test: !!w.test } : null, course }).then(() => { show('ride'); return true; }).catch(() => false);
 }
 function rideShell() {
   const on = !!V;
@@ -780,7 +794,7 @@ $('#sGarmin').onclick = () => {
 };
 function closeSummary() { $('#summary').style.display = 'none'; $('#histMain').style.display = ''; openId = null; }
 $('#sClose').onclick = () => { closeSummary(); renderTrends(); };
-$('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); closeSummary(); renderHistory(); toast('Deleted (kept in rides/trash)'); };
+$('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); closeSummary(); renderHistory(); toast(WEB ? 'Deleted' : 'Deleted (kept in rides/trash)'); account?.sync.kick(); };
 const fileLink = async ext => {
   if (!openId) return;
   if (WEB) { const data = await B.exportFile(openId, ext); if (data) download(fileBaseOf(openRide) + '.' + ext, data, ext === 'fit' ? 'application/octet-stream' : 'application/xml'); return; }
@@ -939,15 +953,73 @@ if (WEB) {
   };
 }
 
+/* ---------- web build only: optional account (sync) and the community library ---------- */
+if (WEB) {
+  const SYNC_SETTINGS = ['ftp', 'ftpSrc', 'weight', 'units', 'beeps', 'cadRange', 'cadOn', 'afterWorkout', 'hideVirtualDistance', 'hrZones', 'hrMax', 'hrZonesSrc'];
+  const idTime = id => Math.max(1, parseInt(String(id).slice(2), 36) || 1);   // c-/k- ids carry their creation time
+  let applying = false;  // sync writing local data: not a local change to push back
+  const quiet = f => { applying = true; try { return f(); } finally { applying = false; } };
+  const local = {
+    list(kind) {
+      if (kind === 'workout') return custom.map(w => ({ id: w.id, data: { name: w.name, text: w.text }, updatedAt: w.updatedAt || idTime(w.id) }));
+      if (kind === 'course') return store.get('hw.courses', []).map(({ id, updatedAt, ...c }) => ({ id, data: c, updatedAt: updatedAt || idTime(id) }));
+      const data = {}; for (const k of SYNC_SETTINGS) if (settings[k] !== undefined) data[k] = settings[k];
+      return [{ id: 'main', data, updatedAt: store.get('hw.settingsAt', 1) }];
+    },
+    put(kind, id, data, at) {
+      if (kind === 'workout') {
+        if (typeof data?.text !== 'string') return;
+        const w = { id, name: String(data.name || 'Untitled').slice(0, 80), text: data.text, updatedAt: at }, i = custom.findIndex(x => x.id === id);
+        i >= 0 ? custom[i] = w : custom.unshift(w);
+        quiet(() => store.set('hw.custom', custom)); compiled.clear(); renderLibBar(); renderLib();
+      } else if (kind === 'course') {
+        let c; try { c = checkCourse(data); } catch { return; }
+        const list = store.get('hw.courses', []).filter(x => x.id !== id);
+        quiet(() => store.set('hw.courses', [{ id, ...c, updatedAt: at }, ...list])); courses.reload();
+      } else if (id === 'main' && data && typeof data === 'object') {
+        const patch = {}; for (const k of SYNC_SETTINGS) if (k in data) patch[k] = data[k];
+        Object.assign(settings, patch); store.set('hw.settings', settings); quiet(() => store.set('hw.settingsAt', at));
+        api('/api/settings', patch).catch(() => {});
+        showSettings(); if ($('#v-settings').classList.contains('on')) renderSettings();
+      }
+    },
+    remove(kind, id) {
+      if (kind === 'workout') { custom = custom.filter(x => x.id !== id); quiet(() => store.set('hw.custom', custom)); if (editing === id) editing = null; renderLibBar(); renderLib(); }
+      if (kind === 'course') { quiet(() => store.set('hw.courses', store.get('hw.courses', []).filter(x => x.id !== id))); courses.reload(); }
+    },
+    async rides() { return (await B.store.rideIds()).map(id => ({ id, updatedAt: Math.max(1, +(/^r-(\d+)$/.exec(id)?.[1] || 1)) })); },
+    getRide: id => B.store.getRide(id),
+    putRide: r => B.store.putRide(r),
+    removeRide: id => B.store.delRide(id),
+    rideActive: () => !!S?.ride,
+    activeRideId: () => S?.ride?.id || null,
+  };
+  const { createAccount } = await import('./web/account.js');
+  account = createAccount({ $, toast, show, store, local, download,
+    onUser: () => { pubBtn(); if (wkTab === 'courses' && libSrc !== 'comm') courses.render(); community?.redraw(); },
+    onRides: () => { if ($('#v-history').classList.contains('on') && !openId) renderHistory(); } });
+  account.init().then(async on => {
+    if (!on) { account = null; return; }
+    onSaved = () => { if (!applying) account?.sync.kick(); };
+    const { createCommunity } = await import('./web/community.js');
+    community = createCommunity({ $, toast, account, ftp: () => settings.ftp, units: () => settings.units, compile, estimate, drawThumb, drawChart,
+      drawProfile: (cv, ele, dist) => courses.draw(cv, ele, dist, null), ride: (w, c) => loadRide(w, c),
+      saveWorkout: w => { custom.unshift({ id: 'c-' + Date.now().toString(36), name: w.name, text: w.text, updatedAt: Date.now() }); store.set('hw.custom', custom); renderLibBar(); renderLib(); },
+      saveCourse: c => courses.add(c), onBack: () => showTab(wkTab) });
+    $('[data-src=comm]').style.display = '';
+    pubBtn(); if ($('#v-workouts').classList.contains('on')) showTab(wkTab);
+  }).catch(e => console.warn('account', e));
+}
+
 /* ---------- nav + settings + init ---------- */
 function show(v) {
   aView(v);
   $$('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
-  if (v === 'workouts') showTab(wkTab);
+  if (v === 'workouts') { if (community?.detail()) community.closeItem(); showTab(wkTab); }
   if (v === 'ride' && V) renderRide();
   if (v === 'history') { closeSummary(); renderHistory(); }
-  if (v === 'settings') renderSettings();
+  if (v === 'settings') { renderSettings(); account?.refresh(); }
 }
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
@@ -957,11 +1029,17 @@ $('#btnJust2').onclick = () => loadRide(null);
 let wkTab = store.get('hw.wkTab', 'workouts') === 'courses' ? 'courses' : 'workouts';
 function showTab(t) {
   wkTab = t; store.set('hw.wkTab', t);
+  if (libSrc === 'comm' && !community) libSrc = 'lib';
   $$('[data-tab]').forEach(b => { const on = b.dataset.tab === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
-  $('#tabWorkouts').style.display = t === 'workouts' ? '' : 'none'; $('#tabCourses').style.display = t === 'courses' ? '' : 'none';
-  if (t === 'workouts') { renderLib(); renderBuilder(); } else courses.render();
+  $$('[data-src]').forEach(b => b.classList.toggle('on', b.dataset.src === libSrc));
+  const comm = libSrc === 'comm';
+  $('#tabWorkouts').style.display = t === 'workouts' && !comm ? '' : 'none'; $('#tabCourses').style.display = t === 'courses' && !comm ? '' : 'none';
+  $('#tabComm').style.display = comm ? '' : 'none';
+  if (comm) community.show(t === 'workouts' ? 'workout' : 'course');
+  else if (t === 'workouts') { renderLibBar(); renderLib(); renderBuilder(); } else courses.render();
 }
 $$('[data-tab]').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$$('[data-src]').forEach(b => b.onclick = () => { libSrc = b.dataset.src; store.set('hw.libSrc', libSrc); libSel = null; showTab(wkTab); });
 $('#btnFtp').onclick = () => $('#ftpModal').classList.add('on');
 $('#ftpClose').onclick = () => $('#ftpModal').classList.remove('on');
 $('#ftpModal').onclick = e => {
@@ -1004,4 +1082,4 @@ connect();
 const setHH = () => { const h = document.querySelector('header'); document.documentElement.style.setProperty('--hh', (h.offsetWidth >= globalThis.innerWidth - 1 ? h.offsetHeight : 0) + 'px'); };
 setHH();
 window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) wkTab === 'workouts' ? renderLib() : courses.render(); if (V) renderRide(); });
-window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE };
+window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE, get account() { return account; }, get community() { return community; } };

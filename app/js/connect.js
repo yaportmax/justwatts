@@ -8,6 +8,7 @@
 //                          (or says accounts are not available yet).
 import { esc } from './core.js';
 import { track } from './analytics.js';
+import { createImporter, profileRows, infoOnly, RANGES, KINDS, DEFAULT_RANGE } from './importer.js';
 
 const UPLOADERS = ['garmin', 'strava', 'trainingpeaks', 'intervals'], PLANS = ['trainingpeaks', 'intervals'];
 const SHORT = { garmin: 'Garmin', strava: 'Strava', trainingpeaks: 'TrainingPeaks', intervals: 'intervals.icu', coros: 'COROS', polar: 'Polar', suunto: 'Suunto', wahoo: 'Wahoo' };
@@ -26,6 +27,9 @@ export const MANUAL = {
 };
 const NAMES = {"garmin": "Garmin Connect", "strava": "Strava", "trainingpeaks": "TrainingPeaks", "intervals": "intervals.icu", "coros": "COROS", "polar": "Polar", "suunto": "Suunto", "wahoo": "Wahoo"};
 const short = id => SHORT[id] || id;
+// Strava's athlete cap (the app starts at 10 riders): calm wording, the manual route next to it. Same as the sign-in's.
+export const CAP_NOTE = "Just Watts has hit Strava's user limit. Direct Strava connection is coming back soon.";
+const hhmm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const day = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const when = ms => { const d = new Date(ms), t = new Date(); return d.toDateString() === t.toDateString() ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric' }); };
 
@@ -33,7 +37,8 @@ let inst = null, queued = null;
 export function openConnectServices(opts = {}) { if (inst) return inst.openConnectServices(opts); queued = opts; }
 globalThis.justwatts = Object.assign(globalThis.justwatts || {}, { openConnectServices });
 
-export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned = () => {}, onChange = () => {}, stravaSetup = () => {} }) {
+export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned = () => {}, onChange = () => {}, stravaSetup = () => {},
+  settings = () => ({}), applyProfile = () => {}, listRides = async () => [], saveRide = async () => false, deleteRide = async () => false, onImported = () => {}, storage = null }) {
   const st = { rows: null, signedOut: false, unavailable: false, planned: null, plannedDay: '' };
   const NET = (p, o) => (globalThis.__justwattsWeb?.net || globalThis.fetch)(p, { credentials: 'same-origin', ...o });
 
@@ -58,6 +63,21 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     targets: rid => call('GET', `/api/rides/${rid}/targets`, 'targets', { ride: rid }),
     retry: (rid, svc) => call('POST', `/api/rides/${rid}/uploads/${svc}`, 'retry', { ride: rid, ...(svc ? { service: svc } : {}) }, {}),
     planned: d => call('GET', `/api/integrations/planned?date=${d}`, 'planned', { date: d }),
+    importProfile: svc => call('GET', `/api/integrations/${svc}/import/profile`, 'import_profile', { service: svc }),
+    importList: (svc, q) => call('GET', `/api/integrations/${svc}/import/list?${new URLSearchParams(q)}`, 'import_list', { service: svc, ...q }),
+    // one ride's file (FIT, or JSON streams for Strava); throws { status, kind, retryAfter } so the importer can pause or skip
+    async importFit(svc, id) {
+      let r;
+      try {
+        const o = { headers: { 'X-HW': '1' } };
+        r = WEB ? await NET('/api/integrations?' + new URLSearchParams({ op: 'import_fit', service: svc, activity: id }), o)
+          : await F(`/api/integrations/${svc}/import/fit?activity=${encodeURIComponent(id)}`, o);
+      } catch { throw Object.assign(new Error('offline'), { status: 0, kind: 'temporary' }); }
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw Object.assign(new Error(j.error || String(r.status)), { status: r.status, kind: j.kind, retryAfter: +r.headers?.get?.('retry-after') || j.retry_after || null }); }
+      const u = new Uint8Array(await r.arrayBuffer());
+      u.wait = +r.headers?.get?.('x-jw-wait') || 0;  // the server is near a rate limit: rest this long before the next
+      return u;
+    },
   };
   // web: the FIT goes up once per ride (the server keeps it for retries); services = a manual Upload press
   async function postFit(rid, services) {
@@ -73,6 +93,8 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     return st.rows;
   }
   const row = id => st.rows?.find(x => x.id === id);
+  const capped = (id = 'strava') => id === 'strava' && !!row('strava')?.status?.capped && !row('strava')?.status?.connected;
+  const capLine = () => esc(CAP_NOTE) + (row('strava')?.synced_by_garmin ? ' <span class="ok">Garmin already sends rides here.</span>' : '');
   const anyPlanned = () => (st.rows || []).some(x => x.caps?.planned && x.status?.connected);
 
   /* ---------- sign in (web) ---------- */
@@ -104,6 +126,7 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     const s = r.status || {};
     if (r.id === 'garmin' && s.enabled === false) return '<span class="warn">Off on this server</span>';
     if (r.needs_reconnect) return '<span class="warn">Signed out. Reconnect.</span>';
+    if (capped(r.id)) return capLine();
     if (!s.connected) return r.recommended ? esc(r.recommended_reason || '') : r.synced_by_garmin ? 'Garmin already sends rides here' : r.caps?.planned ? 'Uploads rides, brings in planned workouts' : 'Uploads rides';
     const bits = [`<span class="ok">Connected${s.account ? ' as ' + esc(s.account) : ''}</span>`];
     const le = r.last_error, ls = r.last_success;
@@ -128,15 +151,22 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
   function settingsRow(r) {
     const s = r.status || {}, on = !!s.connected, off = r.id === 'garmin' && s.enabled === false;
     const strNoApp = r.id === 'strava' && s.configured === false;
-    const ctl = on ? `<select data-auto="${r.id}" aria-label="${esc(short(r.id))} uploads"><option value="1"${r.auto ? ' selected' : ''}>Auto upload</option><option value="0"${r.auto ? '' : ' selected'}>Manual</option></select>`
+    const imp = on && r.caps?.import, pend = imp && IM.pendingFor(r.id);
+    const ctl = (on ? `<select data-auto="${r.id}" aria-label="${esc(short(r.id))} uploads"><option value="1"${r.auto ? ' selected' : ''}>Auto upload</option><option value="0"${r.auto ? '' : ' selected'}>Manual</option></select>`
+      + (imp ? `<button data-imp="${r.id}">${pend ? 'Continue' : 'Get data'}</button>` : '')
       + (r.needs_reconnect ? `<button class="pri" data-conn="${r.id}">Reconnect</button>` : '') + `<button class="ghost" data-disc="${r.id}">Disconnect</button>`
-      : strNoApp ? `<button data-stsetup="1">Set up</button>` : `<button class="${r.recommended ? 'pri' : ''}" data-conn="${r.id}"${off ? ' disabled' : ''}>Connect</button>`;
+      : capped(r.id) ? `<button class="ghost" data-conn="strava" data-force="1" title="Riders already linked to Strava can still connect">Connect anyway</button>`
+      : strNoApp ? `<button data-stsetup="1">Set up</button>` : `<button class="${r.recommended ? 'pri' : ''}" data-conn="${r.id}"${off ? ' disabled' : ''}>Connect</button>`);
     let extra = '';
     if (r.id === 'garmin' && on) {
       const syncs = r.syncs_to || [], q = SYNC_Q;
       extra = `<div class="isyncs"><span>${esc(q.text)}</span>${q.options.map(o => `<label class="chk"><input type="checkbox" data-sync="${o.id}"${syncs.includes(o.id) ? ' checked' : ''}>${esc(o.label)}</label>`).join('')}</div>`;
     }
     if (r.duplicate_risk && r.duplicate_warning) extra += `<div class="warnbox hot">${esc(r.duplicate_warning)}</div>`;
+    if (capped(r.id)) extra += `<div class="capman">${manualHtml('strava', r.manual || MANUAL.strava)}</div>`;
+    const lastImp = imp && IM.lastImported(r.id);
+    if (pend) extra += `<div class="isub imp">${esc(IM.progressText(pend))}${pend.running || pend.paused === 'rate' ? '' : ', paused'}</div>`;
+    else if (lastImp) extra += `<div class="isub imp">Last imported ${esc(new Date(lastImp).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }))}</div>`;
     return `<div class="irow" data-svc="${r.id}"><div class="imain"><div class="iname"><i class="dot${on ? r.needs_reconnect ? ' wait' : ' on' : ''}"></i>${esc(r.name)}${r.recommended ? '<span class="rec">Recommended</span>' : ''}${tipHtml(r)}</div>
       <div class="isub">${statusLine(r)}</div>${extra}</div><div class="sc">${ctl}</div></div>`;
   }
@@ -144,8 +174,9 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     return `<details class="irow man" data-svc="${r.id}"><summary><span class="iname">${esc(r.name)}</span><span class="isub">${r.manual?.supported === false ? 'No file import' : r.manual?.app_only ? 'Phone app' : ''}</span><span class="grow"></span><span class="how">How</span></summary>${manualHtml(r.id, r.manual)}</details>`;
   }
   async function settingsClick(e) {
-    const t = e.target?.closest?.('[data-conn],[data-disc],[data-stsetup],[data-manual],[data-fit]'); if (!t) return;
-    if (t.dataset.conn) return openForm(t.dataset.conn);
+    const t = e.target?.closest?.('[data-conn],[data-disc],[data-stsetup],[data-manual],[data-fit],[data-imp]'); if (!t) return;
+    if (t.dataset.conn) return openForm(t.dataset.conn, null, null, !!t.dataset.force);
+    if (t.dataset.imp) return IM.open(t.dataset.imp);
     if (t.dataset.stsetup) return stravaSetup();
     if (t.dataset.manual) return track('manual_upload', { service: t.dataset.manual });
     if (t.dataset.disc) {
@@ -172,9 +203,10 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
 
   /* ---------- connect forms (one dialog, a step at a time) ---------- */
   const F_ = { svc: null, rid: null, step: 'creds', after: null };
-  function openForm(svc, rid = null, after = null) {
+  function openForm(svc, rid = null, after = null, force = false) {
     const r = row(svc);
     if (WEB && (st.signedOut || st.unavailable)) return signIn();
+    if (capped(svc) && !force) return capNote(rid);
     if (!r?.connect) return;
     if (r.connect.kind === 'oauth') {  // Strava: the existing OAuth flow
       if (r.status?.configured === false) return stravaSetup();
@@ -185,11 +217,22 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     formRender(); $('#connModal').classList.add('on');
     setTimeout(() => $('#connModal').querySelector('input,textarea')?.focus?.(), 30);
   }
-  const closeForm = () => { $('#connModal').classList.remove('on'); clearSecrets(); };
+  // the cap: a note, the manual route (with this ride's .fit when there is one), never a broken OAuth page
+  function capNote(rid = null) {
+    F_.step = 'note'; F_.rid = rid;
+    $('#connTitle').textContent = 'Strava';
+    $('#connBody').innerHTML = `<p class="q">${capLine()}</p>${rid ? '<div><button class="dl" data-act="fit"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16h12"/></svg>Download .fit</button></div>' : ''}${manualHtml('strava', row('strava')?.manual || MANUAL.strava)}`;
+    $('#connErr').textContent = ''; $('#connGo').textContent = 'OK'; $('#connGo').disabled = false; $('#connCancel').textContent = 'Close';
+    $('#connModal').classList.add('on');
+    track('integration_connect', { service: 'strava', ok: 'capped' });
+  }
+  const closeForm = () => { $('#connModal').classList.remove('on'); clearSecrets(); if (F_.step === 'import') F_.step = 'creds'; };
   const clearSecrets = () => { for (const i of $('#connBody').querySelectorAll?.('input,textarea') || []) if (i.type !== 'checkbox') i.value = ''; };
   const field = (name, label, o = {}) => `<label class="f">${esc(label)}<input name="${name}" ${o.secret ? 'type="password" autocomplete="off"' : `type="${o.type || 'text'}" autocomplete="${o.ac || 'off'}"`} spellcheck="false"${o.ph ? ` placeholder="${esc(o.ph)}"` : ''}></label>`;
   function formRender() {
     const { svc, step } = F_, r = row(svc), body = $('#connBody');
+    if (step === 'import') return IM.render();
+    $('#connCancel').textContent = 'Cancel';
     $('#connTitle').textContent = step === 'question' ? 'Garmin connected' : `Connect ${short(svc)}`;
     $('#connErr').textContent = '';
     let h = '', go = 'Connect';
@@ -216,10 +259,12 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
   }
   async function formSubmit() {
     const { svc, rid } = F_, body = $('#connBody'), go = $('#connGo');
+    if (F_.step === 'import') return IM.go();
+    if (F_.step === 'note') return closeForm();
     if (F_.step === 'question') {
       const list = [...body.querySelectorAll('input[name=sync]')].filter(x => x.checked).map(x => x.value);
       const r = await api.syncs(list); if (r.ok) st.rows = r.body.integrations;
-      closeForm(); refresh(); F_.after?.(); return;
+      refresh(); F_.after?.(); return afterConnect(svc);
     }
     const fields = {};
     for (const i of body.querySelectorAll('input,textarea')) if (i.name) fields[i.name] = i.value.trim();
@@ -239,8 +284,136 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     await load(); refresh();
     toast(rid ? `${short(svc)} connected. Uploading this ride.` : `${short(svc)} connected`);
     if (svc === 'garmin' && r.body.question) { F_.step = 'question'; F_.question = r.body.question; formRender(); return; }
-    closeForm(); F_.after?.();
+    F_.after?.(); afterConnect(svc);
   }
+  // right after a connect: offer the import (profile, past rides) when the service has one
+  // (not from a ride's Upload panel: there the point is this ride)
+  function afterConnect(svc) { if (row(svc)?.caps?.import && !F_.rid) IM.open(svc); else closeForm(); }
+
+  /* ---------- import: profile values and past rides, in the same dialog ---------- */
+  const IM = (() => {
+    const store = storage || { get: (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+      set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }, del: k => { try { localStorage.removeItem(k); } catch {} } };
+    const unwrap = async p => { const r = await p; if (!r.ok) throw Object.assign(new Error(r.body.error || String(r.status)), { status: r.status, kind: r.body.kind, retryAfter: r.body.retry_after || null }); return r.body; };
+    const imp = createImporter({ api: { list: (svc, q) => unwrap(api.importList(svc, q)), fit: (svc, id) => api.importFit(svc, id) },
+      rides: listRides, saveRide, deleteRide, storage: store, settings });
+    // a rate pause (Strava's daily limit) resumes by itself at its time while the page is open, or on the next visit
+    let resumeTimer = null;
+    function scheduleResume() {
+      clearTimeout(resumeTimer);
+      const p = imp.pending();
+      if (!p || p.paused !== 'rate' || !p.resume_at) return;
+      resumeTimer = setTimeout(() => { if (!imp.running) { if (S.svc === p.svc && F_.step === 'import') S.phase = 'running'; imp.run(progress).then(scheduleResume); } }, Math.max(0, p.resume_at - Date.now()) + 1000);
+    }
+    const S = { svc: null, phase: 'options', prof: null, rows: [], picked: {}, range: DEFAULT_RANGE, kind: 'cycling', view: null, err: '' };
+    const rateText = v => (v.waiting_s ? `Paused for ${short(v.svc)}'s rate limit, resumes at ${hhmm(Date.now() + v.waiting_s * 1000)}`
+      : v.paused === 'rate' && v.resume_at ? `Paused for ${short(v.svc)}'s rate limit, resumes at ${hhmm(v.resume_at)}` : '');
+    const progressText = v => (v.finding != null && !v.total ? `Finding rides: ${v.finding}` : `${v.done} of ${v.total} rides`) + (rateText(v) ? `. ${rateText(v)}` : '');
+    let lastImported = 0;
+    const LAST = 'hw.importedAt';  // per browser: when each service was last imported from
+    const markImported = svc => { const m = store.get(LAST, {}) || {}; m[svc] = Date.now(); store.set(LAST, m); };
+    function open(svc) {
+      if (WEB && (st.signedOut || st.unavailable)) return signIn();
+      const pend = imp.pending();
+      Object.assign(S, { svc, err: '', phase: pend?.svc === svc ? (imp.running ? 'running' : 'resume') : 'options', view: pend?.svc === svc ? pend : null });
+      F_.svc = svc; F_.step = 'import'; F_.rid = null; F_.after = null;
+      $('#connModal').classList.add('on'); render();
+      if (S.phase === 'options') loadProfile(svc);
+    }
+    async function loadProfile(svc) {
+      S.prof = null; S.rows = []; render();
+      const r = await api.importProfile(svc);
+      if (S.svc !== svc) return;
+      S.prof = r.ok ? r.body : { values: {}, missing: [], errors: { all: r.body.error || 'failed' } };
+      const s = settings();
+      S.rows = profileRows(S.prof.values, s, { units: s.units, service: svc });
+      S.picked = Object.fromEntries(S.rows.map(x => [x.key, x.differs]));
+      render();
+    }
+    function render() {
+      if (F_.step !== 'import') return;
+      const name = short(S.svc), go = $('#connGo'), cancel = $('#connCancel');
+      $('#connTitle').textContent = `Import from ${name}`;
+      $('#connErr').textContent = S.err;
+      let h = '';
+      if (S.phase === 'options') {
+        h += '<div class="imh">Profile</div>';
+        if (!S.prof) h += `<div class="hint">Checking ${esc(name)}…</div>`;
+        else if (!S.rows.length) h += `<div class="hint">${Object.keys(S.prof.errors || {}).length ? `${esc(name)} did not answer` : 'Nothing found'}</div>`;
+        else h += `<div class="imrows">${S.rows.map(x => `<label class="chk"><input type="checkbox" data-pk="${x.key}"${S.picked[x.key] ? ' checked' : ''}><span>${esc(x.label)} <b>${esc(x.text)}</b>${x.differs ? x.nowText ? ` <span class="imnow">(now ${esc(x.nowText)})</span>` : '' : ' <span class="imnow">(same)</span>'}</span></label>`).join('')}</div>`;
+        const info = S.prof ? infoOnly(S.prof.values) : [];
+        if (info.length) h += `<div class="hint">${esc(info.join(' · '))}</div>`;
+        h += `<div class="imh">Past rides</div><div class="imopts">
+          <select data-im="range" aria-label="Past rides">${RANGES.map(([v, l]) => `<option value="${v}"${v === S.range ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+          <select data-im="kind" aria-label="Ride type"${S.range === 'none' ? ' disabled' : ''}>${KINDS.map(([v, l]) => `<option value="${v}"${v === S.kind ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
+        go.textContent = 'Import'; go.disabled = !S.prof; cancel.textContent = 'Skip';
+      } else if (S.phase === 'resume') {
+        const v = S.view || { done: 0, total: 0 };
+        h = `<div class="improg"><div class="bar"><i style="width:${v.total ? Math.round(v.done / v.total * 100) : 0}%"></i></div><div class="hint">${esc(progressText(v))}${v.paused === 'rate' ? '' : ', paused'}</div></div>
+          <div><button class="link" data-imx="discard">Discard</button></div>`;
+        go.textContent = 'Continue'; go.disabled = false; cancel.textContent = 'Later';
+      } else {
+        const v = S.view || { done: 0, total: 0 }, fin = S.phase === 'done', pct = fin ? 100 : v.total ? Math.round(v.done / v.total * 100) : 0;
+        h = `<div class="improg"><div class="bar"><i style="width:${pct}%"></i></div><div class="hint">${esc(fin ? summary(v) : progressText(v))}</div></div>`;
+        go.textContent = fin ? 'Done' : 'Stop'; go.disabled = false; cancel.textContent = 'Close';
+      }
+      $('#connBody').innerHTML = h;
+    }
+    function summary(v) {
+      if (!v?.total && !v?.imported) return v?.dupes ? `Nothing new. ${v.dupes} already in History.` : S.range === 'none' ? 'Profile updated' : 'No rides found';
+      const bits = [`${v.imported} ${v.imported === 1 ? 'ride' : 'rides'} imported`];
+      if (v.dupes) bits.push(`${v.dupes} already in History`);
+      if (v.failed) bits.push(`${v.failed} could not be read`);
+      return bits.join(', ');
+    }
+    function progress(v) {
+      if (!v || v.svc !== S.svc) return;
+      S.view = v;
+      if (!v.running && v.paused === 'rate') { S.phase = 'resume'; S.err = ''; scheduleResume(); }
+      else if (!v.running && v.paused) { S.phase = 'resume'; S.err = v.paused === 'auth' ? `${short(S.svc)} signed out. Reconnect, then continue.` : `${short(S.svc)} is busy. Continue later.`; }
+      else if (!v.running && v.finished) { S.phase = 'done'; markImported(S.svc); }
+      render();
+      if ((v.imported || 0) !== lastImported) { lastImported = v.imported || 0; onImported(); }
+      if (!v.running || v.done % 5 === 0) renderSettings();
+    }
+    async function go() {
+      if (S.phase === 'done') return closeForm();
+      if (S.phase === 'running') { imp.stop(); S.phase = 'resume'; S.view = imp.pending() || S.view; render(); return; }
+      if (S.phase === 'resume') { S.phase = 'running'; S.err = ''; render(); await imp.run(progress); return; }
+      // options: the profile first (a settings write), then the rides
+      const patch = {};
+      for (const x of S.rows) if (S.picked[x.key]) Object.assign(patch, x.patch);
+      if (Object.keys(patch).length) { applyProfile(patch); toast('Profile updated'); }
+      track('import', { service: S.svc, range: S.range, kind: S.kind, profile: Object.keys(patch).length });
+      if (S.range === 'none') { S.phase = 'done'; S.view = { total: 0, imported: 0 }; markImported(S.svc); render(); renderSettings(); return; }
+      S.phase = 'running'; S.view = { finding: 0, total: 0, done: 0 }; lastImported = 0; render();
+      try {
+        const v = await imp.start(S.svc, { range: S.range, kind: S.kind }, progress);
+        if (!v && S.phase === 'running') { S.phase = 'options'; render(); }
+        else if (v && !v.total) { S.phase = 'done'; S.view = v; markImported(S.svc); render(); renderSettings(); }
+      } catch (e) { S.phase = 'options'; S.err = e.kind === 'auth' ? `${short(S.svc)} signed out. Reconnect.` : `Could not list rides: ${e.message}`; render(); }
+    }
+    const body = $('#connBody');
+    const onChangeIm = e => {
+      const t = e.target; if (F_.step !== 'import' || !t?.dataset) return;
+      if (t.dataset.pk) S.picked[t.dataset.pk] = t.checked;
+      if (t.dataset.im === 'range') { S.range = t.value; render(); }
+      if (t.dataset.im === 'kind') S.kind = t.value;
+    };
+    const onClickIm = e => { if (F_.step === 'import' && e.target?.closest?.('[data-imx]')?.dataset.imx === 'discard') { imp.discard(); closeForm(); renderSettings(); } };
+    if (body.addEventListener) { body.addEventListener('change', onChangeIm); body.addEventListener('click', onClickIm); }
+    else { body.onchange = onChangeIm; }
+    return { open, render, go, progressText, imp, state: S,
+      pendingFor: svc => { const p = imp.pending(); return p && p.svc === svc ? p : null; },
+      lastImported: svc => (store.get(LAST, {}) || {})[svc] || null,
+      // the next visit: a paused or unfinished import is offered again
+      offer() {
+        const p = imp.pending(); if (!p || imp.running || !row(p.svc)?.status?.connected) return;
+        if (p.paused === 'rate') { scheduleResume(); return; }  // resumes by itself, the row shows when
+        if (!$('#connModal').classList.contains('on')) open(p.svc);
+      } };
+  })();
+
 
   /* ---------- the ride summary: Upload button, status line, panel ---------- */
   const P = { rid: null, t: null, poll: null, man: 'garmin', mode: 'ride' };
@@ -258,6 +431,8 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
   // the summary: the Upload button's label and a one-line status per connected service; Garmin nudge
   async function renderSummary(rid, { fresh = false } = {}) {
     P.rid = rid;
+    if (/^imp-/.test(rid)) { for (const id of ['#sUpload', '#sUpLine', '#sNudge']) $(id).style.display = 'none'; return; }  // imported: never uploaded back
+    $('#sUpload').style.display = '';
     const t = await loadTargets(rid); if (P.rid !== rid) return;
     P.t = t;
     const btn = $('#sUpload'), line = $('#sUpLine'), nudge = $('#sNudge');
@@ -306,8 +481,9 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     $('#upBody').innerHTML = out.join('');
   }
   function panelRowConnect(r) {
+    if (capped(r.id)) return `<div class="prow" data-svc="strava"><div class="pmain"><div class="pname">${esc(r.name)}</div><div class="psub">${capLine()}</div></div><button data-act="manual" data-svc="strava">By hand</button></div>`;
     const why = r.recommended ? r.recommended_reason || '' : r.duplicate_warning ? 'Garmin already sends rides here' : PLANS.includes(r.id) ? 'Uploads rides, brings in planned workouts' : 'Uploads rides';
-    const stravaWeb = r.id === 'strava' && (WEB || row('strava')?.status?.configured === false);
+    const stravaWeb = r.id === 'strava' && (!r.connect || row('strava')?.status?.configured === false);  // web without the Strava app: by hand
     return `<div class="prow" data-svc="${r.id}"><div class="pmain"><div class="pname">${esc(r.name)}${r.recommended ? '<span class="rec">Recommended</span>' : ''}${tipHtml(r, P.mode === 'ride' ? P.rid : null)}</div>${why ? `<div class="psub">${esc(why)}</div>` : ''}</div>`
       + (stravaWeb ? `<button data-act="manual" data-svc="strava">By hand</button>` : `<button class="${r.recommended ? 'pri' : ''}" data-act="connect" data-svc="${r.id}">Connect</button>`) + '</div>';
   }
@@ -404,7 +580,8 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
   $('#sNudgeX').onclick = () => { try { localStorage.setItem('hw.garminNudge', '"off"'); } catch {} $('#sNudge').style.display = 'none'; };
 
   const self = {
-    load, renderSettings, renderSummary, afterRide, loadPlanned, openPanel, closePanel, openForm, state: st,
+    load, renderSettings, renderSummary, afterRide, loadPlanned, openPanel, closePanel, openForm, state: st, importer: IM,
+    openImport: svc => IM.open(svc), offerImport: () => IM.offer(),
     openConnectServices: async () => { await load(); openPanel('connect'); },
     escape: () => { if ($('#connModal').classList.contains('on')) { closeForm(); return true; } if ($('#upPanel').classList.contains('on')) { closePanel(); return true; } return false; },
   };
@@ -415,5 +592,23 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     load().then(() => svc ? (openPanel('connect'), openForm(svc)) : openPanel('connect')).catch(() => {});
   });
   if (queued) { const q = queued; queued = null; self.openConnectServices(q); }
+  // back from Strava's OAuth (web): ?integration=strava&result=connected|error&reason=...; read once, then dropped from the URL
+  const back = (() => {
+    try {
+      const u = new URL(globalThis.location.href), q = u.searchParams;
+      if (!WEB || q.get('integration') !== 'strava') return null;
+      const out = { result: q.get('result'), reason: q.get('reason'), scope: q.get('scope') };
+      for (const k of ['integration', 'result', 'reason', 'scope']) q.delete(k);
+      globalThis.history?.replaceState?.(null, '', u.pathname + (q.toString() ? '?' + q : '') + u.hash);
+      return out;
+    } catch { return null; }
+  })();
+  if (back) load().then(() => {
+    if (back.result === 'connected') {
+      track('integration_connect', { service: 'strava', ok: 1 }); refresh();
+      toast(back.scope === 'missing' ? 'Strava connected for import only. Allow uploads to send rides.' : 'Strava connected');
+      IM.open('strava');
+    } else if (back.reason === 'strava_capped') capNote(); else if (back.reason !== 'denied') toast('Strava did not connect. Try again.');
+  }).catch(() => {});
   return self;
 }

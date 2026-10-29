@@ -95,6 +95,7 @@ SAFE_RAW = {  # interpolations in app.js HTML templates that are constants, numb
     "${r.garmin ? ' <span class=\"badge\">Garmin</span>' : ''}", "${r.strava ? ' <span class=\"badge\">Strava</span>' : ''}",
     "${r.test ? ' <span class=\"badge\">test</span>' : ''}", "${w.id.startsWith('c-') ? ' · custom' : ''}",
     "${libF.cat === v ? ' on' : ''}", "${heroHtml}", "${restHtml}",
+    "${IMPORTED[r.source] && /^imp-/.test(r.id) ? ` <span class=\"badge src\">${esc(IMPORTED[r.source])}</span>` : ''}",  # source tag, escaped inside
 }
 
 

@@ -19,7 +19,7 @@
   </nav>
   <div class="conn">
     <span class="pill off" id="srvState" style="display:none" aria-hidden="true" role="status">Server offline</span>
-    <span class="pill meter" id="agentMeter" style="display:none" aria-hidden="true" title="AI agent usage this ride: wakes, tokens, cost"></span>
+    <span class="pill meter" id="agentMeter" style="display:none" aria-hidden="true" title="Agent wakes, tokens, cost this ride"></span>
     <span class="pill"><i class="dot" id="tDot"></i><span id="tTxt">Trainer off</span></span>
     <span class="pill"><i class="dot" id="hDot"></i><span id="hTxt">HR off</span></span>
     <button id="btnTrainer" class="pri">Connect trainer</button>
@@ -29,7 +29,7 @@
 
 <main>
 <div id="webNotice" class="panel warnbanner webonly" style="display:none" role="note">
-  <b>This browser has no Web Bluetooth.</b> Use Chrome or Edge on a computer or Android phone. iOS Safari cannot connect to trainers; on iPhone or iPad try the Bluefy browser.
+  <b>No Web Bluetooth in this browser.</b> Use Chrome or Edge on a computer or Android. iPhone, iPad: Bluefy.
 </div>
 <!-- WORKOUTS -->
 <section class="view on" id="v-workouts">
@@ -44,7 +44,7 @@
   <h2>Courses</h2>
   <div class="row crsbar"><span class="hint" id="crsNow"></span><button id="crsImport">Import GPX</button></div>
   <div class="llist" id="crsList"></div>
-  <div class="hint" style="margin-top:6px">In a workout, watt segments stay ERG and free segments follow the road.</div>
+  <div class="hint" style="margin-top:6px">With a workout: watt segments stay ERG, free segments follow the road.</div>
   <input type="file" id="crsFile" accept=".gpx,.tcx" hidden>
 
   <h2>Library</h2>
@@ -74,7 +74,7 @@
         <button id="bRide" class="pri">Ride</button>
       </div>
     </div>
-    <div class="hint">Drag a block's top to change power, its right edge to change length.</div>
+    <div class="hint">Drag a block's top for power, its right edge for length.</div>
     <div class="pal" id="bPal"></div>
     <div class="blist" id="bList"></div>
     <details class="adv" id="bTextBox">
@@ -99,7 +99,7 @@
       <span class="num" id="rClock" style="color:var(--dim)"></span>
     </div>
     <div class="tiles">
-      <div class="tile big" id="tgtTile"><div class="k" title="3 second average, and the target">Power</div><div class="v"><span id="lP">0</span><span class="of"> / <span id="lT">–</span></span></div><div class="s" id="lTs"></div><div class="s" id="lPs"></div></div>
+      <div class="tile big" id="tgtTile"><div class="k" title="3 s average / target">Power</div><div class="v"><span id="lP">0</span><span class="of"> / <span id="lT">–</span></span></div><div class="s" id="lTs"></div><div class="s" id="lPs"></div></div>
       <div class="tile hrz" id="cadTile"><div class="k">Cadence</div><div class="v" id="lC">0</div><div class="s" id="lCs">rpm</div></div>
       <div class="tile hrz" id="hrTile"><div class="k">Heart rate</div><div class="v" id="lH">–</div><div class="s" id="lHs">bpm</div></div>
       <div class="tile"><div class="k">Interval</div><div class="v" id="lI">–</div><div class="s" id="lIs"></div></div>
@@ -112,37 +112,37 @@
     <div class="panel testcue" id="testCue" style="display:none" role="status" aria-live="polite"><div class="tcm" id="tcMain"></div><div class="tcs" id="tcSub"></div></div>
     <div class="panel coach serveronly" id="coach">
       <div><span class="k">Coach</span><span id="coachMsg">Watching</span><div id="coachPrev"></div><div id="coachSaid"></div></div>
-      <div class="row" style="gap:6px"><button id="coachMute" class="mute" title="Mute or unmute the coach voice (or say &quot;mute&quot;)">Mute</button><select id="coachVerb" title="What the coach reads aloud"><option value="all">Speak all</option><option value="important">Important only</option><option value="silent">Silent</option></select><button data-feel="easier">Easier</button><button data-feel="good">Good</button><button data-feel="harder">Harder</button></div>
+      <div class="row" style="gap:6px"><button id="coachMute" class="mute" title="Or say &quot;mute&quot; (M)">Mute</button><select id="coachVerb" title="Coach voice"><option value="all">Speak all</option><option value="important">Important only</option><option value="silent">Silent</option></select><button data-feel="easier">Easier</button><button data-feel="good">Good</button><button data-feel="harder">Harder</button></div>
     </div>
     <div class="panel" style="padding:8px"><canvas id="rideChart"></canvas></div>
     <div class="crs" id="crsRide" style="display:none"><canvas id="crsMap"></canvas><div class="crsp"><canvas id="crsChart"></canvas><div class="crsk num" id="crsK"></div></div></div>
     <div class="controls">
       <button id="cStart" class="pri big">Start</button>
-      <button id="cPause" class="big" title="Pause, resume (Space)">Pause</button>
-      <span class="grp wk"><button id="cBack" title="Restart this segment; in its first 10 s, go to the previous one (←)">Back</button><button id="cSkip" title="End this segment now and start the next (→)">Skip</button></span>
+      <button id="cPause" class="big" title="Space">Pause</button>
+      <span class="grp wk"><button id="cBack" title="Restart segment; in its first 10 s, previous segment (←)">Back</button><button id="cSkip" title="Next segment (→)">Skip</button></span>
       <span class="seg" id="jrMode" style="display:none"><button data-m="g" class="on">Grade</button><button data-m="w">Watts</button><button data-m="r">Level</button></span>
       <div class="adj" id="adjBox" title="↑ ↓, Shift ×5"><button id="cMinus" aria-label="Easier">−</button><span class="num" id="cAdj">100%</span><button id="cPlus" aria-label="Harder">+</button></div>
       <button id="cUndo" style="display:none">Undo</button>
       <span style="flex:1"></span>
-      <button id="cMore" title="All controls (A)">Adjust</button>
+      <button id="cMore" title="A">Adjust</button>
       <button id="cKeys" title="Keys (?)" aria-label="Keyboard shortcuts">?</button>
-      <button id="cEnd" class="danger big" title="Finish: saves the ride to History and uploads it">End ride</button>
+      <button id="cEnd" class="danger big" title="Saves to History and uploads">End ride</button>
     </div>
   </div>
   <div class="sheet" id="adjPanel" role="dialog" aria-label="Adjust">
-    <div class="row shead"><b>Adjust</b><span class="hint">changes apply now · hover a label for help</span><span style="flex:1"></span><button data-a="close">Close</button></div>
+    <div class="row shead"><b>Adjust</b><span class="hint">changes apply now</span><span style="flex:1"></span><button data-a="close">Close</button></div>
     <div class="sgrid">
       <h3 class="sh wk">Coming up</h3>
-      <div class="r wk nextrow" id="rowNext"><span class="l" title="The segment you are on and everything after it. Drag a block's top for watts, its right edge for time, then Apply. What you already rode stays as ridden.">Edit the plan from here</span><div class="b col">
+      <div class="r wk nextrow" id="rowNext"><span class="l" title="Current segment and after. Drag a block's top for watts, its right edge for time, then Apply.">Edit the plan from here</span><div class="b col">
         <canvas id="aNextChart"></canvas>
         <div class="pal" id="aNextPal"></div>
         <div class="blist" id="aNextList"></div>
         <details class="adv"><summary>Edit as text</summary><textarea id="aNext" spellcheck="false" rows="2" placeholder="5m 55%, 3x(3m 110%, 2m 50%)"></textarea></details>
         <div class="row"><button data-a="next" class="pri">Apply</button><button data-a="nextReset">Reset</button><span class="err" id="aNextErr"></span></div></div></div>
       <h3 class="sh">Trainer</h3>
-      <div class="r" id="rowMode"><span class="l" title="ERG: the trainer holds the target watts. Grade or Level: ERG off, you set the resistance and ride by feel or gears.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
+      <div class="r" id="rowMode"><span class="l" title="ERG: the trainer holds the watts. Grade, Level: you set the resistance.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
       <div class="r" id="rowVal"><span class="l" id="aValL">Grade</span><div class="b"><button data-a="adj" data-v="-5">−−</button><button data-a="adj" data-v="-1">−</button><b class="num" id="aVal">–</b><button data-a="adj" data-v="1">+</button><button data-a="adj" data-v="5">++</button></div></div>
-      <div class="r"><span class="l" title="The cadence tile turns green inside this range.">Cadence</span><div class="b"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></div></div>
+      <div class="r"><span class="l" title="Cadence tile is green in this range">Cadence</span><div class="b"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></div></div>
     </div>
   </div>
 </section>
@@ -158,7 +158,7 @@
     <div class="row" style="justify-content:space-between">
       <div><b id="sName" style="font-size:16px"></b> <span id="sDate" style="color:var(--dim);margin-left:8px"></span></div>
       <div class="row" style="gap:6px">
-        <button id="sCard" title="Finish card to download or share">Share card</button>
+        <button id="sCard" title="PNG to download or share">Share card</button>
         <button id="sStrava" class="serveronly">Upload to Strava</button>
         <button id="sGarmin" class="pri serveronly">Upload to Garmin</button>
         <button id="sFit">.fit</button>
@@ -216,13 +216,13 @@
         <label class="f">Z5<input data-hz="4" type="number" min="30" max="230"></label>
       </div>
       <div class="row" style="margin-top:10px">
-        <button id="gImport" title="Copy FTP, weight and HR zones from your Garmin account">Import from Garmin</button>
+        <button id="gImport" title="FTP, weight and HR zones">Import from Garmin</button>
         <span class="hint" id="gImportHint"></span>
       </div>
     </div>
     <div class="panel serveronly">
       <h2>Built-in coach</h2>
-      <div class="checks"><label><input type="checkbox" data-lc="enabled"> Spoken cues and safe target adjustments</label></div>
+      <div class="checks"><label><input type="checkbox" data-lc="enabled"> Spoken cues and target adjustments</label></div>
       <details class="adv"><summary>Advanced</summary>
         <div class="checks" id="lcChecks" style="margin-top:8px">
           <label><input type="checkbox" data-lc="countdown"> Interval start and countdown</label>
@@ -233,31 +233,31 @@
         <div class="row" style="margin-top:10px">
           <label class="f">Auto-adjust targets<select id="lcAuto"><option value="no_agent">When no agent coaches</option><option value="always">Always</option><option value="off">Off</option></select></label>
         </div>
-        <div class="hint" style="margin-top:6px">Auto-adjust: Easier lowers the step 5% FTP, Harder raises it 3% (not in HR zone 5), 30 s over the HR cap eases 5%.</div>
+        <div class="hint" style="margin-top:6px">Easier: segment −5% FTP. Harder: +3% (not in HR zone 5). 30 s over the HR cap: −5%.</div>
       </details>
     </div>
     <div class="panel">
       <h2>Ride</h2>
       <div class="row">
-        <label class="f" title="What the trainer does if you keep riding after the last step">After the last step<select id="afterWk"><option value="hold">Keep the last target</option><option value="grade0">Ride free, flat road</option></select></label>
+        <label class="f">After the last segment<select id="afterWk"><option value="hold">Keep the last target</option><option value="grade0">Ride free, flat road</option></select></label>
         <label class="f">Beeps<select id="beeps"><option value="1">On</option><option value="0">Off</option></select></label>
         <label class="f">Distance in History<select id="virtDist"><option value="0">Virtual distance</option><option value="1">Hide</option></select></label>
       </div>
-      <div class="hint" style="margin-top:6px">Indoor distance comes from the trainer's virtual speed; FIT files keep it.</div>
+      <div class="hint" style="margin-top:6px">Distance comes from the trainer's virtual speed. FIT files keep it.</div>
     </div>
     <div class="panel">
       <h2>Uploads</h2>
       <div class="row serveronly"><label class="f">Garmin<select id="autoGarmin2"><option value="1">Auto upload</option><option value="0">Manual</option></select></label><span class="hint" id="garminState"></span></div>
-      <div class="hint webonly">Garmin: download the .fit from a ride and import it in Garmin Connect, or use the local OpenSpin app for automatic Garmin upload.</div>
+      <div class="hint webonly">Garmin: import the ride's .fit in Garmin Connect, or use the local app for auto upload.</div>
       <details class="serveronly adv" id="stBox">
-      <summary>Strava upload (optional)</summary>
+      <summary>Strava upload</summary>
       <div class="row" style="margin-top:8px">
         <button id="stConnect" class="pri">Connect Strava</button>
         <label class="f">Strava<select id="autoStrava"><option value="1">Auto upload</option><option value="0">Manual</option></select></label>
         <span class="hint" id="stState"></span>
       </div>
       <details class="adv" id="stOwnBox"><summary>Use your own Strava API app</summary>
-        <div class="hint">Optional. Create one at strava.com/settings/api (callback domain <b>localhost</b>). The secret stays in this computer's data folder and OpenSpin's token service is not used.</div>
+        <div class="hint">Create one at strava.com/settings/api, callback domain <b>localhost</b>. The secret stays on this computer; OpenSpin's token service is not used.</div>
         <div class="row" style="margin-top:8px">
           <label class="f">Client ID<input id="stId" style="width:110px"></label>
           <label class="f">Client secret<input id="stSecret" type="password" autocomplete="off" style="width:220px"></label>
@@ -265,24 +265,24 @@
           <button id="stShared">Use OpenSpin's app</button>
         </div>
       </details>
-      <div class="warnbox" id="stDup">If Garmin Connect already syncs your rides to Strava, uploading to both creates duplicates on Strava. Keep one: Garmin upload with Garmin's Strava sync, or direct Strava upload.</div>
+      <div class="warnbox" id="stDup">If Garmin Connect syncs to Strava, uploading to both makes duplicates. Use one.</div>
       <details class="adv"><summary>Advanced</summary>
         <div class="row" style="margin-top:8px">
-          <label class="f" style="flex:1">Public base URL for share cards (optional)<input id="shareBase" placeholder="https://example.com/openspin" style="width:100%"></label>
+          <label class="f" style="flex:1">Share card base URL<input id="shareBase" placeholder="https://example.com/openspin" style="width:100%"></label>
         </div>
-        <div class="hint">Without it, Strava gets a text summary (NP, IF, TSS, intervals). Strava's API cannot attach photos; download the card from the ride summary to post it by hand.</div>
+        <div class="hint">Without it, Strava gets a text summary (NP, IF, TSS, intervals).</div>
       </details>
       </details>
-      <div class="hint webonly">Strava: download the .fit and upload it on strava.com, or use the local app for direct upload.</div>
+      <div class="hint webonly">Strava: upload the ride's .fit on strava.com, or use the local app.</div>
     </div>
     <div class="panel webonly">
       <h2>Your data</h2>
-      <div class="hint">Everything is stored in this browser. Export a backup now and then.</div>
+      <div class="hint">Stored in this browser only.</div>
       <div class="row" style="margin-top:8px"><button id="bkExport">Export all data</button><button id="bkImport">Import backup</button><input type="file" id="bkFile" accept=".json" hidden></div>
     </div>
     <details class="panel adv serveronly">
-      <summary>AI agent (optional)</summary>
-      <div class="hint" id="agentState">OpenSpin works fully without an agent.</div>
+      <summary>AI agent</summary>
+      <div class="hint" id="agentState">Not connected</div>
       <div style="margin-top:8px" class="serveronly"><a href="connect.html" target="_blank">Connect an agent (Claude Code, Codex, any MCP client)</a></div>
 
     </details>
@@ -293,19 +293,19 @@
 <div class="modal" id="ftpModal">
   <div class="panel">
     <div class="row" style="justify-content:space-between"><b>FTP test</b><button id="ftpClose">Close</button></div>
-    <button class="ftpopt" data-t="t-ramp"><b>Ramp test</b><span>About 20 min. +20 W every minute until you can't hold it. FTP = 75% of your best minute.</span></button>
-    <button class="ftpopt" data-t="t-20"><b>20 minute test</b><span>About 1 h. Warm up, 5 min hard, recover, then 20 min as hard as you can hold. FTP = 95% of that average.</span></button>
-    <div class="hint">Prompts on screen and spoken as you go. Set the result as your FTP from the ride summary.</div>
+    <button class="ftpopt" data-t="t-ramp"><b>Ramp test</b><span>About 20 min. +20 W a minute to failure. FTP = 75% of best minute.</span></button>
+    <button class="ftpopt" data-t="t-20"><b>20 minute test</b><span>About 1 h. Warm up, 5 min hard, recover, 20 min all out. FTP = 95% of the 20 min average.</span></button>
+    <div class="hint">Set FTP from the ride summary.</div>
   </div>
 </div>
 <div class="modal" id="devModal">
   <div class="panel">
     <div class="row" style="justify-content:space-between"><b id="devTitle">Trainer</b><button id="devClose">Close</button></div>
-    <div class="hint" id="devHint">The server keeps the connection, so reloading or closing this page never drops it.</div>
+    <div class="hint" id="devHint">Closing this page keeps the connection.</div>
     <div class="devlist" id="devList"></div>
     <div class="row" style="justify-content:space-between">
       <button id="devScan" class="pri">Scan</button>
-      <a href="browser.html" class="hint serveronly" title="Old mode: Bluetooth inside this browser tab">Use browser Bluetooth instead</a>
+      <a href="browser.html" class="hint serveronly" title="Bluetooth in this tab">Use browser Bluetooth instead</a>
     </div>
   </div>
 </div>
@@ -316,7 +316,7 @@
       <div class="row" style="gap:6px"><button id="cardDl" class="pri">Download</button><button id="cardShare">Share</button></div>
       <button id="cardClose">Close</button>
     </div>
-    <div class="hint">Strava's API cannot attach photos: add the card to your activity by hand.</div>
+    <div class="hint">Strava: add the card to the activity by hand.</div>
   </div>
 </div>
 <div class="modal" id="keysModal">
@@ -325,7 +325,7 @@
     <table class="keys">
       <tr><td><kbd>Space</kbd></td><td>Pause, resume</td></tr>
       <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Intensity ±1% (grade, watts, level when not in ERG)</td></tr>
-      <tr><td><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></td><td>±5 steps</td></tr>
+      <tr><td><kbd>Shift</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></td><td>×5</td></tr>
       <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Back, skip</td></tr>
       <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>Segment shorter, longer</td></tr>
       <tr><td><kbd>-</kbd> <kbd>=</kbd></td><td>Segment watts −5, +5</td></tr>

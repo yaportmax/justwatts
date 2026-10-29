@@ -112,7 +112,7 @@ tbody tr:hover{background:var(--panel2)}
 </head>
 <body>
 <header>
-  <div class="brand">OpenSpin <a href="/" style="font-weight:400;font-size:12px;color:var(--dim)" title="Bluetooth in the server: reloads never drop the trainer">browser Bluetooth. Server mode</a></div>
+  <div class="brand">OpenSpin <a href="/" style="font-weight:400;font-size:12px;color:var(--dim)" title="Reloads never drop the trainer">browser Bluetooth. Server mode</a></div>
   <nav>
     <button data-v="workouts" class="on">Workouts</button>
     <button data-v="ride">Ride</button>
@@ -803,7 +803,7 @@ function renderRide() {
     $('#lEs').textContent = fmtT(R.cw.total - R.el) + ' left';
     $('#ivNow').textContent = `${fmtT(at.s.d)} · ${at.s.free ? 'free' : stepWatts(at.s, 0, R.ftp, R.test ? 1 : R.k) + (at.s.a !== at.s.b ? '→' + stepWatts(at.s, at.s.d, R.ftp, R.test ? 1 : R.k) : '') + ' W'}`;
     const nx = R.cw.steps[at.i + 1];
-    $('#ivNext').textContent = nx ? `Next ${fmtT(nx.d)} · ${nx.free ? 'free' : stepWatts(nx, 0, R.ftp, R.test ? 1 : R.k) + ' W'}` : 'Last interval';
+    $('#ivNext').textContent = nx ? `Next ${fmtT(nx.d)} · ${nx.free ? 'free' : stepWatts(nx, 0, R.ftp, R.test ? 1 : R.k) + ' W'}` : 'Last segment';
     $('#ivBar').style.width = (at.into / at.s.d * 100) + '%';
     $('#ivBar').style.background = at.s.free ? css('--z1') : zoneColor(stepWatts(at.s, at.into, R.ftp, R.k) / R.ftp);
   } else {

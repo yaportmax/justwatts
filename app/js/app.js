@@ -283,7 +283,7 @@ async function scanDevices() {
   const list = $('#devList'); list.innerHTML = '<div class="hint">Scanning…</div>'; $('#devScan').disabled = true;
   try {
     const j = await apiJson('/api/devices', { action: 'scan', kind: devKind, timeout: 5 });
-    list.innerHTML = j.devices.length ? '' : '<div class="hint">Nothing found. Wake the device (pedal, wet the strap) and scan again.</div>';
+    list.innerHTML = j.devices.length ? '' : '<div class="hint">Nothing found. Pedal or wet the strap, then scan again.</div>';
     for (const d of j.devices) {
       const b = document.createElement('button');
       b.innerHTML = `<span>${esc(d.name)}</span><span class="m">${esc(d.rssi ?? '')} dBm</span>`;
@@ -350,7 +350,7 @@ function testGuide() {
   let main = '', sub = '';
   if (!V.started) {
     main = kind === 'ramp' ? 'Ramp FTP test' : '20 minute FTP test';
-    sub = kind === 'ramp' ? "5 min warm up, then +20 W every minute. Ride until you can't hold it." : 'Warm up, 5 min hard, recover, then 20 min as hard as you can hold.';
+    sub = kind === 'ramp' ? '5 min warm up, then +20 W a minute to failure.' : 'Warm up, 5 min hard, recover, 20 min all out.';
   } else if (kind === 'ramp') {
     const b = bestMinute(), est = Math.round(b * 0.75);
     if (!at || at.i === 0) {
@@ -359,7 +359,7 @@ function testGuide() {
       if (at && left <= 10) once('w10', 'Ramp starts in 10 seconds. Power goes up 20 watts every minute.');
     } else {
       const tgt = S.ride.target_w ?? stepWatts(at.s, 0, V.ftp);
-      main = `${tgt} W · step ${at.i}`; sub = `Hold it as long as you can · best minute ${Math.round(b)} W · FTP ≈ ${est} W`;
+      main = `${tgt} W · segment ${at.i}`; sub = `Best minute ${Math.round(b)} W · FTP ≈ ${est} W`;
       once('r' + at.i, `${tgt} watts`);
       // failure: under 60% of the target (or stopped) for 8 s ends the test
       const p3 = S.live?.power_3s || 0;
@@ -372,24 +372,24 @@ function testGuide() {
     if (i < E - 2) {
       main = 'Warm up'; sub = `20 min effort in ${fmtT(eff.t0 - V.el)}`;
       once('w', 'Warm up easy. About 20 minutes, with a few short pickups.');
-      if (!at.s.free && at.s.a >= 1 && at.s.d <= 60) once('s' + i, 'One minute faster. Spin it up.');
+      if (!at.s.free && at.s.a >= 1 && at.s.d <= 60) once('s' + i, 'One minute faster.');
     } else if (i === E - 2) {
       main = '5 min hard'; sub = `${fmtT(left)} left · steady, not a sprint`;
       once('h', 'Five minutes hard. Steady, not a sprint.'); if (left <= 60) once('h1', 'One minute left.');
     } else if (i === E - 1) {
       main = 'Recover'; sub = `20 min effort in ${fmtT(left)}`;
       once('rec', 'Easy now. Ten minutes to recover.');
-      if (left <= 60) once('rec1', 'One minute to go. In the effort you set the resistance with plus and minus, or your gears.');
+      if (left <= 60) once('rec1', 'One minute. In the effort, plus and minus or your gears set the resistance.');
       if (left <= 10) once('rec10', 'Ten seconds.');
     } else if (i === E) {
       const avg = Math.round(meanOver(eff.t0, eff.t0 + eff.d));
       main = `${fmtT(left)} left`; sub = `Avg ${avg} W · FTP ≈ ${Math.round(avg * 0.95)} W · + and − change resistance`;
       once('go', 'Go. Twenty minutes, as hard as you can hold steady. Start a little easy.');
       for (const q of [5, 10, 15]) if (at.into >= q * 60) once('q' + q, `${20 - q} minutes left. Average ${avg} watts.`);
-      if (left <= 60) once('last', 'One minute left. Empty the tank.');
+      if (left <= 60) once('last', 'One minute left.');
     } else {
       TG.est ??= Math.round(meanOver(eff.t0, eff.t0 + eff.d) * 0.95);
-      main = `FTP ≈ ${TG.est} W`; sub = 'Cool down easy. End the ride to save it and set your FTP.';
+      main = `FTP ≈ ${TG.est} W`; sub = 'Cool down. End the ride to save it and set FTP.';
       once('done', `Done. Your FTP is about ${TG.est} watts. Cool down easy.`);
     }
   }
@@ -503,13 +503,13 @@ function stepWattsBy(delta) {
   if (!V.cw) return r.control === 'w' ? act('target', { delta }, 'watts', () => control('target', { w: r.jr.w })) : null;
   if (!r.step || r.step.free || r.target_w == null) { toast('No ERG target in this segment'); return; }
   const i = r.step.index, w0 = r.target_w;
-  return act('target', { step: i, delta }, 'step watts', () => control('target', { step: i, w: w0 }));
+  return act('target', { step: i, delta }, 'segment watts', () => control('target', { step: i, w: w0 }));
 }
 const timeSteps = d => d < 120 ? [5, 15] : d < 600 ? [15, 60] : [60, 300];  // small and big change for a segment this long
 function stepTimeBy(sec) {
   const r = R(); if (!r?.step) { toast('Workout done'); return; }
   const i = r.step.index, d0 = r.step.duration_s;
-  return act('edit', { edit: { op: 'extend', seconds: sec } }, 'step time', () => control('edit', { edit: { op: 'duration', step: i, seconds: d0 } }),
+  return act('edit', { edit: { op: 'extend', seconds: sec } }, 'segment time', () => control('edit', { edit: { op: 'duration', step: i, seconds: d0 } }),
     j => `Segment ${i}: ${j.detail?.match(/-> (\S+)$/)?.[1] ?? ''}`);
 }
 function setMode(m) {
@@ -574,7 +574,7 @@ function applyNext() {
   const txt = $('#aNext').value.trim();
   if (txt) { try { parseWorkout(txt); } catch (e) { $('#aNextErr').textContent = e.message; return; } }
   const body = { op: 'rest', steps: txt, with_current: nextBase != null }; if (nextBase != null) body.after = nextBase;
-  return control('edit', { edit: body }).then(j => { nextDirty = false; toast(txt ? `Next steps set · ${fmtT(j.total_s)}` : 'Plan ends after this step'); renderAdjust(); })
+  return control('edit', { edit: body }).then(j => { nextDirty = false; toast(txt ? `Plan set · ${fmtT(j.total_s)}` : 'Plan ends after this segment'); renderAdjust(); })
     .catch(e => { $('#aNextErr').textContent = e.message; });
 }
 $('#adjPanel').onclick = e => {
@@ -812,7 +812,7 @@ $('#sStrava').onclick = async () => {
 let dupWarned = false;
 function confirmDup() {  // Garmin auto-sync to Strava + direct upload = duplicate activity
   if (dupWarned) return true;
-  dupWarned = true; toast('Garmin may already sync this ride to Strava. Tap Upload again to send it directly anyway.');
+  dupWarned = true; toast('Garmin may already sync this ride to Strava. Tap Upload again to send anyway.');
   return false;
 }
 async function uploadGarmin(id) {
@@ -873,7 +873,7 @@ async function renderSettings() {
   $('#stState').textContent = strava.connected ? `Connected${strava.athlete?.name ? ' as ' + strava.athlete.name : ''}` : strava.configured ? 'Not connected' : 'Set up your own Strava API app below';
   $('#autoStrava').value = settings.autoStrava ? '1' : '0'; $('#autoStrava').disabled = !strava.connected;
   $('#stDup').classList.toggle('hot', !!(settings.autoGarmin && settings.autoStrava));
-  $('#agentState').textContent = S?.agent?.connected ? 'An agent is connected and coaching.' : 'OpenSpin works fully without an agent. The built-in coach handles cues and safe adjustments.';
+  $('#agentState').textContent = S?.agent?.connected ? 'Connected' : 'Not connected';
 }
 // Settings > Athlete and the Workouts tab shortcuts edit the same values
 $('#sFtp').onchange = e => { $('#ftp').value = e.target.value; $('#ftp').onchange({ target: $('#ftp') }); renderSettings(); };

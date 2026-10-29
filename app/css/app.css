@@ -422,7 +422,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--di
 .dfoot a:hover{color:var(--ink)}
 #cardImg{width:100%;border-radius:8px;display:block}
 .ftpopt{height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:14px 16px;white-space:normal;background:var(--bg);border-color:var(--line)}
-.ftpopt b{font-size:14px;font-weight:600}
+.ftpopt b{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.ftpopt b .rec{color:var(--acc);font-size:11px;font-weight:600;line-height:16px}
 .ftpopt span{color:var(--dim);font-size:13px;font-weight:400;line-height:1.45}
 .ftpopt:hover{border-color:var(--acc);background:var(--bg)}
 .devlist{display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto;min-height:40px}

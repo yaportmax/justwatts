@@ -22,13 +22,33 @@ const lineGeo = pts => pts.length > 1 ? { type: 'Feature', geometry: { type: 'Li
 const linesGeo = ls => ({ type: 'FeatureCollection', features: ls.filter(l => l.length > 1).map(lineGeo) });
 const OSM_ROADS = 'Roads © OpenStreetMap contributors';
 
+// Others move every poll (about 2 s): each marker glides from where it is drawn to its new spot over one poll;
+// a jump of a km or more snaps. at(list, now): the list at its drawn positions; done(now): the glide is over.
+export function createGlide(ms = 2000) {
+  let g = new Map(), t0 = 0;  // id -> { a: [lat, lon] drawn before, b: the latest }
+  const k = now => Math.min(1, (now - t0) / ms);
+  const pos = (id, f) => { const x = g.get(id); return x && [x.a[0] + (x.b[0] - x.a[0]) * f, x.a[1] + (x.b[1] - x.a[1]) * f]; };
+  return {
+    set(list, now) {
+      const f = k(now), next = new Map();
+      for (const o of list) {
+        const from = pos(o.id, f), far = from && (Math.abs(from[0] - o.lat) > 0.02 || Math.abs(from[1] - o.lon) > 0.02);
+        next.set(o.id, { a: from && !far ? from : [o.lat, o.lon], b: [o.lat, o.lon] });
+      }
+      g = next; t0 = now;
+    },
+    at(list, now) { if (!list.length) return list; const f = k(now); return list.map(o => { const p = pos(o.id, f); return p ? { ...o, lat: p[0], lon: p[1] } : o; }); },
+    done: now => k(now) >= 1,
+  };
+}
+
 export function createRideMap({ $, store, fit, css, toast, relayout }) {
   let style = MAP_STYLES[store.get('hw.mapStyle', 'osm')] ? store.get('hw.mapStyle', 'osm') : 'osm';
   let d3 = !!store.get('hw.map3d', false), focus = !!store.get('hw.mapFocus', false);
   let cur = null;  // { ll, n, D, dist, done, open, alts }
   let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, mapAlts = '', busy = false, size = '', placedOn = false;
   let others = [], marks = new Map();  // other riders (social.js): [{ id, lat, lon, label, hi }]; their 3D markers by id
-  let glide = new Map(), glideT0 = 0, oraf = 0, o2d = 0;  // id -> { a: [lat, lon] drawn before, b: the latest }; glides over one poll
+  const glide = createGlide(); let oraf = 0, o2d = 0;
   const box = $('#crsMapBox'), cv = $('#crsMap'), v3 = $('#crsMap3d');
   $('#mapStyle').innerHTML = Object.entries(MAP_STYLES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
 
@@ -75,24 +95,10 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     }
     for (const [id, m] of marks) if (!keep.has(id)) { m.remove(); marks.delete(id); }
   }
-  // Others move every poll (about 2 s): each marker glides from where it is drawn to its new spot over one poll.
-  // The animation frame runs only while riders are shown and a glide is under way.
-  const GLIDE_MS = 2000;
-  const glideK = (now = performance.now()) => Math.min(1, (now - glideT0) / GLIDE_MS);
-  function posOf(id, k) { const g = glide.get(id); return g && [g.a[0] + (g.b[0] - g.a[0]) * k, g.a[1] + (g.b[1] - g.a[1]) * k]; }
-  function shown() {
-    if (!others.length) return others;
-    const k = glideK();
-    return others.map(o => { const p = posOf(o.id, k); return p ? { ...o, lat: p[0], lon: p[1] } : o; });
-  }
+  const shown = () => glide.at(others, performance.now());
   function setOthers(list) {
-    const now = performance.now(), k = glideK(now), next = new Map();
     others = Array.isArray(list) ? list : [];
-    for (const o of others) {
-      const from = posOf(o.id, k), far = from && (Math.abs(from[0] - o.lat) > 0.02 || Math.abs(from[1] - o.lon) > 0.02);  // a jump of km: no glide
-      next.set(o.id, { a: from && !far ? from : [o.lat, o.lon], b: [o.lat, o.lon] });
-    }
-    glide = next; glideT0 = now;
+    glide.set(others, performance.now());
     syncMarks();
     if (others.length && !oraf) oraf = requestAnimationFrame(glideFrame);
   }
@@ -101,7 +107,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     if (!others.length) return;
     syncMarks();
     if (cur && !(d3 && ready) && now - o2d > 60) { o2d = now; draw2d(); }  // the 2D canvas: about 15 redraws a second
-    if (glideK(now) < 1) oraf = requestAnimationFrame(glideFrame);
+    if (!glide.done(now)) oraf = requestAnimationFrame(glideFrame);
     else if (cur && !(d3 && ready)) draw2d();
   }
   function draw() { if (!cur) return; ui(); if (d3) draw3d(); draw2d(); }

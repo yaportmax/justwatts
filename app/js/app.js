@@ -4,11 +4,12 @@
 import {
   fmtT, esc, ZONES, zoneIdx, HRZ_COLORS, hrZone as hrZoneOf, parseWorkout, toText, compile, stepAt, stepWatts,
   estimate, toZwo as toZwoCore, PRESETS, FTP_TESTS, testKind, summarize, fitEncode, toTcx,
-  activeHrZones, validHrFloors, HR_MAX_DEFAULT, weightShow, weightKg, weightUnit, distText,
+  activeHrZones, validHrFloors, HR_MAX_DEFAULT, weightShow, weightKg, weightUnit, distText, treeText,
 } from './core.js';
 import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
 import { createBuilder } from './builder.js';
+import { fromWords } from './words.js';
 import { LIBRARY, CATEGORIES } from './library.js';
 import { createCourses } from './courses.js';
 import { drawMap } from './map.js';
@@ -159,6 +160,14 @@ function renderBuilder() {
   } catch (err) { $('#bErr').textContent = ok ? err.message : err.message + ' (blocks show the last valid version)'; $('#bStats').textContent = ''; builder.draw(); return null; }
 }
 $('#bText').oninput = renderBuilder;
+// plain words -> the same text format (rules in words.js, nothing leaves the page)
+const buildFromWords = () => {
+  const t = $('#bWords').value.trim(); if (!t) return;
+  try { $('#bText').value = treeText(fromWords(t)); renderBuilder(); $('#bErr').textContent = ''; }
+  catch (err) { $('#bErr').textContent = err.message; }
+};
+$('#bWordsGo').onclick = buildFromWords;
+$('#bWords').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); buildFromWords(); } };
 $('#bUndo').onclick = () => { if (!builder.undo()) toast('Nothing to undo'); };
 $('#bSave').onclick = () => {
   const w = builderWorkout(); if (!renderBuilder()) return;

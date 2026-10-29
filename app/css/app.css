@@ -318,3 +318,6 @@ body.web .agentcol{display:none}
 .crsk b{color:var(--ink);font-weight:600}
 
 #sMap{width:100%;height:220px;display:block;border-radius:6px;margin:4px 0 14px}
+
+.bwords{gap:6px;margin:6px 0 8px;flex-wrap:nowrap}
+.bwords input{flex:1;min-width:0}

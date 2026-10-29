@@ -43,8 +43,8 @@ export function createGlide(ms = 2000) {
 }
 
 export function createRideMap({ $, store, fit, css, toast, relayout }) {
-  let style = MAP_STYLES[store.get('hw.mapStyle', 'osm')] ? store.get('hw.mapStyle', 'osm') : 'osm';
-  let d3 = !!store.get('hw.map3d', false), focus = !!store.get('hw.mapFocus', false);
+  let style = MAP_STYLES[store.get('hw.mapStyle', 'sat')] ? store.get('hw.mapStyle', 'sat') : 'sat';  // satellite and 3D by default
+  let d3 = !!store.get('hw.map3d', true), focus = !!store.get('hw.mapFocus', false);
   let cur = null;  // { ll, n, D, dist, done, open, alts }
   let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, mapAlts = '', busy = false, size = '', placedOn = false;
   let others = [], marks = new Map();  // other riders (social.js): [{ id, lat, lon, label, hi }]; their 3D markers by id

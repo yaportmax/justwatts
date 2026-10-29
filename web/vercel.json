@@ -2,7 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": false,
   "trailingSlash": false,
+  "regions": ["pdx1"],
+  "functions": {
+    "api/**/*.js": { "maxDuration": 15 }
+  },
   "rewrites": [
+    { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/((?!api/)[^.]*)", "destination": "/index.html" }
   ],
   "headers": [

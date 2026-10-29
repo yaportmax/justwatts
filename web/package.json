@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Vercel functions for justwatts.com (web/api). The app itself has no dependencies.",
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0"
+  }
+}

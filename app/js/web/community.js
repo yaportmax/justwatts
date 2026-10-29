@@ -17,7 +17,7 @@ const ERR = {
 };
 const errText = b => b?.error === 'rate_limited' ? 'Daily limit reached. Try again later.' : (b?.error === 'bad_workout' || b?.error === 'bad_course') && b.message ? `${ERR[b.error]} ${b.message}` : ERR[b?.error] || 'Something went wrong.';
 
-export function createCommunity({ $, toast, account, ftp, units, compile, estimate, drawThumb, drawChart, drawProfile, ride, saveWorkout, saveCourse, onBack, fetch = (...a) => globalThis.fetch(...a) }) {
+export function createCommunity({ $, toast, account, ftp, units, compile, estimate, drawThumb, drawChart, drawProfile, drawRoute = null, ride, saveWorkout, saveCourse, onBack, fetch = (...a) => globalThis.fetch(...a) }) {
   const F = { kind: 'workout', q: '', sort: 'liked', period: 'all', dur: '', page: 0 };
   let items = [], more = false, loading = 0, detail = null, qTimer = null, reportArm = null, pub = null;
   const api = (m, p, b) => account.api(m, p, b);
@@ -102,6 +102,7 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
         <button class="pri" data-a="ride">Ride</button>
       </div></div>
       <div class="bstats num">${stats.map(([v, k]) => `<span><b>${esc(v)}</b><small>${esc(k)}</small></span>`).join('')}</div>
+      ${!w && drawRoute && it.course?.ll?.length > 1 ? '<canvas id="cmMap" class="cmmap"></canvas>' : ''}
       <canvas id="cmChart" class="cmchart${w ? '' : ' crs'}"></canvas>
       ${w ? `<div class="cmtext">${esc(it.text)}</div>` : ''}
       <div class="sec-h">Comments <span class="hint">${comments.length || ''}</span></div>
@@ -114,6 +115,9 @@ export function createCommunity({ $, toast, account, ftp, units, compile, estima
       const cv = $('#cmChart'); if (!cv) return;
       if (cw) drawChart(cv, { cw, ftp: ftp(), samples: [], el: null, k: 1 });
       else if (it.course) drawProfile(cv, it.course.ele, it.course.dist);
+      const mv = $('#cmMap'), d = detail;  // the route on the map (tiles redraw it as they load, while this item is open)
+      const route = () => { if (detail === d && $('#cmMap') === mv) drawRoute(mv, it.course.ll, it.course.dist, route); };
+      if (mv && drawRoute && it.course?.ll?.length > 1) route();
     });
   }
   const needAccount = () => { if (account.me()) return false; account.open('signin'); return true; };

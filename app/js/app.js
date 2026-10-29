@@ -1047,6 +1047,7 @@ if (WEB) {
     const { createCommunity } = await import('./web/community.js');
     community = createCommunity({ $, toast, account, ftp: () => settings.ftp, units: () => settings.units, compile, estimate, drawThumb, drawChart,
       drawProfile: (cv, ele, dist) => courses.draw(cv, ele, dist, null), ride: (w, c) => loadRide(w, c),
+      drawRoute: (cv, ll, dist, redraw) => drawMap(cv, { ll, dist, fit, css, redraw, style: store.get('hw.mapStyle', 'osm') }),
       saveWorkout: w => { custom.unshift({ id: 'c-' + Date.now().toString(36), name: w.name, text: w.text, updatedAt: Date.now() }); store.set('hw.custom', custom); renderLibBar(); renderLib(); },
       saveCourse: c => courses.add(c), onBack: () => showTab(wkTab) });
     $('[data-src=comm]').style.display = '';

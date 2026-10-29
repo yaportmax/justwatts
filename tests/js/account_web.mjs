@@ -74,7 +74,7 @@ class FakeStore {
 }
 globalThis.indexedDB = { open(name) { const r = {}; later(() => { let db = DBS.get(name), fresh = false; if (!db) { fresh = true; db = { stores: new Map(), keys: new Map(), createObjectStore(n, o) { this.stores.set(n, new Map()); this.keys.set(n, o?.keyPath); } }; DBS.set(name, db); } db.transaction = s => ({ objectStore: () => new FakeStore(db, s) }); r.result = db; if (fresh) r.onupgradeneeded?.(); r.onsuccess?.(); }); return r; } };
 class ClassList { constructor() { this.s = new Set(); } add(c) { this.s.add(c); } remove(c) { this.s.delete(c); } toggle(c, on) { (on ?? !this.s.has(c)) ? this.s.add(c) : this.s.delete(c); } contains(c) { return this.s.has(c); } }
-const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : k === 'measureText' ? () => ({ width: 40 }) : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
 class El {
   constructor(sel, data = {}) { this.sel = sel; this.dataset = data; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } }; this.classList = new ClassList(); this.kids = {}; this.value = ''; this.textContent = ''; this.innerHTML = ''; this.tagName = 'DIV'; this.offsetHeight = 50; }
   querySelector(s) { return this.kids[s] ??= new El(s); }
@@ -94,6 +94,7 @@ const multi = () => ({
 globalThis.window = globalThis;
 globalThis.addEventListener = () => {};
 globalThis.devicePixelRatio = 1;
+globalThis.Image = class { constructor() { this.complete = false; this.naturalWidth = 0; } };  // map tiles never load here
 globalThis.requestAnimationFrame = f => setTimeout(f, 0);
 globalThis.getComputedStyle = () => ({ getPropertyValue: () => '#38bdf8' });
 globalThis.scrollTo = () => {};
@@ -199,6 +200,15 @@ await hw.backend.fetch('/api/ride/control', { method: 'POST', body: JSON.stringi
 hw.community.openPublish({ kind: 'workout', name: 'Local over-unders', text: '3x(4m 95%, 2m 105%)' });
 const item = await hw.community.publish('Local over-unders', 'vo2, Threshold');
 out.published = { item: item && [item.name, item.tags], modal: $('#pubModal').classList.contains('on') };
+hw.community.itemAction('back');
+// a community course: its route on a small map above the profile, before it is saved
+const hawk = hw.courses.byId('r-hawk');
+const dan = device(); await dan.post('/api/auth/signup', { email: 'dan@example.com', password: 'password123', name: 'Dan' });
+const pubC = await dan.post('/api/community', { kind: 'course', name: 'Hawk Hill loop', course: { name: hawk.name, dist: hawk.dist, gain: hawk.gain, ele: hawk.ele, ll: hawk.ll } });
+assert.ok(pubC.item, JSON.stringify(pubC).slice(0, 200));
+await hw.community.openItem(pubC.item.id);
+await sleep(30);
+out.courseItem = { map: $('#commPane').innerHTML.includes('id="cmMap"'), profile: $('#commPane').innerHTML.includes('id="cmChart"') };
 hw.community.itemAction('back');
 
 /* ---------- 5. sign out: the slot goes back to Sign in, local data stays ---------- */

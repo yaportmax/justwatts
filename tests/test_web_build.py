@@ -127,6 +127,7 @@ def test_web_account_sync_and_community(dist, node):
     assert out["liked"] == {"likes": 1, "liked": True, "comments": ["Great one", "Did it twice"]}
     assert out["rode"] == 1                                                                           # riding a community item counts
     assert out["published"] == {"item": ["Local over-unders", ["vo2", "threshold"]], "modal": False}
+    assert out["courseItem"]["map"] and out["courseItem"]["profile"]                                 # a community course shows its route
     sa = out["signedOutAgain"]
     assert sa["slot"] and sa["custom"] == 1 and sa["sync"] == "null"                                 # local data stays on the device
     assert out["sameAgain"] == {"step": None, "owner": True}                                        # the same account again: no question

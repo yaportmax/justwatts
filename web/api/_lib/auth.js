@@ -74,7 +74,7 @@ route('POST', '/api/auth/signup', async ctx => {
   const id = randomId(12), passHash = await hashPassword(password);
   const existing = await ctx.store.getIdentity('email', email);
   if (existing) {
-    if (!mailOn()) fail(409, 'email_taken');  // without email there is no way to hide this (see docs/API.md)
+    if (!mailOn()) fail(409, 'email_taken');  // without email there is no way to hide this
     const owner = await ctx.store.getUser(existing.userId);
     if (owner) await mailToken(ctx, owner, email, 'reset');  // "you already have an account": a reset link
     return ok({ status: 'verify_sent' }, 202);

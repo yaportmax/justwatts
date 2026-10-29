@@ -62,6 +62,7 @@ globalThis.requestAnimationFrame = f => setTimeout(f, 0);
 globalThis.getComputedStyle = () => ({ getPropertyValue: () => '#38bdf8' });
 const mem = new Map();
 globalThis.localStorage = { getItem: k => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: k => mem.delete(k) };
+globalThis.Image = class {};  // map tiles never load here: the route draws on the plain background
 
 let streams = [];
 if (WEB) {
@@ -162,6 +163,14 @@ $('#aNext').value = '5m bogus'; $('#aNext').oninput(); press('next');
 out.nextErr = String($('#aNextErr').textContent);
 await step('after plan: flat', () => press('after', 'grade0'), () => hw.state().ride.after_workout === 'grade0');
 press('cad', '0,5'); press('beeps', '0');
+// cadence off in the sheet: no readout, no range; Settings shows the same one setting and turns it back on and off
+press('cadon', '0');
+out.cadOff = { tile: $('#cadTile').style.display, range: $('#aCadRange').style.display };
+M['nav button'][3].click(); await sleep(20);
+out.cadOff.settings = $('#cadOn').value; out.cadOff.loDisabled = $('#cadLo').disabled;
+$('#cadOn').onchange({ target: { value: '1' } }); out.cadOff.back = $('#cadTile').style.display;
+$('#cadOn').onchange({ target: { value: '0' } }); M['nav button'][1].click();
+key('KeyF'); out.focusNoMap = $('#rideOn').classList.contains('mapfocus') || mem.has('hw.mapFocus');  // no course: no map focus
 await sleep(50);
 await step('space pauses', () => key('Space'), () => ride().paused);
 await step('space resumes', () => key('Space'), () => !ride().paused);
@@ -190,6 +199,19 @@ await sleep(50);
 out.after = pick(ride());
 out.tab2 = { w: $('#tabWorkouts').style.display, c: $('#tabCourses').style.display, on: M['[data-tab]'].map(b => b.classList.contains('on')) };
 out.shown = { adj: String($('#cAdj').textContent), target: String($('#lT').textContent), badge: String($('#rState').textContent) };
+await until(() => $('#cadTile').style.display === 'none', 'cadence still off after reload');
+
+// ---------- boot 3: a road course with a map: F and the map button swap map and chart ----------
+await boot(3);
+await until(() => ride()?.name === 'Hands', 'ride after reload 2');
+$('#jrCourse').value = 'r-hawk';  // Just ride on a picked course
+$('#btnJust').click(); $('#btnJust').click();  // a ride is in progress: the second tap loads
+await until(() => ride()?.course?.name === 'Hawk Hill, Marin', 'course loaded');
+await until(() => $('#crsSlot').style.display === '', 'map shown');
+key('KeyF');
+out.focus = { on: $('#rideOn').classList.contains('mapfocus'), stored: mem.get('hw.mapFocus'), title: $('#mapFocus').title };
+$('#mapFocus').click();
+Object.assign(out.focus, { off: !$('#rideOn').classList.contains('mapfocus'), stored2: mem.get('hw.mapFocus'), dist: String($('#lDs').textContent) });
 for (const s of streams) s.close();
 process.stdout.write(JSON.stringify(out));
 process.exit(0);

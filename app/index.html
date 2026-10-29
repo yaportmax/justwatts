@@ -103,6 +103,7 @@
     </div>
     <div class="tiles">
       <div class="tile big" id="tgtTile"><div class="k" title="3 s average / target">Power</div><div class="v"><span id="lP">0</span><span class="of"> / <span id="lT">–</span></span></div><div class="s" id="lTs"></div><div class="s" id="lPs"></div></div>
+      <div class="tile" id="distTile"><div class="k">Distance</div><div class="v"><span id="lD">0.0</span><span class="u" id="lDu">mi</span></div><div class="s" id="lDs"></div></div>
       <div class="tile hrz" id="cadTile"><div class="k">Cadence</div><div class="v" id="lC">0</div><div class="s" id="lCs">rpm</div></div>
       <div class="tile hrz" id="hrTile"><div class="k">Heart rate</div><div class="v" id="lH">–</div><div class="s" id="lHs">bpm</div></div>
       <div class="tile"><div class="k">Interval</div><div class="v" id="lI">–</div><div class="s" id="lIs"></div></div>
@@ -113,8 +114,10 @@
       <div class="bar"><i id="ivBar"></i></div>
     </div>
     <div class="panel testcue" id="testCue" style="display:none" role="status" aria-live="polite"><div class="tcm" id="tcMain"></div><div class="tcs" id="tcSub"></div></div>
-    <div class="panel" style="padding:8px"><canvas id="rideChart"></canvas></div>
-    <div class="crs" id="crsRide" style="display:none"><canvas id="crsMap"></canvas><div class="crsp"><canvas id="crsChart"></canvas><div class="crsk num" id="crsK"></div></div></div>
+    <div class="panel" id="rideBig" style="padding:8px"><canvas id="rideChart"></canvas></div>
+    <div class="crs" id="crsRide" style="display:none"><div class="crsslot" id="crsSlot"><div class="rmap" id="crsMapBox"><canvas id="crsMap"></canvas><div id="crsMap3d" style="display:none"></div>
+      <div class="rmapui"><select id="mapStyle" aria-label="Map style"></select><button id="map3d" aria-pressed="false" title="Terrain, following the rider">3D</button><button id="mapFocus" aria-label="Swap map and chart" title="Map focus (F)">⤢</button></div>
+      <div class="rmapattr" id="mapAttr"></div></div></div><div class="crsp"><canvas id="crsChart"></canvas><div class="crsk num" id="crsK"></div></div></div>
     <div class="controls">
       <button id="cStart" class="pri big">Start</button>
       <button id="cPause" class="big" title="Space">Pause</button>
@@ -141,7 +144,7 @@
       <h3 class="sh">Trainer</h3>
       <div class="r" id="rowMode"><span class="l" title="ERG: the trainer holds the watts. Grade, Level: you set the resistance.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
       <div class="r" id="rowVal"><span class="l" id="aValL">Grade</span><div class="b"><button data-a="adj" data-v="-5">−−</button><button data-a="adj" data-v="-1">−</button><b class="num" id="aVal">–</b><button data-a="adj" data-v="1">+</button><button data-a="adj" data-v="5">++</button></div></div>
-      <div class="r"><span class="l" title="Cadence tile is green in this range">Cadence</span><div class="b"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></div></div>
+      <div class="r"><span class="l" title="Cadence tile is green in this range. Off: no cadence readout, target or cues.">Cadence</span><div class="b"><span class="seg" id="aCadOn"><button data-a="cadon" data-v="1">On</button><button data-a="cadon" data-v="0">Off</button></span><span class="b" id="aCadRange"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></span></div></div>
     </div>
   </div>
 </section>
@@ -199,6 +202,7 @@
         <label class="f">Units<select id="units"><option value="imperial">Imperial</option><option value="metric">Metric</option></select></label>
       </div>
       <div class="row" style="margin-top:10px">
+        <label class="f">Cadence<select id="cadOn" title="Off: no cadence readout, target or cues"><option value="1">On</option><option value="0">Off</option></select></label>
         <label class="f">Cadence low<input id="cadLo" type="number" min="40" max="120"></label>
         <label class="f">Cadence high<input id="cadHi" type="number" min="40" max="130"></label>
       </div>
@@ -307,6 +311,7 @@
       <tr><td><kbd>-</kbd> <kbd>=</kbd></td><td>Segment watts −5, +5</td></tr>
       <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>ERG, grade, level</td></tr>
       <tr><td><kbd>A</kbd></td><td>Adjust</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Map or chart focus (courses with a map)</td></tr>
       <tr><td><kbd>Z</kbd></td><td>Undo</td></tr>
       <tr><td><kbd>Esc</kbd></td><td>Close</td></tr>
     </table>

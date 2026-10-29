@@ -37,8 +37,9 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
   resistance level. When the plan ends you keep riding free until you press End.
 - **Manual control mid-ride**: intensity, segment watts and time, the rest of the plan, trainer
   mode, in one or two taps (see [Ride controls](#ride-controls)).
-- **Ride screen** on one page: power, target, cadence against your target range, HR with zones,
-  interval timer, the chart with a right-hand HR axis.
+- **Ride screen** on one page: power, target, distance (and climb on a course), cadence against your
+  target range, HR with zones, interval timer, the chart with a right-hand HR axis. On a course: the
+  route map in four styles or a 3D terrain view that follows you (MapLibre GL JS, vendored).
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.
@@ -63,7 +64,8 @@ and intensity, watts, segment time, length, trainer mode and settings can be und
 | Trainer: ERG, or ERG off by grade or level (the plan keeps showing) | Adjust | 1 2 3 |
 | Edit the plan from the current segment | Adjust | |
 | After the plan: hold the last target or ride flat | Adjust | |
-| Cadence range | Adjust | |
+| Cadence on/off and range (off: no readout, target or cues), beeps | Adjust | |
+| Map style (Map, Satellite, Topo, Cycling), 3D terrain, map or chart focus (courses with a route) | map | F |
 | Undo, Save, End (two taps) | bar | Z, S |
 | Reconnect trainer or HR | header | |
 
@@ -156,4 +158,5 @@ See [SECURITY.md](SECURITY.md) for the threat model and how to report a vulnerab
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The vendored MapLibre GL JS 5.24.0 (`app/vendor/`, the 3D map) is BSD-3-Clause,
+license next to it.

@@ -1,5 +1,6 @@
 """Static web build: output layout, headers, and a full simulated ride in web mode (no server)."""
 import json
+import re
 import subprocess
 import sys
 
@@ -21,6 +22,8 @@ def dist(tmp_path_factory):
 def test_build_output(dist):
     files = {p.relative_to(dist).as_posix() for p in dist.rglob("*") if p.is_file()}
     assert {"index.html", "js/app.js", "js/core.js", "js/mode.js", "js/web/backend.js", "css/app.css", "vercel.json", "icon.svg"} <= files
+    ml = "vendor/maplibre-gl-5.24.0/"                                                # 3D map, pinned, no CDN (CSP)
+    assert {ml + f for f in ("maplibre-gl-csp.js", "maplibre-gl-csp-worker.js", "maplibre-gl.css", "LICENSE.txt")} <= files
     assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
     assert {f for f in files if f.startswith("api/")} == {"api/strava/token.js"}     # only the Strava token service
     assert "MODE = 'web'" in (dist / "js/mode.js").read_text()
@@ -31,7 +34,10 @@ def test_vercel_headers(dist):
     v = json.loads((dist / "vercel.json").read_text())
     h = {x["key"]: x["value"] for x in v["headers"][0]["headers"]}
     csp = h["Content-Security-Policy"]
-    assert "default-src 'self'" in csp and "script-src 'self'" in csp and "connect-src 'self';" in csp
+    assert "default-src 'self'" in csp and "script-src 'self';" in csp and "worker-src 'self';" in csp
+    connect = re.search(r"connect-src ([^;]+);", csp).group(1).split()                 # map tiles + terrain only
+    assert connect[0] == "'self'" and all(h.startswith("https://") and "*" not in h for h in connect[1:])
+    assert "https://s3.amazonaws.com" in connect and "https://server.arcgisonline.com" in csp
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
     assert h["X-Content-Type-Options"] == "nosniff" and "bluetooth=(self)" in h["Permissions-Policy"]
     assert v["rewrites"] == [{"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the function

@@ -31,8 +31,11 @@ MAX_BODY = 64 * 1024 * 1024
 QUIET_PATHS = ("/api/state", "/api/health",
                "/api/strava/callback")  # the callback query carries the OAuth code: keep it out of logs
 # A page served from here may never be framed (clickjacking) and runs only its own scripts.
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; "
-       "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+# Map tiles (keyless): OSM, Esri imagery, OpenTopoMap, CyclOSM. The 3D map fetch()es them and AWS terrain tiles.
+MAP_TILES = "https://tile.openstreetmap.org https://server.arcgisonline.com https://tile.opentopomap.org https://a.tile-cyclosm.openstreetmap.fr"
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       f"img-src 'self' data: blob: {MAP_TILES}; connect-src 'self' {MAP_TILES} https://s3.amazonaws.com; "
+       "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 # headers a reverse proxy or tunnel adds: such a request came from the network, not this computer
 PROXY_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "Forwarded", "CF-Connecting-IP", "True-Client-IP")
 
@@ -430,7 +433,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
                      "hrZonesSrc": None, "cadRange": [85, 95], "afterWorkout": "hold", "ftpSrc": None, "profileImported": False,
-                     "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False, "units": "imperial"}
+                     "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False, "units": "imperial", "cadOn": True}
 
 
 class AppServer(ThreadingHTTPServer):
@@ -543,6 +546,8 @@ class AppServer(ThreadingHTTPServer):
                 if k == "afterWorkout" and v not in ("hold", "grade0"):
                     continue
                 if k == "units" and v not in ("imperial", "metric"):
+                    continue
+                if k == "cadOn" and not isinstance(v, bool):
                     continue
                 if k == "hrZonesSrc" and v not in (None, "default", "manual", "garmin"):
                     continue

@@ -1062,7 +1062,11 @@ if (WEB) {
 }
 
 /* ---------- nav + settings + init ---------- */
-function show(v) {
+// the view is in the URL (#ride, #history, #settings; Workouts is the bare page) so reload and back keep it
+const VIEWS = ['workouts', 'ride', 'history', 'settings'], viewOf = h => VIEWS.includes((h || '').slice(1)) ? h.slice(1) : 'workouts';
+function show(v, push = true) {
+  const want = v === 'workouts' ? '' : '#' + v, loc = globalThis.location;
+  if (push && loc && (loc.hash || '') !== want) try { history.pushState(null, '', want || loc.pathname + loc.search); } catch {}
   aView(v);
   $$('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
@@ -1112,7 +1116,8 @@ if (globalThis.IntersectionObserver) {
   $$('.sset').forEach(x => io.observe(x));
 }
 $('#beeps').onchange = e => { settings.beeps = e.target.value === '1'; saveSettings(['beeps']); };
-if (globalThis.location?.hash === '#settings') setTimeout(() => show('settings'), 0);
+if (VIEWS.includes(globalThis.location?.hash?.slice(1)) && globalThis.location.hash !== '#workouts') setTimeout(() => show(viewOf(globalThis.location.hash), false), 0);
+globalThis.addEventListener?.('popstate', () => show(viewOf(globalThis.location?.hash), false));
 
 async function syncHrZones() {
   if (settings.hrZonesSrc !== 'garmin' || !garminOn) return;  // Garmin zones only when chosen in Settings

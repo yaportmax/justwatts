@@ -7,7 +7,7 @@ ERG mode or lets you ride free by grade, watts or resistance level, and keeps yo
 zones, intervals, trends. It runs on your own computer, with no account and no API keys. The trainer
 connection lives in a small local server, so reloading or closing the browser never drops the trainer or the ride.
 
-Try it in the browser, no install: **[openspin.maxyaport.com](https://openspin.maxyaport.com)** (Chrome or
+Try it in the browser, no install: **[justwatts.com](https://justwatts.com)** (Chrome or
 Edge, Web Bluetooth; rides stay in the browser, no uploads). The local app below adds Garmin and Strava
 upload and a trainer connection that survives closing the tab.
 
@@ -16,7 +16,7 @@ upload and a trainer connection that survives closing the tab.
 Needs Python 3.10+ and a computer with Bluetooth LE. Any modern browser works for the page.
 
 ```sh
-git clone https://github.com/yaportmax/openspin
+git clone https://github.com/yaportmax/justwatts
 cd justwatts
 pip install -e .
 justwatts serve
@@ -45,7 +45,7 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
   efforts.
 - **Uploads** (optional): Garmin Connect and Strava.
 - **Crash-safe**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
-- The web version (openspin.maxyaport.com) runs the same app with Bluetooth in the browser tab (Chrome or Edge).
+- The web version (justwatts.com) runs the same app with Bluetooth in the browser tab (Chrome or Edge).
 
 ## Ride controls
 
@@ -128,7 +128,7 @@ plus an `X-HW: 1` header; the CLI uses a bearer token from a 0600 file. Details 
 | `JUSTWATTS_TOKEN` | from `<data>/token` | API token for the CLI |
 | `JUSTWATTS_GARMIN` | auto | `off` disables Garmin, `on` forces it for a non-default data dir |
 | `JUSTWATTS_BLE` | `on` | `off` disables Bluetooth |
-| `JUSTWATTS_STRAVA_RELAY` | openspin.maxyaport.com | Strava token service for the shared app; `off` allows only your own API app |
+| `JUSTWATTS_STRAVA_RELAY` | justwatts.com | Strava token service for the shared app; `off` allows only your own API app |
 | `JUSTWATTS_STRAVA_CLIENT_ID` | `168528` | Strava client ID used with that token service |
 
 Older `OPENSPIN_*` and `HW_*` names still work. An existing `~/.openspin` data dir keeps being used,

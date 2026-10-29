@@ -28,7 +28,7 @@ TOKEN_URL = "https://www.strava.com/oauth/token"
 API = "https://www.strava.com/api/v3"
 SCOPE = "activity:write,activity:read"
 SHARED_CLIENT_ID = os.environ.get("JUSTWATTS_STRAVA_CLIENT_ID", "168528")
-RELAY_URL = os.environ.get("JUSTWATTS_STRAVA_RELAY", "https://openspin.maxyaport.com/api/strava/token")
+RELAY_URL = os.environ.get("JUSTWATTS_STRAVA_RELAY", "https://justwatts.com/api/strava/token")
 STATE_TTL_S = 900  # an OAuth state is good for 15 minutes
 MAX_STATES = 8
 

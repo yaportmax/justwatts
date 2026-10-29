@@ -311,15 +311,28 @@ const OAUTH_CFG = {
 const safeReturn = r => typeof r === 'string' && /^\/(?![/\\])[\w\-./?=&#%]*$/.test(r) && r.length < 200 ? r : '/';
 const withQuery = (path, q) => { const [p, h] = path.split('#'); return p + (p.includes('?') ? '&' : '?') + new URLSearchParams(q) + (h ? '#' + h : ''); };
 
+// Desktop app sign-in (apps/desktop). Google blocks sign-in inside an embedded browser, so the app opens /start in the
+// system browser with app=<PKCE challenge>. The callback never signs that browser in: it hands the app a one-time code
+// (justwatts://auth?code=...), and the app trades code + verifier for its own session at /api/auth/app/exchange. Linking
+// from the app first takes a ticket (/api/auth/app/ticket) that names the signed-in account. The verifier never leaves
+// the app, so a code that reaches another machine or app is useless.
+const APP_URL = 'justwatts://auth', APP_TTL = 5 * MIN;
+const appChallenge = v => (typeof v === 'string' && /^[\w-]{43}$/.test(v) ? v : '');
+const appBack = (ctx, ret, q) => redirect(ctx.res, APP_URL + '?' + new URLSearchParams({ ...q, return: ret }), ctx.cookies);
+
 for (const [name, cfg] of Object.entries(OAUTH_CFG)) {
   route('GET', `/api/auth/${name}/start`, async ctx => {
     const ret = safeReturn(ctx.url.searchParams.get('return')), mode = ctx.url.searchParams.get('mode') === 'link' ? 'link' : 'login';
-    const back = q => redirect(ctx.res, withQuery(ret, { provider: name, ...q }), ctx.cookies);
+    const app = appChallenge(ctx.url.searchParams.get('app'));
+    const back = q => (app ? appBack(ctx, ret, { provider: name, ...q }) : redirect(ctx.res, withQuery(ret, { provider: name, ...q }), ctx.cookies));
     if (!cfg.on() || !oauthOrigin()) return back({ auth: 'error', reason: 'not_configured' });
     await limit(ctx, [[`oauth:ip:${ctx.ip}`, 15 * MIN, 30]]);
     let uid = '';
-    if (mode === 'link') { const u = await sessionUser(ctx); if (!u) return back({ auth: 'error', reason: 'signed_out' }); uid = u.id; }
-    const st = { s: randomId(16), n: randomId(16), v: randomId(32), p: name, m: mode, u: uid, r: ret, e: ctx.now + 10 * MIN };
+    if (mode === 'link' && app) {  // the app's ticket names the account; the exchange checks it again against the app's session
+      const t = await ctx.store.takeToken(sha256(String(ctx.url.searchParams.get('ticket') ?? '').slice(0, 100)), 'app_ticket', ctx.now);
+      if (!t) return back({ auth: 'error', reason: 'signed_out' }); uid = t.userId;
+    } else if (mode === 'link') { const u = await sessionUser(ctx); if (!u) return back({ auth: 'error', reason: 'signed_out' }); uid = u.id; }
+    const st = { s: randomId(16), n: randomId(16), v: randomId(32), p: name, m: mode, u: uid, r: ret, e: ctx.now + 10 * MIN, a: app };
     ctx.cookies.push(cookie(OAUTH, sign(secret(), Buffer.from(JSON.stringify(st)).toString('base64url')), 600));
     redirect(ctx.res, cfg.authorize(ctx, st), ctx.cookies);
   });
@@ -328,7 +341,12 @@ for (const [name, cfg] of Object.entries(OAUTH_CFG)) {
     let st = null; try { st = raw && JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')); } catch { st = null; }
     ctx.cookies.push(cookie(OAUTH, '', 0));
     const ret = st ? safeReturn(st.r) : '/';
-    const back = (q) => { redirect(ctx.res, withQuery(ret, { provider: name, ...q }), ctx.cookies); };
+    const back = (q) => (st?.a ? appBack(ctx, ret, { provider: name, ...q }) : redirect(ctx.res, withQuery(ret, { provider: name, ...q }), ctx.cookies));
+    const toApp = async (userId, data, q) => {  // the app finishes the sign-in or link at /api/auth/app/exchange
+      const code = randomId(32);
+      await ctx.store.putToken({ hash: sha256(code), userId, purpose: 'app_code', data: JSON.stringify({ c: st.a, p: name, ...data }), expiresAt: ctx.now + APP_TTL });
+      return back({ ...q, code });
+    };
     const q = ctx.url.searchParams, state = q.get('state') || '', code = q.get('code') || '';
     if (!st || st.p !== name || !(st.e > ctx.now) || state.length !== st.s.length || !crypto.timingSafeEqual(Buffer.from(state), Buffer.from(st.s))) return back({ auth: 'error', reason: 'bad_state' });
     if (q.get('error') || !/^[\w\-./~]{4,512}$/.test(code)) return back({ auth: 'error', reason: 'denied' });
@@ -336,6 +354,11 @@ for (const [name, cfg] of Object.entries(OAUTH_CFG)) {
     let prof; try { prof = await cfg.profile(ctx, code, st); } catch { prof = null; }
     if (!prof || prof.error) return back({ auth: 'error', reason: prof?.error || 'provider_failed' });
     const ident = await ctx.store.getIdentity(name, prof.subject);
+    if (st.m === 'link' && st.a) {
+      if (!st.u || !(await ctx.store.getUser(st.u))) return back({ auth: 'error', reason: 'signed_out' });
+      if (ident) return back(ident.userId === st.u ? { auth: 'linked' } : { auth: 'error', reason: 'identity_in_use' });
+      return toApp(st.u, { m: 'link', prof: { subject: prof.subject, email: prof.email, verified: prof.verified } }, { auth: 'linked' });
+    }
     if (st.m === 'link') {
       const u = await sessionUser(ctx);
       if (!u || u.id !== st.u) return back({ auth: 'error', reason: 'signed_out' });
@@ -360,9 +383,43 @@ for (const [name, cfg] of Object.entries(OAUTH_CFG)) {
       user = await ctx.store.createUserWithIdentity({ id: randomId(12), name: prof.name, passHash: null, createdAt: ctx.now }, { provider: name, subject: prof.subject, email: prof.email, verified: prof.verified });
       created = true;
     }
+    if (st.a) return toApp(user.id, { m: 'login' }, created ? { auth: 'ok', new: '1' } : { auth: 'ok' });
     startSession(ctx, user);
     return back(created ? { auth: 'ok', new: '1' } : { auth: 'ok' });  // new: the page shows its first-run steps
   });
 }
+
+route('POST', '/api/auth/app/ticket', async ctx => {
+  checkWrite(ctx.req);
+  const u = await requireUser(ctx);
+  await limit(ctx, [[`ticket:${u.id}`, HOUR, 20]]);
+  const ticket = randomId(32);
+  await ctx.store.putToken({ hash: sha256(ticket), userId: u.id, purpose: 'app_ticket', data: null, expiresAt: ctx.now + APP_TTL });
+  return ok({ ticket });
+});
+route('POST', '/api/auth/app/exchange', async ctx => {
+  checkWrite(ctx.req);
+  const b = await readJson(ctx.req);
+  await limit(ctx, [[`token:ip:${ctx.ip}`, HOUR, 30]]);
+  const t = await ctx.store.takeToken(sha256(String(b.code ?? '').slice(0, 100)), 'app_code', ctx.now);
+  let d = null; try { d = t && JSON.parse(t.data); } catch { d = null; }
+  const v = typeof b.verifier === 'string' && /^[\w-]{43,128}$/.test(b.verifier) ? b.verifier : null;
+  if (!d || !v || crypto.createHash('sha256').update(v).digest('base64url') !== d.c) fail(400, 'bad_token');
+  if (d.m === 'link') {
+    const u = await requireUser(ctx);
+    if (u.id !== t.userId) fail(403, 'signed_out');
+    const ident = await ctx.store.getIdentity(d.p, d.prof.subject);
+    if (ident && ident.userId !== u.id) fail(409, 'identity_in_use');
+    if (!ident) {
+      try { await ctx.store.addIdentity({ provider: d.p, subject: d.prof.subject, userId: u.id, email: d.prof.email, verified: d.prof.verified, createdAt: ctx.now }); }
+      catch (e) { if (e.code === 'exists') fail(409, 'already_linked'); throw e; }
+    }
+    return ok(await publicUser(ctx, u));
+  }
+  const user = await ctx.store.getUser(t.userId);
+  if (!user) fail(400, 'bad_token');
+  startSession(ctx, user);
+  return ok(await publicUser(ctx, user));
+});
 
 module.exports = { readEmail, readPassword, readName };

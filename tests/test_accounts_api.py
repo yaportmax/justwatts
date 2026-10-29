@@ -9,7 +9,7 @@ import pytest
 
 from conftest import REPO
 
-SECTIONS = ["providers", "auth", "origin", "ratelimits", "email", "google", "strava", "claim", "sync", "community", "limits", "moderation", "integrations", "social"]
+SECTIONS = ["providers", "auth", "origin", "ratelimits", "email", "google", "strava", "claim", "sync", "community", "limits", "moderation", "integrations", "social", "app"]
 PGLITE = REPO / "tests/js/node_modules/@electric-sql/pglite"
 
 

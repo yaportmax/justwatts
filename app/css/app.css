@@ -223,3 +223,30 @@ body.web .agentcol{display:none}
 .sgrid .sh{margin:8px 0 0;font-size:12px;color:var(--acc);text-transform:uppercase;letter-spacing:.8px;font-weight:600}
 .sgrid .sh:first-child{margin-top:0}
 .sgrid .l[title]{cursor:help;text-decoration:underline dotted var(--faint);text-underline-offset:3px}
+/* ride screen: numbers on the page, not in boxes */
+#v-ride .tiles{gap:0;margin:4px 0 6px}
+#v-ride .tile{background:none;border:0;border-radius:0;padding:4px 18px 4px 0}
+#v-ride .tile + .tile{padding-left:18px;box-shadow:inset 1px 0 0 var(--line)}
+#v-ride .tile .k{font-size:11px;letter-spacing:1.2px;color:var(--faint)}
+#v-ride .tile .v{font-weight:600;letter-spacing:-1px}
+#v-ride .tile.big .v{font-size:60px;font-weight:700}
+#v-ride .tile.hrz{border:0}
+#v-ride .tile.hrz .v{text-decoration:underline 3px var(--hrc,transparent);text-underline-offset:8px}
+#v-ride .tile.flash .v{color:var(--acc)}
+#v-ride .iv{margin:4px 0 8px}
+#v-ride .bar{height:3px;border-radius:2px}
+#v-ride #rideOn>.panel:not(.coach):not(.testcue){background:none;border:0;padding:0}
+#v-ride .testcue{background:none;border:0;border-left:3px solid var(--acc);border-radius:0;padding:2px 0 2px 12px;margin:2px 0 10px}
+#v-ride .controls{border-top:1px solid var(--line);padding-top:10px}
+#v-ride .controls button:not(.pri):not(.danger){background:none;border-color:transparent;color:var(--dim)}
+#v-ride .controls button:not(.pri):not(.danger):hover{color:var(--ink);background:var(--panel2)}
+#v-ride .controls button.danger{background:none;border-color:#4b2328;color:var(--bad)}
+#v-ride .controls .adj{background:none;border:0;padding:0}
+#v-ride .controls .adj span{color:var(--ink)}
+#v-ride .badge{background:none;border:0;padding:0 0 0 10px;letter-spacing:.4px}
+@media (max-width:900px){
+  #v-ride .tile{padding:6px 10px 6px 0}
+  #v-ride .tile + .tile{padding-left:10px}
+  #v-ride .tile:nth-child(3n+1){box-shadow:none;padding-left:0}
+  #v-ride .tile.big .v{font-size:42px}
+}

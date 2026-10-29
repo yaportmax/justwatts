@@ -70,8 +70,20 @@ function drawThumb(cv, cw, ftp) {
 }
 function drawChart(cv, o, box) {
   const [c, w, h] = box || fit(cv);
-  return drawChartOn(c, w, h, o, css);
+  o.hoverT = hoverT.get(cv) ?? null;
+  const n = drawChartOn(c, w, h, o, css);
+  chartOpts.set(cv, o);
+  return n;
 }
+// hover (or touch) a chart to read the numbers at that moment
+const hoverT = new WeakMap(), chartOpts = new WeakMap();
+function hoverable(cv) {
+  const at = e => { const o = chartOpts.get(cv); if (!o?.geom) return null; const r = cv.getBoundingClientRect(), g = o.geom; return (e.clientX - r.left - g.L) / g.pw * g.total; };
+  const redraw = () => { const o = chartOpts.get(cv); if (o) drawChart(cv, o); };
+  cv.onpointermove = e => { const t = at(e); if (t == null) return; hoverT.set(cv, t); redraw(); };
+  cv.onpointerleave = () => { hoverT.delete(cv); redraw(); };
+}
+hoverable($('#rideChart')); hoverable($('#sumChart'));
 
 /* ---------- library + builder ---------- */
 function renderLib() {
@@ -355,6 +367,7 @@ function renderLive() {
   $('#lC').textContent = cad;
   $('#lCs').textContent = `target ${lo}-${hi} rpm`;
   $('#cadTile').style.setProperty('--hrc', !cad ? 'var(--line)' : cad >= lo && cad <= hi ? 'var(--good)' : cad >= lo - 8 && cad <= hi + 8 ? 'var(--warn)' : 'var(--bad)');
+  $('#hrTile').style.display = S?.devices?.hr || S?.devices?.hr_name ? '' : 'none';  // no strap: no HR anywhere
   const hrNow = live.hr || 0, hz = hrZone(hrNow);
   $('#lH').textContent = hrNow || '–';
   $('#hrTile').style.setProperty('--hrc', hz >= 0 ? `var(${HRZ_COLORS[hz]})` : 'var(--line)');
@@ -364,7 +377,7 @@ function renderRide() {
   if (!V) return;
   const t = curTarget(), m = S.ride.control; $('#lT').textContent = t ?? '–';
   $('#lTs').textContent = V.cw ? (V.jr.wm && V.jr.wm !== 'e' ? 'ERG off · ' + valText(m) : t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free · ' + valText(m)) : m === 'w' ? 'ERG' : valText(m);
-  $('#lE').textContent = fmtT(V.el);
+  $('#lE').textContent = fmtT(V.started ? samples.length : 0);  // time ridden (1 sample a second)
   $('#rName').textContent = V.name;
   const st = !V.started ? ['Ready', ''] : V.auto ? ['Start pedaling', 'warn'] : V.paused ? ['Paused', 'warn'] : S.ride.overtime ? ['Workout done · riding free', 'done'] : ['Riding', ''];
   $('#rState').textContent = st[0]; $('#rState').className = 'badge ' + st[1];
@@ -381,7 +394,8 @@ function renderRide() {
     $('#lEs').textContent = fmtT(V.cw.total - V.el) + ' left';
     $('#ivNow').textContent = `${fmtT(at.s.d)} · ${at.s.free ? 'free' : stepWatts(at.s, 0, V.ftp, kk) + (at.s.a !== at.s.b ? '→' + stepWatts(at.s, at.s.d, V.ftp, kk) : '') + ' W'}`;
     const nx = V.cw.steps[at.i + 1];
-    $('#ivNext').textContent = nx ? `Next ${fmtT(nx.d)} · ${nx.free ? 'free' : stepWatts(nx, 0, V.ftp, kk) + ' W'}` : 'Last interval';
+    $('#ivNext').textContent = nx ? `Next ${fmtT(nx.d)} · ${nx.free ? 'free' : stepWatts(nx, 0, V.ftp, kk) + ' W'}` : 'Last segment';
+    if (nx && !(V.jr.wm && V.jr.wm !== 'e')) $('#lTs').textContent += ` · next ${nx.free ? 'free' : stepWatts(nx, 0, V.ftp, kk) + ' W'} in ${fmtT(at.s.d - at.into)}`;
     $('#ivBar').style.width = (at.into / at.s.d * 100) + '%';
     $('#ivBar').style.background = at.s.free ? css('--z1') : zoneColor(stepWatts(at.s, at.into, V.ftp, V.k) / V.ftp);
   } else {
@@ -410,8 +424,8 @@ function doUndo() {
   undo = null; renderUndo();
   Promise.resolve(u.run()).then(() => toast('Undone')).catch(() => {});
 }
-const didText = d => d.replace(/^target step (\d+) (\d+)W$/, 'Step $1: $2 W').replace(/^skip step (\d+)$/, 'Skipped step $1')
-  .replace(/^back step (\d+)$/, 'Again: step $1').replace(/^mode (\w+)$/, 'Trainer: $1').replace(/^erg (\d+)W$/, '$1 W').replace(/^\w/, c => c.toUpperCase());
+const didText = d => d.replace(/^target step (\d+) (\d+)W$/, 'Segment $1: $2 W').replace(/^skip step (\d+)$/, 'Skipped segment $1')
+  .replace(/^back step (\d+)$/, 'Again: segment $1').replace(/^mode (\w+)$/, 'Trainer: $1').replace(/^erg (\d+)W$/, '$1 W').replace(/^\w/, c => c.toUpperCase());
 function act(action, body = {}, undoLabel = null, inverse = null, say = null) {
   return control(action, body).then(j => {
     toast(say ? say(j) : j.did ? didText(j.did) : j.detail || 'Done');
@@ -433,7 +447,7 @@ function setIntensity(p) { const r = R(); if (!r) return; const k0 = r.intensity
 function stepWattsBy(delta) {
   const r = R(); if (!r) return;
   if (!V.cw) return r.control === 'w' ? act('target', { delta }, 'watts', () => control('target', { w: r.jr.w })) : null;
-  if (!r.step || r.step.free || r.target_w == null) { toast('No ERG target in this step'); return; }
+  if (!r.step || r.step.free || r.target_w == null) { toast('No ERG target in this segment'); return; }
   const i = r.step.index, w0 = r.target_w;
   return act('target', { step: i, delta }, 'step watts', () => control('target', { step: i, w: w0 }));
 }
@@ -441,14 +455,7 @@ function stepTimeBy(sec) {
   const r = R(); if (!r?.step) { toast('Workout done'); return; }
   const i = r.step.index, d0 = r.step.duration_s;
   return act('edit', { edit: { op: 'extend', seconds: sec } }, 'step time', () => control('edit', { edit: { op: 'duration', step: i, seconds: d0 } }),
-    j => `Step ${i}: ${j.detail?.match(/-> (\S+)$/)?.[1] ?? ''}`);
-}
-function lengthBy(d) {
-  const r = R(); if (!r?.total_s) return;
-  if (!r.step) { toast('Workout done: add next steps'); return; }
-  const t0 = r.total_s;
-  return act('edit', { edit: { op: 'total', seconds: Math.max(1, t0 + d), how: 'last' } }, 'length', () => control('edit', { edit: { op: 'total', seconds: t0, how: 'last' } }),
-    j => 'Workout ' + fmtT(j.total_s));
+    j => `Segment ${i}: ${j.detail?.match(/-> (\S+)$/)?.[1] ?? ''}`);
 }
 function setMode(m) {
   const r = R(); if (!r) return;
@@ -470,8 +477,6 @@ const lcOn = () => ({ ...LC_DEFAULTS, ...(settings.localCoach || {}) }).enabled;
 $('#cStart').onclick = () => control('start').catch(() => {});
 $('#cPause').onclick = pauseAct;
 $('#cSave').onclick = () => control('save').then(j => toast(`Saved to History (${fmtT(j.samples)})`)).catch(() => {});
-$('#cShorter').onclick = () => lengthBy(-300);
-$('#cLonger').onclick = () => lengthBy(300);
 $('#cSkip').onclick = skipAct;
 $('#cBack').onclick = backAct;
 $('#cMinus').onclick = () => plusMinus(-1);
@@ -505,7 +510,6 @@ function renderAdjust() {
   $('#aTgt').textContent = tgtOk ? r.target_w + ' W' : '–';
   $('#rowStep').style.display = wk && r.step ? '' : 'none';
   $('#aStep').textContent = r.step ? fmtT(r.step.left_s) + ' left' : '–';
-  $('#cLen').textContent = r.total_s ? fmtT(r.total_s) : '–';
   const cur = wk ? (V.jr.wm || 'e') : V.jr.m;
   $$('#aMode button').forEach(b => { const v = b.dataset.v; b.style.display = (wk ? v !== 'w' : v !== 'e') ? '' : 'none'; b.classList.toggle('on', v === cur); });
   $('#rowVal').style.display = m === 'k' ? 'none' : '';
@@ -626,6 +630,7 @@ function voiceUpdate() {
 }
 const hm = ts => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 function coachUpdate() {
+  $('#coach').style.display = S.agent?.connected ? '' : 'none';  // the coach bar is for a connected agent only
   const ms = S.messages || [], top = ms.at(-1);
   if (top) {
     $('#coachMsg').textContent = top.msg; $('#coachMsg').title = top.msg;

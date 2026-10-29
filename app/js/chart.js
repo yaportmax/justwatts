@@ -1,5 +1,5 @@
 // Ride and workout charts on a 2D canvas context. No DOM access: colors come from css(name).
-import { fmtT, stepWatts, ZONES, zoneIdx } from './core.js';
+import { fmtT, stepWatts, stepAt, ZONES, zoneIdx } from './core.js';
 
 export const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
 export function maxTarget(cw, ftp, k = 1) { let m = 0; for (const s of cw.steps) if (!s.free) m = Math.max(m, stepWatts(s, 0, ftp, k), stepWatts(s, s.d, ftp, k)); return m; }
@@ -74,17 +74,46 @@ export function drawChart(c, w, h, o, css) {
     if (o.el != null) { c.save(); c.beginPath(); c.rect(L, 0, X(o.el) - L, h); c.clip(); drawBlocks(c, o.cw, ftp, X, Y, 0.5, o.k, css); c.restore(); }
   }
   const pts = decimate(smp, Math.max(100, Math.round(pw * 2)));
+  // a jump in ride time (an old skip, a resumed ride) is a gap, never a straight line across it
+  const gapT = Math.max(5, pts.power.length > 1 ? 3 * (pts.power.at(-1)[0] - pts.power[0][0]) / (pts.power.length - 1) : 5);
   if (pts.hr.some(Boolean)) {
     const HY = v => T + ph - (v - 40) / 170 * ph;
     c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = hexA('#ef4444', 0.8);
     for (let v = 80; v <= 200; v += 20) c.fillText(v, w - R + 4, HY(v));
     c.strokeStyle = hexA('#ef4444', 0.75); c.lineWidth = 1.2; c.beginPath(); let on = false;
-    for (const p of pts.hr) { if (!p) { on = false; continue; } on ? c.lineTo(X(p[0]), HY(p[1])) : c.moveTo(X(p[0]), HY(p[1])); on = true; }
+    let pt = null;
+    for (const p of pts.hr) { if (!p) { on = false; continue; } if (pt != null && p[0] - pt > gapT) on = false; on ? c.lineTo(X(p[0]), HY(p[1])) : c.moveTo(X(p[0]), HY(p[1])); on = true; pt = p[0]; }
     c.stroke();
   }
   c.strokeStyle = '#e9edf2'; c.lineWidth = 1.5; c.lineJoin = 'round'; c.beginPath();
-  pts.power.forEach((p, i) => i ? c.lineTo(X(p[0]), Y(p[1])) : c.moveTo(X(p[0]), Y(p[1])));
+  pts.power.forEach((p, i) => i && p[0] - pts.power[i - 1][0] <= gapT ? c.lineTo(X(p[0]), Y(p[1])) : c.moveTo(X(p[0]), Y(p[1])));
   c.stroke(); c.lineWidth = 1;
   if (o.el != null && o.cw) { c.strokeStyle = css('--acc'); c.beginPath(); c.moveTo(X(o.el), T); c.lineTo(X(o.el), T + ph); c.stroke(); }
+  o.geom = { L, R, pw, total };
+  if (o.hoverT != null && o.hoverT >= 0 && o.hoverT <= total) drawHover(c, w, h, o, X, T, ph, css);
   return pts.power.length;
+}
+
+// the readout under the pointer: target there, and what was ridden there (power, HR, cadence)
+export function sampleAt(smp, t) {
+  let lo = 0, hi = smp.length - 1;
+  if (hi < 0 || t < smp[0][1] - 1.5 || t > smp[hi][1] + 1.5) return null;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (smp[m][1] < t) lo = m + 1; else hi = m; }
+  const x = lo > 0 && Math.abs(smp[lo - 1][1] - t) < Math.abs(smp[lo][1] - t) ? smp[lo - 1] : smp[lo];
+  return Math.abs(x[1] - t) <= 1.5 ? x : null;
+}
+function drawHover(c, w, h, o, X, T, ph, css) {
+  const t = o.hoverT, x = X(t), rows = [fmtT(t)];
+  if (o.cw) {
+    const at = stepAt(o.cw, t);
+    if (at) rows.push(at.s.free ? 'Target free' : `Target ${stepWatts(at.s, at.into, o.ftp, o.k ?? 1)} W`);
+  }
+  const s = sampleAt(o.samples || [], t);
+  if (s) { rows.push(`Power ${s[2]} W`); if (s[4] > 0) rows.push(`HR ${s[4]}`); if (s[3] > 0) rows.push(`Cadence ${s[3]}`); }
+  c.strokeStyle = 'rgba(255,255,255,.5)'; c.setLineDash([2, 3]); c.beginPath(); c.moveTo(x, T); c.lineTo(x, T + ph); c.stroke(); c.setLineDash([]);
+  c.font = '12px system-ui'; c.textAlign = 'left'; c.textBaseline = 'top';
+  const bw = Math.max(...rows.map(r => c.measureText(r).width)) + 14, bh = rows.length * 16 + 8;
+  const bx = x + 10 + bw > w ? x - 10 - bw : x + 10;
+  c.fillStyle = 'rgba(12,14,17,.9)'; c.fillRect(bx, T + 4, bw, bh);
+  rows.forEach((r, i) => { c.fillStyle = i ? css('--ink') || '#e9edf2' : css('--dim') || '#8b95a4'; c.fillText(r, bx + 7, T + 8 + i * 16); });
 }

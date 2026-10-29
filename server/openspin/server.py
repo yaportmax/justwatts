@@ -223,6 +223,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        if not path.startswith("/api/"):  # app files always revalidate, so an update never mixes old and new modules
+            self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
     def send_json(self, code: int, obj: Any) -> None:

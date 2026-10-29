@@ -32,9 +32,9 @@ def check(out):
     assert out["undoShown"] == "" and out["sheetOpen"] and out["keysOpen"] and out["closed"]
     toasts = dict(out["log"])
     assert toasts["plus button"] == "Intensity 101%" and toasts["shift up"] == "Intensity 106%"
-    assert toasts["undo button"] == "Undone" and toasts["skip key"] == "Skipped step 1"
-    assert toasts["step watts +5"] == "Step 2: 205 W" and toasts["ERG off: grade"] == "Trainer: grade"
-    assert toasts["workout +5m"].startswith("Workout ") and toasts["next steps"].startswith("Next steps set")
+    assert toasts["undo button"] == "Undone" and toasts["skip key"] == "Skipped segment 1"
+    assert toasts["step watts +5"] == "Segment 2: 205 W" and toasts["ERG off: grade"] == "Trainer: grade"
+    assert toasts["next steps"].startswith("Next steps set")
     assert out["tgtShown"] == "205"
     assert out["adjGrade"] == "Grade 3.0%" and out["tgtSub"].startswith("ERG off")
     assert out["nextErr"]  # a typo is caught before anything is sent
@@ -49,7 +49,7 @@ def check(out):
     for line in ("MANUAL intensity 101%", "MANUAL skip step 1", "MANUAL target step 2 205W", "MANUAL mode grade",
                  "MANUAL grade 2.5%", "MANUAL mode level", "MANUAL mode erg", "MANUAL back step 2"):
         assert line in m, line
-    assert any(x.startswith("EDIT rest after step") for x in m) and any(x.startswith("EDIT duration total") for x in m)
+    assert any(x.startswith("EDIT rest after step") for x in m)
     # the reload keeps every change and the new page shows it
     assert out["after"] == out["before"]
     assert out["shown"]["adj"] == "100%" and out["shown"]["target"] != "–"

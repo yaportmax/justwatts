@@ -145,9 +145,6 @@ await step('] key', () => key('BracketRight'), () => ride().step.duration_s === 
 await step('step -1m button', () => $('#cStepShort').click(), () => ride().step.duration_s === 1200);
 await step('step +30s', () => press('ext', '30'), () => ride().step.duration_s === 1230);
 await step('Z undoes it', () => key('KeyZ'), () => ride().step.duration_s === 1200);
-const total0 = ride().total_s;
-await step('workout +5m', () => $('#cLonger').click(), () => ride().total_s === total0 + 300);
-await step('workout -5m', () => $('#cShorter').click(), () => ride().total_s === total0);
 await step('ERG off: grade', () => press('mode', 'g'), () => ride().control === 'g');
 await step('grade ++', () => press('adj', '5'), () => ride().jr.g === 2.5);
 await step('grade up key', () => key('ArrowUp'), () => ride().jr.g === 3);

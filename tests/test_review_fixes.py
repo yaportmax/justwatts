@@ -74,4 +74,4 @@ def test_static_markup():
     for field in ('id="sFtp"', 'id="sWeight"', 'id="sHrZones"', 'id="hrMax"', 'id="virtDist"'):
         assert field in html
     js = (REPO / "app" / "js" / "app.js").read_text(encoding="utf-8")
-    assert "'Virtual distance'" in js and "'Distance'" not in js
+    assert "'Distance'" in js  # indoor distance from trainer speed, labeled plainly (owner's call)

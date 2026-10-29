@@ -111,21 +111,28 @@ $('#libQ').oninput = e => { libF.q = e.target.value; store.set('hw.libFilter', l
 $('#libDur').onchange = e => setLibF({ dur: e.target.value });
 $('#libLvl').onchange = e => setLibF({ lvl: e.target.value });
 const lvlDots = n => n ? `<span class="lvl" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
+let libSel = null;
 function renderLib() {
   const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = 0;
   for (const w of allWorkouts()) {
     const cw = cwOf(w); if (!cw || !libMatch(w, cw)) continue;
     shown++;
     const e = estimate(cw, ftp), mine = w.id.startsWith('c-');
-    const card = document.createElement('div'); card.className = 'card';
-    card.innerHTML = `<canvas></canvas><div><div class="t">${esc(w.name)}</div>
+    const row = document.createElement('div'); row.className = 'lrow' + (libSel === w.id ? ' sel' : '');
+    row.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(w.name)}</div>
       <div class="m num">${fmtT(cw.total)} · TSS ${Math.round(e.tss)} · ${mine ? 'mine' : esc(w.category || '')} ${lvlDots(w.level)}</div>
       ${w.purpose ? `<div class="p">${esc(w.purpose)}</div>` : ''}</div>
-      <div class="row"><button class="pri" data-a="ride">Ride</button><button data-a="edit">Edit</button></div>`;
-    lib.appendChild(card);
-    requestAnimationFrame(() => drawThumb(card.querySelector('canvas'), cw, ftp));
-    card.querySelector('[data-a=ride]').onclick = () => loadRide(w);
-    card.querySelector('[data-a=edit]').onclick = () => editWorkout(w);
+      <div class="lact"><button class="pri" data-a="ride">Ride</button><button data-a="edit">Edit</button></div>`;
+    lib.appendChild(row);
+    requestAnimationFrame(() => drawThumb(row.querySelector('canvas'), cw, ftp));
+    row.onclick = ev => {
+      const a = ev?.target?.closest?.('[data-a]')?.dataset.a;
+      if (a === 'ride') return loadRide(w);
+      if (a === 'edit') return editWorkout(w);
+      libSel = libSel === w.id ? null : w.id; renderLib();
+    };
+    row.querySelector('[data-a=ride]').onclick = ev => { ev?.stopPropagation?.(); loadRide(w); };
+    row.querySelector('[data-a=edit]').onclick = ev => { ev?.stopPropagation?.(); editWorkout(w); };
   }
   $('#libEmpty').style.display = shown ? 'none' : '';
 }
@@ -417,6 +424,7 @@ function intervalText(cw, i, ftp) {
 function renderRide() {
   if (!V) return;
   const t = curTarget(), m = S.ride.control; $('#lT').textContent = t ?? '–';
+  $('#tgtTile').querySelector('.of').style.display = t == null || (V.jr.wm && V.jr.wm !== 'e') ? 'none' : '';  // free riding: just the power
   $('#lTs').textContent = V.cw ? (V.jr.wm && V.jr.wm !== 'e' ? 'ERG off · ' + valText(m) : t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free · ' + valText(m)) : m === 'w' ? 'ERG' : valText(m);
   $('#lE').textContent = fmtT(V.started ? samples.length : 0);  // time ridden (1 sample a second)
   $('#rName').textContent = V.name;
@@ -733,11 +741,19 @@ async function openSummary(id) {
   openId = id; openRide = r; const m = d.summary;
   $('#summary').style.display = ''; $('#sName').textContent = r.name;
   $('#sDate').textContent = new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const st = [['Time', fmtT(m.time_s)], ['Avg power', m.avg_w + ' W'], ['NP', m.np + ' W'], ['Max', m.max_w + ' W'], ['IF', m.if.toFixed(2)], ['TSS', m.tss], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–'], ['Best 1/5/20', ['1m', '5m', '20m'].map(k => d.best[k] ?? '–').join('/')]];
-  if (!settings.hideVirtualDistance) st.push(['Virtual distance', distText(m.distance_km, settings.units)]);
-  if (d.agent?.local_cues) st.push(['Built-in coach cues', d.agent.local_cues]);
-  if (d.agent?.wakes > 0) st.push(['Coach usage', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
-  $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
+  // the four numbers people look for first, then the rest on one quiet line
+  const elev = m.elevation_gain_m ?? m.elev_gain_m;
+  const hero = [['Time', fmtT(m.time_s)], ...(!settings.hideVirtualDistance ? [['Distance', distText(m.distance_km, settings.units)]] : []),
+    ['Avg power', m.avg_w + ' W'], ['Normalized', m.np + ' W']];
+  if (elev > 0) hero.splice(2, 0, ['Elevation', settings.units === 'metric' ? Math.round(elev) + ' m' : Math.round(elev * 3.28084) + ' ft']);
+  const rest = [['TSS', m.tss], ['IF', m.if.toFixed(2)], ['Max', m.max_w + ' W'], ['Work', m.kJ + ' kJ'], ['Cadence', m.avg_cad + ' rpm'],
+    ...(m.avg_hr ? [['HR', `${m.avg_hr} avg · ${m.max_hr} max`]] : []),
+    ['Best', ['1m', '5m', '20m'].filter(k => d.best[k]).map(k => `${k.replace('m', ' min')} ${d.best[k]} W`).join(' · ') || '–']];
+  if (d.agent?.local_cues) rest.push(['Coach cues', d.agent.local_cues]);
+  if (d.agent?.wakes > 0) rest.push(['Coach', usageText(d.agent.wakes, d.agent.local_cues, d.agent.usage).replace('Agent ', '')]);
+  const heroHtml = hero.map(([k, v]) => `<div><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
+  const restHtml = rest.map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('');
+  $('#sStats').innerHTML = `<div class="shero">${heroHtml}</div><div class="srest">${restHtml}</div>`;
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }
   else if (r.text) { try { cw = compile(r); for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { [s.a, s.b] = Array.isArray(w) ? w : [w, w]; s.u = 'w'; } } } catch {} }

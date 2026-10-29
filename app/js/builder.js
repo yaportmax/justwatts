@@ -4,9 +4,12 @@
 import { parseTree, treeText, flattenTree, flattenPaths, parseDur, stepWatts, ZONES, zoneIdx } from './core.js';
 import { drawBlocks, hexA } from './chart.js';
 
+// four building blocks; colour on the chart shows intensity, so the palette has none
 const PALETTE = [
-  ['Warm up', '10m 45-70%'], ['Steady', '10m 65%'], ['Effort', '5m 100%'], ['Intervals', '5x(3m 110%, 3m 50%)'],
-  ['Recovery', '3m 50%'], ['Ramp', '5m 50-90%'], ['Cool down', '5m 60-40%'], ['Free ride', '10m free'],
+  ['Steady', '5m 75%', 'A fixed target. Drag its top on the chart for watts.'],
+  ['Ramp', '5m 50-90%', 'Target rises or falls smoothly from start to end.'],
+  ['Repeat', '4x(3m 110%, 2m 55%)', 'A set of efforts and recoveries, repeated. Change the count in the list.'],
+  ['Free ride', '5m free', 'No target: you set the resistance.'],
 ];
 
 export const fmtClock = d => {
@@ -148,10 +151,8 @@ export function createBuilder({ list, chart: cv, palette: pal, fit, css, ftp, on
   }
 
   /* ---------- palette ---------- */
-  if (pal) for (const [name, t] of PALETTE) {
-    const c = el('button', 'chip', name); c.title = 'Tap to add, or drag into place';
-    const sw = el('i', 'bsw'); const n = template(t), first = n.items ? n.items[0] : n;
-    sw.style.background = css(ZONES[zoneOf(first)][1]); c.insertBefore?.(sw, c.firstChild);
+  if (pal) for (const [name, t, tip] of PALETTE) {
+    const c = el('button', 'chip', '+ ' + name); c.title = tip + ' Tap to add at the end, or drag into place.';
     c.onpointerdown = e => startListDrag(e, { tpl: t, name });
     pal.appendChild(c);
   }

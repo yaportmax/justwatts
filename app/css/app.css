@@ -107,11 +107,11 @@ h2{font-size:15px;font-weight:600;margin:0 0 4px;letter-spacing:-.005em}
 .empty .hint{margin:0 0 14px;font-size:13px}
 .warnbanner{border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.06);border-radius:var(--r2);padding:10px 14px;margin-bottom:16px;font-size:13px}
 
-/* tabs: underline, page level */
-.tabs{display:flex;gap:24px;margin:0 0 16px;border-bottom:1px solid var(--line)}
-.tabs button{height:auto;background:none;border:0;border-radius:0;padding:8px 0 10px;margin-bottom:-1px;color:var(--dim);font-size:14px;font-weight:500;border-bottom:2px solid transparent}
-.tabs button:hover{background:none;color:var(--ink)}
-.tabs button.on{color:var(--ink);border-bottom-color:var(--ink)}
+/* Workouts | Courses: the page title is the tab switch */
+.tabs{display:flex;gap:20px;align-items:baseline}
+.tabs button{height:auto;background:none;border:0;border-radius:0;padding:0;color:var(--faint);font-size:26px;font-weight:650;letter-spacing:-.02em;line-height:1.15}
+.tabs button:hover{background:none;color:var(--dim)}
+.tabs button.on{color:var(--ink)}
 
 /* toolbars: search + filters on one line */
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
@@ -439,7 +439,7 @@ body.web .serveronly{display:none !important}
   .acct{border:0;margin:0;padding:0}
   .toast{left:50%;top:calc(var(--hh,58px) + 10px)}
   main{padding:16px}
-  .phead h1{font-size:22px}
+  .phead h1,.tabs button{font-size:22px}
   .wk-cols,#lib .lrow{grid-template-columns:84px minmax(0,1fr) 56px}
   .crs-cols,#crsList .lrow{grid-template-columns:84px minmax(0,1fr) 80px}
   .lhead{display:none}
@@ -471,3 +471,6 @@ body.web .serveronly{display:none !important}
 
 /* settings: rows whose only control is hidden (Garmin off) go too */
 .srow:has(#gImport[style*=none]){display:none}
+button.pri:disabled,button.pri:disabled:hover{background:var(--panel2);border-color:var(--line2);color:var(--dim)}
+/* free ride on a course: no segment line, so no empty progress bar */
+.iv:has(#ivNow:empty):has(#ivNext:empty){display:none}

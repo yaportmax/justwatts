@@ -40,16 +40,14 @@
 <section class="view on" id="v-workouts">
   <div id="libPane">
   <div class="phead">
-    <h1>Workouts</h1>
+    <div class="tabs" role="tablist" aria-label="Library">
+      <button role="tab" data-tab="workouts" class="on" aria-selected="true">Workouts</button>
+      <button role="tab" data-tab="courses" aria-selected="false">Courses</button>
+    </div>
     <div class="pact">
       <button id="btnFtp" class="ghost">FTP test</button>
       <span class="jr"><select id="jrCourse" class="pick" aria-label="Just ride course" title="Course for Just ride"></select><button id="btnJust" class="pri">Just ride</button></span>
     </div>
-  </div>
-
-  <div class="tabs" role="tablist">
-    <button role="tab" data-tab="workouts" class="on" aria-selected="true">Workouts</button>
-    <button role="tab" data-tab="courses" aria-selected="false">Courses</button>
   </div>
 
   <div class="tabpane" id="tabCourses" role="tabpanel" style="display:none">

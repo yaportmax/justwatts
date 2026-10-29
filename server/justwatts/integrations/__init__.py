@@ -168,7 +168,10 @@ class Integrations:
         self.log(f"INTEGRATION {svc} disconnected")
 
     def after_ride(self, rid: str) -> list[str]:
-        """Queue uploads for a saved ride: every connected service with auto upload on. Never raises."""
+        """Queue uploads for a saved ride: every connected service with auto upload on. Never raises.
+        Imported rides (ids imp-...) never go back out."""
+        if str(rid).startswith("imp-"):
+            return []
         try:
             svcs = [s for s, c in self.conns.items() if c.uploads and self.connected(s) and self.auto(s)]
             if svcs:
@@ -177,6 +180,26 @@ class Integrations:
         except Exception as e:  # noqa: BLE001 - saving a ride must never fail because of an upload
             self.log(f"UPLOAD queue failed: {e}"[:200])
             return []
+
+    # ---------- import: profile, a page of past rides, one ride's FIT (logs field names, never values) ----------
+    def import_profile(self, svc: str) -> dict:
+        res = self._get(svc).import_profile()
+        if res["missing"] or res["errors"]:
+            self.log(f"IMPORT {svc} profile: missing [{', '.join(res['missing'])}]; failed [{', '.join(res['errors'])}]")
+        return {"service": svc, **res}
+
+    def import_list(self, svc: str, since: str, until: str, start: int = 0) -> dict:
+        res = self._get(svc).import_list(since, until, start)
+        if res.get("skipped"):
+            self.log(f"IMPORT {svc} list: {res['skipped']} entries not read as rides")
+        return {"service": svc, **res}
+
+    def import_fit(self, svc: str, activity_id: str) -> bytes:
+        try:
+            return self._get(svc).import_fit(activity_id)
+        except IntegrationError as e:
+            self.log(f"IMPORT {svc} fit: {e.kind}")
+            raise
 
     def fallback(self, svc: str, rid: str) -> dict:
         return {"ride_id": rid, "fit_url": f"/api/rides/{rid}/fit", "label": FIT_LABEL, "manual": MANUAL.get(svc)}

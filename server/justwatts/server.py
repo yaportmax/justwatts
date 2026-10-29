@@ -462,7 +462,38 @@ class Handler(SimpleHTTPRequestHandler):
         m = UPLOADS_RE.fullmatch(p)
         if m:
             return self.send_json(200, hub.ride_uploads(m[1]) if m[2] == "uploads" else hub.targets(m[1]))
+        m = re.fullmatch(r"/api/integrations/(\w+)/import/(profile|list|fit)", p)
+        if m:
+            return self.integrations_import(m[1], m[2], q)
         return self.send_json(404, {"error": "not found"})
+
+    def integrations_import(self, svc: str, what: str, q: dict):
+        """Import from a connected service: profile values, a page of past rides, one ride's FIT (the page saves it)."""
+        hub = self.server.integrations
+        arg = lambda k, d="": q.get(k, [d])[0]  # noqa: E731
+        try:
+            if what == "profile":
+                return self.send_json(200, hub.import_profile(svc))
+            if what == "list":
+                since, until, start = arg("since"), arg("until") or time.strftime("%Y-%m-%d"), arg("start", "0")
+                if not (re.fullmatch(r"\d{4}-\d{2}-\d{2}", since) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", until) and start.isdigit()):
+                    return self.send_json(400, {"error": "since and until must be YYYY-MM-DD"})
+                return self.send_json(200, hub.import_list(svc, since, until, int(start)))
+            data = hub.import_fit(svc, arg("activity"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return None
+        except KeyError:
+            return self.send_json(404, {"error": "no such integration"})
+        except IntegrationError as e:
+            c = hub.conns.get(svc)
+            body = {"error": scrub(str(e), c.secrets() if c else [])[:300], "kind": e.kind}
+            if e.retry_after:
+                body["retry_after"] = round(e.retry_after)
+            return self.send_json(401 if e.kind == "auth" else 502, body)
 
     def integrations_post(self, p: str, m: re.Match, raw: bytes):
         srv, hub = self.server, self.server.integrations

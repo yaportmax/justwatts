@@ -7,6 +7,7 @@ const { AUTH, BLOCKED, TEMPORARY, DUPLICATE, ACTION, IntegrationError, MANUAL, d
 const { garmin } = require('./garmin');
 const { trainingpeaks } = require('./trainingpeaks');
 const { intervals } = require('./intervals');
+const { strava } = require('./strava');
 
 const DELAYS = [120, 480], MAX_TRIES = DELAYS.length + 1, MAX_RETRY_AFTER = 1800;
 const STUCK_S = 600, GIVE_UP_S = 86400;  // a 'running' job this old died mid-upload; a job still pending after a day gives up
@@ -18,13 +19,16 @@ const SYNC_QUESTION = { id: 'garmin_syncs', text: 'Does your Garmin account alre
   options: [{ id: 'strava', label: 'Strava' }, { id: 'trainingpeaks', label: 'TrainingPeaks' }, { id: 'other', label: 'other' }] };
 const FIT_LABEL = 'upload the .fit file manually';
 const RIDE_RE = /^[\w-]{1,80}$/;
+const IMPORTED_RE = /^imp-/;  // rides brought in by an import never go back out
 
-function hub({ fetch, store, now = () => Date.now() / 1000, sleep, fitUrl = rid => `/api/integrations?op=fit&ride=${encodeURIComponent(rid)}` }) {
+function hub({ fetch, store, now = () => Date.now() / 1000, sleep, log = () => {}, env = process.env, key = null, fitUrl = rid => `/api/integrations?op=fit&ride=${encodeURIComponent(rid)}` }) {
   const conns = {};
-  for (const c of [garmin({ fetch, now, sleep }), trainingpeaks({ fetch, now }), intervals({ fetch })]) conns[c.id] = c;
-  for (const [id, name] of Object.entries(MANUAL_ONLY)) conns[id] = { id, name, uploads: false, connectKind: null, manualOnly: true,
+  const st = strava({ fetch, now, sleep, env, key });  // Strava: OAuth on this server when its app is set up, else by hand
+  for (const c of [garmin({ fetch, now, sleep }), trainingpeaks({ fetch, now }), intervals({ fetch }), ...(st.configured() ? [st] : [])]) conns[c.id] = c;
+  for (const [id, name] of Object.entries(MANUAL_ONLY)) if (!conns[id]) conns[id] = { id, name, uploads: false, connectKind: null, manualOnly: true,
     secrets: () => [], async status() { return { connected: false, manual_only: true }; }, async disconnect() {} };
   const ids = ORDER.filter(id => conns[id]);
+  const importer = svc => { const c = get(svc); if (!c.imports) throw new IntegrationError(BLOCKED, `${c.name} has no import`); return c; };
   const get = svc => { if (!conns[svc]) throw new IntegrationError(BLOCKED, 'no such integration'); return conns[svc]; };
 
   const state = async () => (await store.state('integrations')) || {};
@@ -140,6 +144,7 @@ function hub({ fetch, store, now = () => Date.now() / 1000, sleep, fitUrl = rid 
     // The page posts the FIT after a ride is saved; it is kept for retries and the fallback link.
     async upload(rid, fit, meta, services) {
       if (!RIDE_RE.test(rid)) throw new IntegrationError(BLOCKED, 'bad ride id');
+      if (IMPORTED_RE.test(rid)) throw new IntegrationError(BLOCKED, 'imported rides are not uploaded');
       await store.putFile(`fit:${rid}`, fit);
       await store.setState(`meta:${rid}`, { ...meta, ride_id: rid });
       const s = await state(), garminOn = await connected('garmin'), svcs = [];
@@ -204,6 +209,31 @@ function hub({ fetch, store, now = () => Date.now() / 1000, sleep, fitUrl = rid 
       return { date: day, workouts, errors };
     },
     fit: rid => (RIDE_RE.test(rid) ? store.file(`fit:${rid}`) : null),
+    stravaStart: uid => { if (!conns.strava || conns.strava.manualOnly) throw new IntegrationError(BLOCKED, 'Strava is not set up on this server'); return conns.strava.authorizeUrl(uid); },
+    async stravaCallback(uid, q) {
+      if (!conns.strava || conns.strava.manualOnly) throw new IntegrationError(BLOCKED, 'Strava is not set up on this server');
+      const res = await conns.strava.callback(store, uid, q);
+      await patch('strava', { last_error: null });
+      return res;
+    },
+    // import: profile values (each piece optional), a page of past rides, one ride's FIT. Logs field names only.
+    async importProfile(svc) {
+      const c = importer(svc);
+      const res = await c.importProfile(store);
+      if (res.missing.length || Object.keys(res.errors).length) {
+        log(`import ${svc} profile: missing [${res.missing.join(', ')}]; failed [${Object.entries(res.errors).map(([k, e]) => `${k}: ${scrub(e, []).replace(/\d{6,}/g, '#').slice(0, 60)}`).join('; ')}]`);
+      }
+      return { service: svc, ...res };
+    },
+    async importList(svc, opts) {
+      const res = await importer(svc).importList(store, opts);
+      if (res.skipped) log(`import ${svc} list: ${res.skipped} entries not read as rides`);
+      return { service: svc, ...res };
+    },
+    async importFit(svc, id) {
+      try { return await importer(svc).importFit(store, id); }
+      catch (e) { log(`import ${svc} fit: ${e.kind || 'error'} ${String(e.message).replace(/\d{6,}/g, '#').slice(0, 80)}`); throw e; }
+    },
     secretsOf, conns,
   };
   return api;

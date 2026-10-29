@@ -13,11 +13,18 @@
 //   5. refresh: same URL, grant_type=refresh_token; refresh 15 min before the JWT exp
 //   6. upload: POST connectapi.garmin.com/upload-service/upload (multipart "file"), Bearer, Android app headers;
 //      409 = duplicate ("Duplicate Activity.", CHANGELOG 0.3.19)
+//   7. import (same Bearer, connectapi.garmin.com; paths as python-garminconnect garmin.py):
+//      /userprofile-service/userprofile/user-settings (userData: weight g, lactateThresholdHeartRate),
+//      /userprofile-service/socialProfile (displayName), /weight-service/weight/dateRange,
+//      /biometric-service/biometric/latestFunctionalThresholdPower/CYCLING, /biometric-service/heartRateZones,
+//      /biometric-service/biometric/latestLactateThreshold, /wellness-service/wellness/dailyHeartRate/{displayName},
+//      /activitylist-service/activities/search/activities, /download-service/files/activity/{id} (zip, original FIT)
 // Only {di_token, di_refresh_token, di_client_id} are stored; the password is used once and dropped.
 // Risk: Garmin may refuse logins from datacenter IPs or Node's TLS fingerprint (garth #217, garminconnect #369);
 // that surfaces as `blocked`, and the page offers the local app or the manual FIT upload.
 'use strict';
 const { AUTH, BLOCKED, TEMPORARY, DUPLICATE, IntegrationError, kindForStatus, retryAfter, call, multipart, realSleep } = require('./base');
+const I = require('./importing');
 
 const SSO = 'https://sso.garmin.com';
 const SERVICE = 'https://mobile.integration.garmin.com/gcm/ios';
@@ -26,7 +33,8 @@ const IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebK
 const DI_TOKEN = 'https://diauth.garmin.com/di-oauth2-service/oauth/token';
 const DI_GRANT = 'https://connectapi.garmin.com/di-oauth2-service/oauth/grant/service_ticket';
 const DI_CLIENTS = ['GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2', 'GARMIN_CONNECT_MOBILE_ANDROID_DI_2024Q4', 'GARMIN_CONNECT_MOBILE_ANDROID_DI', 'GARMIN_CONNECT_MOBILE_IOS_DI'];
-const UPLOAD = 'https://connectapi.garmin.com/upload-service/upload';
+const API = 'https://connectapi.garmin.com';
+const UPLOAD = `${API}/upload-service/upload`;
 const NATIVE = { 'User-Agent': 'GCM-Android-5.23', 'X-Garmin-User-Agent': 'com.garmin.android.apps.connectmobile/5.23; ; Google/sdk_gphone64_arm64/google; Android/33; Dalvik/2.1.0',
   'X-Garmin-Paired-App-Version': '10861', 'X-Garmin-Client-Platform': 'Android', 'X-App-Ver': '10861', 'X-Lang': 'en', 'X-GCExperience': 'GC5', 'Accept-Language': 'en-US,en;q=0.9' };
 const MFA_TTL_S = 300;
@@ -45,6 +53,9 @@ function mergeJar(jar, add) {
 function jwtExp(tok) {
   try { return Number(JSON.parse(Buffer.from(String(tok).split('.')[1], 'base64url').toString('utf8')).exp) || null; } catch { return null; }
 }
+
+const ymd = ms => new Date(ms).toISOString().slice(0, 10);
+const PAGE = 50;
 
 function garmin({ fetch, now = () => Date.now() / 1000, sleep = realSleep }) {
   const q = new URLSearchParams({ clientId: CLIENT, locale: 'en-US', service: SERVICE }).toString();
@@ -98,8 +109,28 @@ function garmin({ fetch, now = () => Date.now() / 1000, sleep = realSleep }) {
     return { connected: true };
   }
 
+  // GET on connectapi with the DI token; one forced refresh on 401. Returns { status, json, buf }.
+  async function get(us, path, { raw = false } = {}) {
+    let r;
+    for (const attempt of [0, 1]) {
+      const s = await token(us, attempt === 1);
+      try {
+        const res = await fetch(API + path, { redirect: 'manual', headers: { ...NATIVE, Accept: raw ? '*/*' : 'application/json', Authorization: `Bearer ${s.di_token}` },
+          ...(typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? { signal: AbortSignal.timeout(9000) } : {}) });
+        const buf = Buffer.from(await res.arrayBuffer());
+        let json = null; if (!raw) { try { json = buf.length ? JSON.parse(buf.toString('utf8')) : null; } catch { json = null; } }
+        r = { status: res.status, headers: res.headers, json, buf };
+      } catch (e) { throw new IntegrationError(TEMPORARY, 'network: ' + String((e && e.name) || e).slice(0, 60)); }
+      if (r.status !== 401) break;
+    }
+    if (r.status === 401) throw new IntegrationError(AUTH, 'Garmin sign-in expired; connect Garmin again');
+    if (r.status >= 300) throw new IntegrationError(kindForStatus(r.status), `Garmin said ${r.status}`, retryAfter(r.headers));
+    return r;
+  }
+  const piece = p => p.then(r => ({ ok: true, json: r.json }), e => ({ ok: false, error: e.message, kind: e.kind }));
+
   return {
-    id: 'garmin', name: 'Garmin Connect', official: false,
+    id: 'garmin', name: 'Garmin Connect', official: false, imports: true,
     fields: [{ name: 'email', label: 'Garmin email', secret: false },
       { name: 'password', label: 'Garmin password', secret: true, help: 'Sent to Garmin once, never stored' },
       { name: 'mfa_code', label: 'Code from Garmin', secret: false, step: 'mfa' }],
@@ -139,6 +170,41 @@ function garmin({ fetch, now = () => Date.now() / 1000, sleep = realSleep }) {
       throw ssoFail(r);
     },
     async disconnect(us) { await us.setSecret('garmin', null); await us.setSecret('garmin_mfa', null); },
+    // profile: each call on its own; one failing never fails the rest. The token is read (and refreshed) once first.
+    async importProfile(us) {
+      await token(us);
+      const today = ymd(now() * 1000), yearAgo = ymd((now() - 365 * 86400) * 1000);
+      const social = piece(get(us, '/userprofile-service/socialProfile'));
+      const pieces = {
+        settings: piece(get(us, '/userprofile-service/userprofile/user-settings')),
+        weight: piece(get(us, `/weight-service/weight/dateRange?startDate=${yearAgo}&endDate=${today}`)),
+        ftp: piece(get(us, '/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING')),
+        zones: piece(get(us, '/biometric-service/heartRateZones')),
+        lactate: piece(get(us, '/biometric-service/biometric/latestLactateThreshold')),
+        rhr: social.then(s => {
+          const name = s.ok && s.json && s.json.displayName;
+          if (!name) return { ok: false, error: s.ok ? 'no displayName' : s.error };
+          return piece(get(us, `/wellness-service/wellness/dailyHeartRate/${encodeURIComponent(name)}?date=${today}`));
+        }),
+      };
+      const done = {};
+      for (const [k, p] of Object.entries(pieces)) done[k] = await p;
+      if (Object.values(done).every(p => !p.ok) && Object.values(done).some(p => p.kind === AUTH)) throw new IntegrationError(AUTH, 'Garmin sign-in expired; connect Garmin again');
+      return I.garminProfile(done);
+    },
+    // one page of cycling activities between two days (inclusive), newest first
+    async importList(us, { since, until, start = 0 }) {
+      const q = new URLSearchParams({ startDate: since, endDate: until, start: String(start), limit: String(PAGE), activityType: 'cycling' });
+      const r = await get(us, `/activitylist-service/activities/search/activities?${q}`);
+      const raw = Array.isArray(r.json) ? r.json : (r.json && Array.isArray(r.json.activityList) ? r.json.activityList : []);
+      const items = raw.map(I.garminActivity).filter(Boolean);
+      return { items, skipped: raw.length - items.length, more: raw.length >= PAGE, next: start + raw.length };
+    },
+    async importFit(us, id) {
+      if (!/^\d{1,20}$/.test(String(id))) throw new IntegrationError(BLOCKED, 'bad activity id');
+      const r = await get(us, `/download-service/files/activity/${id}`, { raw: true });
+      try { return I.fitFromZip(r.buf); } catch (e) { throw new IntegrationError(BLOCKED, `Garmin file: ${e.message}`); }
+    },
     async upload(us, fit, meta) {
       let r;
       for (const attempt of [0, 1]) {

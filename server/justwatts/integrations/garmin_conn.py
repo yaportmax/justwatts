@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..garmin import DISABLED_MSG
+from . import importing as I
 from .base import AUTH, BLOCKED, DUPLICATE, TEMPORARY, Connector, IntegrationError, RideMeta
 
 MFA_TTL_S = 300
@@ -38,6 +39,7 @@ class GarminConnector(Connector):
     id, name = "garmin", "Garmin Connect"
     official = False
     connect_kind = "fields"
+    imports = True
     fields = [{"name": "email", "label": "Garmin email", "secret": False},
               {"name": "password", "label": "Garmin password", "secret": True, "help": "Sent to Garmin once, never stored"},
               {"name": "mfa_code", "label": "Code from Garmin", "secret": False, "step": "mfa"}]
@@ -117,6 +119,80 @@ class GarminConnector(Connector):
                 f.unlink(missing_ok=True)
         if hasattr(self.link, "reset"):
             self.link.reset()
+
+    # ---------- import: the same connectapi paths as the web (python-garminconnect's connectapi / download) ----------
+    def _client(self):
+        if not self.enabled:
+            raise IntegrationError(BLOCKED, DISABLED_MSG)
+        if not self.link.linked():
+            raise IntegrationError(AUTH, "not signed in to Garmin")
+        try:
+            return self.link.client()
+        except Exception as e:  # noqa: BLE001
+            raise IntegrationError(classify(str(e)), f"Garmin: {e}"[:200]) from None
+
+    @staticmethod
+    def _fn(g, name: str):
+        """python-garminconnect moved connectapi/download between versions: Garmin, Garmin.client, Garmin.garth."""
+        for o in (g, getattr(g, "client", None), getattr(g, "garth", None)):
+            f = getattr(o, name, None) if o is not None else None
+            if callable(f):
+                return f
+        raise IntegrationError(BLOCKED, f"this garminconnect has no {name}; update it: pip install -U garminconnect")
+
+    def _get(self, g, path: str):
+        f = self._fn(g, "connectapi")
+        try:
+            return f(path)
+        except Exception as e:  # noqa: BLE001
+            raise IntegrationError(classify(str(e)), f"Garmin: {e}"[:160]) from None
+
+    def import_profile(self) -> dict:
+        g = self._client()
+        today = time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+        year_ago = time.strftime("%Y-%m-%d", time.gmtime(self.clock() - 365 * 86400))
+        paths = {"settings": "/userprofile-service/userprofile/user-settings",
+                 "weight": f"/weight-service/weight/dateRange?startDate={year_ago}&endDate={today}",
+                 "ftp": "/biometric-service/biometric/latestFunctionalThresholdPower/CYCLING",
+                 "zones": "/biometric-service/heartRateZones",
+                 "lactate": "/biometric-service/biometric/latestLactateThreshold"}
+        pieces: dict[str, dict] = {}
+        for k, path in paths.items():
+            try:
+                pieces[k] = {"ok": True, "json": self._get(g, path)}
+            except IntegrationError as e:
+                pieces[k] = {"ok": False, "error": str(e), "kind": e.kind}
+        try:
+            name = (self._get(g, "/userprofile-service/socialProfile") or {}).get("displayName") or getattr(g, "display_name", None)
+            pieces["rhr"] = {"ok": True, "json": self._get(g, f"/wellness-service/wellness/dailyHeartRate/{name}?date={today}")} if name \
+                else {"ok": False, "error": "no displayName"}
+        except IntegrationError as e:
+            pieces["rhr"] = {"ok": False, "error": str(e), "kind": e.kind}
+        if all(not p["ok"] for p in pieces.values()) and any(p.get("kind") == AUTH for p in pieces.values()):
+            raise IntegrationError(AUTH, "Garmin sign-in expired; connect Garmin again")
+        return I.garmin_profile(pieces)
+
+    def import_list(self, since: str, until: str, start: int = 0) -> dict:
+        g = self._client()
+        q = f"startDate={since}&endDate={until}&start={int(start)}&limit=50&activityType=cycling"
+        raw = self._get(g, f"/activitylist-service/activities/search/activities?{q}")
+        raw = raw if isinstance(raw, list) else (raw or {}).get("activityList") or [] if isinstance(raw, dict) else []
+        items = [x for x in (I.garmin_activity(a) for a in raw) if x]
+        return {"items": items, "skipped": len(raw) - len(items), "more": len(raw) >= 50, "next": int(start) + len(raw)}
+
+    def import_fit(self, activity_id: str) -> bytes:
+        if not re.fullmatch(r"\d{1,20}", str(activity_id)):
+            raise IntegrationError(BLOCKED, "bad activity id")
+        g = self._client()
+        f = self._fn(g, "download")
+        try:
+            data = f(f"/download-service/files/activity/{activity_id}")
+        except Exception as e:  # noqa: BLE001
+            raise IntegrationError(classify(str(e)), f"Garmin: {e}"[:160]) from None
+        try:
+            return I.fit_from_zip(data)
+        except ValueError as e:
+            raise IntegrationError(BLOCKED, f"Garmin file: {e}") from None
 
     def upload(self, fit: bytes, meta: RideMeta) -> dict:
         if not self.enabled:

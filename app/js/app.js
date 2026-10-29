@@ -112,6 +112,13 @@ const conn = createConnect({ $, F, WEB, toast,
   downloadFit: id => fileLink('fit', id),
   onPlanned: list => { planned = list; if ($('#v-workouts').classList.contains('on') && wkTab === 'workouts') renderLib(); },
   stravaSetup: () => { const d = $('#stOwnBox'); d.open = true; d.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); },
+  // import (connect.js + importer.js): profile values into settings, past rides into History (never uploaded back)
+  settings: () => settings,
+  applyProfile: patch => { Object.assign(settings, patch); saveSettings(Object.keys(patch)); renderSettings(); showSettings(); },
+  listRides: async () => { try { return (await (await F('/api/rides')).json()).rides; } catch { return []; } },
+  saveRide: async r => { try { return (await api('/api/ride', r)).ok; } catch { return false; } },
+  deleteRide: async id => { try { return (await api(`/api/rides/${id}/delete`, {})).ok; } catch { return false; } },  // a poorer copy of an imported ride
+  onImported: () => { renderHistory(); account?.sync.kick(); },
 });
 // open world: the page provides the road ahead (world.js); quiet controls (a refused road update is not an error to show)
 const world = createWorld({ control: (action, b) => apiJson('/api/ride/control', { action, ...b }),
@@ -802,13 +809,14 @@ function onKey(e) {
 document.addEventListener('keydown', onKey);
 /* ---------- history (server archive is the source of truth) ---------- */
 let rows = [];
+const IMPORTED = { garmin: 'Garmin', intervals: 'intervals.icu', strava: 'Strava' };  // the source tag on imported rides
 async function renderHistory() {
   try { rows = (await (await F('/api/rides')).json()).rides; } catch { return; }
   const tb = $('#hist'); tb.innerHTML = '';
   $('#histEmpty').style.display = rows.length ? 'none' : '';
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${esc(fmtT(r.time_s))}</td><td class="num">${esc(r.avg_w)}</td><td class="num">${esc(r.np)}</td><td class="num">${esc(r.tss)}</td><td class="num">${esc(r.kJ)}</td><td class="num">${esc(r.avg_hr ?? '–')}</td><td class="num">${esc(r.best?.['5m'] ?? '–')}</td>`;
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${IMPORTED[r.source] && /^imp-/.test(r.id) ? ` <span class="badge src">${esc(IMPORTED[r.source])}</span>` : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${esc(fmtT(r.time_s))}</td><td class="num">${esc(r.avg_w)}</td><td class="num">${esc(r.np)}</td><td class="num">${esc(r.tss)}</td><td class="num">${esc(r.kJ)}</td><td class="num">${esc(r.avg_hr ?? '–')}</td><td class="num">${esc(r.best?.['5m'] ?? '–')}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
   renderTrends();
@@ -1187,7 +1195,7 @@ $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3
 showTab(wkTab); aView(document.querySelector('.view.on')?.id?.replace('v-', '') || 'workouts');
 setStatus();
 loadSettings().then(syncHrZones);
-conn.load().then(() => conn.loadPlanned()).catch(() => {});
+conn.load().then(() => { conn.offerImport(); return conn.loadPlanned(); }).catch(() => {});  // a paused import is offered again
 migrateLocalRides().then(renderHistory);
 F('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() => {});
 connect();

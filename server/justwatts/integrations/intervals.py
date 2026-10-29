@@ -13,6 +13,7 @@ import re
 import urllib.parse
 from pathlib import Path
 
+from . import importing as I
 from . import planned as P
 from .base import (AUTH, BLOCKED, TEMPORARY, Connector, IntegrationError, Resp, RideMeta, SecretFile, http,
                    kind_for_status, multipart, retry_after)
@@ -27,6 +28,7 @@ RIDE_TYPES = ("Ride", "VirtualRide", "MountainBikeRide", "GravelRide", None, "")
 class IntervalsConnector(Connector):
     id, name = "intervals", "intervals.icu"
     planned_workouts = True
+    imports = True
     fields = [{"name": "athlete_id", "label": "Athlete ID", "secret": False, "help": "Settings, Developer Settings, e.g. i12345"},
               {"name": "api_key", "label": "API key", "secret": True, "help": "Settings, Developer Settings"}]
 
@@ -87,6 +89,34 @@ class IntervalsConnector(Connector):
         act = (first or {}).get("id")
         return {"activity_id": act, "url": f"https://intervals.icu/activities/{act}" if act else None,
                 "duplicate": r.status == 200}
+
+    def import_profile(self) -> dict:
+        aid, key = self._creds()
+        try:
+            piece = {"ok": True, "json": self._call("GET", f"/athlete/{urllib.parse.quote(aid)}", key).json()}
+        except IntegrationError as e:
+            if e.kind == AUTH:
+                raise
+            piece = {"ok": False, "error": str(e)}
+        return I.intervals_profile({"athlete": piece})
+
+    def import_list(self, since: str, until: str, start: int = 0) -> dict:
+        aid, key = self._creds()
+        q = urllib.parse.urlencode({"oldest": since, "newest": until})
+        raw = self._call("GET", f"/athlete/{urllib.parse.quote(aid)}/activities?{q}", key).json()
+        raw = raw if isinstance(raw, list) else []
+        items = [x for x in (I.intervals_activity(a) for a in raw) if x]
+        return {"items": items, "skipped": len(raw) - len(items), "more": False, "next": len(raw)}
+
+    def import_fit(self, activity_id: str) -> bytes:
+        if not re.fullmatch(r"i?\d{1,20}", str(activity_id)):
+            raise IntegrationError(BLOCKED, "bad activity id")
+        _, key = self._creds()
+        r = self._call("GET", f"/activity/{urllib.parse.quote(str(activity_id))}/fit-file", key, None, {"Accept": "*/*"})
+        try:
+            return I.fit_from_zip(r.body)
+        except ValueError as e:
+            raise IntegrationError(BLOCKED, f"intervals.icu file: {e}") from None
 
     def planned(self, day: str) -> list[dict]:
         aid, key = self._creds()

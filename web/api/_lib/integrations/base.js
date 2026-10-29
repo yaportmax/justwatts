@@ -35,7 +35,7 @@ async function call(fetch, url, opt = {}) {
   const buf = Buffer.from(await res.arrayBuffer());
   const text = buf.toString('utf8');
   let json = null; try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-  return { status: res.status, headers: res.headers, text, json };
+  return { status: res.status, headers: res.headers, text, json, buf };
 }
 
 function multipart(fields, fileField, filename, data, ctype = 'application/octet-stream') {
@@ -74,8 +74,8 @@ for (const m of Object.values(MANUAL)) {
 function describe(c) {
   const d = {
     id: c.id, name: c.name, official: c.official !== false,
-    caps: { upload: c.uploads !== false, planned: !!c.plannedWorkouts },
-    connect: c.connectKind === null ? null : { kind: c.connectKind || 'fields', fields: (c.fields || []).map(f => ({ ...f })) },
+    caps: { upload: c.uploads !== false, planned: !!c.plannedWorkouts, import: !!c.imports },
+    connect: c.connectKind === null ? null : { kind: c.connectKind || 'fields', ...(c.connectUrl ? { url: c.connectUrl } : {}), fields: (c.fields || []).map(f => ({ ...f })) },
     manual: MANUAL[c.id] || null,
   };
   if (c.official === false) d.unofficial_note = UNOFFICIAL_NOTE.replace('{name}', c.name);

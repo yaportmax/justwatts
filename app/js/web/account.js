@@ -13,7 +13,7 @@ const REASONS = {
   bad_state: () => 'Sign-in timed out. Try again.',
   denied: () => 'Sign-in cancelled.',
   provider_failed: p => `${p} sign-in failed. Try again.`,
-  strava_capped: () => 'Strava sign-in is full for now. Use Google or email.',
+  strava_capped: () => "Just Watts has hit Strava's user limit. Strava sign-in is coming back soon. Use Google or email.",
   email_in_use: p => `That ${p} address has a Just Watts account. Sign in with email, then link ${p} in Settings.`,
   identity_in_use: p => `That ${p} account is linked to another Just Watts account.`,
   already_linked: p => `This account already has a different ${p} sign-in.`,
@@ -162,7 +162,7 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     const b = [];
     if (providers?.google) b.push(`<button type="button" class="oauth" data-a="google">${ICONS.google}<span>Continue with Google</span></button>`);
     if (providers?.strava) b.push(`<button type="button" class="oauth" data-a="strava">${ICONS.strava}<span>Continue with Strava</span></button>`);
-    if (providers?.strava && providers.stravaCapped) b.push('<div class="hint capped">Strava sign-in is limited for now. If it fails, use Google or email.</div>');
+    if (providers?.strava && providers.stravaCapped) b.push(`<div class="hint capped">${esc(REASONS.strava_capped())}</div>`);
     return b.length ? `<div class="oauths">${b.join('')}</div><div class="or"><span>or</span></div>` : '';
   }
   function renderDialog() {

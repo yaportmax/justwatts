@@ -41,13 +41,13 @@ def test_hr_zone_parity(js):
 
 
 def test_units(js):
-    cases = [[88.81, 195.8, "imperial"], [88.81, 88.8, "metric"], [0, "", "imperial"], [70, 154.3, None]]
+    cases = [[81.65, 180, "imperial"], [72.5, 72.5, "metric"], [0, "", "imperial"], [70, 154.3, None]]
     out = js([{"op": "units", "cases": cases}])[0]
-    assert out[0] == {"show": 195.8, "kg": 88.81, "unit": "lb", "dist": "55.2 mi"}
-    assert out[1] == {"show": 88.8, "kg": 88.8, "unit": "kg", "dist": "88.8 km"}
+    assert out[0] == {"show": 180, "kg": 81.65, "unit": "lb", "dist": "50.7 mi"}
+    assert out[1] == {"show": 72.5, "kg": 72.5, "unit": "kg", "dist": "72.5 km"}
     assert out[2]["show"] == "" and out[2]["kg"] == 0
     assert out[3]["unit"] == "lb" and out[3]["show"] == 154.3  # no setting = imperial
-    lbs = [150, 165.5, 195.8, 220.1]
+    lbs = [150, 165.5, 182.3, 220.1]
     kgs = [r["kg"] for r in js([{"op": "units", "cases": [[0, lb, "imperial"] for lb in lbs]}])[0]]
     back = [r["show"] for r in js([{"op": "units", "cases": [[kg, 0, "imperial"] for kg in kgs]}])[0]]
     assert back == lbs  # lb survives the kg round trip

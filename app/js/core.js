@@ -39,7 +39,7 @@ export function weightShow(kg, units) {  // value for the weight input; '' when 
   if (!(kg > 0)) return '';
   return Math.round((isMetric(units) ? kg : kg * LB_PER_KG) * 10) / 10;
 }
-export function weightKg(v, units) {  // input value -> kg (2 decimals so 195.8 lb round-trips)
+export function weightKg(v, units) {  // input value -> kg (2 decimals so 182.3 lb round-trips)
   v = +v; if (!(v > 0)) return 0;
   return Math.round((isMetric(units) ? v : v / LB_PER_KG) * 100) / 100;
 }
@@ -266,3 +266,26 @@ ${pts}
 </Track></Lap><Notes>${esc(r.name)}</Notes></Activity></Activities></TrainingCenterDatabase>
 `;
 }
+
+/* ---------- ERG / MRC import (TrainingPeaks, TrainerRoad and others export these) ---------- */
+// [COURSE DATA] holds "minutes value" points: the same value at two points is a steady segment, different values a
+// ramp. MRC values are % FTP, ERG values watts. -> { name, text } in the workout text format.
+export function fromErgMrc(src) {
+  const t = String(src || ''), head = /\[COURSE HEADER\]([\s\S]*?)\[END COURSE HEADER\]/i.exec(t)?.[1] || '';
+  const data = /\[COURSE DATA\]([\s\S]*?)\[END COURSE DATA\]/i.exec(t)?.[1];
+  if (data == null) throw new Error('no [COURSE DATA]');
+  const pct = /\bPERCENT\b/i.test(head), u = pct ? '%' : 'w';
+  const pts = data.split(/\r?\n/).map(l => l.trim().split(/\s+/).map(Number)).filter(p => p.length >= 2 && p.every(Number.isFinite));
+  if (pts.length < 2) throw new Error('no points');
+  const steps = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [m0, v0] = pts[i], [m1, v1] = pts[i + 1], d = Math.round((m1 - m0) * 60);
+    if (d <= 0) continue;  // a vertical jump: the next pair starts the new value
+    const k = x => pct ? x / 100 : Math.round(x);
+    steps.push({ d, a: k(v0), b: k(v1), u });
+  }
+  if (!steps.length) throw new Error('no steps');
+  const name = (/^\s*(?:DESCRIPTION|FILE NAME)\s*=\s*(.+)$/im.exec(head)?.[1] || 'Imported').trim().replace(/\.(erg|mrc)$/i, '').slice(0, 80);
+  return { name, text: toText(steps) };
+}
+

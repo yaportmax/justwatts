@@ -474,3 +474,9 @@ body.web .serveronly{display:none !important}
 button.pri:disabled,button.pri:disabled:hover{background:var(--panel2);border-color:var(--line2);color:var(--dim)}
 /* free ride on a course: no segment line, so no empty progress bar */
 .iv:has(#ivNow:empty):has(#ivNext:empty){display:none}
+/* site footer: what the app is and the privacy link (required on the home view), never on the ride screen */
+.sitefoot{margin:64px 0 0;padding:16px 0 0;border-top:1px solid var(--line);color:var(--faint);font-size:12px;display:flex;gap:20px;flex-wrap:wrap;align-items:baseline}
+.sitefoot span{flex:1;min-width:260px}
+.sitefoot a{color:var(--dim);text-decoration:none}
+.sitefoot a:hover{color:var(--ink);text-decoration:underline}
+main:has(#v-ride.on) .sitefoot{display:none}

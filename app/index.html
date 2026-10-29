@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Just Watts</title>
+<meta name="description" content="Just Watts is a free, open-source smart trainer app for indoor cycling: ERG workouts, real-road courses, ride history and uploads to Garmin and Strava.">
 <link rel="preload" href="fonts/InterVariable-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/app.css">
 <meta name="theme-color" content="#0b0d10">
@@ -82,7 +83,7 @@
     </div>
     <div class="pact">
       <button id="bUndo" class="ghost" title="Undo (Ctrl+Z)">Undo</button>
-      <button id="bImport" class="ghost">Import .zwo</button>
+      <button id="bImport" class="ghost" title=".zwo, .erg or .mrc (Zwift, TrainingPeaks, TrainerRoad)">Import</button>
       <button id="bZwo" class="ghost" title="Download as .zwo">Export .zwo</button>
       <button id="bDel" class="ghost danger" style="display:none">Delete</button>
       <button id="bSave">Save</button>
@@ -110,7 +111,7 @@
         <div class="err" id="bErr"></div>
       </aside>
     </div>
-    <input type="file" id="zwoFile" accept=".zwo,.xml" hidden>
+    <input type="file" id="zwoFile" accept=".zwo,.xml,.erg,.mrc" hidden>
   </div>
   </div>
 </section>
@@ -308,6 +309,10 @@
   </div>
 </section>
 
+<footer class="sitefoot" id="siteFoot">
+  <span>Just Watts is a free, open-source smart trainer app for indoor cycling: structured ERG workouts, real-road courses, ride history and uploads to Garmin and Strava. Optional account to sync across devices.</span>
+  <a href="https://justwatts.com/privacy">Privacy policy</a><a href="https://github.com/yaportmax/justwatts" target="_blank" rel="noopener">Source</a>
+</footer>
 </main>
 <div class="modal" id="ftpModal">
   <div class="panel dlg" role="dialog" aria-labelledby="ftpTitle">

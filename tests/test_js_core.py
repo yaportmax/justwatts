@@ -191,3 +191,13 @@ def test_zwo_export(js):
 def test_fmt_t(js):
     assert js([{"op": "fmtT", "values": [0, 59.4, 59.5, 61, 3599, 3600, 3661]}])[0] == \
         ["0:00", "0:59", "1:00", "1:01", "59:59", "1:00:00", "1:01:01"]
+
+
+def test_erg_and_mrc_import(js):
+    mrc = ("[COURSE HEADER]\nVERSION = 2\nDESCRIPTION = VO2 Short (45/30s)\nMINUTES PERCENT\n[END COURSE HEADER]\n"
+           "[COURSE DATA]\n0.00\t45\n10.00\t70\n10.00\t120\n10.75\t120\n10.75\t50\n11.25\t50\n[END COURSE DATA]")
+    erg = "[COURSE HEADER]\nMINUTES WATTS\n[END COURSE HEADER]\n[COURSE DATA]\n0 100\n5 100\n5 300\n6 300\n[END COURSE DATA]"
+    a, b, bad = js([{"op": "ergmrc", "text": mrc}, {"op": "ergmrc", "text": erg}, {"op": "ergmrc", "text": "hello"}])
+    assert a == {"name": "VO2 Short (45/30s)", "text": "10m 45-70%, 45s 120%, 30s 50%"}
+    assert b == {"name": "Imported", "text": "5m 100w, 1m 300w"}
+    assert bad == {"error": "no [COURSE DATA]"}

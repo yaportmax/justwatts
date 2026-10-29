@@ -129,7 +129,7 @@ function sortedWorkouts(list) {
   const mixed = []; for (let left = rest.length; left;) for (const a of q.values()) if (a.length) { mixed.push(a.shift()); left--; }
   return [...mine, ...top, ...mixed];
 }
-const lvlDots = n => n ? `<span class="lvl" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
+const lvlDots = n => n ? `<span class="lvl l${n}" title="Difficulty ${n} of 5">${[1, 2, 3, 4, 5].map(i => `<i${i <= n ? ' class="on"' : ''}></i>`).join('')}</span>` : '';
 let libSel = null, libCourse = '';  // the selected workout row and the course picked on it (Flat: '')
 function renderLib() {
   const ftp = settings.ftp, lib = $('#lib'); lib.innerHTML = ''; let shown = 0;
@@ -138,8 +138,8 @@ function renderLib() {
     const e = estimate(cw, ftp), mine = w.id.startsWith('c-');
     const on = libSel === w.id, row = document.createElement('div'); row.className = 'lrow' + (on ? ' sel' : '');
     row.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(w.name)}</div>
-      <div class="m num">${fmtT(cw.total)} · TSS ${Math.round(e.tss)} · ${mine ? 'mine' : esc(w.category || '')} ${lvlDots(w.level)}</div>
       ${w.purpose ? `<div class="p">${esc(w.purpose)}</div>` : ''}</div>
+      <div class="c${mine ? ' mine' : ''}">${mine ? 'Mine' : esc(w.category || '')}</div><div class="m num r">${fmtT(cw.total)}</div><div class="m num r">${Math.round(e.tss)}</div><div>${lvlDots(w.level)}</div>
       <div class="lact">${on ? `<select class="pick" data-a="pick" aria-label="Course">${courses.options(libCourse)}</select>` : ''}<button class="pri" data-a="ride">Ride</button><button data-a="edit">Edit</button></div>`;
     lib.appendChild(row);
     requestAnimationFrame(() => drawThumb(row.querySelector('canvas'), cw, ftp));
@@ -163,17 +163,28 @@ function editWorkout(w) {
   editing = w.id.startsWith('c-') ? w.id : null;
   $('#bName').value = editing ? w.name : w.name + (w.id.startsWith('p-') ? ' (mine)' : '');
   $('#bText').value = w.text; $('#bDel').style.display = editing ? '' : 'none';
-  renderBuilder(); $('#bName').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  openBuilder(true);
 }
+// the builder is its own page inside Workouts: New workout or Edit opens it, the crumb goes back
+function openBuilder(on) {
+  $('#libPane').style.display = on ? 'none' : ''; $('#builderPane').style.display = on ? '' : 'none';
+  if (on) { renderBuilder(); globalThis.scrollTo?.(0, 0); } else renderLib();
+}
+$('#btnNew').onclick = () => {
+  editing = null; $('#bName').value = 'My workout'; $('#bText').value = '10m 45-75%, 4x(5m 100%, 3m 55%), 8m 50-40%';
+  $('#bDel').style.display = 'none'; openBuilder(true);
+};
+$('#bBack').onclick = () => openBuilder(false);
 function builderWorkout() { return { id: editing || 'c-' + Date.now().toString(36), name: $('#bName').value.trim() || 'Untitled', text: $('#bText').value }; }
 const builder = createBuilder({ list: $('#bList'), chart: $('#bChart'), palette: $('#bPal'), fit, css, ftp: () => settings.ftp, onEdit: text => { $('#bText').value = text; renderBuilder(); } });
 function renderBuilder() {
   const w = builderWorkout(), ok = builder.load(w.text);
   try {
     const cw = compile(w), e = estimate(cw, settings.ftp);
-    $('#bErr').textContent = ''; $('#bStats').textContent = `${fmtT(cw.total)} · TSS ${Math.round(e.tss)} · IF ${e.IF.toFixed(2)} · NP ${Math.round(e.np)} W`;
+    $('#bErr').textContent = '';
+    $('#bStats').innerHTML = [[fmtT(cw.total), 'Time'], [Math.round(e.tss), 'TSS'], [e.IF.toFixed(2), 'IF'], [Math.round(e.np) + ' W', 'NP']].map(([v, k]) => `<span><b>${esc(v)}</b><small>${k}</small></span>`).join('');
     builder.draw(); return cw;
-  } catch (err) { $('#bErr').textContent = ok ? err.message : err.message + ' (blocks show the last valid version)'; $('#bStats').textContent = ''; builder.draw(); return null; }
+  } catch (err) { $('#bErr').textContent = ok ? err.message : err.message + ' (blocks show the last valid version)'; $('#bStats').innerHTML = ''; builder.draw(); return null; }
 }
 $('#bText').oninput = renderBuilder;
 // plain words -> the same text format (rules in words.js, nothing leaves the page)
@@ -276,11 +287,12 @@ function setStatus() {
   $('#tDot').className = 'dot ' + ({ ble: 'on', wait: 'wait', sim: 'sim' }[mode] || '');
   $('#tTxt').textContent = { none: 'Trainer off', wait: 'Connecting…', ble: d.trainer_name || 'Trainer', sim: 'Simulated' }[mode] || 'Trainer off';
   const again = d.reconnect?.trainer;  // web: after a reload the browser needs one click to reconnect
-  $('#btnTrainer').textContent = mode === 'ble' || mode === 'wait' ? 'Disconnect' : again ? `Reconnect ${d.trainer_name || 'trainer'}` : 'Connect trainer';
-  $('#btnTrainer').className = mode === 'ble' || mode === 'wait' ? '' : again ? 'pri reconnect' : 'pri';
+  $('#btnTrainer').textContent = mode === 'ble' || mode === 'wait' ? 'Disconnect' : again ? 'Reconnect' : 'Connect';
+  $('#btnTrainer').title = again ? `Reconnect ${d.trainer_name || 'trainer'}` : '';
+  $('#btnTrainer').className = mode === 'ble' || mode === 'wait' || mode === 'sim' ? '' : again ? 'pri reconnect' : 'pri';  // simulated: a real trainer is optional
   $('#hDot').className = 'dot ' + (d.hr ? 'on' : d.hr_waiting || d.hr_name ? 'wait' : '');
   $('#hTxt').textContent = d.hr ? `HR ${d.hr}` : d.hr_state === 'waiting_heartbeat' ? 'Strap found, waiting for heartbeat (wet the contacts)' : d.hr_state === 'connecting' ? 'HR connecting…' : d.hr_waiting || d.hr_name ? 'HR waiting' : 'HR off';
-  $('#btnHR').textContent = d.hr_name ? 'Disconnect HR' : d.reconnect?.hr ? 'Reconnect HR' : 'Connect HR';
+  $('#btnHR').textContent = d.hr_name ? 'Disconnect' : d.reconnect?.hr ? 'Reconnect' : 'Connect';
 }
 let devKind = 'trainer';
 function openDevices(kind) {
@@ -638,26 +650,30 @@ async function renderHistory() {
   $('#histEmpty').style.display = rows.length ? 'none' : '';
   for (const r of rows) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${esc(fmtT(r.time_s))}</td><td class="num">${esc(r.avg_w)}</td><td class="num">${esc(r.np)}</td><td class="num">${esc(r.tss)}</td><td class="num">${esc(r.kJ)}</td><td class="num">${esc(r.avg_hr ?? '–')}</td><td class="num">${esc(r.best?.['5m'] ?? '–')}</td>`;
+    tr.innerHTML = `<td>${new Date(r.start).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td><td>${esc(r.name)}${r.garmin ? ' <span class="badge">Garmin</span>' : ''}${r.strava ? ' <span class="badge">Strava</span>' : ''}${r.test ? ' <span class="badge">test</span>' : ''}</td><td class="num">${esc(fmtT(r.time_s))}</td><td class="num">${esc(r.avg_w)}</td><td class="num">${esc(r.np)}</td><td class="num">${esc(r.tss)}</td><td class="num">${esc(r.kJ)}</td><td class="num">${esc(r.avg_hr ?? '–')}</td><td class="num">${esc(r.best?.['5m'] ?? '–')}</td>`;
     tr.onclick = () => openSummary(r.id); tb.appendChild(tr);
   }
   renderTrends();
 }
+const shortDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
 async function renderTrends() {
   let t; try { t = await (await F('/api/trends?weeks=12')).json(); } catch { return; }
   const [c, w, h] = fit($('#trendChart')), wk = t.weeks, max = Math.max(50, ...wk.map(x => x.tss));
-  const bw = w / wk.length;
-  c.font = '11px system-ui'; c.textAlign = 'center'; c.textBaseline = 'bottom';
+  const L = 0, B = 22, T = 18, bw = (w - L) / wk.length, ph = h - B - T, font = css('--font') || 'system-ui';
+  c.font = `500 11px ${font}`; c.textAlign = 'center'; c.textBaseline = 'bottom';
+  c.strokeStyle = css('--line'); c.beginPath(); c.moveTo(0, h - B + 0.5); c.lineTo(w, h - B + 0.5); c.stroke();
   wk.forEach((x, i) => {
-    const bh = (h - 30) * x.tss / max;
-    c.fillStyle = css('--acc'); c.fillRect(i * bw + 4, h - 16 - bh, bw - 8, bh);
-    c.fillStyle = css('--dim'); if (x.tss) c.fillText(x.tss, i * bw + bw / 2, h - 18 - bh);
-    c.fillStyle = css('--faint'); c.fillText(x.week.slice(5), i * bw + bw / 2, h);
+    const bh = Math.max(x.tss ? 3 : 0, ph * x.tss / max), cx = L + i * bw + bw / 2, last = i === wk.length - 1, bwid = Math.min(44, bw * 0.56);
+    c.fillStyle = last ? css('--acc') : 'rgba(56,189,248,.38)';
+    if (bh) { c.beginPath(); (c.roundRect ? c.roundRect(cx - bwid / 2, h - B - bh, bwid, bh, [4, 4, 0, 0]) : c.rect(cx - bwid / 2, h - B - bh, bwid, bh)); c.fill(); }
+    c.fillStyle = css('--dim'); if (x.tss) c.fillText(x.tss, cx, h - B - bh - 4);
+    c.fillStyle = last ? css('--ink') : css('--faint'); c.textBaseline = 'top';
+    c.fillText(shortDate(x.week), cx, h - B + 6); c.textBaseline = 'bottom';
   });
   const f = t.ftp_history.at(-1);
-  $('#tFtp').textContent = f ? `FTP ${f.ftp} W (${f.source}, ${f.date})` + (t.ftp_history.length > 1 ? ` · was ${t.ftp_history.at(-2).ftp}` : '') : '';
-  $('#tBest').innerHTML = ['1m', '5m', '20m'].map(k => `<div class="stat"><div class="k">Best ${k}</div><div class="v">${esc(t.best[k] ? t.best[k].w + ' W' : '–')}</div><div class="hint">${esc(t.best[k]?.date || '')}</div></div>`).join('')
-    + `<div class="stat"><div class="k">TSS this week</div><div class="v">${esc(wk.at(-1).tss)}</div></div>`;
+  $('#tFtp').textContent = f ? `FTP ${f.ftp} W · ${f.source} · ${shortDate(f.date)}` + (t.ftp_history.length > 1 ? ` · was ${t.ftp_history.at(-2).ftp} W` : '') : '';
+  $('#tBest').innerHTML = `<div class="stat"><div class="k">TSS this week</div><div class="v">${esc(wk.at(-1).tss)}</div><div class="hint">${esc(rows.length)} rides in all</div></div>`
+    + ['1m', '5m', '20m'].map(k => `<div class="stat"><div class="k">Best ${k.replace('m', ' min')}</div><div class="v">${esc(t.best[k] ? t.best[k].w + ' W' : '–')}</div><div class="hint">${esc(shortDate(t.best[k]?.date))}</div></div>`).join('');
 }
 // one-time move of rides that only exist in this browser's storage into the server archive
 async function migrateLocalRides() {
@@ -677,7 +693,7 @@ async function openSummary(id) {
   try { [r, d] = await Promise.all([(await F('/api/rides/' + id)).json(), (await F('/api/rides/' + id + '/detail')).json()]); } catch { return; }
   if (!r?.samples) return;
   openId = id; openRide = r; const m = d.summary;
-  $('#summary').style.display = ''; $('#sName').textContent = r.name;
+  $('#summary').style.display = ''; $('#histMain').style.display = 'none'; $('#sName').textContent = r.name;
   $('#sDate').textContent = new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   // the four numbers people look for first, then the rest on one quiet line
   const elev = m.elevation_gain_m ?? m.elev_gain_m;
@@ -717,12 +733,12 @@ async function openSummary(id) {
   $('#sLaps').innerHTML = d.laps.map(l => `<tr><td>${esc(l.overtime ? 'free' : l.index)}</td><td class="num">${esc(fmtT(l.time_s))}</td><td class="num">${esc(l.target_w ?? (l.free ? 'free' : '–'))}</td><td class="num">${esc(l.avg_w)}</td><td class="num">${esc(l.max_w)}</td><td class="num">${esc(l.np)}</td><td class="num">${esc(l.avg_hr ?? '–')}</td><td class="num">${esc(l.max_hr ?? '–')}</td><td class="num">${esc(l.avg_cad ?? '–')}</td></tr>`).join('');
   renderGarminBtn(d.garmin);
   renderStravaBtn(d.strava);
-  $('#summary').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  globalThis.scrollTo?.(0, 0);
 }
 function renderGarminBtn(g) {
   const b = $('#sGarmin'); b.disabled = !garminOn && !g;
   b.title = garminOn ? '' : 'Garmin is disabled on this server';
-  b.textContent = g ? 'On Garmin ✓' : 'Upload to Garmin'; b.className = g ? '' : 'pri'; b.dataset.g = g || '';
+  b.textContent = g ? 'On Garmin ✓' : 'Upload to Garmin'; b.classList.toggle('pri', !g); b.dataset.g = g || '';
 }
 function renderStravaBtn(sid) {
   const b = $('#sStrava'); b.dataset.s = sid || '';
@@ -762,8 +778,9 @@ $('#sGarmin').onclick = () => {
   if (g) window.open(/^\d+$/.test(g) ? `https://connect.garmin.com/modern/activity/${g}` : 'https://connect.garmin.com/modern/activities', '_blank');
   else if (openId) uploadGarmin(openId);
 };
-$('#sClose').onclick = () => { $('#summary').style.display = 'none'; openId = null; };
-$('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); $('#summary').style.display = 'none'; openId = null; renderHistory(); toast('Deleted (kept in rides/trash)'); };
+function closeSummary() { $('#summary').style.display = 'none'; $('#histMain').style.display = ''; openId = null; }
+$('#sClose').onclick = () => { closeSummary(); renderTrends(); };
+$('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); closeSummary(); renderHistory(); toast('Deleted (kept in rides/trash)'); };
 const fileLink = async ext => {
   if (!openId) return;
   if (WEB) { const data = await B.exportFile(openId, ext); if (data) download(fileBaseOf(openRide) + '.' + ext, data, ext === 'fit' ? 'application/octet-stream' : 'application/xml'); return; }
@@ -873,19 +890,19 @@ async function shareCard() {
   const W = 1080, H = 1080, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const c = cv.getContext('2d');
   c.fillStyle = '#0c0e11'; c.fillRect(0, 0, W, H);
-  c.fillStyle = '#38bdf8'; c.font = '700 40px system-ui'; c.textBaseline = 'top'; c.fillText('Just Watts', 60, 52);
-  c.fillStyle = '#e9edf2'; c.font = '700 64px system-ui'; c.fillText(r.name.slice(0, 28), 60, 120);
-  c.fillStyle = '#8b95a4'; c.font = '30px system-ui';
+  c.fillStyle = '#38bdf8'; c.font = '700 40px "Inter var", system-ui'; c.textBaseline = 'top'; c.fillText('Just Watts', 60, 52);
+  c.fillStyle = '#e9edf2'; c.font = '700 64px "Inter var", system-ui'; c.fillText(r.name.slice(0, 28), 60, 120);
+  c.fillStyle = '#8b95a4'; c.font = '30px "Inter var", system-ui';
   c.fillText(new Date(r.start || r.samples[0][0]).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }), 60, 200);
   const st = [['Time', fmtT(m.time_s)], ['NP', m.np + ' W'], ['Avg', m.avg_w + ' W'], ['TSS', m.tss], ['IF', m.if.toFixed(2)], ['Work', m.kJ + ' kJ'], ['Avg HR', m.avg_hr ?? '–'], ['Max HR', m.max_hr ?? '–']];
   st.forEach(([k, v], i) => {
     const x = 60 + (i % 4) * 245, y = 270 + Math.floor(i / 4) * 130;
-    c.fillStyle = '#8b95a4'; c.font = '600 24px system-ui'; c.fillText(k.toUpperCase(), x, y);
-    c.fillStyle = '#e9edf2'; c.font = '700 54px system-ui'; c.fillText(String(v), x, y + 34);
+    c.fillStyle = '#8b95a4'; c.font = '600 24px "Inter var", system-ui'; c.fillText(k.toUpperCase(), x, y);
+    c.fillStyle = '#e9edf2'; c.font = '700 54px "Inter var", system-ui'; c.fillText(String(v), x, y + 34);
   });
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = Math.max(t, r.samples.at(-1)[1]); }
-  c.save(); c.translate(40, 560); c.font = '22px system-ui';
+  c.save(); c.translate(40, 560); c.font = '22px "Inter var", system-ui';
   drawChart(null, { cw, ftp: r.ftp, samples: r.samples, el: null, k: 1 }, [c, W - 80, 460]);
   c.restore();
   return new Promise(res => cv.toBlob(b => res(b), 'image/png'));
@@ -929,7 +946,7 @@ function show(v) {
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
   if (v === 'workouts') showTab(wkTab);
   if (v === 'ride' && V) renderRide();
-  if (v === 'history') renderHistory();
+  if (v === 'history') { closeSummary(); renderHistory(); }
   if (v === 'settings') renderSettings();
 }
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
@@ -956,6 +973,16 @@ function showSettings() {
   showUnits(); $('#beeps').value = settings.beeps ? '1' : '0';
   renderLib(); renderBuilder();
 }
+// Settings: the left index scrolls to a section and follows the scroll
+$$('[data-set]').forEach(b => b.onclick = () => document.getElementById(b.dataset.set)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+if (globalThis.IntersectionObserver) {
+  const seen = new Map(), io = new IntersectionObserver(es => {
+    for (const e of es) seen.set(e.target.id, e.isIntersecting);
+    const on = $$('[data-set]').find(b => seen.get(b.dataset.set) && b.offsetParent);
+    if (on) $$('[data-set]').forEach(b => b.classList.toggle('on', b === on));
+  }, { rootMargin: '0px 0px -60% 0px' });
+  $$('.sset').forEach(x => io.observe(x));
+}
 $('#beeps').onchange = e => { settings.beeps = e.target.value === '1'; saveSettings(['beeps']); };
 if (globalThis.location?.hash === '#settings') setTimeout(() => show('settings'), 0);
 
@@ -973,7 +1000,8 @@ loadSettings().then(syncHrZones);
 migrateLocalRides().then(renderHistory);
 F('/api/strava/status').then(r => r.json()).then(j => { strava = j; }).catch(() => {});
 connect();
-const setHH = () => document.documentElement.style.setProperty('--hh', document.querySelector('header').offsetHeight + 'px');
+// --hh: height of the top bar on narrow screens; 0 when the shell is a sidebar
+const setHH = () => { const h = document.querySelector('header'); document.documentElement.style.setProperty('--hh', (h.offsetWidth >= globalThis.innerWidth - 1 ? h.offsetHeight : 0) + 'px'); };
 setHH();
 window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) wkTab === 'workouts' ? renderLib() : courses.render(); if (V) renderRide(); });
 window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE };

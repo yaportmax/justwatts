@@ -35,7 +35,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     c.fillStyle = css('--panel2'); path(); c.fill();
     const fx = done == null ? 0 : Math.min(1, done / dist) * w;
     if (fx > 0) { c.save(); c.beginPath(); c.rect(0, 0, fx, h); c.clip(); c.globalAlpha = 0.35; c.fillStyle = css('--acc'); path(); c.fill(); c.restore(); }
-    c.strokeStyle = css('--faint'); c.lineWidth = 1.25; c.beginPath(); ele.forEach((e, i) => (i ? c.lineTo : c.moveTo).call(c, X(i), Y(e))); c.stroke();
+    c.strokeStyle = css('--dim'); c.lineWidth = 1.25; c.beginPath(); ele.forEach((e, i) => (i ? c.lineTo : c.moveTo).call(c, X(i), Y(e))); c.stroke();
     if (done != null) {
       const f = Math.min(1, done / dist) * (ele.length - 1), i = Math.min(ele.length - 2, Math.floor(f)), e = ele[i] + (ele[i + 1] - ele[i]) * (f - i);
       c.fillStyle = css('--ink'); c.beginPath(); c.arc(fx, Y(e), 4, 0, 2 * Math.PI); c.fill();
@@ -50,8 +50,8 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     for (const c of all()) {
       const own = c.id.startsWith('k-'), on = c.id === sel;
       const card = document.createElement('div'); card.className = 'lrow' + (on ? ' sel' : '');
-      card.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(c.name)}</div>
-        <div class="m num">${info(c)}</div></div>
+      card.innerHTML = `<canvas></canvas><div class="lmain"><div class="t">${esc(c.name)}</div>${own ? '<div class="p">Imported</div>' : ''}</div>
+        <div class="m num r">${distText(c.dist / 1000, units())}</div><div class="m num r">${upText(c.gain)}</div>
         <div class="lact">${on ? `<select class="pick" data-a="pick" aria-label="Workout">${wOptions(pickW)}</select>` : ''}<button class="pri" data-a="ride">Ride</button>${own ? '<button data-a="del" class="danger">Delete</button>' : ''}</div>`;
       box.appendChild(card);
       requestAnimationFrame(() => draw(card.querySelector('canvas'), c.ele, c.dist, null));

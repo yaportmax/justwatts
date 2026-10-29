@@ -5,12 +5,14 @@ export const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `
 export function maxTarget(cw, ftp, k = 1) { let m = 0; for (const s of cw.steps) if (!s.free) m = Math.max(m, stepWatts(s, 0, ftp, k), stepWatts(s, s.d, ftp, k)); return m; }
 
 // the target profile as zone-colored blocks
-export function drawBlocks(c, cw, ftp, X, Y, alpha, k, css) {
+// edge: alpha of a crisp top line in the zone color (0: none), so faint blocks still read clearly
+export function drawBlocks(c, cw, ftp, X, Y, alpha, k, css, edge = 0) {
   const zoneColor = f => css(ZONES[zoneIdx(f)][1]);
   for (const s of cw.steps) {
     if (s.free) {
       c.fillStyle = hexA(css('--z1'), alpha * 0.5);
       c.fillRect(X(s.t0), Y(0.5 * ftp), X(s.t0 + s.d) - X(s.t0), Y(0) - Y(0.5 * ftp));
+      if (edge) { c.strokeStyle = hexA(css('--z1'), edge * 0.6); c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(s.t0), Y(0.5 * ftp)); c.lineTo(X(s.t0 + s.d), Y(0.5 * ftp)); c.stroke(); c.lineWidth = 1; }
       continue;
     }
     const n = s.a === s.b ? 1 : Math.max(2, Math.min(40, Math.round(s.d / 15)));
@@ -20,6 +22,7 @@ export function drawBlocks(c, cw, ftp, X, Y, alpha, k, css) {
       c.fillStyle = hexA(zoneColor(((w0 + w1) / 2) / ftp), alpha);
       const ov = j < n - 1 ? 0.6 : 0;  // overlap neighbours so antialiasing leaves no seams
       c.beginPath(); c.moveTo(X(s.t0 + t0), Y(0)); c.lineTo(X(s.t0 + t0), Y(w0)); c.lineTo(X(s.t0 + t1) + ov, Y(w1)); c.lineTo(X(s.t0 + t1) + ov, Y(0)); c.closePath(); c.fill();
+      if (edge) { c.strokeStyle = hexA(zoneColor(((w0 + w1) / 2) / ftp), edge); c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(s.t0 + t0), Y(w0)); c.lineTo(X(s.t0 + t1), Y(w1)); c.stroke(); c.lineWidth = 1; }
     }
   }
 }
@@ -59,10 +62,10 @@ export function drawChart(c, w, h, o, css) {
   let mp = 0; for (const s of smp) if (s[2] > mp) mp = s[2];
   const yMax = Math.max(ftp * 1.3, (o.cw ? maxTarget(o.cw, ftp, o.k) : 0) * 1.12, Math.min(mp, ftp * 2.5) * 1.05);
   const X = t => L + t / total * pw, Y = v => T + ph - Math.max(0, v) / yMax * ph;
-  c.font = '11px system-ui'; c.fillStyle = css('--faint'); c.textAlign = 'right'; c.textBaseline = 'middle';
+  c.font = '11px "Inter var", system-ui'; c.fillStyle = css('--faint'); c.textAlign = 'right'; c.textBaseline = 'middle';
   for (const f of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
     const v = f * ftp; if (v > yMax) break;
-    c.strokeStyle = f === 1 ? 'rgba(255,255,255,.28)' : 'rgba(255,255,255,.07)'; c.setLineDash(f === 1 ? [4, 4] : []);
+    c.strokeStyle = f === 1 ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.06)'; c.setLineDash(f === 1 ? [4, 4] : []);
     c.beginPath(); c.moveTo(L, Y(v)); c.lineTo(w - R, Y(v)); c.stroke(); c.setLineDash([]);
     c.fillText(Math.round(v), L - 6, Y(v));
   }
@@ -70,8 +73,8 @@ export function drawChart(c, w, h, o, css) {
   const stepT = [60, 300, 600, 900, 1800, 3600].find(s => total / s <= 8) || 3600;
   for (let t = 0; t <= total; t += stepT) c.fillText(fmtT(t), X(t), h - B + 5);
   if (o.cw) {
-    c.save(); drawBlocks(c, o.cw, ftp, X, Y, 0.22, o.k, css); c.restore();
-    if (o.el != null) { c.save(); c.beginPath(); c.rect(L, 0, X(o.el) - L, h); c.clip(); drawBlocks(c, o.cw, ftp, X, Y, 0.5, o.k, css); c.restore(); }
+    c.save(); drawBlocks(c, o.cw, ftp, X, Y, 0.26, o.k, css, 0.9); c.restore();
+    if (o.el != null) { c.save(); c.beginPath(); c.rect(L, 0, X(o.el) - L, h); c.clip(); drawBlocks(c, o.cw, ftp, X, Y, 0.34, o.k, css); c.restore(); }
   }
   const pts = decimate(smp, Math.max(100, Math.round(pw * 2)));
   // a jump in ride time (an old skip, a resumed ride) is a gap, never a straight line across it
@@ -88,7 +91,7 @@ export function drawChart(c, w, h, o, css) {
   c.strokeStyle = '#e9edf2'; c.lineWidth = 1.5; c.lineJoin = 'round'; c.beginPath();
   pts.power.forEach((p, i) => i && p[0] - pts.power[i - 1][0] <= gapT ? c.lineTo(X(p[0]), Y(p[1])) : c.moveTo(X(p[0]), Y(p[1])));
   c.stroke(); c.lineWidth = 1;
-  if (o.el != null && o.cw) { c.strokeStyle = css('--acc'); c.beginPath(); c.moveTo(X(o.el), T); c.lineTo(X(o.el), T + ph); c.stroke(); }
+  if (o.el != null && o.cw) { c.strokeStyle = css('--acc'); c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(o.el), T); c.lineTo(X(o.el), T + ph); c.stroke(); c.lineWidth = 1; c.fillStyle = css('--acc'); c.beginPath(); c.arc(X(o.el), T + 2, 3, 0, 2 * Math.PI); c.fill(); }
   o.geom = { L, R, pw, total };
   if (o.hoverT != null && o.hoverT >= 0 && o.hoverT <= total) drawHover(c, w, h, o, X, T, ph, css);
   return pts.power.length;
@@ -111,9 +114,9 @@ function drawHover(c, w, h, o, X, T, ph, css) {
   const s = sampleAt(o.samples || [], t);
   if (s) { rows.push(`Power ${s[2]} W`); if (s[4] > 0) rows.push(`HR ${s[4]}`); if (s[3] > 0) rows.push(`Cadence ${s[3]}`); }
   c.strokeStyle = 'rgba(255,255,255,.5)'; c.setLineDash([2, 3]); c.beginPath(); c.moveTo(x, T); c.lineTo(x, T + ph); c.stroke(); c.setLineDash([]);
-  c.font = '12px system-ui'; c.textAlign = 'left'; c.textBaseline = 'top';
+  c.font = '12px "Inter var", system-ui'; c.textAlign = 'left'; c.textBaseline = 'top';
   const bw = Math.max(...rows.map(r => c.measureText(r).width)) + 14, bh = rows.length * 16 + 8;
   const bx = x + 10 + bw > w ? x - 10 - bw : x + 10;
-  c.fillStyle = 'rgba(12,14,17,.9)'; c.fillRect(bx, T + 4, bw, bh);
+  c.fillStyle = 'rgba(19,22,27,.96)'; c.beginPath(); (c.roundRect ? c.roundRect(bx, T + 4, bw, bh, 6) : c.rect(bx, T + 4, bw, bh)); c.fill();
   rows.forEach((r, i) => { c.fillStyle = i ? css('--ink') || '#e9edf2' : css('--dim') || '#8b95a4'; c.fillText(r, bx + 7, T + 8 + i * 16); });
 }

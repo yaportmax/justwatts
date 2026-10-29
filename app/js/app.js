@@ -32,6 +32,7 @@ const store = {
 };
 // Settings live on the server (agents read the athlete profile there); localStorage is only migrated once.
 const settings = Object.assign({ ftp: 200, weight: 0, beeps: true, autoGarmin: false, cadRange: [85, 95], voiceMode: 'all', units: 'imperial' }, store.get('hw.settings', {}));
+const cadOn = () => settings.cadOn !== false;  // cadence off: no readout, target or cues
 let garminOn = false;
 const api = (path, body) => F(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const apiJson = async (path, body) => { const r = await api(path, body); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
@@ -91,7 +92,7 @@ function hoverable(cv) {
   cv.onpointerleave = () => { hoverT.delete(cv); redraw(); };
 }
 hoverable($('#rideChart')); hoverable($('#sumChart'));
-const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: c => loadRide(null, c) });
+const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: c => loadRide(null, c), relayout: () => V && renderRide() });
 
 /* ---------- library + builder ---------- */
 // library filters are a per-browser convenience
@@ -412,8 +413,13 @@ async function wake(on) { try { if (on && !wakeLock && navigator.wakeLock) wakeL
 function renderLive() {
   const live = S?.live || {}, p3 = live.power_3s || 0;
   $('#lP').textContent = p3;
-  let m = 0; for (const x of samples) m += (x[5] || 0) / 3.6;  // virtual distance from trainer speed, like the summary
-  $('#lPs').textContent = (V ? distText(m / 1000, settings.units) : '') + (settings.weight > 0 ? (V ? ' · ' : '') + (p3 / settings.weight).toFixed(1) + ' W/kg' : '');
+  $('#lPs').textContent = settings.weight > 0 ? (p3 / settings.weight).toFixed(1) + ' W/kg' : '';
+  // distance: along the course, else virtual distance from trainer speed (like the summary); climbed on a course
+  const rc = S?.ride?.course; let m = 0;
+  if (rc) m = rc.done_m; else for (const x of samples) m += (x[5] || 0) / 3.6;
+  const [dv, du] = distText(m / 1000, settings.units).split(' ');
+  $('#lD').textContent = dv; $('#lDu').textContent = du; $('#lDs').textContent = rc ? courses.upText(rc.climbed_m) + ' up' : '';
+  $('#cadTile').style.display = cadOn() ? '' : 'none';  // cadence off: no readout, no target
   const cad = live.cadence || 0, [lo, hi] = settings.cadRange || [85, 95];
   $('#lC').textContent = cad;
   $('#lCs').textContent = `target ${lo}-${hi} rpm`;
@@ -466,9 +472,9 @@ function renderRide() {
   }
   $('#rClock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const cwDraw = V.cw && V.el > V.cw.total ? { ...V.cw, total: V.el * 1.02 } : V.cw;
+  courses.renderRide(S.ride.course);  // first: Map focus may move the chart
   if ($('#v-ride').classList.contains('on')) drawChart($('#rideChart'), { cw: cwDraw, ftp: V.ftp, samples, el: V.el, k: kk });
   wake(V.started);
-  courses.renderRide(S.ride.course);
   renderAdjust(); renderUndo();
 }
 // on a course, grade mode follows the road; +/- adds an offset to it
@@ -576,6 +582,7 @@ function renderAdjust() {
   else if (nextBase != null && curStep() !== nextBase) { $('#aNextErr').textContent = 'Segment changed. Reset to see the new plan.'; }
   const [lo, hi] = settings.cadRange || [85, 95];
   $('#aCadLo').textContent = lo; $('#aCadHi').textContent = hi;
+  $$('#aCadOn button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === cadOn())); $('#aCadRange').style.display = cadOn() ? '' : 'none';
 }
 $('#aNext').oninput = () => { nextDirty = true; $('#aNextErr').textContent = ''; nextBuilder.load($('#aNext').value); nextBuilder.draw(); };
 const nextBuilder = createBuilder({ list: $('#aNextList'), chart: $('#aNextChart'), palette: $('#aNextPal'), fit, css, ftp: () => V?.ftp || settings.ftp,
@@ -609,6 +616,7 @@ $('#adjPanel').onclick = e => {
     if (cr[0] >= cr[1]) return;
     return setSetting('cadRange', cr, 'cadence');
   }
+  if (a === 'cadon') return setSetting('cadOn', v === '1', 'cadence');
   if (a === 'coach') return setSetting('localCoach', { ...(settings.localCoach || {}), enabled: v === '1' }, 'coach');
   if (a === 'beeps') return setSetting('beeps', v === '1', 'beeps');
 };
@@ -626,7 +634,7 @@ const KEYS = {
   ArrowRight: skipAct, ArrowLeft: backAct, BracketRight: () => stepTimeBy(timeSteps(R()?.step?.duration_s ?? 600)[1]), BracketLeft: () => stepTimeBy(-timeSteps(R()?.step?.duration_s ?? 600)[1]),
   Equal: () => stepWattsBy(5), NumpadAdd: () => stepWattsBy(5), Minus: () => stepWattsBy(-5), NumpadSubtract: () => stepWattsBy(-5),
   Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
-  KeyA: () => sheet(), KeyZ: doUndo, KeyM: () => $('#coachMute').click(),
+  KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo, KeyM: () => $('#coachMute').click(),
 };
 function onKey(e) {
   if (e.key === 'Escape') { sheet(false); $('#keysModal').classList.remove('on'); return; }
@@ -866,7 +874,7 @@ const LC_DEFAULTS = { enabled: !WEB,  // the web build starts with the coach off
 let strava = {};
 async function renderSettings() {
   const lc = { ...LC_DEFAULTS, ...(settings.localCoach || {}) }, cr = settings.cadRange || [85, 95];
-  $('#cadLo').value = cr[0]; $('#cadHi').value = cr[1];
+  $('#cadLo').value = cr[0]; $('#cadHi').value = cr[1]; $('#cadOn').value = cadOn() ? '1' : '0'; $('#cadLo').disabled = $('#cadHi').disabled = !cadOn();
   $('#sFtp').value = settings.ftp; $('#sWeight').value = weightShow(settings.weight, settings.units);
   $('#units').value = settings.units || 'imperial'; showUnits();
   renderHrZones();
@@ -927,6 +935,7 @@ $('#lcAuto').onchange = e => setLC({ auto_adjust: e.target.value });
 $('#afterWk').onchange = e => { settings.afterWorkout = e.target.value; saveSettings(['afterWorkout']); };
 const cadSave = () => { const lo = +$('#cadLo').value, hi = +$('#cadHi').value; if (lo >= 40 && hi > lo && hi <= 130) { settings.cadRange = [lo, hi]; saveSettings(['cadRange']); } else toast('Cadence range: low < high'); };
 $('#cadLo').onchange = cadSave; $('#cadHi').onchange = cadSave;
+$('#cadOn').onchange = e => { settings.cadOn = e.target.value === '1'; saveSettings(['cadOn']); renderSettings(); renderLive(); };
 $('#hrMax').onchange = e => {
   const v = +e.target.value;
   if (!e.target.value) settings.hrMax = null; else if (v >= 100 && v <= 230) settings.hrMax = Math.round(v); else { toast('Max HR: 100 to 230'); renderHrZones(); return; }

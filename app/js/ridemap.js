@@ -1,0 +1,139 @@
+// Ride-screen map. 2D: the chosen style on a canvas (map.js). 3D: MapLibre (vendored, loaded on first use) with AWS
+// Terrain Tiles under the same style, the camera behind the rider facing the road. Map focus swaps it with the power chart.
+import { drawMap, MAP_STYLES, styleOf, lineDist, pointAt } from './map.js';
+
+const ML = 'vendor/maplibre-gl-5.24.0/';
+const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png', DEM_ATTR = 'Terrain © Mapzen, AWS';
+let mlLoad = null;
+function loadML() {
+  return mlLoad ??= new Promise((ok, bad) => {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = ML + 'maplibre-gl.css'; document.head.appendChild(l);
+    const s = document.createElement('script'); s.src = ML + 'maplibre-gl-csp.js';
+    s.onload = () => { const m = globalThis.maplibregl; if (!m) return bad(new Error('no MapLibre')); m.setWorkerUrl(ML + 'maplibre-gl-csp-worker.js'); ok(m); };
+    s.onerror = () => { mlLoad = null; bad(new Error('MapLibre did not load')); };
+    document.head.appendChild(s);
+  });
+}
+const R = Math.PI / 180;
+const bearing = (a, b) => Math.atan2(Math.sin((b[1] - a[1]) * R) * Math.cos(b[0] * R),
+  Math.cos(a[0] * R) * Math.sin(b[0] * R) - Math.sin(a[0] * R) * Math.cos(b[0] * R) * Math.cos((b[1] - a[1]) * R)) / R;
+const NONE = { type: 'FeatureCollection', features: [] };
+const lineGeo = pts => pts.length > 1 ? { type: 'Feature', geometry: { type: 'LineString', coordinates: pts.map(p => [p[1], p[0]]) } } : NONE;
+
+export function createRideMap({ $, store, fit, css, toast, relayout }) {
+  let style = MAP_STYLES[store.get('hw.mapStyle', 'osm')] ? store.get('hw.mapStyle', 'osm') : 'osm';
+  let d3 = !!store.get('hw.map3d', false), focus = !!store.get('hw.mapFocus', false);
+  let cur = null;  // { ll, D, dist, done }
+  let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, busy = false, size = '', placedOn = false;
+  const box = $('#crsMapBox'), cv = $('#crsMap'), v3 = $('#crsMap3d');
+  $('#mapStyle').innerHTML = Object.entries(MAP_STYLES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
+
+  // Map focus: the map takes the big chart panel, the power chart its small slot
+  function place() {
+    const on = focus && !!cur;
+    if (on === placedOn) return false;
+    placedOn = on;
+    (on ? $('#rideBig') : $('#crsSlot')).appendChild(box);
+    (on ? $('#crsSlot') : $('#rideBig')).appendChild($('#rideChart'));
+    $('#rideOn').classList.toggle('mapfocus', on);
+    return true;
+  }
+  function ui() {
+    const live = d3 && ready;
+    $('#mapStyle').value = style;
+    $('#map3d').classList.toggle('on', d3); $('#map3d').setAttribute('aria-pressed', String(d3));
+    $('#mapFocus').classList.toggle('on', focus); $('#mapFocus').title = focus ? 'Chart focus (F)' : 'Map focus (F)';
+    $('#mapAttr').textContent = styleOf(style).attr + (live ? ' · ' + DEM_ATTR : '');
+    v3.style.display = d3 ? '' : 'none'; cv.style.display = live ? 'none' : '';  // 2D shows until the terrain is up
+  }
+  const draw2d = () => { if (cur && !(d3 && ready)) drawMap(cv, { ll: cur.ll, dist: cur.dist, done: cur.done, fit, css, redraw: draw2d, style, attr: false }); };
+  function draw() { if (!cur) return; ui(); if (d3) draw3d(); draw2d(); }
+
+  function spec() {
+    const st = styleOf(style), round = { 'line-join': 'round', 'line-cap': 'round' };
+    const paint = st.dark ? { 'raster-brightness-min': 0.8, 'raster-brightness-max': 0.04, 'raster-hue-rotate': 180, 'raster-saturation': -0.6 }  // inverted, like the 2D map
+      : st.dim ? { 'raster-brightness-max': st.dim } : {};
+    mapStyle = style; mapLL = cur.ll;
+    return { version: 8,
+      sources: {
+        base: { type: 'raster', tiles: [st.tiles], tileSize: 256, maxzoom: st.max },
+        dem: { type: 'raster-dem', tiles: [DEM], tileSize: 256, maxzoom: 15, encoding: 'terrarium' },
+        route: { type: 'geojson', data: lineGeo(cur.ll) }, done: { type: 'geojson', data: NONE },
+      },
+      layers: [
+        { id: 'base', type: 'raster', source: 'base', paint },
+        { id: 'casing', type: 'line', source: 'route', layout: round, paint: { 'line-color': '#000', 'line-opacity': 0.5, 'line-width': 9 } },
+        { id: 'route', type: 'line', source: 'route', layout: round, paint: { 'line-color': css('--ink'), 'line-width': 4 } },
+        { id: 'done', type: 'line', source: 'done', layout: round, paint: { 'line-color': css('--acc'), 'line-width': 5 } },
+      ],
+      terrain: { source: 'dem', exaggeration: 1.3 },
+      sky: { 'sky-color': '#16202b', 'horizon-color': '#2a3442', 'fog-color': '#151920', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.7, 'fog-ground-blend': 0.75 },
+    };
+  }
+  async function draw3d() {
+    if (map) {
+      if (!ready) return;
+      if (mapLL !== cur.ll || mapStyle !== style) map.setStyle(spec());
+      const D = cur.D, d = Math.max(0, Math.min(cur.done ?? 0, cur.dist)); let k = 0; while (k < D.length - 1 && D[k + 1] <= d) k++;
+      map.getSource('done')?.setData(lineGeo([...cur.ll.slice(0, k + 1), pointAt(cur.ll, D, d)]));
+      // glide from where the rider is drawn now to the new position over the next second
+      const now = performance.now();
+      anim = { d0: anim ? animAt(now) : d, d1: d, t0: now };
+      if (!raf) raf = requestAnimationFrame(frame);
+      return;
+    }
+    if (busy) return; busy = true;
+    try {
+      const ml = await loadML();
+      if (!cur) return;
+      map = new ml.Map({ container: v3, style: spec(), attributionControl: false, interactive: false, fadeDuration: 0, maxPitch: 75,
+        center: [cur.ll[0][1], cur.ll[0][0]], zoom: 14, pitch: 60, transformRequest: url => ({ url, referrerPolicy: 'strict-origin' }) });  // OSM needs the origin
+      const dot = document.createElement('div'); dot.className = 'rmapdot';
+      rider = new ml.Marker({ element: dot }).setLngLat([cur.ll[0][1], cur.ll[0][0]]).addTo(map);
+      map.on('load', () => { ready = true; draw(); });
+      map.on('error', e => console.warn('map:', e?.error?.message || e));
+    } catch (e) {
+      console.warn(e); d3 = false; store.set('hw.map3d', false); toast('3D map unavailable here'); map = null; draw();
+    } finally { busy = false; }
+  }
+  // The camera sits behind the rider facing the next 100 m of road, the rider low in the frame. jumpTo every frame,
+  // not easeTo: an eased camera freezes its terrain height for the flight and can end up inside the mountain.
+  const animAt = now => anim.d0 + (anim.d1 - anim.d0) * Math.min(1, (now - anim.t0) / 1100);
+  function frame(now) {
+    raf = 0;
+    if (!map || !ready || !d3 || !cur || !anim) return;
+    const w = v3.clientWidth, h = v3.clientHeight; if (!w || !h) return;  // hidden: stop until the next update
+    if (w + 'x' + h !== size) { size = w + 'x' + h; map.resize(); camB = null; }
+    const { ll, D, dist } = cur, d = animAt(now), at = pointAt(ll, D, d);
+    const a = Math.max(0, Math.min(d - 20, dist - 100)), tb = bearing(pointAt(ll, D, a), pointAt(ll, D, Math.min(dist, a + 100)));
+    const turn = ((tb - (camB ?? tb)) % 360 + 540) % 360 - 180;
+    camB = camB == null ? tb : camB + turn * Math.min(1, (now - (frame.t || now)) / 900);  // ease the heading through hairpins
+    frame.t = now;
+    rider.setLngLat([at[1], at[0]]);
+    const center = [at[1], at[0]];  // elevation given: jumpTo looks it up at a fractional zoom and gets 0 (MapLibre 5.24)
+    map.jumpTo({ center, elevation: map.queryTerrainElevation(center) ?? 0, bearing: camB, pitch: w > 600 ? 62 : 56, zoom: w > 600 ? 14.8 : 13.8, padding: { top: Math.round(h * 0.42), bottom: 0, left: 0, right: 0 } });
+    if (now - anim.t0 < 1100 || Math.abs(turn) > 0.3) raf = requestAnimationFrame(frame);
+    else frame.t = 0;
+  }
+
+  // ll: the course line ([lat, lon]); rc: the ride's course state. Returns true when the layout moved.
+  function update(ll, rc) {
+    const has = !!(rc && ll?.length > 1);
+    if (!has) cur = null;
+    else { if (cur?.ll !== ll) { cur = { ll, D: lineDist(ll, rc.dist_m) }; anim = null; } cur.dist = rc.dist_m; cur.done = rc.done_m; }
+    const moved = place();
+    $('#crsSlot').style.display = has ? '' : 'none';
+    draw();
+    return moved;
+  }
+  function toggleFocus() {
+    if (!cur) return false;
+    focus = !focus; store.set('hw.mapFocus', focus);
+    place(); draw(); relayout();
+    return true;
+  }
+  $('#mapStyle').onchange = e => { style = MAP_STYLES[e.target.value] ? e.target.value : 'osm'; store.set('hw.mapStyle', style); draw(); };
+  $('#map3d').onclick = () => { d3 = !d3; store.set('hw.map3d', d3); size = ''; anim = null; draw(); };
+  $('#mapFocus').onclick = toggleFocus;
+  return { update, toggleFocus, focused: () => placedOn };
+}

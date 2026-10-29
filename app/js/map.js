@@ -1,10 +1,18 @@
-// Route map: OpenStreetMap raster tiles, darkened, on a canvas; the course line; the rider.
-// No library and no key (tile use policy: https://operations.osmfoundation.org/policies/tiles/). Without network the line still draws on the plain background.
+// Route map: raster tiles on a canvas, the course line, the rider. No library and no key; every source is keyless
+// and keeps its attribution. Without network the line still draws on the plain background. The 3D view is ridemap.js.
 import { haversine } from './course.js';
 
 const TILE = 256, MAXZ = 17;
-const URL_OF = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-export const MAP_ATTR = '© OpenStreetMap';
+// keyless tile sources; dark: inverted to match the page, dim: toned down (satellite stays as is)
+export const MAP_STYLES = {
+  osm: { name: 'Map', tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, dark: true, attr: '© OpenStreetMap contributors' },
+  sat: { name: 'Satellite', tiles: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', max: 19, attr: 'Tiles © Esri, Maxar, Earthstar Geographics, GIS User Community' },
+  topo: { name: 'Topo', tiles: 'https://tile.opentopomap.org/{z}/{x}/{y}.png', max: 17, dim: 0.85, attr: '© OpenStreetMap contributors, SRTM · Style © OpenTopoMap (CC-BY-SA)' },
+  cycle: { name: 'Cycling', tiles: 'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png', max: 20, dim: 0.85, attr: '© CyclOSM · © OpenStreetMap contributors' },
+};
+export const styleOf = k => MAP_STYLES[k] || MAP_STYLES.osm;
+const URL_OF = (st, z, x, y) => st.tiles.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+const filterOf = st => st.dark ? 'invert(1) hue-rotate(180deg) brightness(.75) contrast(.9) saturate(.4)' : st.dim ? `brightness(${st.dim})` : 'none';
 
 const cache = new Map();  // url -> Image (loaded or loading); bounded below
 function tile(url, onload) {
@@ -39,7 +47,8 @@ export function pointAt(ll, D, d) {
 }
 
 // draw the whole route fitted to the canvas; done = metres ridden (null: no rider)
-export function drawMap(cv, { ll, dist, done = null, fit, css, redraw }) {
+export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = 'osm', attr = true }) {
+  const st = styleOf(style), filter = filterOf(st);
   const [c, w, h] = fit(cv); if (!ll?.length || w < 10 || h < 10) return;
   const pad = 14, xs = ll.map(p => wx(p[1])), ys = ll.map(p => wy(p[0]));
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -49,14 +58,14 @@ export function drawMap(cv, { ll, dist, done = null, fit, css, redraw }) {
 
   c.fillStyle = css('--panel'); c.fillRect(0, 0, w, h);
   // tiles: one zoom level above the fitted scale so they are never blurry, drawn scaled down
-  const zt = Math.max(0, Math.min(MAXZ + 1, Math.ceil(z)));
+  const zt = Math.max(0, Math.min(st.max, MAXZ + 1, Math.ceil(z)));
   const ts = TILE * 2 ** (z - zt), n = 2 ** zt;
   let pending = false;
   for (let ty = Math.floor(cy / ts); ty * ts < cy + h; ty++) {
     if (ty < 0 || ty >= n) continue;
     for (let tx = Math.floor(cx / ts); tx * ts < cx + w; tx++) {
-      const im = tile(URL_OF(zt, ((tx % n) + n) % n, ty), () => { if (!pending) { pending = true; requestAnimationFrame(redraw); } });
-      if (im) { c.filter = 'invert(1) hue-rotate(180deg) brightness(.75) contrast(.9) saturate(.4)'; c.drawImage(im, tx * ts - cx, ty * ts - cy, ts + 0.5, ts + 0.5); c.filter = 'none'; }
+      const im = tile(URL_OF(st, zt, ((tx % n) + n) % n, ty), () => { if (!pending) { pending = true; requestAnimationFrame(redraw); } });
+      if (im) { c.filter = filter; c.drawImage(im, tx * ts - cx, ty * ts - cy, ts + 0.5, ts + 0.5); c.filter = 'none'; }
     }
   }
 
@@ -75,7 +84,8 @@ export function drawMap(cv, { ll, dist, done = null, fit, css, redraw }) {
     c.fillStyle = css('--acc'); c.strokeStyle = css('--bg'); c.lineWidth = 2;
     c.beginPath(); c.arc(...at, 6, 0, 2 * Math.PI); c.fill(); c.stroke();
   }
+  if (!attr) return;  // the ride screen shows it as text over the map
   c.font = '10px system-ui, sans-serif'; c.textAlign = 'right'; c.textBaseline = 'bottom';
-  c.fillStyle = 'rgba(12,14,17,.7)'; const tw = c.measureText(MAP_ATTR).width; c.fillRect(w - tw - 8, h - 15, tw + 8, 15);
-  c.fillStyle = css('--dim'); c.fillText(MAP_ATTR, w - 4, h - 2);
+  c.fillStyle = 'rgba(12,14,17,.7)'; const tw = c.measureText(st.attr).width; c.fillRect(w - tw - 8, h - 15, tw + 8, 15);
+  c.fillStyle = css('--dim'); c.fillText(st.attr, w - 4, h - 2);
 }

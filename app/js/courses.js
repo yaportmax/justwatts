@@ -3,11 +3,11 @@
 import { esc, distText, isMetric } from './core.js';
 import { parseTrack, parseFit, buildCourse, SAMPLE_COURSES } from './course.js';
 import { ROUTE_COURSES } from './course-routes.js';
-import { drawMap } from './map.js';
+import { createRideMap } from './ridemap.js';
 
 const FT = 3.28084;
 
-export function createCourses({ $, store, toast, fit, css, units, ride }) {
+export function createCourses({ $, store, toast, fit, css, units, ride, relayout }) {
   let mine = store.get('hw.courses', []);
   let sel = store.get('hw.course', '');
   const all = () => [...mine, ...ROUTE_COURSES, ...SAMPLE_COURSES];
@@ -60,22 +60,19 @@ export function createCourses({ $, store, toast, fit, css, units, ride }) {
   $('#crsImport').onclick = () => $('#crsFile').click();
   $('#crsFile').onchange = e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) importFile(f); };
 
-  let last = null;
-  const redraw = () => { if (last) drawMap($('#crsMap'), { ll: last.src.ll, dist: last.rc.dist_m, done: last.rc.done_m, fit, css, redraw }); };
-  // ride screen: map, profile with the rider's position, distance, grade, climbed, speed
+  const map = createRideMap({ $, store, fit, css, toast, relayout });
+  // ride screen: map, profile with the rider's position, distance left, grade, speed (distance and climbed are in the top row)
   function renderRide(rc) {
     const box = $('#crsRide'); if (!box) return;
-    box.style.display = rc ? '' : 'none'; if (!rc) return;
-    draw($('#crsChart'), rc.profile, rc.dist_m, rc.done_m);
     // the map: the ride state has no line, so take it from the course list (gone if the course was deleted)
-    const src = all().find(c => c.name === rc.name && Math.abs(c.dist - rc.dist_m) < 1), mv = $('#crsMap');
-    mv.style.display = src?.ll?.length > 1 ? '' : 'none';
-    if (src?.ll?.length > 1) { last = { src, rc }; drawMap(mv, { ll: src.ll, dist: rc.dist_m, done: rc.done_m, fit, css, redraw }); }
-    const u = units(), km = x => distText(x / 1000, u).split(' ');
-    const [d, du] = km(rc.done_m), [t] = km(rc.dist_m), spd = isMetric(u) ? `${Math.round(rc.speed_kmh)} km/h` : `${Math.round(rc.speed_kmh * 0.621371)} mph`;
-    $('#crsK').innerHTML = `<span><b>${d}</b> / ${t} ${du}</span><span><b>${rc.grade.toFixed(1)}%</b></span><span><b>${upText(rc.climbed_m)}</b> up</span><span>${spd}</span>${rc.end ? '<span>Finished</span>' : ''}`;
+    const src = rc && all().find(c => c.name === rc.name && Math.abs(c.dist - rc.dist_m) < 1);
+    box.style.display = rc ? '' : 'none';
+    map.update(src?.ll, rc); if (!rc) return;
+    draw($('#crsChart'), rc.profile, rc.dist_m, rc.done_m);
+    const u = units(), [left, lu] = distText(Math.max(0, rc.dist_m - rc.done_m) / 1000, u).split(' '), spd = isMetric(u) ? `${Math.round(rc.speed_kmh)} km/h` : `${Math.round(rc.speed_kmh * 0.621371)} mph`;
+    $('#crsK').innerHTML = `<span><b>${rc.grade.toFixed(1)}%</b></span>${rc.end ? '<span>Finished</span>' : `<span><b>${left}</b> ${lu} to go</span>`}<span>${spd}</span>`;
   }
 
   render();
-  return { selected, render, renderRide, reload: () => { mine = store.get('hw.courses', []); render(); } };
+  return { selected, render, renderRide, map, upText, reload: () => { mine = store.get('hw.courses', []); render(); } };
 }

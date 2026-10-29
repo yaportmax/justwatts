@@ -8,7 +8,7 @@ import { detail, metaRow, trends } from './history.js';
 import { parseLine } from './lines.js';
 
 const SETTINGS_DEFAULTS = { ftp: 200, weight: 0, beeps: true, autoGarmin: false, hrZones: null, hrMax: null, hrZonesSrc: null, cadRange: [85, 95],
-  voiceMode: 'all', afterWorkout: 'hold', localCoach: {}, ftpSrc: null, hideVirtualDistance: false, units: 'imperial' };
+  voiceMode: 'all', afterWorkout: 'hold', localCoach: {}, ftpSrc: null, hideVirtualDistance: false, units: 'imperial', cadOn: true };
 const NOT_WEB = 'not available in the web version; use the local app';
 const UNMUTE = /\b(unmute|voice on|talk to me|speak again|you can talk)\b/i, MUTE = /\b(mute|quiet|stop talking|shut up|silence|be silent|no talking)\b/i;
 const pad = n => String(n).padStart(2, '0'), hms = d => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -83,6 +83,7 @@ export class WebBackend {
       if (!(k in SETTINGS_DEFAULTS) || k === 'autoGarmin') continue;
       if (k === 'ftp' && !(+v >= 50 && +v <= 600)) continue;
       if (k === 'units' && v !== 'imperial' && v !== 'metric') continue;
+      if (k === 'cadOn' && typeof v !== 'boolean') continue;
       if (k === 'hrZonesSrc' && ![null, 'default', 'manual', 'garmin'].includes(v)) continue;
       this.settings[k] = k === 'localCoach' ? { ...(this.settings[k] || {}), ...v } : v;
     }

@@ -35,8 +35,11 @@ HISTORY_LEN = 1200  # state snapshots kept (~1 h at one per 3 s)
 QUIET_PATHS = ("/api/state", "/api/event", "/api/current", "/api/coach?", "/api/health",
                "/api/strava/callback")  # the callback query carries the OAuth code: keep it out of logs
 # A page served from here may never be framed (clickjacking) and runs only its own scripts.
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; "
-       "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+# Map tiles (keyless): OSM, Esri imagery, OpenTopoMap, CyclOSM. The 3D map fetch()es them and AWS terrain tiles.
+MAP_TILES = "https://tile.openstreetmap.org https://server.arcgisonline.com https://tile.opentopomap.org https://a.tile-cyclosm.openstreetmap.fr"
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       f"img-src 'self' data: blob: {MAP_TILES}; connect-src 'self' {MAP_TILES} https://s3.amazonaws.com; "
+       "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 # headers a reverse proxy or tunnel adds: such a request came from the network, not this computer
 PROXY_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "Forwarded", "CF-Connecting-IP", "True-Client-IP")
 
@@ -632,7 +635,7 @@ class Handler(SimpleHTTPRequestHandler):
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
                      "hrZonesSrc": None, "cadRange": [85, 95], "voiceMode": "all", "afterWorkout": "hold",
                      "agentGate": {}, "localCoach": {}, "ftpSrc": None, "profileImported": False,
-                     "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False, "units": "imperial"}
+                     "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False, "units": "imperial", "cadOn": True}
 AGENT_RECENT_S = 300  # an agent (or CLI tool) used the token this recently: show agent-only UI
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "turns")
 VOICE_MODES = ("all", "important", "silent")
@@ -670,8 +673,8 @@ class CoachServer(ThreadingHTTPServer):
         self.engine.on_finish = self._after_finish
         self.agent_seen: float | None = None
         self.strava = StravaLink(cfg.data, http=strava_http) if strava_http else StravaLink(cfg.data)
-        self.gate = AgentGate(lambda: self.settings, on_wake=lambda b: self.engine.count_agent(wakes=1))
-        self.local = LocalCoach(lambda: self.settings, self._local_say, adjust=self._local_adjust,
+        self.gate = AgentGate(self.coach_settings, on_wake=lambda b: self.engine.count_agent(wakes=1))
+        self.local = LocalCoach(self.coach_settings, self._local_say, adjust=self._local_adjust,
                                 agent_connected=self.agent_connected)
         super().__init__(("127.0.0.1", cfg.port), Handler)
         self.engine.resume()
@@ -809,6 +812,8 @@ class CoachServer(ThreadingHTTPServer):
                     continue
                 if k == "units" and v not in ("imperial", "metric"):
                     continue
+                if k == "cadOn" and not isinstance(v, bool):
+                    continue
                 if k == "hrZonesSrc" and v not in (None, "default", "manual", "garmin"):
                     continue
                 if k == "shareBaseUrl" and not (isinstance(v, str) and (v == "" or re.match(r"https?://", v))):
@@ -822,6 +827,14 @@ class CoachServer(ThreadingHTTPServer):
             atomic_write(self.settings_file, json.dumps(new).encode())
             self.settings_stored = True
         return self.settings_payload()
+
+    def coach_settings(self) -> dict:
+        """Settings as the coaches read them: cadence off means no cadence cues and no low-cadence alerts."""
+        s = self.settings
+        if s.get("cadOn", True):
+            return s
+        return {**s, "localCoach": {**(s.get("localCoach") or {}), "cadence": False},
+                "agentGate": {**(s.get("agentGate") or {}), "cadence_low_s": float("inf")}}
 
     def athlete(self) -> dict:
         s, z = self.settings, H.active_hr_zones(self.settings)

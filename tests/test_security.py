@@ -21,6 +21,8 @@ def test_pages_cannot_be_framed_and_run_only_own_scripts(srv):
         csp = r.getheader("Content-Security-Policy", "")
         assert r.getheader("X-Frame-Options") == "DENY" and "frame-ancestors 'none'" in csp
         assert "script-src 'self';" in csp and r.getheader("X-Content-Type-Options") == "nosniff"
+        connect = csp.split("connect-src ")[1].split(";")[0].split()  # the page's own API, map tiles, 3D terrain
+        assert connect[0] == "'self'" and "https://s3.amazonaws.com" in connect and not any("*" in h for h in connect)
 
 
 def test_proxied_requests_never_reach_the_api(srv):

@@ -43,8 +43,9 @@ No trainer? `justwatts simulate` drives a fake ride through the server.
   rate, cadence reminders, and automatic adjustments: Easier lowers the segment 5% FTP, Harder
   raises it 3% (not in HR zone 5), 30 s over your HR cap eases it 5%. Each cue can be turned off in
   Settings.
-- **Ride screen** on one page: power, target, cadence against your target range, HR with zones,
-  interval timer, the chart with a right-hand HR axis.
+- **Ride screen** on one page: power, target, distance (and climb on a course), cadence against your
+  target range, HR with zones, interval timer, the chart with a right-hand HR axis. On a course: the
+  route map in four styles or a 3D terrain view that follows you (MapLibre GL JS, vendored).
 - **Voice** (optional): coach messages read aloud with Mute and an "important only" mode; with the
   `[voice]` extra, talk back through local Whisper, and the coach stops talking when you start.
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
@@ -71,7 +72,8 @@ and intensity, watts, segment time, length, trainer mode and settings can be und
 | Trainer: ERG, or ERG off by grade or level (the plan keeps showing) | Adjust | 1 2 3 |
 | Edit the plan from the current segment | Adjust | |
 | After the plan: hold the last target or ride flat | Adjust | |
-| Cadence range, built-in coach on/off, beeps | Adjust | |
+| Cadence on/off and range (off: no readout, target or cues), built-in coach on/off, beeps | Adjust | |
+| Map style (Map, Satellite, Topo, Cycling), 3D terrain, map or chart focus (courses with a route) | map | F |
 | Mute, voice level, Easier/Good/Harder | coach bar | M |
 | Undo, Save, End (two taps) | bar | Z, S |
 | Reconnect trainer or HR | header | |
@@ -215,4 +217,5 @@ See [SECURITY.md](SECURITY.md) for the threat model and how to report a vulnerab
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The vendored MapLibre GL JS 5.24.0 (`app/vendor/`, the 3D map) is BSD-3-Clause,
+license next to it.

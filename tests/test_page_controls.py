@@ -45,6 +45,12 @@ def check(out):
     assert b["after_workout"] == "grade0"
     s = out["settings"]
     assert s["cadRange"] == [90, 95] and s["localCoach"]["enabled"] is False and s["beeps"] is False and s["voiceMode"] == "silent"
+    assert s["cadOn"] is False                                     # one setting: the sheet and Settings both change it
+    assert out["cadOff"] == {"tile": "none", "range": "none", "settings": "0", "loDisabled": True, "back": ""}
+    assert out["focusNoMap"] is False                              # F without a course map does nothing
+    f = out["focus"]                                               # with one, F and the map button swap map and chart
+    assert f["on"] and f["stored"] == "true" and f["title"] == "Chart focus (F)" and f["off"] and f["stored2"] == "false"
+    assert f["dist"].endswith(" up")                              # climbed, next to the distance
     m = out["manual"]
     for line in ("MANUAL intensity 101%", "MANUAL skip step 1", "MANUAL target step 2 205W", "MANUAL mode grade",
                  "MANUAL grade 2.5%", "MANUAL mode level", "MANUAL mode erg", "MANUAL back step 2"):

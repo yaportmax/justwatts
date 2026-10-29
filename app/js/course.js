@@ -163,10 +163,12 @@ export function profileOf(c, n = 300) {
 }
 
 /* ---------- speed from power, with momentum ---------- */
-// One tick: integrate kinetic energy in 0.25 s sub-steps. v in m/s, grade in %, mass = rider + bike in kg.
-export function speedStep(v, watts, grade, mass, dt) {
+// One tick: integrate kinetic energy in 0.25 s sub-steps. v in m/s, grade in %, mass = rider + bike in kg,
+// draft: the share of air drag a rider ahead takes away (0 .. DRAFT_MAX, the open world's riders)
+export const DRAFT_MAX = 0.35;
+export function speedStep(v, watts, grade, mass, dt, draft = 0) {
   const a = Math.atan(grade / 100), n = Math.max(1, Math.ceil(dt / 0.25 - 1e-9)), h = dt / n, p = Math.max(0, watts) * PHYS.eta;
-  const fk = mass * PHYS.g * (PHYS.crr * Math.cos(a) + Math.sin(a)), air = 0.5 * PHYS.rho * PHYS.cda;
+  const fk = mass * PHYS.g * (PHYS.crr * Math.cos(a) + Math.sin(a)), air = 0.5 * PHYS.rho * PHYS.cda * (1 - Math.max(0, Math.min(DRAFT_MAX, +draft || 0)));
   for (let k = 0; k < n; k++) {
     const e = 0.5 * mass * v * v + (p - (fk + air * v * v) * v) * h;
     v = e > 0 ? Math.min(PHYS.vmax, Math.sqrt(2 * e / mass)) : 0;

@@ -1,6 +1,9 @@
 // Ride-screen map. 2D: the chosen style on a canvas (map.js). 3D: MapLibre (vendored, loaded on first use) with AWS
 // Terrain Tiles under the same style, the camera behind the rider facing the road. Map focus swaps it with the power chart.
 import { drawMap, MAP_STYLES, styleOf, lineDist, pointAt } from './map.js';
+import { probeWebGL2, pickView } from './world3d/probe.js';
+import { sharedBaked } from './world3d/baked.js';
+import { draftShare } from './world3d/draft.js';
 
 const ML = 'vendor/maplibre-gl-5.24.0/';
 const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png', DEM_ATTR = 'Terrain © Mapzen, AWS';
@@ -42,14 +45,26 @@ export function createGlide(ms = 2000) {
   };
 }
 
-export function createRideMap({ $, store, fit, css, toast, relayout }) {
+export function createRideMap({ $, store, fit, css, toast, relayout, live = () => null, onDraft = () => {} }) {
   let style = MAP_STYLES[store.get('hw.mapStyle', 'sat')] ? store.get('hw.mapStyle', 'sat') : 'sat';  // satellite and 3D by default
   let d3 = !!store.get('hw.map3d', true), focus = !!store.get('hw.mapFocus', false);
+  // the open world's 3D world view (world3d/view.js, three.js loaded on first use); falls back to MapLibre 3D
+  let wv = null, wvBusy = false, wvFailed = false, owPref = store.get('hw.owView', null), ow = null;
   let cur = null;  // { ll, n, D, dist, done, open, alts }
   let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, mapAlts = '', busy = false, size = '', placedOn = false;
   let others = [], marks = new Map();  // other riders (social.js): [{ id, lat, lon, label, hi }]; their 3D markers by id
   const glide = createGlide(); let oraf = 0, o2d = 0;
   const box = $('#crsMapBox'), cv = $('#crsMap'), v3 = $('#crsMap3d');
+  const doc = globalThis.document, wbox = doc?.createElement('div'), wbtn = doc?.createElement('button'), cbtn = doc?.createElement('button'), dbadge = doc?.createElement('span');
+  if (wbox) {
+    wbox.id = 'crsWorld'; wbox.style.display = 'none'; box.insertBefore?.(wbox, v3.nextSibling);
+    wbtn.id = 'mapWorld'; wbtn.textContent = 'World'; wbtn.title = 'Open world in 3D'; wbtn.setAttribute('aria-pressed', 'false');
+    cbtn.id = 'mapCam'; cbtn.title = 'Camera (V)'; cbtn.setAttribute('aria-label', 'Camera');
+    cbtn.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.2"/></svg>';
+    dbadge.className = 'w3draft'; dbadge.textContent = 'Draft';
+    const m3 = $('#map3d'); m3.parentNode?.insertBefore?.(wbtn, m3); m3.parentNode?.insertBefore?.(cbtn, $('#mapFocus')); box.appendChild?.(dbadge);
+  }
+  const kind = () => pickView({ pref: cur?.open ? owPref : null, open: !!cur?.open, gl: !!cur?.open && probeWebGL2(), failed: wvFailed, d3 });
   $('#mapStyle').innerHTML = Object.entries(MAP_STYLES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
 
   // Map focus: the map takes the big chart panel, the power chart its small slot
@@ -63,6 +78,18 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     return true;
   }
   function ui() {
+    const k = cur ? kind() : '2d', w = k === 'world';
+    if (wbox) {
+      wbtn.style.display = cur?.open && probeWebGL2() && !wvFailed ? '' : 'none'; wbtn.classList.toggle('on', w); wbtn.setAttribute('aria-pressed', String(w));
+      cbtn.style.display = w ? '' : 'none'; wbox.style.display = w ? '' : 'none'; $('#mapStyle').style.display = w ? 'none' : '';
+      if (!w) dbadge.classList.remove('on');
+    }
+    if (w) {
+      $('#map3d').classList.remove('on'); $('#map3d').setAttribute('aria-pressed', 'false');
+      $('#mapFocus').classList.toggle('on', focus); $('#mapFocus').title = focus ? 'Chart focus (F)' : 'Map focus (F)';
+      $('#mapAttr').textContent = '© OpenStreetMap contributors · Terrain © Mapzen, AWS';
+      v3.style.display = 'none'; cv.style.display = 'none'; return;
+    }
     const live = d3 && ready;
     $('#mapStyle').value = style;
     $('#map3d').classList.toggle('on', d3); $('#map3d').setAttribute('aria-pressed', String(d3));
@@ -73,7 +100,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   }
   // 2D: the whole course; an open-world ride: about 1.6 km across, centred on the rider (points every 10 m)
   function draw2d() {
-    if (!cur || (d3 && ready)) return;
+    if (!cur || (d3 && ready) || kind() === 'world') return;
     const others = shown();
     if (!cur.open) return drawMap(cv, { ll: cur.ll, dist: cur.dist, done: cur.done, fit, css, redraw: draw2d, style, attr: false, others });
     const i = Math.floor(cur.done / 10), a = Math.max(0, i - 150), b = Math.min(cur.ll.length, i + 250), w = cur.ll.slice(a, b);
@@ -102,15 +129,56 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     syncMarks();
     if (others.length && !oraf) oraf = requestAnimationFrame(glideFrame);
   }
+  // drafting: a rider close ahead on my line (open world); the engine hears of it at most every 2 s
+  let draft = 0, draftSent = 0;
+  function drafts(now = performance.now()) {
+    let k = 0;
+    if (cur?.open && others.length && cur.D) {
+      const d = Math.max(0, Math.min(cur.done, cur.dist)), p = pointAt(cur.ll, cur.D, d), q = pointAt(cur.ll, cur.D, Math.min(cur.dist, d + 8));
+      k = draftShare({ lat: p[0], lon: p[1], h: bearing(p, q) }, shown());
+    }
+    if (Math.abs(k - draft) > 0.04 || (k > 0 && now - draftSent > 2000) || (!k && draft)) { draft = k; draftSent = now; onDraft(k); }
+    dbadge?.classList.toggle('on', k > 0.1);
+  }
   function glideFrame(now) {
     oraf = 0;
-    if (!others.length) return;
+    if (!others.length) { drafts(now); return; }
+    drafts(now);
     syncMarks();
-    if (cur && !(d3 && ready) && now - o2d > 60) { o2d = now; draw2d(); }  // the 2D canvas: about 15 redraws a second
+    if (cur && !(d3 && ready) && kind() !== 'world' && now - o2d > 60) { o2d = now; draw2d(); }  // the 2D canvas: about 15 redraws a second
     if (!glide.done(now)) oraf = requestAnimationFrame(glideFrame);
     else if (cur && !(d3 && ready)) draw2d();
   }
-  function draw() { if (!cur) return; ui(); if (d3) draw3d(); draw2d(); }
+  function draw() {
+    if (!cur) { closeWorld(); return; }
+    const k = kind(); ui();
+    if (k === 'world') return drawWorld();
+    closeWorld();
+    if (d3) draw3d(); draw2d();
+  }
+  // the world view: built on first use, fed the ride on every update; any failure turns it off for this session
+  function closeWorld() { if (wv) { wv.dispose(); wv = null; } }
+  function worldFail(why) {
+    if (wvFailed) return; wvFailed = true; wv = null; console.warn('world view off:', why);
+    toast(/slow/.test(why || '') ? 'Switched to the 3D map for speed' : '3D world unavailable here, showing the 3D map');
+    d3 = true; draw();
+  }
+  function worldState() {
+    const lv = live() || {};
+    return { ll: cur.ll, ele: ow?.ele, dist: cur.dist, d: cur.done, v: cur.v ?? 0, cad: lv.cadence || 0, alts: cur.alts || [], turn: ow?.turn || null };
+  }
+  async function drawWorld() {
+    if (wv) { try { wv.update(worldState()); } catch (e) { worldFail(e.message); } return; }
+    if (wvBusy) return; wvBusy = true;
+    try {
+      const m = await import('./world3d/view.js');
+      if (!cur || kind() !== 'world') return;
+      wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, quality: store.get('hw.worldQ', 0),
+        time: store.get('hw.worldTime', 'golden') });
+      wv.update(worldState());
+    } catch (e) { worldFail(e?.message || String(e)); }
+    finally { wvBusy = false; }
+  }
 
   function spec() {
     const st = styleOf(style), round = { 'line-join': 'round', 'line-cap': 'round' };
@@ -177,15 +245,17 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     frame.t = now;
     rider.setLngLat([at[1], at[0]]);
     const center = [at[1], at[0]];  // elevation given: jumpTo looks it up at a fractional zoom and gets 0 (MapLibre 5.24)
-    const z = (w > 600 ? 14.8 : 13.8) + (cur.open ? 1.2 : 0);  // open world: closer, to see the junction ahead
-    map.jumpTo({ center, elevation: map.queryTerrainElevation(center) ?? 0, bearing: camB, pitch: w > 600 ? 62 : 56, zoom: z, padding: { top: Math.round(h * 0.42), bottom: 0, left: 0, right: 0 } });
+    // open world: third person, low behind the rider looking down the road; a course: higher, to see more of it
+    const z = (w > 600 ? 14.8 : 13.8) + (cur.open ? 1.5 : 0), pitch = cur.open ? (w > 600 ? 74 : 70) : w > 600 ? 62 : 56;
+    map.jumpTo({ center, elevation: map.queryTerrainElevation(center) ?? 0, bearing: camB, pitch, zoom: z, padding: { top: Math.round(h * (cur.open ? 0.56 : 0.42)), bottom: 0, left: 0, right: 0 } });
     if (now - anim.t0 < 1100 || Math.abs(turn) > 0.3) raf = requestAnimationFrame(frame);
     else frame.t = 0;
   }
 
   // ll: the course line ([lat, lon]); rc: the ride's course state; alts: other roads at a junction (open world).
   // Returns true when the layout moved.
-  function update(ll, rc, alts = null) {
+  function update(ll, rc, alts = null, view = null) {
+    ow = view;
     const has = !!(rc && ll?.length > 1);
     if (!has) cur = null;
     else {
@@ -193,9 +263,10 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
         const keep = cur?.open && rc.open;
         cur = { ll, open: !!rc.open, D: lineDist(ll, rc.open ? (ll.length - 1) * 10 : rc.dist_m) }; if (!keep) anim = null;
       }
-      cur.dist = rc.open ? (ll.length - 1) * 10 : rc.dist_m; cur.done = Math.min(rc.done_m, cur.dist); cur.alts = alts;
+      cur.dist = rc.open ? (ll.length - 1) * 10 : rc.dist_m; cur.done = Math.min(rc.done_m, cur.dist); cur.alts = alts; cur.v = (rc.speed_kmh || 0) / 3.6;
     }
     const moved = place();
+    drafts();
     $('#crsSlot').style.display = has ? '' : 'none';
     draw();
     return moved;
@@ -207,7 +278,18 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     return true;
   }
   $('#mapStyle').onchange = e => { style = MAP_STYLES[e.target.value] ? e.target.value : 'osm'; store.set('hw.mapStyle', style); draw(); };
-  $('#map3d').onclick = () => { d3 = !d3; store.set('hw.map3d', d3); size = ''; anim = null; draw(); };
+  $('#map3d').onclick = () => {
+    if (cur?.open && kind() === 'world') { d3 = true; owPref = '3d'; }  // from the world view to the 3D map
+    else { d3 = !d3; if (cur?.open) owPref = d3 ? '3d' : '2d'; }
+    store.set('hw.map3d', d3); if (cur?.open) store.set('hw.owView', owPref); size = ''; anim = null; draw();
+  };
+  if (wbtn) {
+    wbtn.onclick = () => { owPref = kind() === 'world' ? (d3 ? '3d' : '2d') : 'world'; store.set('hw.owView', owPref); size = ''; anim = null; draw(); };
+    cbtn.onclick = () => toggleCamera();
+  }
+  function toggleCamera() { if (!wv) return false; const m = wv.toggleCamera(); cbtn?.classList.toggle('on', m === 'first'); return true; }
+  const TIMES = ['golden', 'morning', 'day'];
+  function cycleTime() { if (!wv) return false; const t = TIMES[(TIMES.indexOf(store.get('hw.worldTime', 'golden')) + 1) % TIMES.length]; store.set('hw.worldTime', wv.setTime(t)); return true; }
   $('#mapFocus').onclick = toggleFocus;
-  return { update, toggleFocus, setOthers, focused: () => placedOn };
+  return { update, toggleFocus, setOthers, toggleCamera, cycleTime, focused: () => placedOn, worldStats: () => wv?.stats() ?? null, view: () => cur ? kind() : null };
 }

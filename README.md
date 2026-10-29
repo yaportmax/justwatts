@@ -42,12 +42,17 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
 - **Ride screen** on one page: power, target, distance (and climb on a course), cadence against your
   target range, HR with zones, interval timer, the chart with a right-hand HR axis. On a course: the
   route map in four styles or a 3D terrain view that follows you (MapLibre GL JS, vendored).
-- **Open world**: start anywhere (Golden Gate Bridge, Hawk Hill, Alpe d'Huez or a tap on the map) and
-  ride real roads with no route. You stay on the road; at a junction you go straight on or follow the
-  main road unless you pick another way. Roads are OpenStreetMap data loaded around you (Overpass),
-  the grade comes from terrain tiles, a workout can run on top, and the road ridden can be saved as a
-  course. Roads around the three presets ship with the app (`app/roads`, rebuilt with
-  `node tools/bake_roads.mjs`), so those starts load at once.
+- **Open world**: Marin, from the Golden Gate Bridge over the Headlands and Mt Tam to West Marin and
+  Point Reyes Station, with named starts (the bridge, Hawk Hill, Rodeo Beach, Sausalito, Mill Valley, Muir
+  and Stinson Beach, Pantoll, East Peak, Seven Sisters, Fairfax, Whites Hill, Samuel P. Taylor, Point Reyes
+  Station) or a tap on the map. Ride real roads with no route: you stay on the road; at a junction you go
+  straight on or follow the main road unless you pick another way, and no way leads out of the world. A
+  workout can run on top, and the road ridden can be saved as a course. The ride map shows it as a 3D world
+  (three.js, vendored): terrain, roads with their lanes and markings, trees, towns, the Golden Gate Bridge
+  and the city across the water, a chase camera (V: first person, T: time of day), other riders, and their
+  draft when you sit on a wheel. Without WebGL2, or if it runs too slowly, the 3D map or the 2D map shows
+  instead. Roads, terrain and ground data are OpenStreetMap and Mapzen terrain, baked into the app
+  (`app/roads/marin`, `app/world`) so a ride never waits on a server.
 - **Riding with others** (justwatts.com, signed in): riders on the same course or within about 5 km in
   the open world show on the 2D and 3D maps with name and watts, friends highlighted. Friends by name
   or share link, a Friends panel with who is riding now and "Ride here", group rides (a course or

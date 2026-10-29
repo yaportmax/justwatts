@@ -4,18 +4,39 @@
 // the plan from the engine's course. Junction choices: choose(), or key() with the arrow keys.
 import { RoadGraph, Plan, OVERPASS, overpassQuery, parseWays, cellKey, cellBox, cellsAround, tileAt, tileEle, bridges, smoothFrom, label } from './roads.js';
 import { STEP_M } from './course.js';
+import { gridAt, sharedBaked } from './world3d/baked.js';
 
 export const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
+// The open world is Marin: the Golden Gate Bridge and a strip of San Francisco, the Headlands, Mt Tam, West Marin to
+// Point Reyes Station. Routes never leave BOUNDS (a way out is no option: the default turns away or turns around).
+export const BOUNDS = [[37.80, -122.83, 38.08, -122.47], [37.775, -122.53, 37.81, -122.43]];
+export const inWorld = (lat, lon) => BOUNDS.some(([s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e);
 export const PRESETS = [
   { id: 'ggb', name: 'Golden Gate Bridge', lat: 37.80817, lon: -122.47641, heading: 340 },
-  { id: 'hawk', name: 'Hawk Hill', lat: 37.83294, lon: -122.48262, heading: 290 },
-  { id: 'alpe', name: "Alpe d'Huez", lat: 45.0558, lon: 6.03584, heading: 320 },
+  { id: 'hawk', name: 'Hawk Hill', lat: 37.82955, lon: -122.48372, heading: 230 },
+  { id: 'rodeo', name: 'Rodeo Beach', lat: 37.83406, lon: -122.53338, heading: 122 },
+  { id: 'sausalito', name: 'Sausalito', lat: 37.85874, lon: -122.48394, heading: 300 },
+  { id: 'millvalley', name: 'Mill Valley', lat: 37.88404, lon: -122.55409, heading: 245 },
+  { id: 'muirbeach', name: 'Muir Beach', lat: 37.8635, lon: -122.57791, heading: 326 },
+  { id: 'stinson', name: 'Stinson Beach', lat: 37.89982, lon: -122.6433, heading: 300 },
+  { id: 'pantoll', name: 'Pantoll', lat: 37.90415, lon: -122.6044, heading: 41 },
+  { id: 'eastpeak', name: 'East Peak', lat: 37.92746, lon: -122.58194, heading: 280 },
+  { id: 'sisters', name: 'Seven Sisters', lat: 37.91627, lon: -122.62746, heading: 329 },
+  { id: 'fairfax', name: 'Fairfax', lat: 37.98734, lon: -122.58867, heading: 277 },
+  { id: 'whites', name: 'Whites Hill', lat: 38.00682, lon: -122.61571, heading: 300 },
+  { id: 'taylor', name: 'Samuel P. Taylor', lat: 38.0194, lon: -122.73028, heading: 250 },
+  { id: 'reyes', name: 'Point Reyes Station', lat: 38.06736, lon: -122.80484, heading: 170 },
 ];
-// roads baked into the app around the presets (tools/bake_roads.mjs): those starts never wait on Overpass
+// roads baked into the app (tools/bake_roads.mjs) in blocks of 5 x 5 cells, app/roads/<id>/<i>_<j>.json: the open
+// world never waits on Overpass
 export const SEEDS = [
-  { id: 'bay', box: [37.77, -122.53, 37.87, -122.43] },   // Golden Gate Bridge, Hawk Hill, the Presidio, Marin Headlands
-  { id: 'alpe', box: [45.02, 5.98, 45.11, 6.1] },        // Bourg d'Oisans to Alpe d'Huez
+  { id: 'marin', box: [37.76, -122.86, 38.1, -122.42], block: 5 },
 ];
+export const seedOf = key => {
+  const [cs, cw, cn, ce] = cellBox(key);
+  return SEEDS.find(({ box: [s, w, n, e] }) => cs >= s - 1e-9 && cw >= w - 1e-9 && cn <= n + 1e-9 && ce <= e + 1e-9) || null;
+};
+export const blockOf = (seed, key) => { const [i, j] = key.split('_').map(Number); return `${Math.floor(i / seed.block)}_${Math.floor(j / seed.block)}`; };
 const AHEAD = 2500, PROMPT = 200, BATCH = 30, CACHE = 'jw-roads-1';
 const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 
@@ -31,18 +52,19 @@ export function createRoadLoader({ fetch = globalThis.fetch, caches = globalThis
     try { const r = await (await caches?.open(CACHE))?.match(url(key)); const j = r && await r.json(); return Array.isArray(j?.ways) ? j.ways : null; } catch { return null; }
   }
   async function toCache(key, ways) { try { await (await caches?.open(CACHE))?.put(url(key), new Response(JSON.stringify({ ways }), { headers: { 'Content-Type': 'application/json' } })); } catch {} }
-  const seeds = new Map();  // id -> Promise<{ cells, byId } | null>
+  const seeds = new Map();  // file -> Promise<{ cells, byId } | null>
   function fromSeed(key) {
-    const [cs, cw, cn, ce] = cellBox(key), seed = SEEDS.find(({ box: [s, w, n, e] }) => cs >= s && cw >= w && cn <= n && ce <= e);
+    const seed = seedOf(key);
     if (!seed) return Promise.resolve(null);
-    if (!seeds.has(seed.id)) seeds.set(seed.id, (async () => {
+    const file = `${seed.id}/${blockOf(seed, key)}.json`;
+    if (!seeds.has(file)) seeds.set(file, (async () => {
       try {
-        const r = await fetch(base + seed.id + '.json'); if (!r.ok) return null;
+        const r = await fetch(base + file); if (!r.ok) return null;
         const j = await r.json(); if (!j?.cells || !Array.isArray(j.ways)) return null;
         return { cells: j.cells, byId: new Map(j.ways.map(w => [w.id, w])) };
       } catch { return null; }
     })());
-    return seeds.get(seed.id).then(d => { const ids = d?.cells[key]; return Array.isArray(ids) ? ids.map(id => d.byId.get(id)).filter(Boolean) : null; });
+    return seeds.get(file).then(d => { const ids = d?.cells[key]; return Array.isArray(ids) ? ids.map(id => d.byId.get(id)).filter(Boolean) : d ? [] : null; });
   }
   function done(key, ways) {
     mem.set(key, ways); const i = queue.indexOf(key); if (i >= 0) queue.splice(i, 1);
@@ -90,8 +112,9 @@ export function createRoadLoader({ fetch = globalThis.fetch, caches = globalThis
   return { get, has: key => mem.has(key), clear: () => { queue.length = 0; wait.clear(); } };
 }
 
-// Terrarium tiles for grade: decoded once, kept for a while; a tile that will not load gives null (flat there)
-export function createTerrain({ fetch = globalThis.fetch, decode = decodePng, max = 64 } = {}) {
+// Terrarium tiles for grade: decoded once, kept for a while; a tile that will not load gives null (flat there).
+// Inside the baked world the 3D view's own heights (world3d/baked.js), so the road and the ground agree.
+export function createTerrain({ fetch = globalThis.fetch, decode = decodePng, max = 64, baked = null } = {}) {
   const tiles = new Map();
   async function load(z, x, y) {
     for (let i = 0; i < 3; i++) {
@@ -112,7 +135,15 @@ export function createTerrain({ fetch = globalThis.fetch, decode = decodePng, ma
   // elevation at each [lat, lon], null where no tile
   async function ele(lls) {
     const at = lls.map(([lat, lon]) => tileAt(lat, lon)), out = [];
-    for (const a of at) { const t = await tile(a.z, a.x, a.y); out.push(t ? tileEle(t, a.px, a.py) : null); }
+    for (let i = 0; i < at.length; i++) {
+      const a = at[i];
+      if (baked && inWorld(...lls[i])) {
+        const t = await baked.get(a.z, a.x, a.y), s = t ? t.n - 1 : 0;
+        out.push(t ? gridAt(t.hs, t.n, (a.px + 0.5) / 256 * s, (a.py + 0.5) / 256 * s) : null);
+        continue;
+      }
+      const t = await tile(a.z, a.x, a.y); out.push(t ? tileEle(t, a.px, a.py) : null);
+    }
     return out;
   }
   return { ele };
@@ -125,8 +156,8 @@ async function decodePng(blob) {
 }
 
 // control(action, body) -> Promise (the engine), course() -> Promise<{ course, d }> (GET /api/ride/course)
-export function createWorld({ control, course, loader = createRoadLoader(), terrain = createTerrain(), onChange = () => {} }) {
-  const g = new RoadGraph();
+export function createWorld({ control, course, loader = createRoadLoader(), terrain = createTerrain({ baked: sharedBaked() }), onChange = () => {}, inside = inWorld }) {
+  const g = new RoadGraph({ inside });
   // ll, ele: the engine's course as sent; raw, br: terrain height and bridge/tunnel flag per point; dirty: first point a
   // junction choice changed; prov: first point of a bridge or tunnel still running at the end of what was sent (sent
   // flat for now, sent again once its far end is known)
@@ -257,5 +288,7 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
         alts: j ? j.opts.filter(o => o.to !== j.sel).map(o => plan.peek(j.k, o.to)) : [] };
     },
     active: () => !!rid,
+    // a rider close ahead (world3d/draft.js): the engine takes that share off the air drag for a few seconds
+    draft(k) { if (rid) control('draft', { k }).catch(() => {}); },
   };
 }

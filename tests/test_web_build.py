@@ -24,6 +24,10 @@ def test_build_output(dist):
     assert {"index.html", "js/app.js", "js/core.js", "js/mode.js", "js/web/backend.js", "css/app.css", "vercel.json", "icon.svg"} <= files
     ml = "vendor/maplibre-gl-5.24.0/"                                                # 3D map, pinned, no CDN (CSP)
     assert {ml + f for f in ("maplibre-gl-csp.js", "maplibre-gl-csp-worker.js", "maplibre-gl.css", "LICENSE.txt")} <= files
+    th = "vendor/three-0.180.0/"                                                     # the 3D world, pinned, no CDN (CSP)
+    assert {th + f for f in ("three.module.min.js", "three.core.min.js", "LICENSE.txt")} <= files
+    assert {"world/index.json", "js/world3d/view.js"} <= files and any(f.startswith("world/14/") for f in files)  # the baked Marin world
+    assert any(f.startswith("roads/marin/") for f in files)
     assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
     api = {f for f in files if f.startswith("api/")}                                  # Strava relay, accounts, integrations
     assert {f for f in api if not f.startswith("api/_lib/")} == {"api/strava/token.js", "api/accounts.js", "api/integrations.js"}  # _lib is not routed

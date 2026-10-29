@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import events as E
-from .course import G_MAX, G_MIN, check_ride_course, ele_at, grade_at, mass_of, profile_of, ridden, road_extend, speed_step
+from .course import DRAFT_MAX, G_MAX, G_MIN, check_ride_course, ele_at, grade_at, mass_of, profile_of, ridden, road_extend, speed_step
 from .devices import DeviceHub
 from .workout import WorkoutError, compile_workout, parse_workout, step_at, step_watts, to_text
 
@@ -331,7 +331,8 @@ class RideEngine:
                   "back": self.back, "end": self.finish, "adjust": self.adjust, "mode": self.set_mode,
                   "dismiss": self.dismiss, "resume": self.resume_ride, "hold": self.hold,
                   "intensity": self.set_intensity, "free": self.set_free, "target": self.set_target,
-                  "save": self.save_copy, "edit": lambda b: self.edit(b.get("edit") or {}), "road": self.road}.get(action)
+                  "save": self.save_copy, "edit": lambda b: self.edit(b.get("edit") or {}), "road": self.road,
+                  "draft": self.set_draft}.get(action)
             if not fn:
                 raise ValueError(f"unknown action {action!r}")
             self._did = None
@@ -843,13 +844,25 @@ class RideEngine:
                 self.apply_target()
             self._bump()
 
+    _draft: tuple[float, float] = (0.0, 0.0)  # open world: (share of air drag taken away, clock it lapses at)
+
+    def set_draft(self, body: dict) -> dict:
+        """Open world: a rider close ahead takes some of the air drag ({k}: 0 .. DRAFT_MAX); it lapses unless sent again."""
+        try:
+            k = max(0.0, min(DRAFT_MAX, float(body.get("k") or 0)))
+        except (TypeError, ValueError):
+            k = 0.0
+        self._draft = (k, self.clock() + 5)
+        return {"draft": k}
+
     def _course_tick(self, dt: float) -> None:
         """Move along the course at the speed the rider's power gives on the road under them."""
         r = self.ride
         if not r.course:
             return
         c, cs = r.course, r.cs
-        cs["v"] = speed_step(cs["v"], self.hub.r.power, grade_at(c, cs["d"]), mass_of(self.settings().get("weight")), dt)
+        draft = self._draft[0] if c.get("open") and self.clock() < self._draft[1] else 0.0
+        cs["v"] = speed_step(cs["v"], self.hub.r.power, grade_at(c, cs["d"]), mass_of(self.settings().get("weight")), dt, draft)
         e0 = ele_at(c, cs["d"])
         cs["d"] += cs["v"] * dt
         if c.get("open"):  # open world: wait at the end of the known road until the page adds more

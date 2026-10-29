@@ -2,7 +2,7 @@
 // Same state shape, controls, mid-ride edits, overtime and persistence semantics;
 // persistence goes to IndexedDB (snapshot every 30 s + a sample journal every 5 s, see backend.js).
 import { parseWorkout, toText, stepAt, stepWatts, fmtT, lineRideStart, lineRideEnd, lineStepStart, lineStepEnd } from '../core.js';
-import { G_MIN, G_MAX, checkRideCourse, eleAt, gradeAt, massOf, profileOf, ridden, roadExtend, speedStep } from '../course.js';
+import { G_MIN, G_MAX, DRAFT_MAX, checkRideCourse, eleAt, gradeAt, massOf, profileOf, ridden, roadExtend, speedStep } from '../course.js';
 
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 const jsr = Math.round;
@@ -101,7 +101,7 @@ export class Engine {
   control(action, body = {}) {
     const fn = { load: this.load, start: this.start, pause: this.togglePause, hold: this.hold, resume: this.resumeRide, skip: this.skip, back: this.back, end: this.finish,
       adjust: this.adjust, mode: this.setMode, intensity: this.setIntensity, free: this.setFree, target: this.setTarget, save: this.saveCopy,
-      dismiss: () => { this.notice = null; }, edit: b => this.edit(b.edit || {}), road: this.road }[action];
+      dismiss: () => { this.notice = null; }, edit: b => this.edit(b.edit || {}), road: this.road, draft: this.setDraft }[action];
     if (!fn) throw new Error(`unknown action ${action}`);
     this.did = null;
     let res = fn.call(this, body) || {};
@@ -347,10 +347,13 @@ export class Engine {
     }
     this.bump();
   }
+  // open world: a rider close ahead takes some of the air drag ({ k }: 0 .. DRAFT_MAX); it lapses unless sent again
+  setDraft(b) { this.draft = { k: Math.max(0, Math.min(DRAFT_MAX, +b.k || 0)), until: this.clock() + 5 }; return { draft: this.draft.k }; }
   // move along the course at the speed the rider's power gives on the road under them
   courseTick(dt) {
     const r = this.ride, c = r.course, cs = r.cs; if (!c) return;
-    cs.v = speedStep(cs.v, this.hub.r.power, gradeAt(c, cs.d), massOf(+this.settings().weight), dt);
+    const draft = c.open && this.draft && this.clock() < this.draft.until ? this.draft.k : 0;
+    cs.v = speedStep(cs.v, this.hub.r.power, gradeAt(c, cs.d), massOf(+this.settings().weight), dt, draft);
     const e0 = eleAt(c, cs.d); cs.d += cs.v * dt;
     if (c.open) cs.d = Math.min(cs.d, c.dist);  // open world: wait at the end of the known road until the page adds more
     cs.up += Math.max(0, eleAt(c, cs.d) - e0);

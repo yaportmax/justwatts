@@ -1,8 +1,9 @@
-// Open world start: a preset or a tap on the map (the nearest road), a workout to run on top or none, Ride.
+// Open world start (Marin): a named start (a chip or its pin on the map) or a tap inside the world (the nearest road),
+// a workout to run on top or none, Ride.
 import { esc } from './core.js';
 import { loadML } from './ridemap.js';
 import { MAP_STYLES } from './map.js';
-import { PRESETS, DEM } from './world.js';
+import { PRESETS, DEM, BOUNDS, inWorld } from './world.js';
 
 // go(start, workoutId) -> Promise (throws with a message to show)
 export function createPicker({ $, store, world, wOptions, go }) {
@@ -16,7 +17,7 @@ export function createPicker({ $, store, world, wOptions, go }) {
   }
   async function pick(p, fly = false) {
     at = p; store.set('hw.owStart', p); ui();
-    if (map) { mk?.setLngLat([p.lon, p.lat]); if (fly) map.jumpTo({ center: [p.lon, p.lat], zoom: 14 }); }
+    if (map) { mk?.setLngLat([p.lon, p.lat]); if (fly) map.jumpTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 11) }); }
     hint(p.id ? p.name : 'Finding the nearest road');
     const my = ++seq, r = await world.preview(p.lat, p.lon, p.heading).catch(() => null);
     if (my !== seq) return;
@@ -26,15 +27,21 @@ export function createPicker({ $, store, world, wOptions, go }) {
   }
   async function initMap() {
     const ml = await loadML(), c = at || PRESETS[0];
-    map = new ml.Map({ container: $('#owMap'), attributionControl: false, center: [c.lon, c.lat], zoom: 14, maxPitch: 0, dragRotate: false,
+    map = new ml.Map({ container: $('#owMap'), attributionControl: false, center: [c.lon, c.lat], zoom: 11, minZoom: 9.5, maxBounds: [[-123.0, 37.70], [-122.30, 38.16]], maxPitch: 0, dragRotate: false,
       transformRequest: url => ({ url, referrerPolicy: 'strict-origin' }),
       style: { version: 8, sources: { base: { type: 'raster', tiles: [osm.tiles], tileSize: 256, maxzoom: osm.max },
         dem: { type: 'raster-dem', tiles: [DEM], tileSize: 256, maxzoom: 15, encoding: 'terrarium' } },
       layers: [{ id: 'base', type: 'raster', source: 'base', paint: { 'raster-brightness-min': 0.8, 'raster-brightness-max': 0.04, 'raster-hue-rotate': 180, 'raster-saturation': -0.6 } },
         { id: 'relief', type: 'hillshade', source: 'dem', paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#000', 'hillshade-highlight-color': '#fff' } }] } });
+    for (const p of PRESETS) {  // the named starts as pins
+      const el = document.createElement('button'); el.className = 'owpin'; el.title = p.name; el.setAttribute('aria-label', p.name);
+      el.onclick = e => { e.stopPropagation(); pick(p); };
+      new ml.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(map);
+    }
     const dot = document.createElement('div'); dot.className = 'rmapdot';
     mk = new ml.Marker({ element: dot }).setLngLat([c.lon, c.lat]).addTo(map);
-    map.on('click', e => pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }));
+    map.fitBounds([[BOUNDS[0][1], BOUNDS[0][0]], [BOUNDS[0][3], BOUNDS[0][2]]], { padding: 16, duration: 0 });  // the whole world, every pin
+    map.on('click', e => inWorld(e.lngLat.lat, e.lngLat.lng) ? pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }) : hint('Outside the Marin world', true));
   }
   // wid: the workout to ride there ('' free ride)
   function open(wid = '') {

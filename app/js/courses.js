@@ -18,7 +18,7 @@ export const authorCell = (name, it = null) => `<div class="au${name === 'You' ?
 // community feed for the list (web build, community.js) or null; openComm / rideComm / moreComm act on it.
 // publish(c) returns a handler when the course may be published (web, signed in).
 // world: the open-world road provider (world.js), for its map line, junction prompt and road name.
-export function createCourses({ $, store, toast, fit, css, units, ride, workouts, relayout, source = () => 'all', comm = () => null, openComm = () => {}, rideComm = () => {}, moreComm = () => {}, publish = () => null, world = null, openWorld = null, openCourse = () => {} }) {
+export function createCourses({ $, store, toast, fit, css, units, ride, workouts, relayout, source = () => 'all', comm = () => null, openComm = () => {}, rideComm = () => {}, moreComm = () => {}, publish = () => null, world = null, openWorld = null, openCourse = () => {}, live = () => null }) {
   let mine = store.get('hw.courses', []);
   store.del('hw.course');  // the old "use this course for every ride" choice: rides now pick a course each time
   const cf = Object.assign({ q: '', sort: '' }, store.get('hw.crsFilter', {}));  // search and sort: a per-browser convenience
@@ -143,14 +143,14 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
   $('#crsFile').onchange = e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) importFile(f); };
 
   const thumbs = createThumbs({ fit, css, store, draw });
-  const map = createRideMap({ $, store, fit, css, toast, relayout });
+  const map = createRideMap({ $, store, fit, css, toast, relayout, live, onDraft: k => world?.draft?.(k) });
   // ride screen: map, profile with the rider's position, distance left, grade, speed (distance and climbed are in the top row)
   function renderRide(rc) {
     const box = $('#crsRide'); if (!box) return;
     // the map: the ride state has no line, so take it from the course list (gone if the course was deleted); open world: from the page's road plan
     const ow = rc?.open ? world?.view() : null, src = srcOf(rc);
     box.style.display = rc ? '' : 'none';
-    map.update(rc?.open ? ow?.ll : src?.ll, rc, ow?.alts); turnPrompt(ow); if (!rc) return;
+    map.update(rc?.open ? ow?.ll : src?.ll, rc, ow?.alts, ow); turnPrompt(ow); if (!rc) return;
     const u = units(), spd = isMetric(u) ? `${Math.round(rc.speed_kmh)} km/h` : `${Math.round(rc.speed_kmh * 0.621371)} mph`;
     if (ow) {  // open world: about 1 km behind and 2.5 km ahead
       const i = Math.floor(ow.d / 10), a = Math.max(0, i - 100), b = Math.min(ow.ele.length, i + 250);

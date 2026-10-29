@@ -108,7 +108,7 @@ out.spacing = Math.max(...eng.ride.course.ll.slice(1).map((p, i) => dist(eng.rid
   const ground = ([lat]) => { const y = (lat - O[0]) * 111195; return 50 + y * 0.02 - (y > 300 && y < 1700 ? 40 : 0); };
   const w2 = createWorld({ control: async (a, b) => eng2.control(a, b), course: async () => ({ course: eng2.ride.course, d: eng2.ride.cs.d }),
     loader: { get: key => new Promise(ok => { const f = () => +key.split('_')[0] <= north ? ok(ways) : setTimeout(f, 5); f(); }) },
-    terrain: { ele: async lls => lls.map(ground) } });
+    terrain: { ele: async lls => lls.map(ground) }, inside: null });  // a made-up place outside the Marin world
   const started = await w2.start({ name: 'Bridge', lat: O[0] + 1e-4, lon: O[1], heading: 0 });
   eng2.control('start', {});
   const first = eng2.ride.course.ele.slice();

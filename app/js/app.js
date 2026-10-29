@@ -123,7 +123,7 @@ const conn = createConnect({ $, F, WEB, toast,
 // open world: the page provides the road ahead (world.js); quiet controls (a refused road update is not an error to show)
 const world = createWorld({ control: (action, b) => apiJson('/api/ride/control', { action, ...b }),
   course: async () => (await F('/api/ride/course', { headers: { 'X-HW': '1' } })).json(), onChange: () => { if (V) renderRide(); } });
-const courses = createCourses({ world, openWorld: wid => picker.open(wid), openCourse: c => detail.openCourse(c), $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide(),
+const courses = createCourses({ world, live: () => S?.live, openWorld: wid => picker.open(wid), openCourse: c => detail.openCourse(c), $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide(),
   source: () => srcNow(), comm: f => commFeed('course', f), openComm: id => community?.openItem(id), rideComm: id => community?.rideItem(id), moreComm: () => community?.feedMore('course'),
   publish: c => community && account?.me() ? () => community.openPublish({ kind: 'course', course: c }) : null });
 
@@ -793,6 +793,7 @@ const KEYS = {
   Equal: () => stepWattsBy(5), NumpadAdd: () => stepWattsBy(5), Minus: () => stepWattsBy(-5), NumpadSubtract: () => stepWattsBy(-5),
   Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
   KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo,
+  KeyV: () => courses.map.toggleCamera(), KeyT: () => courses.map.cycleTime(),  // the 3D world
 };
 function onKey(e) {
   if (e.key === 'Escape') { if (conn.escape()) return; picker.close(); detail.close(); sheet(false); $('#keysModal').classList.remove('on'); return; }

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import events as E
-from .course import G_MAX, G_MIN, check_course, ele_at, grade_at, mass_of, profile_of, speed_step
+from .course import G_MAX, G_MIN, check_ride_course, ele_at, grade_at, mass_of, profile_of, ridden, road_extend, speed_step
 from .devices import DeviceHub
 from .workout import WorkoutError, compile_workout, parse_workout, step_at, step_watts, to_text
 
@@ -76,7 +76,8 @@ class Ride:
         if not s:
             return
         up = max(0.0, s[0][7] - self.course["ele"][0]) + sum(max(0.0, b[7] - a[7]) for a, b in zip(s, s[1:]))
-        self.cs.update(d=float(s[-1][8]), v=s[-1][5] / 3.6, up=up, end=bool(self.cs["end"] or s[-1][8] >= self.course["dist"]))
+        end = not self.course.get("open") and bool(self.cs["end"] or s[-1][8] >= self.course["dist"])
+        self.cs.update(d=float(s[-1][8]), v=s[-1][5] / 3.6, up=up, end=end)
 
     @property
     def id(self) -> str:
@@ -250,7 +251,7 @@ class RideEngine:
             r.ov = {int(k): v for k, v in (cur.get("ov") or {}).items()}
             if cur.get("course"):
                 try:
-                    r.set_course(check_course(cur["course"]))
+                    r.set_course(check_ride_course(cur["course"]))
                     r.cs = {**r.cs, **(cur.get("cs") or {})}
                     r.resume_course()
                 except ValueError:
@@ -330,7 +331,7 @@ class RideEngine:
                   "back": self.back, "end": self.finish, "adjust": self.adjust, "mode": self.set_mode,
                   "dismiss": self.dismiss, "resume": self.resume_ride, "hold": self.hold,
                   "intensity": self.set_intensity, "free": self.set_free, "target": self.set_target,
-                  "save": self.save_copy, "edit": lambda b: self.edit(b.get("edit") or {})}.get(action)
+                  "save": self.save_copy, "edit": lambda b: self.edit(b.get("edit") or {}), "road": self.road}.get(action)
             if not fn:
                 raise ValueError(f"unknown action {action!r}")
             self._did = None
@@ -354,7 +355,7 @@ class RideEngine:
         """{workout: {name, text, test} | null, course: course | null}. A course alone is a free ride on it;
         with a workout, ERG segments keep their watts and free segments ride the course grade."""
         w = body.get("workout")
-        c = check_course(body["course"]) if body.get("course") else None
+        c = check_ride_course(body["course"]) if body.get("course") else None
         if self.ride and self.ride.started:
             self.finish({})
         ftp = int(self.settings().get("ftp") or 200)
@@ -367,6 +368,14 @@ class RideEngine:
         self.notice = None
         self.apply_target()
         return {"loaded": r.name}
+
+    def road(self, body: dict):
+        """Open world: the page extends the road ahead ({at, ele, ll, nd}, see course.road_extend)."""
+        r = self.ride
+        if not r or not r.course:
+            raise ValueError("no open-world ride")
+        r.set_course(road_extend(r.course, body, r.cs["d"]))
+        return {"n": len(r.course["ele"])}
 
     def start(self, body: dict | None = None):
         r = self.ride
@@ -602,6 +611,8 @@ class RideEngine:
             r.acc = None
         self.log_event(E.line_ride_end(r.el))
         self.ride = None
+        if r.course and r.course.get("open"):
+            r.course = ridden(r.course, r.cs["d"])
         self.hub.want({"k": "sim", "g": 0})
         self.clear_saved()
         if len(r.samples) < 10:
@@ -841,8 +852,10 @@ class RideEngine:
         cs["v"] = speed_step(cs["v"], self.hub.r.power, grade_at(c, cs["d"]), mass_of(self.settings().get("weight")), dt)
         e0 = ele_at(c, cs["d"])
         cs["d"] += cs["v"] * dt
+        if c.get("open"):  # open world: wait at the end of the known road until the page adds more
+            cs["d"] = min(cs["d"], c["dist"])
         cs["up"] += max(0.0, ele_at(c, cs["d"]) - e0)
-        if cs["d"] >= c["dist"] and not cs["end"]:
+        if cs["d"] >= c["dist"] and not cs["end"] and not c.get("open"):
             cs["end"] = True
             self.log_event(f"COURSE DONE at T+{E.fmt_t(r.el)}, riding on until End")
             self.notice = "Course done. Keep riding or press End ride."
@@ -938,7 +951,7 @@ class RideEngine:
                 ride["course"] = {"name": c["name"], "dist_m": c["dist"], "gain_m": c["gain"], "done_m": _r1(min(cs["d"], c["dist"])),
                                   "odo_m": _r1(cs["d"]), "ele_m": _r1(ele_at(c, cs["d"])), "climbed_m": _r1(cs["up"]),
                                   "grade": grade_at(c, cs["d"]), "speed_kmh": _r1(cs["v"] * 3.6), "end": cs["end"],
-                                  "profile": r.prof}
+                                  "profile": r.prof, "open": bool(c.get("open")), "n": len(c["ele"])}
             if r.steps:
                 at = step_at(r.steps, r.el)
                 ride["total_s"] = r.total
@@ -950,6 +963,11 @@ class RideEngine:
                                   "planned": None if s.get("free") else {"a": s["a"], "b": s["b"], "unit": s["u"]},
                                   "override_w": r.ov.get(i)} for i, s in enumerate(r.steps)]
             return st
+
+    def course_payload(self) -> dict:
+        with self.lock:
+            r = self.ride
+            return {"course": r.course, "d": r.cs["d"]} if r and r.course else {"course": None, "d": 0}
 
     def samples_since(self, ride_id: str | None, n: int) -> tuple[str | None, list]:
         with self.lock:

@@ -107,6 +107,7 @@ export class WebBackend {
       E.applyTarget(); this.bump();
       return resp(200, { ...this.hub.status(), devices: [] });
     }
+    if (p === '/api/ride/course') { const r = E.ride; return resp(200, r?.course ? { course: r.course, d: r.cs.d } : { course: null, d: 0 }); }
     if (p === '/api/ride/control') return resp(200, { ok: true, ...E.control(String(body.action || ''), body) });
     if (p === '/api/events') return resp(200, { events: this.log.slice(-(+(q.get('n') || 50))).map(l => { const m = l.match(/^\[(\d\d:\d\d:\d\d)\] (.*)$/); return parseLine(m[2], m[1]); }) });
     if (p === '/api/ride' && method === 'POST') { if (body.id && body.samples?.length) await this.store.putRide({ ...body, source: body.source || 'browser' }); return resp(200, { ok: true }); }

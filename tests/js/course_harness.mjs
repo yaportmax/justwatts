@@ -14,20 +14,20 @@ function ride({ workout, course, settings: s0, script }) {
   let t = 1000, wall = 1.7e12;
   const hub = { mode: 'ble', r: { power: 0, cadence: 0, hr: 0, speed: 0, last: 0, hrLast: 0 }, wantCmd: null, sent: [],
     want(c) { this.wantCmd = c; if (JSON.stringify(this.sent.at(-1)) !== JSON.stringify(c)) this.sent.push(c); }, status() { return {}; } };
-  const lines = [];
-  const eng = new Engine({ hub, logEvent: l => { lines.push(l); eng.note(l); }, settings: () => settings, save: () => {}, archive: () => {}, clock: () => t, wall: () => wall });
+  const lines = []; let archived = null;
+  const eng = new Engine({ hub, logEvent: l => { lines.push(l); eng.note(l); }, settings: () => settings, save: () => {}, archive: p => { archived = p; }, clock: () => t, wall: () => wall });
   const out = [];
   for (const [op, a] of script) {
     let res = null;
     if (op === 'power') { hub.r.power = a; hub.r.cadence = a > 0 ? 90 : 0; hub.r.last = t; }
     else if (op === 'tick') for (let i = 0; i < a; i++) { t += 1; wall += 1000; hub.r.last = t; eng.tick(1); }
     else if (op === 'set') Object.assign(settings, a);
-    else { try { eng.control(op, a || {}); res = 'ok'; } catch (e) { res = 'error: ' + e.message; } }
+    else { try { const x = eng.control(op, a || {}); res = op === 'road' ? x.n : 'ok'; } catch (e) { res = 'error: ' + e.message; } }
     const r = eng.state({}).ride;
     out.push({ op, res, course: r?.course ? { ...r.course, profile: r.course.profile.length } : null, control: r?.control ?? null, want: hub.wantCmd,
       last: r ? eng.ride.samples.at(-1) ?? null : null });
   }
-  const p = eng.ride?.payload();
+  const p = eng.ride?.payload() ?? archived;
   return { out, sent: hub.sent, lines: lines.filter(l => /^(COURSE|WORKOUT)/.test(l)), samples: p ? p.samples.map(x => x.slice(1)) : null, payload: p };
 }
 
@@ -42,6 +42,9 @@ function run(r) {
     case 'profile': return C.profileOf(r.course, r.n);
     case 'samples': return C.SAMPLE_COURSES;
     case 'check': { try { return C.checkCourse(r.course); } catch (e) { return { error: e.message }; } }
+    case 'checkRide': { try { return C.checkRideCourse(r.course); } catch (e) { return { error: e.message }; } }
+    case 'extend': { try { return C.roadExtend(r.course, r.body, r.d); } catch (e) { return { error: e.message }; } }
+    case 'ridden': return C.ridden(r.course, r.d);
     case 'ride': return ride(r);
     case 'export': return { fit: Buffer.from(fitEncode(r.ride)).toString('base64'), tcx: toTcx(r.ride), dist: summarize(r.ride).dist };
     default: throw new Error('unknown op ' + r.op);

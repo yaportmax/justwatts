@@ -38,10 +38,12 @@ MAX_BODY = 64 * 1024 * 1024
 QUIET_PATHS = ("/api/state", "/api/health",
                "/api/strava/callback")  # the callback query carries the OAuth code: keep it out of logs
 # A page served from here may never be framed (clickjacking) and runs only its own scripts.
-# Map tiles (keyless): OSM, Esri imagery, OpenTopoMap, CyclOSM. The 3D map fetch()es them and AWS terrain tiles.
+# Map tiles (keyless): OSM, Esri imagery, OpenTopoMap, CyclOSM. The 3D map fetch()es them and AWS terrain tiles;
+# open world fetches OpenStreetMap roads from Overpass (roads.js OVERPASS).
 MAP_TILES = "https://tile.openstreetmap.org https://server.arcgisonline.com https://tile.opentopomap.org https://a.tile-cyclosm.openstreetmap.fr"
+OVERPASS = "https://overpass-api.de https://maps.mail.ru"
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-       f"img-src 'self' data: blob: {MAP_TILES}; connect-src 'self' {MAP_TILES} https://s3.amazonaws.com; "
+       f"img-src 'self' data: blob: {MAP_TILES}; connect-src 'self' {MAP_TILES} https://s3.amazonaws.com {OVERPASS}; "
        "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 # headers a reverse proxy or tunnel adds: such a request came from the network, not this computer
 UPLOADS_RE = re.compile(r"/api/rides/([\w\-]+)/(uploads|targets)")
@@ -260,11 +262,13 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(200, srv.garmin.zones())
             except Exception as e:  # noqa: BLE001 - not signed in, disabled, or Garmin unreachable
                 return self.send_json(502, {"error": str(e)[:200]})
-        if p in ("/api/state", "/api/events"):
+        if p in ("/api/state", "/api/events", "/api/ride/course"):
             if not self.trusted():
                 return self.send_json(403, {"error": "forbidden"})
             if p == "/api/state":
                 return self.send_json(200, {"state": srv.engine_state()})
+            if p == "/api/ride/course":  # the ride's whole course (an open-world page rebuilds its road plan from it)
+                return self.send_json(200, srv.engine.course_payload())
             n = max(1, min(2000, int(q.get("n", ["50"])[0])))
             return self.send_json(200, {"events": [parse_line(x) for x in tail_lines(self.cfg.events_log, n)]})
         if p.startswith("/api/"):

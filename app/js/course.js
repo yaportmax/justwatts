@@ -4,6 +4,8 @@
 //
 // course = { name, dist: metres, gain: metres climbed, ele: [m every STEP_M from 0], ll: [[lat, lon]] }
 // ll is a decimated polyline for a mini map (empty for synthetic courses).
+// Open world: { ..., open: true, ll: one point per ele point, nd: [[metres, OSM node id]] (the page's road plan) }.
+// The page extends it as the rider rides (roadExtend); the road behind the rider never changes.
 
 export const STEP_M = 10, G_MIN = -15, G_MAX = 20, MAX_M = 500000, MIN_M = 100;
 export const PHYS = { crr: 0.004, cda: 0.32, rho: 1.2, eta: 0.97, bike: 9, rider: 75, g: 9.81, vmax: 30 };
@@ -93,6 +95,8 @@ function median(a, k) {
 function movingAvg(a, k) {
   return a.map((_, i) => { let s = 0, n = 0; for (let j = Math.max(0, i - k); j <= Math.min(a.length - 1, i + k); j++) { s += a[j]; n++; } return s / n; });
 }
+// 50 m median, then 90 m moving average, 0.1 m
+export const smoothEle = raw => movingAvg(median(raw, 2), 4).map(r1);
 export function gainOf(ele) { let g = 0; for (let i = 1; i < ele.length; i++) if (ele[i] > ele[i - 1]) g += ele[i] - ele[i - 1]; return Math.floor(g + 0.5); }
 
 // track points -> compact course. Throws on a track that is too short or too long.
@@ -116,7 +120,7 @@ export function buildCourse(name, pts) {
     const f = D[j + 1] > D[j] ? clamp((x - D[j]) / (D[j + 1] - D[j]), 0, 1) : 0;
     raw.push(E[j] + (E[j + 1] - E[j]) * f);
   }
-  const ele = movingAvg(median(raw, 2), 4).map(r1);   // 50 m median, then 90 m moving average
+  const ele = smoothEle(raw);
   const ll = [], m = Math.min(200, P.length);
   for (let k = 0, q = 0; k < m; k++) {
     const want = m > 1 ? k * total / (m - 1) : 0; while (q < P.length - 1 && D[q] < want) q++;
@@ -172,12 +176,45 @@ export function speedStep(v, watts, grade, mass, dt) {
 export const massOf = weightKg => (weightKg > 0 ? +weightKg : PHYS.rider) + PHYS.bike;
 
 /* ---------- validation of a course sent to an engine ---------- */
+const MAX_N = MAX_M / STEP_M + 2, MAX_ND = 100000;
+const num = x => typeof x === 'number' && Number.isFinite(x);
+// open-world parts: ele and ll the same length (one point per STEP_M), nd ascending [metres, node id]. Throws.
+function openParts(ele, ll, nd, min) {
+  if (!Array.isArray(ele) || ele.length < min || ele.length > MAX_N || !ele.every(x => num(x) && Math.abs(x) < 10000)) throw new Error('course.ele must be numbers');
+  if (!Array.isArray(ll) || ll.length !== ele.length || !ll.every(p => Array.isArray(p) && p.length === 2 && num(p[0]) && num(p[1]) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180)) throw new Error('course.ll must be one [lat, lon] per point');
+  if (!Array.isArray(nd) || nd.length > MAX_ND || !nd.every((x, i) => Array.isArray(x) && x.length === 2 && num(x[0]) && Number.isInteger(x[1]) && (!i || x[0] >= nd[i - 1][0]))) throw new Error('course.nd must be ascending [metres, id]');
+  return [ele.slice(), ll.map(p => [p[0], p[1]]), nd.map(x => [x[0], x[1]])];
+}
+// a course sent with a load: an open-world course or a plain one (web/api copies checkCourse verbatim)
+export const checkRideCourse = c => c?.open === true ? checkOpen(c) : checkCourse(c);
+export function checkOpen(c) {
+  const [ele, ll, nd] = openParts(c.ele, c.ll, c.nd ?? [], Math.ceil(MIN_M / STEP_M) + 1);
+  return { name: String(c.name || 'Open world').slice(0, 80), dist: (ele.length - 1) * STEP_M, gain: gainOf(ele), ele, ll, open: true, nd };
+}
 export function checkCourse(c) {
   if (!c || typeof c !== 'object') throw new Error('course must be an object');
   const ele = c.ele, dist = typeof c.dist === 'number' ? c.dist : NaN;
   if (!Array.isArray(ele) || ele.length < 2 || ele.length > MAX_M / STEP_M + 2 || !ele.every(x => typeof x === 'number' && Number.isFinite(x) && Math.abs(x) < 10000)) throw new Error('course.ele must be 2.. numbers');
   if (!(dist >= MIN_M && dist <= MAX_M)) throw new Error('course.dist out of range');
   return { name: String(c.name || 'Course').slice(0, 80), dist, gain: gainOf(ele), ele: ele.slice(), ll: (Array.isArray(c.ll) ? c.ll : []).filter(p => Array.isArray(p) && p.length === 2 && p.every(x => typeof x === 'number' && Number.isFinite(x))).slice(0, 500) };
+}
+// open world: replace the points from index at on ({at, ele, ll, nd}); d = metres ridden. Never touches the
+// segment under the rider (a plain append always fits). nd entries from the first new one on are replaced. Throws.
+export function roadExtend(c, b, d) {
+  if (!c?.open) throw new Error('not an open-world ride');
+  const n = c.ele.length, at = b?.at;
+  if (!Number.isInteger(at) || at < 1 || at > n) throw new Error('road.at out of range');
+  if (at < Math.min(n, Math.floor(Math.max(0, d) / STEP_M) + 2)) throw new Error('road.at is behind the rider');
+  const [ele, ll, nd] = openParts(b.ele, b.ll, b.nd ?? [], 1);
+  if (at + ele.length > MAX_N) throw new Error('course too long');
+  const cut = nd.length ? nd[0][0] : Infinity, E = c.ele.slice(0, at).concat(ele);
+  return { ...c, dist: (E.length - 1) * STEP_M, gain: gainOf(E), ele: E, ll: c.ll.slice(0, at).concat(ll), nd: c.nd.filter(x => x[0] < cut).concat(nd) };
+}
+// open world at the end of a ride: only the road ridden (d metres), so the saved ride shows where the rider went
+export function ridden(c, d) {
+  if (!c?.open) return c;
+  const n = Math.max(2, Math.min(c.ele.length, Math.floor(Math.max(0, d) / STEP_M) + 2)), ele = c.ele.slice(0, n);
+  return { ...c, dist: (n - 1) * STEP_M, gain: gainOf(ele), ele, ll: c.ll.slice(0, n), nd: c.nd.filter(x => x[0] <= (n - 1) * STEP_M) };
 }
 
 /* ---------- bundled synthetic courses (no GPX needed) ---------- */

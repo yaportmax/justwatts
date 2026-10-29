@@ -122,6 +122,11 @@ def _moving_avg(a: list[float], k: int) -> list[float]:
     return out
 
 
+def smooth_ele(raw: list[float]) -> list[float]:
+    """50 m median, then 90 m moving average, 0.1 m."""
+    return [_r1(x) for x in _moving_avg(_median(raw, 2), 4)]
+
+
 def gain_of(ele: list[float]) -> int:
     g = 0.0
     for i in range(1, len(ele)):
@@ -165,7 +170,7 @@ def build_course(name: str, pts: list[dict]) -> dict:
             j += 1
         f = _clamp((x - D[j]) / (D[j + 1] - D[j]), 0, 1) if D[j + 1] > D[j] else 0
         raw.append(E[j] + (E[j + 1] - E[j]) * f)
-    ele = [_r1(x) for x in _moving_avg(_median(raw, 2), 4)]
+    ele = smooth_ele(raw)
     ll, m, q = [], min(200, len(P)), 0
     for k in range(m):
         want = k * total / (m - 1) if m > 1 else 0
@@ -216,6 +221,37 @@ def mass_of(weight_kg) -> float:
     return (w if w > 0 else PHYS["rider"]) + PHYS["bike"]
 
 
+MAX_N, MAX_ND = MAX_M // STEP_M + 2, 100000
+
+
+def _int(x) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool) or isinstance(x, float) and x.is_integer()
+
+
+def _open_parts(ele, ll, nd, least: int):
+    """Open-world parts: ele and ll the same length (one point per STEP_M), nd ascending [metres, node id]."""
+    if not isinstance(ele, list) or not least <= len(ele) <= MAX_N or not all(_finite(x) and abs(x) < 10000 for x in ele):
+        raise ValueError("course.ele must be numbers")
+    if (not isinstance(ll, list) or len(ll) != len(ele)
+            or not all(isinstance(p, list) and len(p) == 2 and _finite(p[0]) and _finite(p[1]) and abs(p[0]) <= 90 and abs(p[1]) <= 180 for p in ll)):
+        raise ValueError("course.ll must be one [lat, lon] per point")
+    if (not isinstance(nd, list) or len(nd) > MAX_ND
+            or not all(isinstance(x, list) and len(x) == 2 and _finite(x[0]) and _int(x[1]) and (i == 0 or x[0] >= nd[i - 1][0]) for i, x in enumerate(nd))):
+        raise ValueError("course.nd must be ascending [metres, id]")
+    return list(ele), [[p[0], p[1]] for p in ll], [[x[0], int(x[1])] for x in nd]
+
+
+def check_ride_course(c) -> dict:
+    """A course sent with a load: an open-world course or a plain one."""
+    return check_open(c) if isinstance(c, dict) and c.get("open") is True else check_course(c)
+
+
+def check_open(c: dict) -> dict:
+    ele, ll, nd = _open_parts(c.get("ele"), c.get("ll"), c.get("nd", []), math.ceil(MIN_M / STEP_M) + 1)
+    return {"name": str(c.get("name") or "Open world")[:80], "dist": (len(ele) - 1) * STEP_M, "gain": gain_of(ele),
+            "ele": ele, "ll": ll, "open": True, "nd": nd}
+
+
 def check_course(c) -> dict:
     """Validate a course sent with a load control. Raises ValueError."""
     if not isinstance(c, dict):
@@ -230,3 +266,31 @@ def check_course(c) -> dict:
     ll = [p for p in (c.get("ll") if isinstance(c.get("ll"), list) else [])
           if isinstance(p, list) and len(p) == 2 and all(_finite(x) for x in p)][:500]
     return {"name": str(c.get("name") or "Course")[:80], "dist": dist, "gain": gain_of(ele), "ele": list(ele), "ll": ll}
+
+
+def road_extend(c, b, d: float) -> dict:
+    """Open world: replace the points from index at on ({at, ele, ll, nd}); d = metres ridden. Never touches the
+    segment under the rider (a plain append always fits). nd entries from the first new one on are replaced."""
+    if not isinstance(c, dict) or not c.get("open"):
+        raise ValueError("not an open-world ride")
+    n, at = len(c["ele"]), b.get("at") if isinstance(b, dict) else None
+    if not (isinstance(at, int) and not isinstance(at, bool)) or not 1 <= at <= n:
+        raise ValueError("road.at out of range")
+    if at < min(n, math.floor(max(0, d) / STEP_M) + 2):
+        raise ValueError("road.at is behind the rider")
+    ele, ll, nd = _open_parts(b.get("ele"), b.get("ll"), b.get("nd", []), 1)
+    if at + len(ele) > MAX_N:
+        raise ValueError("course too long")
+    cut, E = nd[0][0] if nd else math.inf, c["ele"][:at] + ele
+    return {**c, "dist": (len(E) - 1) * STEP_M, "gain": gain_of(E), "ele": E, "ll": c["ll"][:at] + ll,
+            "nd": [x for x in c["nd"] if x[0] < cut] + nd}
+
+
+def ridden(c, d: float):
+    """Open world at the end of a ride: only the road ridden (d metres), so the saved ride shows where the rider went."""
+    if not isinstance(c, dict) or not c.get("open"):
+        return c
+    n = max(2, min(len(c["ele"]), math.floor(max(0, d) / STEP_M) + 2))
+    ele = c["ele"][:n]
+    return {**c, "dist": (n - 1) * STEP_M, "gain": gain_of(ele), "ele": ele, "ll": c["ll"][:n],
+            "nd": [x for x in c["nd"] if x[0] <= (n - 1) * STEP_M]}

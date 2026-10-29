@@ -2,7 +2,7 @@
 // Same state shape, controls, mid-ride edits, overtime and persistence semantics;
 // persistence goes to IndexedDB (snapshot every 30 s + a sample journal every 5 s, see backend.js).
 import { parseWorkout, toText, stepAt, stepWatts, fmtT, lineRideStart, lineRideEnd, lineStepStart, lineStepEnd } from '../core.js';
-import { G_MIN, G_MAX, checkCourse, eleAt, gradeAt, massOf, profileOf, speedStep } from '../course.js';
+import { G_MIN, G_MAX, checkRideCourse, eleAt, gradeAt, massOf, profileOf, ridden, roadExtend, speedStep } from '../course.js';
 
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 const jsr = Math.round;
@@ -20,7 +20,7 @@ export class Ride {
   resumeCourse() {  // position from the last recorded sample (the journal is newer than the snapshot's cs)
     const s = this.samples.filter(x => x.length > 8); if (!s.length) return;
     let up = Math.max(0, s[0][7] - this.course.ele[0]); for (let i = 1; i < s.length; i++) up += Math.max(0, s[i][7] - s[i - 1][7]);
-    Object.assign(this.cs, { d: s.at(-1)[8], v: s.at(-1)[5] / 3.6, up, end: !!(this.cs.end || s.at(-1)[8] >= this.course.dist) });
+    Object.assign(this.cs, { d: s.at(-1)[8], v: s.at(-1)[5] / 3.6, up, end: !this.course.open && !!(this.cs.end || s.at(-1)[8] >= this.course.dist) });
   }
   get id() { return `r-${this.startTs || 0}`; }
   retime() { let t = 0; for (const s of this.steps || []) { s.t0 = t; t += s.d; } this.total = t; }
@@ -58,7 +58,7 @@ export class Engine {
     Object.assign(r, { el: Math.max(cur.el || 0, cur.samples.at(-1)[1]), started: true, paused: true, auto: true, pp: true, k: cur.k || 1,
       samples: cur.samples, jr: { ...r.jr, ...(cur.jr || {}) }, startTs: cur.start, events: cur.events || [], overtime: !!cur.overtime });
     r.ov = Object.fromEntries(Object.entries(cur.ov || {}).map(([k, v]) => [+k, v]));
-    if (cur.course) { try { r.setCourse(checkCourse(cur.course)); r.cs = { ...r.cs, ...(cur.cs || {}) }; r.resumeCourse(); } catch {} }
+    if (cur.course) { try { r.setCourse(checkRideCourse(cur.course)); r.cs = { ...r.cs, ...(cur.cs || {}) }; r.resumeCourse(); } catch {} }
     this.ride = r;
     this.log(`RIDE RESUMED after reload at T+${fmtT(r.el)} (${r.samples.length} samples kept)`);
     this.notice = 'Ride restored. Reconnect the trainer, then pedal to continue.';
@@ -101,7 +101,7 @@ export class Engine {
   control(action, body = {}) {
     const fn = { load: this.load, start: this.start, pause: this.togglePause, hold: this.hold, resume: this.resumeRide, skip: this.skip, back: this.back, end: this.finish,
       adjust: this.adjust, mode: this.setMode, intensity: this.setIntensity, free: this.setFree, target: this.setTarget, save: this.saveCopy,
-      dismiss: () => { this.notice = null; }, edit: b => this.edit(b.edit || {}) }[action];
+      dismiss: () => { this.notice = null; }, edit: b => this.edit(b.edit || {}), road: this.road }[action];
     if (!fn) throw new Error(`unknown action ${action}`);
     this.did = null;
     let res = fn.call(this, body) || {};
@@ -117,12 +117,17 @@ export class Engine {
   // {workout, course}: a course alone is a free ride on it; with a workout, ERG segments keep their watts
   // and free segments ride the course grade
   load(body) {
-    const w = body.workout, c = body.course ? checkCourse(body.course) : null;
+    const w = body.workout, c = body.course ? checkRideCourse(body.course) : null;
     if (this.ride?.started) this.finish();
     const ftp = +(this.settings().ftp || 200);
     const r = w ? new Ride(w.name, w.text, !!w.test, ftp) : new Ride(c ? c.name : 'Just ride', '', false, ftp);
     r.setCourse(c); this.ride = r;
     this.notice = null; this.applyTarget(); return { loaded: this.ride.name };
+  }
+  // open world: the page extends the road ahead ({at, ele, ll, nd}, see course.js roadExtend)
+  road(b) {
+    const r = this.ride; if (!r?.course) throw new Error('no open-world ride');
+    r.setCourse(roadExtend(r.course, b, r.cs.d)); return { n: r.course.ele.length };
   }
   start() {
     const r = this.ride; if (!r || r.started) return;
@@ -221,6 +226,7 @@ export class Engine {
     const r = this.ride; if (!r) return;
     if (r.acc?.p.length) { this.log(lineStepEnd(r.acc)); r.acc = null; }
     this.log(lineRideEnd(r.el)); this.ride = null; this.hub.want({ k: 'sim', g: 0 }); this.saveFn(null);
+    if (r.course?.open) r.course = ridden(r.course, r.cs.d);
     if (r.samples.length < 10) { this.notice = 'Ride too short, not saved'; this.lastFinished = null; return { saved: false }; }
     const p = r.payload(); this.archiveFn(p);
     this.lastFinished = { id: p.id, name: r.name, samples: r.samples.length, ts: this.wall() };
@@ -345,8 +351,10 @@ export class Engine {
   courseTick(dt) {
     const r = this.ride, c = r.course, cs = r.cs; if (!c) return;
     cs.v = speedStep(cs.v, this.hub.r.power, gradeAt(c, cs.d), massOf(+this.settings().weight), dt);
-    const e0 = eleAt(c, cs.d); cs.d += cs.v * dt; cs.up += Math.max(0, eleAt(c, cs.d) - e0);
-    if (cs.d >= c.dist && !cs.end) {
+    const e0 = eleAt(c, cs.d); cs.d += cs.v * dt;
+    if (c.open) cs.d = Math.min(cs.d, c.dist);  // open world: wait at the end of the known road until the page adds more
+    cs.up += Math.max(0, eleAt(c, cs.d) - e0);
+    if (cs.d >= c.dist && !cs.end && !c.open) {
       cs.end = true; this.log(`COURSE DONE at T+${fmtT(r.el)}, riding on until End`);
       this.notice = 'Course done. Keep riding or press End ride.';
     }
@@ -380,7 +388,7 @@ export class Engine {
     if (r.course) {
       const c = r.course, cs = r.cs;
       ride.course = { name: c.name, dist_m: c.dist, gain_m: c.gain, done_m: r1(Math.min(cs.d, c.dist)), odo_m: r1(cs.d), ele_m: r1(eleAt(c, cs.d)),
-        climbed_m: r1(cs.up), grade: gradeAt(c, cs.d), speed_kmh: r1(cs.v * 3.6), end: cs.end, profile: r.prof };
+        climbed_m: r1(cs.up), grade: gradeAt(c, cs.d), speed_kmh: r1(cs.v * 3.6), end: cs.end, profile: r.prof, open: !!c.open, n: c.ele.length };
     }
     if (r.steps) {
       const at = stepAt({ steps: r.steps }, r.el); ride.total_s = r.total;

@@ -190,14 +190,16 @@ def run_python(tmp_path, script, settings=None):
             s.update(a)
         else:
             try:
-                eng.control(op, a or {})
-                res = "ok"
+                x = eng.control(op, a or {})
+                res = x["n"] if op == "road" else "ok"
             except ValueError as e:
                 res = f"error: {e}"
         r = eng.state({})["ride"]
         out.append({"op": op, "res": res, "course": r and r["course"] and {**r["course"], "profile": len(r["course"]["profile"])},
                     "control": r and r["control"], "want": hub.wanted_cmd, "last": (eng.ride.samples[-1] if eng.ride.samples else None) if r else None})
     p = eng.ride.payload() if eng.ride else None
+    if p is None and eng.last_finished:  # ended: the archived ride
+        p = json.loads((eng.rides_dir / f"{eng.last_finished['id']}.json").read_text(encoding="utf-8"))
     return {"out": out, "sent": hub.sent, "lines": [x for x in lines if x.startswith(("COURSE", "WORKOUT"))],
             "samples": p and [x[1:] for x in p["samples"]], "payload": p}, eng
 
@@ -413,3 +415,130 @@ def test_http_load_with_course(srv, js):
     assert code == 200 and st["ride"]["course"]["dist_m"] == 12000 and len(st["ride"]["course"]["profile"]) == 300
     code, res = srv.req("POST", "/api/ride/control", {"action": "load", "course": {"dist": 1, "ele": []}}, headers=srv.page)
     assert code == 400
+
+
+# ---------- open world: the page extends the course as the rider rides ----------
+def _r1(x):
+    return math.floor(x * 10 + 0.5) / 10
+
+
+def hills(i):
+    """A test road: 300 m flat, a 4 % climb to 570 m, then a 2 % descent."""
+    return _r1(50 if i <= 30 else 50 + 0.4 * (min(i, 57) - 30) - 0.2 * max(0, i - 57))
+
+
+def road(i0, n, e=hills, nd_every=5):
+    """Points i0..i0+n-1 of a straight road north (10 m apart), with nd entries every few points."""
+    return {"ele": [e(i) for i in range(i0, i0 + n)], "ll": [[round(37.8 + i * 10 / 111195, 6), -122.47] for i in range(i0, i0 + n)],
+            "nd": [[i * 10.0, 1000 + i] for i in range(i0, i0 + n) if i % nd_every == 0]}
+
+
+OPEN = {"name": "Open world", "open": True, **road(0, 31)}
+
+
+def test_open_course_checks_match_js(js):
+    bad = [{**OPEN, "ll": OPEN["ll"][:-1]}, {**OPEN, "ele": OPEN["ele"][:5], "ll": OPEN["ll"][:5]},
+           {**OPEN, "nd": [[20.0, 1], [10.0, 2]]}, {**OPEN, "ll": [[91, 0]] * 31}, {**OPEN, "nd": [[0, 1.5]]}]
+    out = js([{"op": "checkRide", "course": c} for c in [OPEN, *bad]])
+    ok = C.check_ride_course(OPEN)
+    close(out[0], ok)
+    assert ok["dist"] == 300 and ok["open"] and len(ok["ll"]) == 31 and ok["nd"][0] == [0.0, 1000]
+    for c, o in zip(bad, out[1:]):
+        with pytest.raises(ValueError):
+            C.check_ride_course(c)
+        assert "error" in o
+    # extend: append, replace ahead, never behind the rider; nd from the first new entry on is replaced
+    c = C.check_ride_course(OPEN)
+    cases = [({"at": 31, **road(31, 20)}, 0), ({"at": 25, **road(25, 10, e=lambda i: 60.0)}, 200), ({"at": 21, **road(21, 3)}, 200),
+             ({"at": 31, **road(31, 5)}, 300), ({"at": 32, **road(32, 5)}, 0), ({"at": 10, "ele": [1], "ll": [[1, 2, 3]]}, 0)]
+    out = js([{"op": "extend", "course": c, "body": b, "d": d} for b, d in cases])
+    for (b, d), o in zip(cases, out):
+        try:
+            py = C.road_extend(c, b, d)
+        except ValueError as e:
+            assert o == {"error": str(e)}
+            continue
+        close(o, py)
+    assert out[0]["dist"] == 500 and len(out[0]["ll"]) == 51
+    assert out[1]["dist"] == 340 and out[1]["ele"][:25] == c["ele"][:25] and out[1]["ele"][25:] == [60.0] * 10
+    assert [x[0] for x in out[1]["nd"]][-3:] == [200.0, 250.0, 300.0]
+    assert out[2] == {"error": "road.at is behind the rider"}       # the rider is at 200 m: segment 20-21 stays
+    assert out[3]["dist"] == 350                                    # a plain append always fits, even at the end
+    assert out[4] == {"error": "road.at out of range"} and "error" in out[5]
+    r = js([{"op": "ridden", "course": out[0], "d": 123.4}])[0]
+    assert r == C.ridden(out[0], 123.4) and r["dist"] == 130 and len(r["ll"]) == 14 and all(x[0] <= 130 for x in r["nd"])
+
+
+def test_road_extend_replaces_nd_from_the_new_part():
+    c = C.check_ride_course(OPEN)
+    b = {"at": 26, **road(26, 10)}
+    b["nd"] = [[255.0, 7], [300.0, 8]]
+    x = C.road_extend(c, b, 100)
+    assert [n for _, n in x["nd"]] == [1000, 1005, 1010, 1015, 1020, 1025, 7, 8]  # 250 kept (before 255), 300 replaced
+
+
+OPEN_SCRIPT = [["power", 250], ["load", {"workout": None, "course": OPEN}], ["start", {}], ["tick", 20],
+               ["road", {"at": 31, **road(31, 30)}], ["tick", 40],
+               ["road", {"at": 5, **road(5, 3)}],                       # behind the rider: refused
+               ["road", {"at": 58, **road(58, 40)}], ["tick", 120],     # then waits at the end of the known road
+               ["road", {"at": 98, **road(98, 100)}], ["tick", 20], ["adjust", {"dir": 1}], ["tick", 5]]
+
+
+def test_js_engine_rides_an_extending_course_like_python(js, tmp_path):
+    py, eng = run_python(tmp_path, OPEN_SCRIPT)
+    jr = js([{"op": "ride", "settings": {}, "script": OPEN_SCRIPT}])[0]
+    for i, (a, b) in enumerate(zip(py["out"], jr["out"])):
+        close(a, {**b, "last": b["last"] and [a["last"][0], *b["last"][1:]]}, path=f"step {i} {OPEN_SCRIPT[i][0]}")
+    close(py["samples"], jr["samples"], path="samples")
+    close(py["sent"], jr["sent"], path="sent")
+    assert py["lines"] == jr["lines"] == []                                  # no COURSE DONE in an open world
+    o = py["out"]
+    assert o[4]["res"] == 61 and o[6]["res"].startswith("error: road.at is behind") and o[7]["res"] == 98 and o[9]["res"] == 198
+    assert 310 < o[5]["course"]["odo_m"] < 570 and o[5]["course"]["grade"] == pytest.approx(4.0, abs=0.2)
+    assert o[5]["want"] == {"k": "sim", "g": o[5]["course"]["grade"]}     # the trainer follows the new road
+    stuck = o[8]["course"]
+    assert stuck["odo_m"] == stuck["dist_m"] == 970 and stuck["open"] and stuck["n"] == 98 and not stuck["end"]
+    assert o[10]["course"]["odo_m"] > 970 and o[10]["course"]["dist_m"] == 1970
+    assert py["samples"][-1][7] == o[-1]["course"]["odo_m"]
+
+
+def test_open_world_ride_ends_with_the_road_ridden_and_exports_gps(js, tmp_path):
+    script = [["power", 250], ["load", {"workout": None, "course": {**OPEN, **road(0, 201)}}], ["start", {}], ["tick", 60], ["end", {}]]
+    py, _ = run_python(tmp_path, script)
+    jr = js([{"op": "ride", "settings": {}, "script": script}])[0]
+    p, q = py["payload"], jr["payload"]
+    d = p["samples"][-1][8]
+    assert p["course"]["open"] and p["course"]["dist"] == (math.floor(d / 10) + 1) * 10 and len(p["course"]["ll"]) == len(p["course"]["ele"])
+    close(p["course"], q["course"], path="course")
+    root = ET.fromstring(H.tcx(p).encode())
+    ns = {"t": "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"}
+    lat = [float(e.text) for e in root.findall(".//t:Position/t:LatitudeDegrees", ns)]
+    assert len(lat) == 60 and lat[-1] == pytest.approx(37.8 + d / 111195, abs=2e-5)  # GPS where the rider got to
+
+
+def test_open_world_ride_resumes_after_restart(tmp_path):
+    res, eng = run_python(tmp_path, [["power", 250], ["load", {"workout": None, "course": OPEN}], ["start", {}], ["tick", 10],
+                                     ["road", {"at": 31, **road(31, 60)}], ["tick", 37]])
+    before = eng.state({})["ride"]["course"]
+    eng._close_journal()
+    hub = Hub()
+    eng2 = RideEngine(hub, tmp_path, lambda l: None, lambda: {"ftp": 200, "weight": 75}, wall=lambda: 1.7e9 + 60)
+    assert eng2.resume()
+    after = eng2.state({})["ride"]["course"]
+    assert after["open"] and after["n"] == 91 and after["odo_m"] == pytest.approx(before["odo_m"], abs=10)
+    cp = eng2.course_payload()
+    assert cp["course"]["nd"] == eng.ride.course["nd"] and cp["course"]["ll"] == eng.ride.course["ll"]
+    assert eng2.control("road", {"at": 91, **road(91, 10)})["n"] == 101  # the page carries on extending
+
+
+def test_http_ride_course_needs_the_page(srv):
+    code, _ = srv.req("GET", "/api/ride/course")
+    assert code == 403
+    code, res = srv.req("GET", "/api/ride/course", headers=srv.page)
+    assert code == 200 and res == {"course": None, "d": 0}
+    code, res = srv.req("POST", "/api/ride/control", {"action": "load", "workout": None, "course": OPEN}, headers=srv.page)
+    assert code == 200
+    code, res = srv.req("POST", "/api/ride/control", {"action": "road", "at": 31, **road(31, 5)}, headers=srv.page)
+    assert code == 200 and res["n"] == 36
+    code, res = srv.req("GET", "/api/ride/course", headers=srv.page)
+    assert code == 200 and len(res["course"]["ll"]) == 36 and res["course"]["open"]

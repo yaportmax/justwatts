@@ -1128,6 +1128,12 @@ S.social = async () => {
   advance(8 * DAY);
   assert.deepEqual((await ann.get('/api/social')).body.activity, []);
 
+  // the account export carries social data
+  const ex = (await ann.get('/api/sync/export')).body.social;
+  assert.equal(ex.profile.code, me.code);
+  assert.deepEqual(ex.friends.map(f => f.name).sort(), ['Bob', 'Cat']);
+  assert.ok(ex.messages.some(m => m.body === 'Rolling in 5'));
+  assert.ok(Array.isArray(ex.groups) && Array.isArray(ex.activities) && Array.isArray(ex.blocked));
   // deleting an account removes its social rows; friends see it gone
   await bob.post('/api/auth/delete', { confirm: 'DELETE', password: 'password123' });
   as = (await ann.get('/api/social')).body;

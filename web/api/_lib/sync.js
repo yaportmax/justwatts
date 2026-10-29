@@ -111,6 +111,7 @@ route('GET', '/api/sync/export', async ctx => {
       exportedAt: ctx.now, user: { id: u.id, name: u.name, createdAt: u.createdAt },
       identities: ids.map(i => ({ provider: i.provider, email: i.email || null, verified: !!i.verified, createdAt: i.createdAt })),
       records: data.records, rides: data.rides.map(r => ({ ...r, url: `/api/sync/rides/${encodeURIComponent(r.id)}` })),
+      social: await ctx.store.exportSocial(u.id),  // friends, blocks, group rides, chat sent, finished rides shared
     },
     headers: { 'Content-Disposition': 'attachment; filename="justwatts-account.json"' },
   };

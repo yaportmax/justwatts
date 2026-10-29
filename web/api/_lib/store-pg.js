@@ -391,15 +391,25 @@ function pgStore(db) {
         : `DELETE FROM ${S}.presence WHERE user_id = $1`;
       const p = [uid, look.areas, look.group || null, look.since];
       if (row) p.push(row.area, row.group || null, row.lat, row.lon, JSON.stringify(row.data), row.at);
-      const rows = await q(`WITH w AS (${write}) SELECT p.user_id AS id, coalesce(u.name, '') AS name, p.lat, p.lon, p.data, p.group_id AS "group",
+      // stale rows of others go in the same statement: a position is never kept long after it stops showing
+      const rows = await q(`WITH w AS (${write}), old AS (DELETE FROM ${S}.presence WHERE at < $4::float8 - 60000 AND user_id <> $1) SELECT p.user_id AS id, coalesce(u.name, '') AS name, p.lat, p.lon, p.data, p.group_id AS "group",
           EXISTS (SELECT 1 FROM ${S}.friends f WHERE f.user_id = $1 AND f.friend_id = p.user_id AND f.state = 'yes') AS friend
         FROM ${S}.presence p JOIN ${S}.users u ON u.id = p.user_id
-        WHERE p.at > $4 AND p.user_id <> $1 AND (p.area = ANY($2::text[]) OR ($3::text IS NOT NULL AND p.group_id = $3::text)) AND NOT ${BLOCKED('$1', 'p.user_id')}
+        WHERE p.at > $4::float8 AND p.user_id <> $1 AND (p.area = ANY($2::text[]) OR ($3::text IS NOT NULL AND p.group_id = $3::text)) AND NOT ${BLOCKED('$1', 'p.user_id')}
         LIMIT 200`, p);
-      if (Math.random() < 0.02) await q(`DELETE FROM ${S}.presence WHERE at < $1`, [look.since - 60000]);
       return rows;
     },
     async dropPresence(uid) { await q(`DELETE FROM ${S}.presence WHERE user_id = $1`, [uid]); },
+    async exportSocial(uid) {
+      return {
+        profile: one(await q(`SELECT code, visible FROM ${S}.social WHERE user_id = $1`, [uid])),
+        friends: await q(`SELECT f.friend_id AS id, coalesce(u.name, '') AS name, f.state FROM ${S}.friends f JOIN ${S}.users u ON u.id = f.friend_id WHERE f.user_id = $1 ORDER BY f.created_at`, [uid]),
+        blocked: await q(`SELECT blocked_id AS id FROM ${S}.blocks WHERE user_id = $1 ORDER BY created_at`, [uid]),
+        groups: await q(`SELECT g.id, g.name, g.start_at AS "startAt", g.plan, m.state, g.owner = $1 AS mine FROM ${S}.group_members m JOIN ${S}.group_rides g ON g.id = m.group_id WHERE m.user_id = $1 ORDER BY g.start_at`, [uid]),
+        messages: await q(`SELECT id, chan, body, created_at AS "createdAt" FROM ${S}.messages WHERE user_id = $1 ORDER BY seq`, [uid]),
+        activities: (await q(`SELECT id, at, data, rideons FROM ${S}.activities WHERE user_id = $1 ORDER BY at`, [uid])).map(({ data, ...a }) => ({ ...a, ...data })),
+      };
+    },
     async createGroup(g) {
       await q(`INSERT INTO ${S}.group_rides (id, owner, name, start_at, plan, workout, created_at) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)`,
         [g.id, g.owner, g.name, g.startAt, JSON.stringify(g.plan), g.workout ? JSON.stringify(g.workout) : null, g.createdAt]);

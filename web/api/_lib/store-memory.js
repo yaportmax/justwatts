@@ -298,10 +298,20 @@ function memoryStore() {
         if (!(look.areas.includes(p.area) || (look.group && p.group === look.group))) continue;
         out.push({ id, name: nm(id), lat: p.lat, lon: p.lon, data: clone(p.data), group: p.group, friend: friends.get(`${uid}\n${id}`)?.state === 'yes' });
       }
-      for (const [id, p] of [...pres]) if (p.at < look.since - 60000) pres.delete(id);
+      for (const [id, p] of [...pres]) if (p.at < look.since - 60000 && id !== uid) pres.delete(id);
       return out.slice(0, 200);
     },
     async dropPresence(uid) { pres.delete(uid); },
+    async exportSocial(uid) {
+      return {
+        profile: clone(prof.get(uid)) || null,
+        friends: [...friends].filter(([k]) => k.split('\n')[0] === uid).map(([k, f]) => ({ id: k.split('\n')[1], name: nm(k.split('\n')[1]), state: f.state })),
+        blocked: [...blocks.keys()].filter(k => k.split('\n')[0] === uid).map(k => ({ id: k.split('\n')[1] })),
+        groups: [...members].filter(([k]) => k.split('\n')[1] === uid).map(([k, m]) => { const g = groups.get(k.split('\n')[0]); return g && { id: g.id, name: g.name, startAt: g.startAt, plan: clone(g.plan), state: m.state, mine: g.owner === uid }; }).filter(Boolean),
+        messages: [...msgs.values()].filter(m => m.userId === uid).sort((a, b) => a.seq - b.seq).map(m => ({ id: m.id, chan: m.chan, body: m.body, createdAt: m.createdAt })),
+        activities: [...acts.values()].filter(a => a.userId === uid).map(a => ({ id: a.id, at: a.at, ...clone(a.data), rideons: a.rideons })),
+      };
+    },
     async createGroup(g) { groups.set(g.id, clone(g)); },
     async getGroup(id) { const g = groups.get(id); return g ? { ...clone(g), ownerName: nm(g.owner) } : null; },
     async deleteGroup(id) { groups.delete(id); for (const k of [...members.keys()]) if (k.startsWith(id + '\n')) members.delete(k); },

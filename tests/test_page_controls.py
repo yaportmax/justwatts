@@ -41,7 +41,7 @@ def check(out):
     b = out["before"]
     assert b["intensity"] == 1.0 and b["control"] == "k" and b["jr"]["wm"] == "e" and b["jr"]["g"] == 3
     assert b["steps"][1][3] and b["steps"][1][2] == 205  # step 2 set by hand
-    assert [s[0] for s in b["steps"][-2:]] == [120, 60]  # the next steps typed in the sheet
+    assert b["steps"][-1][0] == 60 and 100 <= b["steps"][-2][0] <= 120  # typed in the sheet: this segment becomes 2m in total, then 1m
     assert b["after_workout"] == "grade0"
     s = out["settings"]
     assert s["cadRange"] == [90, 95] and s["localCoach"]["enabled"] is False and s["beeps"] is False and s["voiceMode"] == "silent"

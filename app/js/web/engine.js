@@ -267,8 +267,18 @@ export class Engine {
       }
       const old = r.total; r.retime(); desc = `duration total ${fmtT(old)} -> ${fmtT(r.total)}`;
     } else if (op === 'rest') {  // replace everything after the current step (the rider's "next steps" box)
-      const text = String(e.steps || '').trim(), nw = text ? parse(text) : [], keep = at ? cur : r.steps.length - 1;
+      const text = String(e.steps || '').trim(); let nw = text ? parse(text) : [], keep = at ? cur : r.steps.length - 1;
       if (e.after != null && +e.after - 1 !== keep) throw new Error('the step changed; check the next steps and apply again');
+      if (e.with_current && at && nw.length) {  // nw[0] is the current step as edited: what was ridden stays, the rest follows the edit
+        const s = r.steps[cur], first = { ...nw[0] }, ridden = Math.ceil(into);
+        if (ridden < 1) { keep = cur - 1; r.acc = null; r.lastStep = -1; }
+        else {
+          if (!s.free && s.a !== s.b) s.b = s.a + (s.b - s.a) * Math.min(1, ridden / s.d);
+          s.d = ridden;
+          if (first.d > ridden) { if (!first.free && first.a !== first.b) first.a = first.a + (first.b - first.a) * ridden / first.d; first.d -= ridden; nw = [first, ...nw.slice(1)]; }
+          else nw = nw.slice(1);
+        }
+      }
       r.steps.splice(keep + 1, r.steps.length, ...nw);
       for (const k of Object.keys(r.ov)) if (+k > keep) delete r.ov[k];
       desc = `rest after step ${keep + 1}: ${toText(nw) || 'none'}`;

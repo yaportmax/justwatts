@@ -729,6 +729,23 @@ class RideEngine:
                     raise ValueError("the step changed; check the next steps and apply again")
                 if not at and not new:
                     raise ValueError("nothing to add")
+                if e.get("with_current") and at and new:
+                    # new[0] is the current step as edited: what was ridden stays as it was, the rest follows the edit
+                    s, first, ridden = r.steps[cur], dict(new[0]), math.ceil(into)
+                    if ridden < 1:
+                        keep = cur - 1
+                        r.acc, r.last_step = None, -1
+                    else:
+                        if not s.get("free") and s["a"] != s["b"]:
+                            s["b"] = s["a"] + (s["b"] - s["a"]) * min(1, ridden / s["d"])
+                        s["d"] = ridden
+                        if first["d"] > ridden:
+                            if not first.get("free") and first["a"] != first["b"]:
+                                first["a"] = first["a"] + (first["b"] - first["a"]) * ridden / first["d"]
+                            first["d"] -= ridden
+                            new = [first] + new[1:]
+                        else:
+                            new = new[1:]
                 r.steps[keep + 1:] = new
                 r.ov = {k: v for k, v in r.ov.items() if k <= keep}
                 desc = f"rest after step {keep + 1}: {to_text(new) or 'none'}"

@@ -93,8 +93,7 @@
       <span class="num" id="rClock" style="color:var(--dim)"></span>
     </div>
     <div class="tiles">
-      <div class="tile big"><div class="k">Power 3s</div><div class="v" id="lP">0</div><div class="s" id="lPs"></div></div>
-      <div class="tile big" id="tgtTile"><div class="k">Target</div><div class="v" id="lT">–</div><div class="s" id="lTs"></div></div>
+      <div class="tile big" id="tgtTile"><div class="k" title="3 second average, and the target">Power</div><div class="v"><span id="lP">0</span><span class="of"> / <span id="lT">–</span></span></div><div class="s" id="lTs"></div><div class="s" id="lPs"></div></div>
       <div class="tile hrz" id="cadTile"><div class="k">Cadence</div><div class="v" id="lC">0</div><div class="s" id="lCs">rpm</div></div>
       <div class="tile hrz" id="hrTile"><div class="k">Heart rate</div><div class="v" id="lH">–</div><div class="s" id="lHs">bpm</div></div>
       <div class="tile"><div class="k">Interval</div><div class="v" id="lI">–</div><div class="s" id="lIs"></div></div>
@@ -127,7 +126,7 @@
     <div class="row shead"><b>Adjust</b><span class="hint">changes apply now · hover a label for help</span><span style="flex:1"></span><button data-a="close">Close</button></div>
     <div class="sgrid">
       <h3 class="sh wk">Coming up</h3>
-      <div class="r wk nextrow" id="rowNext"><span class="l" title="Everything after the segment you are on. Drag a block's top for watts, its right edge for time, then Apply. The dimmed part is done or in progress.">Edit the rest of the plan</span><div class="b col">
+      <div class="r wk nextrow" id="rowNext"><span class="l" title="The segment you are on and everything after it. Drag a block's top for watts, its right edge for time, then Apply. What you already rode stays as ridden.">Edit the plan from here</span><div class="b col">
         <canvas id="aNextChart"></canvas>
         <div class="pal" id="aNextPal"></div>
         <div class="blist" id="aNextList"></div>

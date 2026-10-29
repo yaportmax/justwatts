@@ -392,7 +392,8 @@ async function wake(on) { try { if (on && !wakeLock && navigator.wakeLock) wakeL
 function renderLive() {
   const live = S?.live || {}, p3 = live.power_3s || 0;
   $('#lP').textContent = p3;
-  $('#lPs').textContent = settings.weight > 0 ? (p3 / settings.weight).toFixed(1) + ' W/kg' : 'W';
+  let m = 0; for (const x of samples) m += (x[5] || 0) / 3.6;  // virtual distance from trainer speed, like the summary
+  $('#lPs').textContent = (V ? distText(m / 1000, settings.units) : '') + (settings.weight > 0 ? (V ? ' · ' : '') + (p3 / settings.weight).toFixed(1) + ' W/kg' : '');
   const cad = live.cadence || 0, [lo, hi] = settings.cadRange || [85, 95];
   $('#lC').textContent = cad;
   $('#lCs').textContent = `target ${lo}-${hi} rpm`;
@@ -534,7 +535,7 @@ function sheet(on = !$('#adjPanel').classList.contains('on')) {
 function nextText() {
   const r = R(); if (!V?.cw) return ['', null];
   if (!r.step) return ['', null];  // after the plan: anything typed here is added now
-  return [toText(V.cw.steps.slice(r.step.index).map(({ t0, ...x }) => x)), r.step.index];
+  return [toText(V.cw.steps.slice(r.step.index - 1).map(({ t0, ...x }) => x)), r.step.index];  // from the segment in progress
 }
 function renderAdjust() {
   if (!V || !$('#adjPanel').classList.contains('on')) return;
@@ -552,12 +553,12 @@ function renderAdjust() {
 }
 $('#aNext').oninput = () => { nextDirty = true; $('#aNextErr').textContent = ''; nextBuilder.load($('#aNext').value); nextBuilder.draw(); };
 const nextBuilder = createBuilder({ list: $('#aNextList'), chart: $('#aNextChart'), palette: $('#aNextPal'), fit, css, ftp: () => V?.ftp || settings.ftp,
-  prefix: () => V?.cw && nextBase != null ? V.cw.steps.slice(0, nextBase) : [], now: () => V?.el ?? null,
+  prefix: () => V?.cw && nextBase != null ? V.cw.steps.slice(0, nextBase - 1) : [], now: () => V?.el ?? null,
   onEdit: text => { $('#aNext').value = text; nextDirty = true; $('#aNextErr').textContent = ''; nextBuilder.draw(); } });
 function applyNext() {
   const txt = $('#aNext').value.trim();
   if (txt) { try { parseWorkout(txt); } catch (e) { $('#aNextErr').textContent = e.message; return; } }
-  const body = { op: 'rest', steps: txt }; if (nextBase != null) body.after = nextBase;
+  const body = { op: 'rest', steps: txt, with_current: nextBase != null }; if (nextBase != null) body.after = nextBase;
   return control('edit', { edit: body }).then(j => { nextDirty = false; toast(txt ? `Next steps set · ${fmtT(j.total_s)}` : 'Plan ends after this step'); renderAdjust(); })
     .catch(e => { $('#aNextErr').textContent = e.message; });
 }

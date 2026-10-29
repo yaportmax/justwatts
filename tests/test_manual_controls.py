@@ -61,6 +61,17 @@ def test_step_target_on_a_ramp_shifts_the_ramp(srv):
     assert eng.ride.steps[1]["a"] == 0.5
 
 
+def test_edit_from_the_current_segment_keeps_what_was_ridden(srv):
+    ride(srv, text="10m 40-80%, 5m 50%", n=300)  # halfway up the ramp
+    assert ctl(srv, "edit", edit={"op": "rest", "steps": "12m 40-80%, 5m 50%", "after": 1, "with_current": True})[0] == 200
+    r = st(srv)
+    assert [s["duration_s"] for s in r["steps"]] == [300, 420, 300]
+    assert (r["steps"][0]["start_w"], r["steps"][0]["end_w"]) == (80, 120)  # the ridden half is unchanged
+    assert r["steps"][1]["end_w"] == 160 and 110 <= r["target_w"] <= 125
+    ticks(srv, 2)
+    assert st(srv)["step"]["index"] == 2
+
+
 def test_step_target_is_the_watts_the_trainer_gets_now(srv):
     eng = ride(srv, n=70)  # step 2: 200 W
     ctl(srv, "intensity", percent=110)

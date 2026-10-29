@@ -90,6 +90,8 @@ body.dragging,body.dragging *{cursor:grabbing !important;user-select:none}
 #rideOn>.panel:not(.coach){flex:1;min-height:140px;display:flex}
 #rideChart{width:100%;height:100%;display:block}
 #rideOn .controls{margin-top:8px}
+#rideOn>*:not(.panel){flex:none}  /* only the chart panel gives up height */
+@media (max-width:700px){#v-ride.on{height:auto}#rideOn>.panel:not(.coach){flex:none}}
 #v-ride main,#v-ride{padding-bottom:0}
 
 .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}

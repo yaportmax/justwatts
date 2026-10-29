@@ -58,8 +58,8 @@ kbd{display:inline-block;min-width:24px;padding:2px 6px;border:1px solid var(--l
 body{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);min-height:100vh;background:linear-gradient(90deg,var(--side) calc(var(--side-w) - 1px),var(--line) 0 var(--side-w),var(--bg) 0)}
 header.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px;padding:16px 12px;background:var(--side);border-right:1px solid var(--line);z-index:5;overflow-y:auto}
 .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 20px}
-.brand .mark{width:26px;height:26px}
-.brand .word{font-weight:650;font-size:15px;letter-spacing:-.01em}
+.brand .mark{width:26px;height:26px;display:none}
+.brand .word{height:26px;width:auto;display:block}
 nav{display:flex;flex-direction:column;gap:2px}
 nav button{justify-content:flex-start;gap:10px;height:34px;padding:0 10px;background:none;border-color:transparent;color:var(--dim);font-size:14px;font-weight:500}
 nav button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
@@ -429,6 +429,7 @@ body.web .serveronly{display:none !important}
   header.side{position:sticky;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line);background:rgba(14,16,20,.94);backdrop-filter:blur(6px)}
   .brand{padding:0}
   .brand .word{display:none}
+  .brand .mark{display:block}
   nav{flex-direction:row}
   nav button span{display:none}
   nav button{padding:0 8px}

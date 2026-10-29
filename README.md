@@ -1,4 +1,4 @@
-<img src="app/icon.svg" width="72" alt="Just Watts logo">
+<picture><source media="(prefers-color-scheme: dark)" srcset="app/wordmark.svg"><img src="app/wordmark-dark.svg" width="320" alt="Just Watts"></picture>
 
 # Just Watts
 

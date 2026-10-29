@@ -25,8 +25,10 @@ def test_build_output(dist):
     ml = "vendor/maplibre-gl-5.24.0/"                                                # 3D map, pinned, no CDN (CSP)
     assert {ml + f for f in ("maplibre-gl-csp.js", "maplibre-gl-csp-worker.js", "maplibre-gl.css", "LICENSE.txt")} <= files
     assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
-    api = {f for f in files if f.startswith("api/")}                                  # the Strava token relay + accounts API
-    assert {f for f in api if not f.startswith("api/_lib/")} == {"api/strava/token.js", "api/accounts.js"}  # _lib is not routed
+    api = {f for f in files if f.startswith("api/")}                                  # Strava relay, accounts, integrations
+    assert {f for f in api if not f.startswith("api/_lib/")} == {"api/strava/token.js", "api/accounts.js", "api/integrations.js"}  # _lib is not routed
+    assert {f"api/_lib/integrations/{m}.js" for m in ("base", "crypto", "store", "planned", "intervals", "trainingpeaks",
+                                                       "garmin", "hub", "http", "session")} <= api
     pkg = json.loads((dist / "package.json").read_text())                             # Vercel installs the one dependency
     assert pkg["dependencies"] == {"@neondatabase/serverless": "1.2.0"} and (dist / "package-lock.json").exists()
     assert "privacy.html" in files

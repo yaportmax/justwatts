@@ -1,6 +1,6 @@
 // In-page backend for the web build. It answers the same /api/* requests and live stream the local
 // server does, so app.js runs unchanged: F() and ES replace fetch and EventSource in web mode.
-import { fitEncode, toTcx } from '../core.js';
+import { fitEncode, toTcx, activeHrZones } from '../core.js';
 import { Engine } from './engine.js';
 import { WebHub } from './ble.js';
 import { openDB, MemStore } from './idb.js';
@@ -9,7 +9,7 @@ import { LocalCoach } from './coach.js';
 import { parseLine } from './lines.js';
 
 const SETTINGS_DEFAULTS = { ftp: 200, weight: 0, beeps: true, autoGarmin: false, hrZones: null, hrMax: null, hrZonesSrc: null, cadRange: [85, 95],
-  voiceMode: 'all', afterWorkout: 'hold', localCoach: {}, ftpSrc: null, hideVirtualDistance: false };
+  voiceMode: 'all', afterWorkout: 'hold', localCoach: {}, ftpSrc: null, hideVirtualDistance: false, units: 'imperial' };
 const NOT_WEB = 'not available in the web version; use the local app';
 const UNMUTE = /\b(unmute|voice on|talk to me|speak again|you can talk)\b/i, MUTE = /\b(mute|quiet|stop talking|shut up|silence|be silent|no talking)\b/i;
 const pad = n => String(n).padStart(2, '0'), hms = d => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -83,13 +83,15 @@ export class WebBackend {
     for (const [k, v] of Object.entries(body)) {
       if (!(k in SETTINGS_DEFAULTS) || k === 'autoGarmin') continue;
       if (k === 'ftp' && !(+v >= 50 && +v <= 600)) continue;
+      if (k === 'units' && v !== 'imperial' && v !== 'metric') continue;
+      if (k === 'hrZonesSrc' && ![null, 'default', 'manual', 'garmin'].includes(v)) continue;
       this.settings[k] = k === 'localCoach' ? { ...(this.settings[k] || {}), ...v } : v;
     }
     this.settingsStored = true; this.store.set('settings', this.settings);
     this.bump(); return this.settingsPayload();
   }
   settingsPayload() { return { settings: { ...this.settings, autoGarmin: false }, stored: this.settingsStored, garmin: false, web: true, ble_supported: this.hub.supported }; }
-  athlete() { const s = this.settings; return { ftp: s.ftp, weight_kg: s.weight || null, hr_zones: s.hrZones, hr_max: s.hrMax, hr_zones_source: s.hrZonesSrc, cadence_range: s.cadRange }; }
+  athlete() { const s = this.settings, z = activeHrZones(s); return { ftp: s.ftp, weight_kg: s.weight || null, hr_zones: z.floors, hr_max: s.hrMax, hr_zones_source: z.src, cadence_range: s.cadRange }; }
   state() {
     const st = this.engine.state(this.athlete(), { said: this.said.slice(0, 3) });
     st.voice = { ...this.voice, mode: this.settings.voiceMode || 'all' };
@@ -149,7 +151,7 @@ export class WebBackend {
       if (!r) return resp(404, { error: 'no such ride' });
       const meta = ((await this.store.get('meta')) || {})[id] || {};
       if (!sub) return resp(200, r);
-      if (sub === 'detail') return resp(200, detail(r, this.settings.hrZones, meta));
+      if (sub === 'detail') return resp(200, detail(r, activeHrZones(this.settings).floors, meta));
       if (sub === 'description') { await this.setMeta(id, { description: String(body.text || '').slice(0, 2000) }); return resp(200, { ok: true }); }
       if (sub === 'card') return resp(200, { ok: true, url: null });   // web: the card is for downloading and sharing
       if (sub === 'strava') return resp(503, { ok: false, error: 'Strava upload is ' + NOT_WEB });

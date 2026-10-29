@@ -37,6 +37,10 @@ function run(r) {
       };
     case 'fmtT':
       return r.values.map(core.fmtT);
+    case 'hrzones':
+      return r.cases.map(s => core.activeHrZones(s));
+    case 'units':
+      return r.cases.map(([kg, v, u]) => ({ show: core.weightShow(kg, u), kg: core.weightKg(v, u), unit: core.weightUnit(u), dist: core.distText(kg, u) }));
     case 'crc':
       return core.fitCrc(r.bytes);
     default:

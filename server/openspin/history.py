@@ -32,6 +32,42 @@ def hr_zone(h: int, floors: list | None) -> int:
     return i
 
 
+HR_MAX_DEFAULT = 185
+HRZ_PCT = (50, 60, 70, 80, 90)
+
+
+def _num(x) -> float | None:
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def valid_hr_floors(z) -> bool:
+    if not isinstance(z, list) or len(z) != 5:
+        return False
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and 30 < x < 230 for x in z):
+        return False
+    return all(b > a for a, b in zip(z, z[1:]))
+
+
+def default_hr_floors(hr_max: float) -> list[int]:
+    return [js_round(hr_max * p / 100) for p in HRZ_PCT]
+
+
+def active_hr_zones(s: dict | None) -> dict:
+    """Manual or Garmin floors when set, else 50/60/70/80/90 % of max HR (185 when unset).
+    Mirrors core.js activeHrZones."""
+    s = s or {}
+    src, m = s.get("hrZonesSrc"), _num(s.get("hrMax"))
+    hr_max = (int(m) if m == int(m) else m) if m is not None and 100 <= m <= 230 else None
+    if src != "default" and valid_hr_floors(s.get("hrZones")):
+        return {"floors": s["hrZones"], "max": hr_max, "src": src or "manual"}
+    mx = hr_max or HR_MAX_DEFAULT
+    return {"floors": default_hr_floors(mx), "max": mx, "src": "default"}
+
+
 def norm_power(p: list[float]) -> float:
     if len(p) < 30:
         return sum(p) / len(p) if p else 0

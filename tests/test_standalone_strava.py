@@ -131,7 +131,11 @@ def test_garmin_profile_import(tmp_path):
                 break
             time.sleep(0.02)
         st = s.settings
-        assert (st["ftp"], st["ftpSrc"], st["weight"], st["hrZones"][0], st["hrMax"]) == (247, "garmin", 71.5, 101, 188)
+        assert (st["ftp"], st["ftpSrc"], st["weight"]) == (247, "garmin", 71.5)
+        assert st["hrZones"] is None and s.athlete()["hr_zones_source"] == "default"  # Garmin zones only on request
+        s.update_settings({"hrZonesSrc": "garmin"})
+        s.import_garmin_profile()
+        assert (s.settings["hrZones"][0], s.settings["hrMax"]) == (101, 188)
         s.update_settings({"ftp": 230, "ftpSrc": "manual"})
         res = s.import_garmin_profile()
         assert "ftp" not in res["imported"] and s.settings["ftp"] == 230  # what the athlete typed wins

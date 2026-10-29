@@ -251,7 +251,8 @@ Sample: `[epoch_ms, elapsed_s, watts, cadence, hr (0 = none), speed_kmh, target_
   the ride ends, even with no page open.
 - `devices.json` remembers the trainer and strap; the server reconnects at start and after every
   drop, until you press Disconnect.
-- `settings.json` holds FTP, weight, HR zones, cadence range and Garmin auto-upload.
+- `settings.json` holds FTP, weight (kg), units (`imperial` or `metric`, display only), HR zones
+  (`hrZonesSrc`: `default`, `manual` or `garmin`), cadence range and Garmin auto-upload.
 
 ## Workout text
 

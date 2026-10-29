@@ -65,8 +65,9 @@ T+18:30 step 7/15 1:30 in, 1:30 left | tgt 288 | 30s 284W | step avg 287W | HR 1
 `end` near the top of the athlete's zones on a recovery-bound step is normal; the recovery step tells
 you more (see below).
 
-HR zones come from `get_athlete_profile` as five floors (Z1..Z5 lower bounds) plus max HR. If they
-are missing, use power only and do not guess HR limits.
+HR zones come from `get_athlete_profile` as five floors (Z1..Z5 lower bounds) plus max HR.
+`hr_zones_source` is `manual`, `garmin` or `default`; `default` zones are 50/60/70/80/90% of a guessed
+max HR (185 unless the athlete entered one), so treat them as rough and do not set HR caps from them.
 
 ## When to adjust
 

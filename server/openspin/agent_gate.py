@@ -38,6 +38,14 @@ PASS_TYPES = {"step_start", "step_end", "feel", "said", "paused", "resumed", "ri
 MANUAL_HOLD_S = 60  # after a change by hand, the built-in coach does not auto-adjust for this long
 
 
+def hr_cap(ath: dict) -> int | None:
+    """95 % of max HR, else the Z5 floor. Default zones (a guessed max) set no cap. Mirrors web/coach.js."""
+    hmax, floors = ath.get("hr_max"), ath.get("hr_zones")
+    if hmax:
+        return round(hmax * 0.95)
+    return floors[4] if floors and ath.get("hr_zones_source") != "default" else None
+
+
 class AgentGate:
     def __init__(self, settings: Callable[[], dict], clock: Callable[[], float] = time.time,
                  on_wake: Callable[[dict], None] | None = None):
@@ -120,8 +128,8 @@ class AgentGate:
     def _alerts(self, st: dict, ride: dict, c: dict, now: float) -> None:
         a, live, ath = self._a, st.get("live") or {}, st.get("athlete") or {}
         hr = live.get("hr") or 0
-        floors, hmax = ath.get("hr_zones"), ath.get("hr_max")
-        cap = c["hr_cap"] or (round(hmax * 0.95) if hmax else (floors[4] if floors else None))
+        floors = ath.get("hr_zones")
+        cap = c["hr_cap"] or hr_cap(ath)
         if cap and hr:
             if hr >= cap and not a.get("hr_cap"):
                 a["hr_cap"] = True
@@ -325,8 +333,8 @@ class LocalCoach:
     def _hr_guard(self, st: dict, c: dict, now: float) -> None:
         cur = self._current()
         ath, live = st.get("athlete") or {}, st.get("live") or {}
-        hmax, floors, hr = ath.get("hr_max"), ath.get("hr_zones"), live.get("hr") or 0
-        cap = round(hmax * 0.95) if hmax else (floors[4] if floors else None)
+        hr = live.get("hr") or 0
+        cap = hr_cap(ath)
         if not cur or not cap or not self._may_adjust(c) or hr < cap:
             self.hr_over_since = None
             return

@@ -88,7 +88,7 @@ def test_oauth_states_bounded_and_expire(tmp_path, monkeypatch):
 
 
 SAFE_RAW = {  # interpolations in app.js HTML templates that are constants, numbers or fixed markup
-    "${HRZ_COLORS[i]}", "${Math.round(hrNow / settings.hrMax * 100)}", "${ZONES[i][1]}", "${ZONES[i][2]}", "${cls(l)}",
+    "${HRZ_COLORS[i]}", "${Math.round(hrNow / hmax * 100)}", "${ZONES[i][1]}", "${ZONES[i][2]}", "${cls(l)}",
     "${fmtT(t)}", "${hm(x.ts)}", "${hz + 1}", "${i + 1}", "${k}", "${t / hn * 100}", "${t / tot * 100}",
     "${r.garmin ? ' <span class=\"badge\">Garmin</span>' : ''}", "${r.strava ? ' <span class=\"badge\">Strava</span>' : ''}",
     "${r.test ? ' <span class=\"badge\">test</span>' : ''}", "${w.id.startsWith('c-') ? ' · custom' : ''}",

@@ -349,7 +349,7 @@ class Handler(SimpleHTTPRequestHandler):
             if sub == "":
                 return self.send_raw_json(json.dumps(r).encode())
             if sub == "detail":
-                return self.send_json(200, H.detail(r, srv.settings.get("hrZones"), srv.ride_meta(rid)))
+                return self.send_json(200, H.detail(r, H.active_hr_zones(srv.settings)["floors"], srv.ride_meta(rid)))
             if sub in ("fit", "tcx"):
                 data = H.fit_encode(r) if sub == "fit" else H.tcx(r).encode()
                 self.send_response(200)
@@ -631,7 +631,7 @@ class Handler(SimpleHTTPRequestHandler):
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
                      "hrZonesSrc": None, "cadRange": [85, 95], "voiceMode": "all", "afterWorkout": "hold",
                      "agentGate": {}, "localCoach": {}, "ftpSrc": None, "profileImported": False,
-                     "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False}
+                     "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False, "units": "imperial"}
 AGENT_RECENT_S = 300  # an agent (or CLI tool) used the token this recently: show agent-only UI
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "cost_usd", "turns")
 VOICE_MODES = ("all", "important", "silent")
@@ -712,10 +712,11 @@ class CoachServer(ThreadingHTTPServer):
         self.log_event(f"CUE set step {step} {watts}W | {why}")
 
     def import_garmin_profile(self, force: bool = False) -> dict:
-        """Copy FTP, weight and HR zones from Garmin into settings (only fields the athlete did not set)."""
+        """Copy FTP, weight and HR zones from Garmin into settings (only fields the athlete did not set).
+        HR zones come over only on request (force) or when the athlete chose Garmin zones."""
         prof = self.garmin.profile()
         s, patch = self.settings, {}
-        if prof.get("floors") and (force or s.get("hrZonesSrc") != "manual"):
+        if prof.get("floors") and (force or s.get("hrZonesSrc") == "garmin"):
             patch.update(hrZones=prof["floors"], hrMax=prof.get("max"), hrZonesSrc="garmin")
         if prof.get("ftp") and (force or s.get("ftpSrc") != "manual"):
             patch.update(ftp=prof["ftp"], ftpSrc="garmin")
@@ -805,6 +806,10 @@ class CoachServer(ThreadingHTTPServer):
                     continue
                 if k == "afterWorkout" and v not in ("hold", "grade0"):
                     continue
+                if k == "units" and v not in ("imperial", "metric"):
+                    continue
+                if k == "hrZonesSrc" and v not in (None, "default", "manual", "garmin"):
+                    continue
                 if k == "shareBaseUrl" and not (isinstance(v, str) and (v == "" or re.match(r"https?://", v))):
                     continue
                 if k in ("agentGate", "localCoach"):
@@ -818,9 +823,9 @@ class CoachServer(ThreadingHTTPServer):
         return self.settings_payload()
 
     def athlete(self) -> dict:
-        s = self.settings
-        return {"ftp": s.get("ftp"), "weight_kg": s.get("weight") or None, "hr_zones": s.get("hrZones"),
-                "hr_max": s.get("hrMax"), "hr_zones_source": s.get("hrZonesSrc"), "cadence_range": s.get("cadRange")}
+        s, z = self.settings, H.active_hr_zones(self.settings)
+        return {"ftp": s.get("ftp"), "weight_kg": s.get("weight") or None, "hr_zones": z["floors"],
+                "hr_max": s.get("hrMax"), "hr_zones_source": z["src"], "cadence_range": s.get("cadRange")}
 
     # ---------- state ----------
     def engine_state(self) -> dict:
@@ -882,7 +887,7 @@ class CoachServer(ThreadingHTTPServer):
     def upload_strava(self, ride: dict) -> dict:
         rid = ride["id"]
         meta = self.ride_meta(rid)
-        d = H.detail(ride, self.settings.get("hrZones"), meta)
+        d = H.detail(ride, H.active_hr_zones(self.settings)["floors"], meta)
         desc = summary_text(d, self.card_url(rid), meta.get("description"))
         res = self.strava.upload(H.fit_encode(ride), ride.get("name") or "OpenSpin ride", desc, rid)
         if res.get("activity_id"):

@@ -21,6 +21,7 @@ export class Store {
   getRide(id) { return done(this.tx('rides').get(id)); }
   delRide(id) { return done(this.tx('rides', 'readwrite').delete(id)); }
   allRides() { return done(this.tx('rides').getAll()); }
+  rideIds() { return done(this.tx('rides').getAllKeys()); }
   async exportAll() {
     const kv = {};
     for (const k of ['settings', 'custom', 'meta', 'devices']) kv[k] = await this.get(k);
@@ -44,4 +45,5 @@ export class MemStore extends Store {
   async getRide(id) { return structuredClone(this.rides.get(id)); }
   async delRide(id) { this.rides.delete(id); }
   async allRides() { return [...this.rides.values()].map(r => structuredClone(r)); }
+  async rideIds() { return [...this.rides.keys()]; }
 }

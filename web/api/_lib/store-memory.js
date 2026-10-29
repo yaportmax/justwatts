@@ -43,6 +43,37 @@ function memoryStore() {
       const i = userIdents(uid).find(x => x.provider === provider); if (!i) return false;
       idents.delete(ik(i.provider, i.subject)); return true;
     },
+    // the account an address belongs to: its email sign-in, else a verified provider address (Google)
+    async identityByEmail(email) {
+      const all = [...idents.values()].filter(i => i.email === email && (i.provider === 'email' || i.verified)).sort((a, b) => a.createdAt - b.createdAt);
+      return clone(all.find(i => i.provider === 'email') || all[0]) || null;
+    },
+    // fold account `from` into `to`: sign-ins, synced records and rides (last write wins), community content; then drop `from`
+    async mergeUser(from, to) {
+      const src = users.get(from), dst = users.get(to); if (!src || !dst) return false;
+      const mine = userIdents(from), theirs = userIdents(to);
+      if (mine.some(i => theirs.some(x => x.provider === i.provider))) throw new StoreError('exists');
+      for (const i of mine) i.userId = to;
+      const rev = ++dst.rev;
+      for (const [k, r] of [...records]) if (r.userId === from) {
+        records.delete(k); const nk = `${to}\n${r.kind}\n${r.id}`;
+        if (LWW(records.get(nk), r)) records.set(nk, { ...r, userId: to, rev });
+      }
+      for (const [k, r] of [...rides]) if (r.userId === from) {
+        rides.delete(k); const nk = `${to}\n${r.id}`;
+        if (LWW(rides.get(nk), r)) rides.set(nk, { ...r, userId: to, rev });
+      }
+      const touched = new Set();
+      for (const it of items.values()) if (it.owner === from) it.owner = to;
+      for (const c of comments.values()) if (c.userId === from) c.userId = to;
+      for (const [k, l] of [...likes]) if (l.userId === from) { likes.delete(k); touched.add(l.itemId); const nk = `${l.itemId}\n${to}`; if (!likes.has(nk)) likes.set(nk, { ...l, userId: to }); }
+      for (const k of [...itemRides]) { const [it, uid, day] = k.split('\n'); if (uid === from) { itemRides.delete(k); itemRides.add(`${it}\n${to}\n${day}`); touched.add(it); } }
+      for (const [k, r] of [...reports]) if (r.userId === from) { reports.delete(k); const nk = `${r.type}\n${r.targetId}\n${to}`; if (!reports.has(nk)) reports.set(nk, { ...r, userId: to }); }
+      for (const [k, t] of tokens) if (t.userId === from) tokens.delete(k);
+      users.delete(from);
+      for (const t of touched) recount(t);
+      return true;
+    },
     async setIdentityVerified(provider, subject, verified) { const i = idents.get(ik(provider, subject)); if (i) i.verified = !!verified; },
     async updateUser(id, patch) { const u = users.get(id); if (u) for (const k of ['name', 'passHash']) if (k in patch) u[k] = patch[k]; },
     async bumpSession(id) { const u = users.get(id); return u ? ++u.sessionVersion : 0; },

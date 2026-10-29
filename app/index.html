@@ -30,8 +30,7 @@
     <div class="dev"><span class="pill"><i class="dot" id="tDot"></i><span id="tTxt">Trainer off</span></span><button id="btnTrainer" class="pri">Connect trainer</button></div>
     <div class="dev"><span class="pill"><i class="dot" id="hDot"></i><span id="hTxt">HR off</span></span><button id="btnHR">Connect HR</button></div>
   </div>
-  <!-- account and sign in go here (accounts branch) -->
-  <div class="acct" id="acctSlot"></div>
+  <div class="acct webonly" id="acctSlot"></div>
 </header>
 
 <main>
@@ -51,6 +50,8 @@
       <span class="jr"><select id="jrCourse" class="pick" aria-label="Just ride course" title="Course for Just ride"></select><button id="btnJust" class="pri">Just ride</button></span>
     </div>
   </div>
+
+  <div class="srcbar" id="libSrc" role="group" aria-label="Source"><button data-src="lib" class="on">Library</button><button data-src="mine">Mine</button><button data-src="comm" class="webonly" style="display:none">Community</button></div>
 
   <div class="tabpane" id="tabCourses" role="tabpanel" style="display:none">
     <div class="toolbar crsbar"><span class="hint">With a workout: watt segments stay ERG, free segments follow the road.</span><button id="crsImport" title="GPX, TCX or FIT"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3M6 7l4-4 4 4M4 13v3h12v-3"/></svg>Import route</button></div>
@@ -73,7 +74,23 @@
   <div class="llist" id="lib"></div>
   <div class="empty" id="libEmpty" style="display:none">No workouts match.</div>
   </div>
+
+  <div class="tabpane webonly" id="tabComm" style="display:none">
+    <div class="toolbar libbar" id="cmBar">
+      <label class="search"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/></svg><input id="cmQ" type="search" placeholder="Search community workouts" aria-label="Search community"></label>
+      <select id="cmSort" aria-label="Sort"><option value="liked">Most liked</option><option value="popular">Most popular</option><option value="new">New</option></select>
+      <select id="cmPeriod" aria-label="Period"><option value="all">All time</option><option value="month">This month</option><option value="week">This week</option></select>
+      <select id="cmDur" aria-label="Length"><option value="">Any length</option><option value="0-30">Under 30 min</option><option value="30-60">30 to 60 min</option><option value="60-90">60 to 90 min</option><option value="90-">Over 90 min</option></select>
+    </div>
+    <div class="lhead cm-cols" id="cmHead"></div>
+    <div class="llist" id="cmList"></div>
+    <div class="empty" id="cmEmpty" style="display:none"></div>
+    <div class="cmmore"><button id="cmMore" style="display:none">More</button></div>
   </div>
+  </div>
+
+  <!-- a community item: its own page inside Workouts (web build) -->
+  <div id="commPane" class="webonly" style="display:none"></div>
 
   <!-- the builder: its own focused page, opened by New workout or Edit -->
   <div id="builderPane" style="display:none">
@@ -87,6 +104,7 @@
       <button id="bImport" class="ghost" title=".zwo, .erg or .mrc (Zwift, TrainingPeaks, TrainerRoad)">Import</button>
       <button id="bZwo" class="ghost" title="Download as .zwo">Export .zwo</button>
       <button id="bDel" class="ghost danger" style="display:none">Delete</button>
+      <button id="bPub" class="ghost webonly" style="display:none" title="Share it in the community library">Publish</button>
       <button id="bSave">Save</button>
       <button id="bRide" class="pri">Ride</button>
     </div>
@@ -248,7 +266,8 @@
     <button data-set="set-ride">Ride</button>
     <button data-set="set-uploads">Integrations</button>
     <button data-set="set-data" class="webonly">Your data</button>
-    <!-- Account goes here (accounts branch) -->
+    <button data-set="set-account" class="webonly" style="display:none">Account</button>
+    <button data-set="set-admin" class="webonly" style="display:none">Moderation</button>
   </div>
   <div class="setgrid">
     <section class="sset" id="set-athlete">
@@ -297,7 +316,14 @@
       <h2>Your data</h2>
       <div class="srow"><span class="sl">Backup<small>Stored in this browser only.</small></span><span class="sc"><button id="bkExport">Export all data</button><button id="bkImport">Import backup</button><input type="file" id="bkFile" accept=".json" hidden></span></div>
     </section>
-    <!-- Account section goes here (accounts branch) -->
+    <section class="sset webonly" id="set-account" style="display:none">
+      <h2>Account</h2>
+      <div id="acctSet"></div>
+    </section>
+    <section class="sset webonly" id="set-admin" style="display:none">
+      <h2>Moderation<span class="hint">Hidden after reports</span></h2>
+      <div id="adminSet"></div>
+    </section>
   </div>
   </div>
 </section>
@@ -363,6 +389,24 @@
       <tr><td><kbd>Z</kbd></td><td>Undo</td></tr>
       <tr><td><kbd>Esc</kbd></td><td>Close</td></tr>
     </table>
+  </div>
+</div>
+<div class="modal webonly" id="authModal">
+  <div class="panel dlg authdlg" role="dialog" aria-labelledby="authTitle">
+    <div class="dhead"><b id="authTitle">Sign in</b><button class="x" data-a="close" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+    <div id="authBody"></div>
+  </div>
+</div>
+<div class="modal webonly" id="pubModal">
+  <div class="panel dlg" role="dialog" aria-labelledby="pubTitle">
+    <div class="dhead"><b id="pubTitle">Publish <span id="pubKind" class="hint"></span></b><button class="x" data-a="close" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+    <form id="pubForm" class="aform" novalidate>
+      <label class="f">Name<input id="pubName" maxlength="60" required></label>
+      <label class="f">Tags<input id="pubTags" placeholder="sweet spot, ftp" maxlength="120"></label>
+      <div class="hint">Anyone can see and ride it, under your account name.</div>
+      <div class="err" id="pubErr"></div>
+      <div class="dfoot"><span></span><div class="row" style="gap:8px"><button type="button" data-a="close">Cancel</button><button type="submit" class="pri">Publish</button></div></div>
+    </form>
   </div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

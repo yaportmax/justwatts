@@ -88,3 +88,49 @@ def test_web_mode_ride_with_reload(dist, node):
                           {"op": "upload", "services": "intervals", "fit": True, "key": False}]
     assert w["auto"] == [{"op": "upload", "services": None, "fit": True}]     # later rides go up by themselves
     assert w["today"] and not w["leak"]
+
+
+def test_web_account_sync_and_community(dist, node):
+    # the page against the real accounts API (in-memory store, stubbed Resend / Strava), see tests/js/account_web.mjs
+    p = subprocess.run([node, str(REPO / "tests/js/account_web.mjs"), str(REPO), str(dist)], capture_output=True, text=True, timeout=180, encoding="utf-8")
+    assert p.returncode == 0, p.stderr[-4000:]
+    out = json.loads(p.stdout)
+    assert out["off"]["slot"] == "" and out["off"]["account"] is None and out["off"]["setAccount"] == "none"   # no accounts on the server: nothing shows
+    so = out["signedOut"]
+    assert so["slot"] and so["settings"] and so["comm"] == ""                                       # Sign in, and Community to browse
+    d = out["dialog"]
+    assert d["on"] and d["title"] == "Sign in" and 'data-a="forgot"' in d["html"] and 'data-a="signup"' in d["html"]
+    assert "oauth" not in d["html"]                                                                  # no Google / Strava env: no buttons
+    c = out["connect"]                                                                               # right after sign-up: connect services
+    assert c["step"] == "connect" and c["html"].index("Garmin") < c["html"].index("Strava") and "Recommended" in c["html"] and "Skip for now" in c["html"]
+    assert out["connectTap"] == {"closed": True, "settings": True}                                   # the hook's fallback opens Settings
+    p_ = out["pushed"]                                                                               # first sign-in: local data merges into the account
+    assert p_["records"] == ["settings:main", "workout:c-local1"] and p_["workout"] == {"name": "Local over-unders", "text": "3x(4m 95%, 2m 105%)"}
+    assert p_["rides"] == [["r-1790000000000", 120]]
+    assert "Account settings" in out["menu"] and "Sign out" in out["menu"] and "Synced" in out["menu"] and ">A</span>" in out["menu"]
+    s = out["settingsHtml"]
+    for want in ("Name", "ann@example.com", "Not confirmed", "Sign-in methods", "Change password", "Export my data", "Sign out everywhere", "Delete account"):
+        assert want in s, want
+    assert 'data-p="email" disabled' in s                                                             # never the last sign-in method
+    assert out["pulled"] == {"custom": ["c-remote", "c-local1"], "ftp": 280, "units": "metric", "ride": 90}
+    assert out["during"] == {"ftp": 280, "pending": {"ftp": 300}, "custom": ["c-local1"]}             # settings wait for the ride; deletes apply
+    assert out["after"] == {"ftp": 300, "pending": None}
+    assert out["localEdit"] == 310
+    assert out["offline"] == {"status": "offline", "slot": True} and out["backOnline"] == "synced"
+    li = out["list"]
+    assert li["tab"] == "" and "by Ann" in li["row"] and "sweet spot" in li["row"] and 'title="Comments"' in li["row"] and ">1</span>" in li["row"]
+    assert "Time" in li["head"] and "TSS" in li["head"]
+    it = out["item"]
+    for want in ("Sweet spot ladder", "Comments", "Great one", 'data-a="like"', "Save to mine", 'data-a="ride"', "Add a comment"):
+        assert want in it["html"], want
+    assert out["liked"] == {"likes": 1, "liked": True, "comments": ["Great one", "Did it twice"]}
+    assert out["rode"] == 1                                                                           # riding a community item counts
+    assert out["published"] == {"item": ["Local over-unders", ["vo2", "threshold"]], "modal": False}
+    sa = out["signedOutAgain"]
+    assert sa["slot"] and sa["custom"] == 1 and sa["sync"] == "null"                                 # local data stays on the device
+    st = out["strava"]                                                                               # Strava sign-up: ask for the email once
+    assert st["back"] == "/?provider=strava&auth=ok&new=1" and st["step"] == "email" and "Skip for now" in st["html"] and st["stripped"] == "/"
+    assert out["claim"]["step"] == "sent" and out["claim"]["mail"] == ["eddy@example.com"] and 'data-a="connect"' in out["claim"]["html"]
+    assert out["claimed"] == {"email": "eddy@example.com", "verified": True, "toast": "Email confirmed"}
+    oe = out["oauthError"]
+    assert oe["step"] == "signin" and "Strava sign-in is full for now" in oe["html"] and "limited for now" in oe["html"] and oe["stripped"] == "/"

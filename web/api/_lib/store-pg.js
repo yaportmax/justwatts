@@ -106,6 +106,38 @@ function pgStore(db) {
       catch (e) { if (unique(e)) throw new StoreError('exists'); throw e; }
     },
     async removeIdentity(uid, p) { return (await q(`DELETE FROM ${S}.identities WHERE user_id = $1 AND provider = $2 RETURNING provider`, [uid, p])).length > 0; },
+    async identityByEmail(email) {
+      return one(await q(`SELECT ${IDENT} FROM ${S}.identities WHERE email = $1 AND (provider = 'email' OR verified) ORDER BY (provider = 'email') DESC, created_at LIMIT 1`, [email]));
+    },
+    async mergeUser(from, to) {
+      const [mine, theirs] = [await this.identitiesOf(from), await this.identitiesOf(to)];
+      if (mine.some(i => theirs.some(x => x.provider === i.provider))) throw new StoreError('exists');
+      const rev = `(SELECT rev FROM ${S}.users WHERE id = $2)`;
+      try {
+        await tx([
+          [`UPDATE ${S}.identities SET user_id = $2 WHERE user_id = $1`, [from, to]],
+          [`UPDATE ${S}.users SET rev = rev + 1 WHERE id = $1`, [to]],
+          [`INSERT INTO ${S}.records AS t (user_id, kind, id, data, updated_at, deleted, rev)
+            SELECT $2, kind, id, data, updated_at, deleted, ${rev} FROM ${S}.records WHERE user_id = $1
+            ON CONFLICT (user_id, kind, id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, deleted = excluded.deleted, rev = excluded.rev
+            WHERE ${LWW('t')}`, [from, to]],
+          [`INSERT INTO ${S}.rides AS t (user_id, id, body, size, name, start_ms, samples, updated_at, deleted, rev)
+            SELECT $2, id, body, size, name, start_ms, samples, updated_at, deleted, ${rev} FROM ${S}.rides WHERE user_id = $1
+            ON CONFLICT (user_id, id) DO UPDATE SET body = excluded.body, size = excluded.size, name = excluded.name, start_ms = excluded.start_ms,
+              samples = excluded.samples, updated_at = excluded.updated_at, deleted = excluded.deleted, rev = excluded.rev
+            WHERE ${LWW('t')}`, [from, to]],
+          [`UPDATE ${S}.items SET owner = $2 WHERE owner = $1`, [from, to]],
+          [`UPDATE ${S}.comments SET user_id = $2 WHERE user_id = $1`, [from, to]],
+          [`INSERT INTO ${S}.likes (item_id, user_id, created_at) SELECT item_id, $2, created_at FROM ${S}.likes WHERE user_id = $1 ON CONFLICT DO NOTHING`, [from, to]],
+          [`INSERT INTO ${S}.item_rides (item_id, user_id, day) SELECT item_id, $2, day FROM ${S}.item_rides WHERE user_id = $1 ON CONFLICT DO NOTHING`, [from, to]],
+          [`INSERT INTO ${S}.reports (type, target_id, user_id, reason, created_at) SELECT type, target_id, $2, reason, created_at FROM ${S}.reports WHERE user_id = $1 ON CONFLICT DO NOTHING`, [from, to]],
+          [`DELETE FROM ${S}.users WHERE id = $1`, [from]],  // cascades the old rows
+          [`UPDATE ${S}.items i SET likes = (SELECT count(*) FROM ${S}.likes WHERE item_id = i.id), rides = (SELECT count(*) FROM ${S}.item_rides WHERE item_id = i.id)
+            WHERE i.id IN (SELECT item_id FROM ${S}.likes WHERE user_id = $1 UNION SELECT item_id FROM ${S}.item_rides WHERE user_id = $1)`, [to]],
+        ]);
+      } catch (e) { if (unique(e)) throw new StoreError('exists'); throw e; }
+      return true;
+    },
     async setIdentityVerified(p, s, v) { await q(`UPDATE ${S}.identities SET verified = $3 WHERE provider = $1 AND subject = $2`, [p, s, !!v]); },
     async updateUser(id, patch) {
       if ('name' in patch) await q(`UPDATE ${S}.users SET name = $2 WHERE id = $1`, [id, patch.name]);

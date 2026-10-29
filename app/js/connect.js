@@ -409,6 +409,11 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
     escape: () => { if ($('#connModal').classList.contains('on')) { closeForm(); return true; } if ($('#upPanel').classList.contains('on')) { closePanel(); return true; } return false; },
   };
   inst = self;
+  // the account UI's connect step (after sign-up) hands a service, or none, to this UI
+  globalThis.addEventListener?.('jw:connect-services', e => {
+    e.preventDefault(); const svc = e.detail?.service;
+    load().then(() => svc ? (openPanel('connect'), openForm(svc)) : openPanel('connect')).catch(() => {});
+  });
   if (queued) { const q = queued; queued = null; self.openConnectServices(q); }
   return self;
 }

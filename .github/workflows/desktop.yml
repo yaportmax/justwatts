@@ -1,0 +1,154 @@
+# Desktop app (apps/desktop): builds the Windows installer and the macOS dmg + zip (universal), runs the unit tests and
+# an end-to-end smoke test of the packaged app on each OS, and on a version tag (v1.2.3) publishes a GitHub Release.
+# electron-updater in installed apps reads latest.yml / latest-mac.yml from that release; the website links to
+#   releases/latest/download/JustWatts-Setup.exe and releases/latest/download/JustWatts.dmg
+#
+# Optional secrets (each step is skipped cleanly without them):
+#   macOS signing:      MAC_CERT_P12_BASE64, MAC_CERT_PASSWORD   (Developer ID Application certificate, .p12 in base64)
+#   macOS notarization: APPSTORE_KEY_ID, APPSTORE_ISSUER_ID, APPSTORE_KEY_P8   (App Store Connect API key)
+#   Windows signing:    WIN_CERT_P12_BASE64, WIN_CERT_PASSWORD   (code signing certificate, .pfx in base64)
+name: Desktop app
+
+on:
+  push:
+    tags: ['v*']
+    branches: [apps]
+    paths: ['apps/desktop/**', 'app/**', 'web/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Version from the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+
+      - name: Install
+        run: |
+          npm ci
+          node node_modules/electron/install.js
+
+      - name: Unit tests
+        run: npm test
+
+      - name: macOS signing and notarization (when the secrets are set)
+        if: runner.os == 'macOS'
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_KEY_P8: ${{ secrets.APPSTORE_KEY_P8 }}
+        run: |
+          if [ -n "$MAC_CERT_P12_BASE64" ]; then
+            echo "CSC_LINK=$MAC_CERT_P12_BASE64" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=$MAC_CERT_PASSWORD" >> "$GITHUB_ENV"
+            echo "Signing with the Developer ID certificate"
+            if [ -n "$APPSTORE_KEY_P8" ] && [ -n "$APPSTORE_KEY_ID" ] && [ -n "$APPSTORE_ISSUER_ID" ]; then
+              printf '%s' "$APPSTORE_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+              echo "APPLE_API_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+              echo "APPLE_API_KEY_ID=$APPSTORE_KEY_ID" >> "$GITHUB_ENV"
+              echo "APPLE_API_ISSUER=$APPSTORE_ISSUER_ID" >> "$GITHUB_ENV"
+              echo "Notarizing with the App Store Connect API key"
+            else
+              echo "No App Store Connect API key: not notarized"
+            fi
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "JW_MAC_ADHOC=1" >> "$GITHUB_ENV"
+            echo "No Developer ID certificate: ad-hoc signed, not notarized (auto-update needs the real signature)"
+          fi
+
+      - name: Windows signing (when the secrets are set)
+        if: runner.os == 'Windows'
+        env:
+          WIN_CERT_P12_BASE64: ${{ secrets.WIN_CERT_P12_BASE64 }}
+          WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: |
+          if [ -n "$WIN_CERT_P12_BASE64" ]; then
+            echo "CSC_LINK=$WIN_CERT_P12_BASE64" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=$WIN_CERT_PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "No Windows certificate: unsigned installer"
+          fi
+
+      - name: Build
+        run: |
+          node scripts/build-web.mjs
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$JW_MAC_ADHOC" ]; then npx electron-builder --mac --publish never -c.mac.identity=- ; else npx electron-builder --mac --publish never; fi
+          else
+            npx electron-builder --win --publish never
+          fi
+          ls -la dist
+
+      - name: Smoke test the packaged app
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then EXE="$(ls -d dist/mac-universal/*.app)/Contents/MacOS/Just Watts"; else EXE="dist/win-unpacked/Just Watts.exe"; fi
+          node e2e/smoke.mjs --exe "$EXE" --shots shots
+
+      - name: Release files
+        run: |
+          mkdir -p out
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cp dist/JustWatts.dmg dist/JustWatts.dmg.blockmap dist/JustWatts-mac.zip dist/JustWatts-mac.zip.blockmap dist/latest-mac.yml out/
+          else
+            cp dist/JustWatts-Setup.exe dist/JustWatts-Setup.exe.blockmap dist/latest.yml out/
+          fi
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: apps/desktop/out/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots-${{ runner.os }}
+          path: apps/desktop/shots/*
+          if-no-files-found: ignore
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: out
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          for f in JustWatts-Setup.exe latest.yml JustWatts.dmg JustWatts-mac.zip latest-mac.yml; do test -f "out/$f"; done
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" out/* --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" out/* -R "$GITHUB_REPOSITORY" --title "Just Watts ${GITHUB_REF_NAME#v}" --notes "Desktop app for Windows and Mac. Installed apps update by themselves."
+          fi

@@ -1,0 +1,58 @@
+{
+  "name": "justwatts-desktop",
+  "productName": "Just Watts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Just Watts desktop app: the website's build with Bluetooth outside the page.",
+  "homepage": "https://justwatts.com",
+  "license": "MIT",
+  "author": "Just Watts",
+  "main": "src/main.js",
+  "scripts": {
+    "web": "node scripts/build-web.mjs",
+    "start": "node scripts/build-web.mjs && electron .",
+    "test": "node --test test/*.test.mjs",
+    "e2e": "node e2e/smoke.mjs",
+    "dist": "node scripts/build-web.mjs && electron-builder --publish never",
+    "dist:win": "node scripts/build-web.mjs && electron-builder --win --publish never",
+    "dist:mac": "node scripts/build-web.mjs && electron-builder --mac --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.10"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.17.0",
+    "playwright-core": "1.61.1"
+  },
+  "build": {
+    "appId": "com.justwatts.app",
+    "productName": "Just Watts",
+    "copyright": "Just Watts contributors",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["src/**", "native/**", "web/**", "build/icon.png", "package.json"],
+    "protocols": [{ "name": "Just Watts", "schemes": ["justwatts"] }],
+    "publish": [{ "provider": "github", "owner": "yaportmax", "repo": "justwatts", "releaseType": "release" }],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png",
+      "artifactName": "JustWatts-Setup.${ext}"
+    },
+    "nsis": { "oneClick": true, "perMachine": false, "deleteAppDataOnUninstall": false, "artifactName": "JustWatts-Setup.${ext}" },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }],
+      "category": "public.app-category.healthcare-fitness",
+      "artifactName": "JustWatts-mac.${ext}",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSBluetoothAlwaysUsageDescription": "Just Watts connects to your smart trainer and heart rate strap over Bluetooth.",
+        "NSBluetoothPeripheralUsageDescription": "Just Watts connects to your smart trainer and heart rate strap over Bluetooth."
+      }
+    },
+    "dmg": { "artifactName": "JustWatts.${ext}" },
+    "linux": { "target": [] }
+  }
+}

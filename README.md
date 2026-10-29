@@ -36,11 +36,11 @@ No trainer? `openspin simulate` drives a fake ride through the server.
   .zwo import and export, an FTP ramp test.
 - **Ride modes**: structured ERG workouts, free ride by grade (simulation), ERG watts or FTMS
   resistance level. When the plan ends you keep riding free until you press End.
-- **Full control by hand, mid-ride**: everything the built-in coach or an agent can change, you can
-  too, in one or two taps (see [Ride controls](#ride-controls)). Your change wins: the coaches see it
+- **Manual control mid-ride**: anything the built-in coach or an agent can change, in one or two
+  taps (see [Ride controls](#ride-controls)). Your change wins: the coaches see it
   and hold off.
 - **Built-in coach** (no agent needed): interval start and 10 s countdown, rep recaps, recovery heart
-  rate, cadence reminders, and safe automatic adjustments: Easier lowers the step 5% FTP, Harder
+  rate, cadence reminders, and automatic adjustments: Easier lowers the segment 5% FTP, Harder
   raises it 3% (not in HR zone 5), 30 s over your HR cap eases it 5%. Each cue can be turned off in
   Settings.
 - **Ride screen** on one page: power, target, cadence against your target range, HR with zones,
@@ -50,33 +50,33 @@ No trainer? `openspin simulate` drives a fake ride through the server.
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.
-- **Uploads** (optional): Garmin Connect, and Strava direct with one click.
-- **Robust**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
+- **Uploads** (optional): Garmin Connect and Strava.
+- **Crash-safe**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
 - `browser.html` keeps an older single-tab Web Bluetooth mode as a fallback (Chrome or Edge).
 
 ## Ride controls
 
 Common actions sit on the ride screen; the rest are in **Adjust**. Each change shows what changed,
-and intensity, watts, step time, length, trainer mode and settings can be undone for 15 s.
+and intensity, watts, segment time, length, trainer mode and settings can be undone for 15 s.
 
 | Control | Where | Key |
 |---|---|---|
 | Pause, resume (Pause during an auto-pause stays paused) | bar | Space |
 | Intensity ±1 % (grade, watts or level when not in ERG) | bar −/+ | ↑ ↓ (Shift ±5) |
-| Back (restart step; in its first 10 s, the previous one), Skip | bar | ← → |
-| Step time ±1 min (±30 s in Adjust) | bar | [ ] |
-| Step watts ±5/±10 | Adjust | - = |
+| Back (restart segment; in its first 10 s, the previous one), Skip | bar | ← → |
+| Segment time ±1 min (±30 s in Adjust) | bar | [ ] |
+| Segment watts ±5/±10 | Adjust | - = |
 | Intensity presets, reset to 100 % | Adjust | |
 | Workout length ±5 min | Adjust | |
 | Trainer: ERG, or ERG off by grade or level (the plan keeps showing) | Adjust | 1 2 3 |
-| Next steps: edit the rest of the plan as text | Adjust | |
+| Edit the plan from the current segment | Adjust | |
 | After the plan: hold the last target or ride flat | Adjust | |
 | Cadence range, built-in coach on/off, beeps | Adjust | |
 | Mute, voice level, Easier/Good/Harder | coach bar | M |
 | Undo, Save, End (two taps) | bar | Z, S |
 | Reconnect trainer or HR | header | |
 
-`?` shows the keys. Free steps and a flat finish ride by grade, and −/+ moves it. FTP tests keep
+`?` shows the keys. Free segments and a flat finish ride by grade, and −/+ moves it. FTP tests keep
 their targets.
 
 ## Supported hardware
@@ -89,7 +89,7 @@ their targets.
 | ANT+ only devices | No |
 
 Most current trainers (Wahoo, Tacx, Elite, Saris, JetBlack) expose FTMS; only the Zwift Hub has been
-tested so far. Resistance-level mode follows FTMS 1.0 and is untested on hardware. Reports welcome.
+tested so far. Resistance-level mode follows FTMS 1.0 and is untested on hardware.
 
 ## Uploads
 
@@ -118,10 +118,9 @@ Strava description links the card.
 Every FIT file is saved to `~/.openspin/rides/` before any upload, and History can always export
 .fit and .tcx.
 
-## Optional: let an AI agent coach you live
+## Optional: AI agent coaching
 
-OpenSpin is complete without one. An agent adds judgment: it reads your heart rate trend and what
-you say, edits the workout mid-ride and explains why. Agent features in the UI (the usage meter,
+An agent reads your heart rate trend and what you say, and edits the workout mid-ride. Agent features in the UI (the usage meter,
 the History agent column) only appear when an agent is connected.
 
 ```sh
@@ -139,7 +138,7 @@ args = ["mcp"]
 
 Then: *"Coach my ride. Read the playbook, wait for events, keep me in zone."*
 
-Agents stay cheap: an event gate wakes them only for step summaries, FEEL presses, speech, alerts
+An event gate wakes the agent only for segment summaries, FEEL presses, speech, alerts
 (HR cap, zone jump, low cadence, power off target, pause, device lost) and a status every few
 minutes, in 5 s batches, while the built-in coach handles countdowns and recaps. The ride header
 shows wakes, tokens and cost; `openspin tail --agent` shows what wakes the coach. Guard rails limit

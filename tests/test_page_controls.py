@@ -34,7 +34,7 @@ def check(out):
     assert toasts["plus button"] == "Intensity 101%" and toasts["shift up"] == "Intensity 106%"
     assert toasts["undo button"] == "Undone" and toasts["skip key"] == "Skipped segment 1"
     assert toasts["step watts +5"] == "Segment 2: 205 W" and toasts["ERG off: grade"] == "Trainer: grade"
-    assert toasts["next steps"].startswith("Next steps set")
+    assert toasts["next steps"].startswith("Plan set")
     assert out["tgtShown"] == "205"
     assert out["adjGrade"] == "Grade 3.0%" and out["tgtSub"].startswith("ERG off")
     assert out["nextErr"]  # a typo is caught before anything is sent

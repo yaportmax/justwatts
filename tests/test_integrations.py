@@ -478,7 +478,7 @@ def test_list_order_metadata_and_tooltips(tmp_path):
     g = rows[0]
     assert g["recommended"] and g["recommended_reason"] == "Uploads here can sync on to apps you link in Garmin Connect."
     assert g["unofficial_note"] == UNOFFICIAL_NOTE.format(name="Garmin Connect")
-    assert g["unofficial_note"].endswith("upload the .fit file manually:") and "—" not in json.dumps(rows)
+    assert g["unofficial_note"].endswith("upload the .fit file manually:") and chr(0x2014) not in json.dumps(rows, ensure_ascii=False)
     assert g["manual"]["url"] == "https://connect.garmin.com/modern/import-data" and len(g["manual"]["steps"]) == 3
     assert "unofficial_note" not in rows[2] and rows[2]["official"]
     coros = rows[3]

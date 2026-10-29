@@ -45,7 +45,7 @@ def test_manual_table_and_note_match(web):
     assert web["manual"] == MANUAL and web["note"] == UNOFFICIAL_NOTE
     for m in MANUAL.values():
         assert all(len(s) <= 70 for s in m["steps"]) and len(m["steps"]) <= 3
-    assert "—" not in json.dumps(MANUAL) + UNOFFICIAL_NOTE
+    assert chr(0x2014) not in json.dumps(MANUAL, ensure_ascii=False) + UNOFFICIAL_NOTE
 
 
 def test_unstructured_and_garbage_inputs():

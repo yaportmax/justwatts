@@ -486,7 +486,8 @@ body.web .serveronly{display:none !important}
   .sc{justify-content:flex-start}
   .sgrid .r{grid-template-columns:1fr;gap:4px}
   .sheet{top:auto;left:0;right:0;bottom:0;width:100%;max-height:80vh;border-radius:12px 12px 0 0}
-  .owturn{top:6px;flex-wrap:wrap;justify-content:center}.owturn button{height:32px}
+  .owturn{top:6px;left:6px;right:6px;transform:none;max-width:none;gap:2px;padding:4px}.owturn .owm{padding:0 4px;font-size:12px}
+  .owturn button{flex:1 1 0;height:32px;padding:0 6px;display:block;line-height:30px;font-size:12px;text-align:left}.owturn button .owa{width:15px;height:15px;vertical-align:-3px;margin-right:3px}
   .modal:has(.owdlg){padding:8px}.owmap{height:52vh}.owdlg .dfoot{flex-wrap:wrap}#owWk{width:auto;flex:1}
 }
 @media (hover:none){.lrow .lact{visibility:visible;display:none}.lrow.sel .lact{display:flex}}

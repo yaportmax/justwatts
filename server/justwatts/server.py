@@ -150,6 +150,9 @@ class Handler(SimpleHTTPRequestHandler):
             # a token caller is a local process, never a web page from another origin
             return origin is None or origin in self.origins()
         # The page itself: same origin plus a custom header (forces a CORS preflight we never answer).
+        if origin is None and self.command in ("GET", "HEAD"):
+            # browsers send no Origin on a same-origin GET; Sec-Fetch-Site is set by the browser, never by a page
+            return self.headers.get("Sec-Fetch-Site") == "same-origin" and self.headers.get("X-HW") == "1"
         return origin in self.origins() and self.headers.get("X-HW") == "1"
 
     def read_body(self) -> bytes:

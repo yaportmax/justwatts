@@ -1,3 +1,5 @@
+<img src="app/icon.svg" width="72" alt="Just Watts logo">
+
 # Just Watts
 
 A free, open-source smart-trainer app.

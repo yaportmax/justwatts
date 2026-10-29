@@ -28,6 +28,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   let cur = null;  // { ll, n, D, dist, done, open, alts }
   let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, mapAlts = '', busy = false, size = '', placedOn = false;
   let others = [], marks = new Map();  // other riders (social.js): [{ id, lat, lon, label, hi }]; their 3D markers by id
+  let glide = new Map(), glideT0 = 0, oraf = 0, o2d = 0;  // id -> { a: [lat, lon] drawn before, b: the latest }; glides over one poll
   const box = $('#crsMapBox'), cv = $('#crsMap'), v3 = $('#crsMap3d');
   $('#mapStyle').innerHTML = Object.entries(MAP_STYLES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
 
@@ -53,6 +54,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   // 2D: the whole course; an open-world ride: about 1.6 km across, centred on the rider (points every 10 m)
   function draw2d() {
     if (!cur || (d3 && ready)) return;
+    const others = shown();
     if (!cur.open) return drawMap(cv, { ll: cur.ll, dist: cur.dist, done: cur.done, fit, css, redraw: draw2d, style, attr: false, others });
     const i = Math.floor(cur.done / 10), a = Math.max(0, i - 150), b = Math.min(cur.ll.length, i + 250), w = cur.ll.slice(a, b);
     drawMap(cv, { ll: w, dist: (w.length - 1) * 10, done: cur.done - a * 10, fit, css, redraw: draw2d, style, attr: false, ends: false, alts: cur.alts,
@@ -62,7 +64,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   function syncMarks() {
     if (!map || !ready || !globalThis.maplibregl) return;
     const keep = new Set();
-    for (const o of others) {
+    for (const o of shown()) {
       keep.add(o.id);
       let m = marks.get(o.id);
       if (!m) { const el = document.createElement('div'); el.className = 'rmo'; m = new globalThis.maplibregl.Marker({ element: el, anchor: 'left', offset: [-6, 0] }).setLngLat([o.lon, o.lat]).addTo(map); marks.set(o.id, m); }
@@ -73,7 +75,35 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     }
     for (const [id, m] of marks) if (!keep.has(id)) { m.remove(); marks.delete(id); }
   }
-  function setOthers(list) { others = Array.isArray(list) ? list : []; syncMarks(); }
+  // Others move every poll (about 2 s): each marker glides from where it is drawn to its new spot over one poll.
+  // The animation frame runs only while riders are shown and a glide is under way.
+  const GLIDE_MS = 2000;
+  const glideK = (now = performance.now()) => Math.min(1, (now - glideT0) / GLIDE_MS);
+  function posOf(id, k) { const g = glide.get(id); return g && [g.a[0] + (g.b[0] - g.a[0]) * k, g.a[1] + (g.b[1] - g.a[1]) * k]; }
+  function shown() {
+    if (!others.length) return others;
+    const k = glideK();
+    return others.map(o => { const p = posOf(o.id, k); return p ? { ...o, lat: p[0], lon: p[1] } : o; });
+  }
+  function setOthers(list) {
+    const now = performance.now(), k = glideK(now), next = new Map();
+    others = Array.isArray(list) ? list : [];
+    for (const o of others) {
+      const from = posOf(o.id, k), far = from && (Math.abs(from[0] - o.lat) > 0.02 || Math.abs(from[1] - o.lon) > 0.02);  // a jump of km: no glide
+      next.set(o.id, { a: from && !far ? from : [o.lat, o.lon], b: [o.lat, o.lon] });
+    }
+    glide = next; glideT0 = now;
+    syncMarks();
+    if (others.length && !oraf) oraf = requestAnimationFrame(glideFrame);
+  }
+  function glideFrame(now) {
+    oraf = 0;
+    if (!others.length) return;
+    syncMarks();
+    if (cur && !(d3 && ready) && now - o2d > 60) { o2d = now; draw2d(); }  // the 2D canvas: about 15 redraws a second
+    if (glideK(now) < 1) oraf = requestAnimationFrame(glideFrame);
+    else if (cur && !(d3 && ready)) draw2d();
+  }
   function draw() { if (!cur) return; ui(); if (d3) draw3d(); draw2d(); }
 
   function spec() {

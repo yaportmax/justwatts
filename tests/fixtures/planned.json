@@ -1,0 +1,66 @@
+{
+  "intervals": [
+    {"name": "vo2 repeats with ramp warmup (forum 93737 shape)",
+     "doc": {"target": "POWER", "duration": 5640, "ftp": 250, "steps": [
+       {"text": "Warm up", "duration": 600, "warmup": true, "ramp": true, "power": {"start": 35, "end": 55, "units": "%ftp"}, "_power": {"value": 113, "start": 88, "end": 138}, "cadence": {"value": 85, "units": "rpm"}},
+       {"reps": 4, "text": "Main set", "steps": [
+         {"duration": 480, "power": {"value": 110, "units": "%ftp"}, "_power": {"value": 275, "start": 268, "end": 282}},
+         {"duration": 480, "power": {"value": 50, "units": "%ftp"}, "_power": {"value": 125}}]},
+       {"duration": 600, "cooldown": true, "freeride": true}]},
+     "expect": "10m 35-55%, 4x(8m 110%, 8m 50%), 10m free"},
+    {"name": "nested sets, watts, ranges and zones",
+     "doc": {"ftp": 200, "steps": [
+       {"duration": 300, "power": {"value": 2, "units": "power_zone"}},
+       {"reps": 3, "steps": [
+         {"reps": 2, "steps": [{"duration": 30, "power": {"value": 400, "units": "w"}}, {"duration": 30, "power": {"value": 100, "units": "w"}}]},
+         {"duration": 240, "power": {"start": 88, "end": 94, "units": "%ftp"}}]},
+       {"duration": 90, "ramp": true, "power": {"start": 80, "end": 40, "units": "%ftp"}}]},
+     "expect": "5m 65%, 3x(2x(30s 400w, 30s 100w), 4m 91%), 1m30s 80-40%"},
+    {"name": "unknown parts become free (hr, pace, mmp without _power, open, distance, max effort)",
+     "doc": {"steps": [
+       {"duration": 600, "hr": {"value": 70, "units": "%lthr"}},
+       {"duration": 60, "power": {"value": 100, "units": "%mmp", "mmp_duration": 300}},
+       {"until_lap_press": true, "power": {"value": 60, "units": "%ftp"}},
+       {"distance": 5000, "power": {"value": 75, "units": "%ftp"}},
+       {"duration": 20, "maxeffort": true},
+       {"duration": 600, "power": {"value": 75, "units": "%ftp"}}]},
+     "expect": "26m20s free, 10m 75%"},
+    {"name": "%mmp resolved to watts, down-ramp _power flipped by the old bug",
+     "doc": {"ftp": 250, "steps": [
+       {"duration": 120, "power": {"value": 100, "units": "%mmp", "mmp_duration": 300}, "_power": {"value": 300}},
+       {"duration": 300, "ramp": true, "power": {"start": 60, "end": 40, "units": "%hr"}, "_power": {"start": 100, "end": 150}}]},
+     "expect": "2m 120%, 5m 60-40%"},
+    {"name": "1x repeat inlined, empty repeat dropped",
+     "doc": {"steps": [{"reps": 1, "steps": [{"duration": 60, "power": {"value": 50}}]}, {"reps": 3, "steps": []}, {"duration": 30, "power": {"value": 120.5, "units": "%ftp"}}]},
+     "expect": "1m 50%, 30s 120.5%"}
+  ],
+  "trainingpeaks": [
+    {"name": "real response (tp2intervals fixture): stair ramp, steady, repetition, cooldown",
+     "structure": {"structure": [
+       {"type": "rampUp", "length": {"value": 1, "unit": "repetition"}, "steps": [
+         {"name": "Progressive Warmup", "length": {"value": 300, "unit": "second"}, "targets": [{"minValue": 60}], "intensityClass": "active", "openDuration": false},
+         {"name": "Progressive Warmup", "length": {"value": 300, "unit": "second"}, "targets": [{"minValue": 70}], "intensityClass": "active", "openDuration": false},
+         {"name": "Progressive Warmup", "length": {"value": 300, "unit": "second"}, "targets": [{"minValue": 80}], "intensityClass": "active", "openDuration": false}],
+        "begin": 0, "end": 900},
+       {"type": "step", "length": {"value": 1, "unit": "repetition"}, "steps": [{"name": "Steady", "length": {"value": 300, "unit": "second"}, "targets": [{"minValue": 50}], "intensityClass": "warmUp", "openDuration": false}], "begin": 1200, "end": 1500},
+       {"type": "repetition", "length": {"value": 5, "unit": "repetition"}, "steps": [
+         {"type": "step", "name": "Hard", "length": {"unit": "second", "value": 30}, "targets": [{"minValue": 121, "maxValue": 150}], "intensityClass": "active", "openDuration": false},
+         {"type": "step", "name": "Easy", "length": {"unit": "second", "value": 30}, "targets": [{"minValue": 50}], "intensityClass": "rest", "openDuration": false}], "begin": 1500, "end": 1800},
+       {"type": "step", "length": {"value": 1, "unit": "repetition"}, "steps": [{"name": "Cool Down", "length": {"value": 600, "unit": "second"}, "targets": [{"minValue": 45}], "intensityClass": "coolDown", "openDuration": false}], "begin": 3480, "end": 4080}],
+      "primaryLengthMetric": "duration", "primaryIntensityMetric": "percentOfFtp", "primaryIntensityTargetOrRange": "range"},
+     "expect": "5m 60%, 5m 70%, 5m 80%, 5m 50%, 5x(30s 135.5%, 30s 50%), 10m 45%"},
+    {"name": "nested repetition with cadence target, minutes, open step, as a JSON string",
+     "structure": "{\"structure\":[{\"type\":\"repetition\",\"length\":{\"value\":2,\"unit\":\"repetition\"},\"steps\":[{\"type\":\"repetition\",\"length\":{\"value\":3,\"unit\":\"repetition\"},\"steps\":[{\"type\":\"step\",\"length\":{\"value\":1,\"unit\":\"minute\"},\"targets\":[{\"minValue\":95,\"maxValue\":105},{\"minValue\":90,\"maxValue\":100,\"unit\":\"roundOrStridePerMinute\"}]},{\"type\":\"step\",\"length\":{\"value\":1,\"unit\":\"minute\"},\"targets\":[{\"minValue\":55}]}]},{\"type\":\"step\",\"length\":{\"value\":5,\"unit\":\"minute\"},\"targets\":[{\"minValue\":50}]}]},{\"type\":\"step\",\"length\":{\"value\":1,\"unit\":\"repetition\"},\"steps\":[{\"length\":{\"value\":0,\"unit\":\"second\"},\"openDuration\":true,\"targets\":[{\"minValue\":40}]}]}],\"primaryIntensityMetric\":\"percentOfFtp\"}",
+     "expect": "2x(3x(1m 100%, 1m 55%), 5m 50%), 5m free"},
+    {"name": "heart-rate workout rides free with its shape",
+     "structure": {"structure": [
+       {"type": "step", "length": {"value": 1, "unit": "repetition"}, "steps": [{"length": {"value": 600, "unit": "second"}, "targets": [{"minValue": 70, "maxValue": 80}]}]},
+       {"type": "repetition", "length": {"value": 3, "unit": "repetition"}, "steps": [{"type": "step", "length": {"value": 120, "unit": "second"}, "targets": [{"minValue": 95}]}, {"type": "step", "length": {"value": 60, "unit": "second"}, "targets": [{"minValue": 70}]}]}],
+      "primaryIntensityMetric": "percentOfThresholdHr"},
+     "expect": "10m free, 3x(3m free)"},
+    {"name": "distance step becomes free time at 30 km/h",
+     "structure": {"structure": [{"type": "step", "length": {"value": 1, "unit": "repetition"}, "steps": [{"length": {"value": 5, "unit": "kilometer"}, "targets": [{"minValue": 70}]}]}, {"type": "step", "length": {"value": 1, "unit": "repetition"}, "steps": [{"length": {"value": 90, "unit": "second"}, "targets": [{"minValue": 110}]}]}],
+      "primaryIntensityMetric": "percentOfFtp", "primaryLengthMetric": "distance"},
+     "expect": "10m free, 1m30s 110%"}
+  ]
+}

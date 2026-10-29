@@ -26,6 +26,13 @@ from .engine import RideEngine
 from . import history as H
 from .strava import StravaError, StravaLink, summary_text
 from .garmin import DISABLED_MSG, GarminLink
+from .integrations import Integrations, IntegrationError, RideMeta
+from .integrations.base import scrub
+from .integrations.garmin_conn import GarminConnector
+from .integrations.intervals import IntervalsConnector
+from .integrations.manual import manual_only
+from .integrations.strava_conn import StravaConnector
+from .integrations.trainingpeaks import TrainingPeaksConnector
 
 MAX_BODY = 64 * 1024 * 1024
 QUIET_PATHS = ("/api/state", "/api/health",
@@ -37,6 +44,7 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
        f"img-src 'self' data: blob: {MAP_TILES}; connect-src 'self' {MAP_TILES} https://s3.amazonaws.com; "
        "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 # headers a reverse proxy or tunnel adds: such a request came from the network, not this computer
+UPLOADS_RE = re.compile(r"/api/rides/([\w\-]+)/(uploads|targets)")
 PROXY_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "Forwarded", "CF-Connecting-IP", "True-Client-IP")
 
 
@@ -206,6 +214,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.redirect(home + f"?strava_error={quote(str(e))}#settings")
             srv.log_event("STRAVA connected")
             return self.redirect(home + "?strava=connected#settings")
+        if p.startswith("/api/integrations") or UPLOADS_RE.fullmatch(p):
+            return self.integrations_get(p, q)
         if p == "/api/live":
             rid = q.get("ride", [None])[0]
             n = int(q.get("n", ["0"])[0] or 0)
@@ -302,11 +312,15 @@ class Handler(SimpleHTTPRequestHandler):
         p = urlsplit(self.path).path
         routes = ("/api/ride", "/api/garmin/upload", "/api/ride/control", "/api/settings", "/api/devices", "/api/garmin/import", "/api/strava/config", "/api/strava/disconnect", "/api/strava/shared")
         ride_action = re.fullmatch(r"/api/rides/([\w\-]+)/(garmin|delete|strava|card|description)", p)
-        if p not in routes and not ride_action:
+        integ = re.fullmatch(r"/api/integrations/(\w+)/(connect|disconnect|auto|syncs)", p) or \
+            re.fullmatch(r"/api/rides/([\w\-]+)/uploads/(\w+)", p)
+        if p not in routes and not ride_action and not integ:
             return self.send_json(404, {"error": "not found"})
         if not self.trusted():
             return self.send_json(403, {"error": "forbidden"})
         srv = self.server
+        if integ:
+            return self.integrations_post(p, integ, raw)
         if p == "/api/strava/config":
             # the client secret is the user's: only the page may set it, never a token caller
             if self.token_ok() or self.headers.get("X-HW") != "1":
@@ -336,14 +350,15 @@ class Handler(SimpleHTTPRequestHandler):
             srv.set_ride_meta(ride_action[1], {"description": text})
             return self.send_json(200, {"ok": True})
         if ride_action and ride_action[2] == "strava":
-            r = srv.load_ride(ride_action[1])
-            if r is None:
+            if srv.load_ride(ride_action[1]) is None:
                 return self.send_json(404, {"error": "no such ride"})
-            try:
-                res = srv.upload_strava(r)
-            except StravaError as e:
-                return self.send_json(502, {"ok": False, "error": str(e)})
-            return self.send_json(200 if res.get("ok") else 502, res)
+            job = srv.integrations.runner.run_now(ride_action[1], "strava")
+            res = {"ok": job.get("state") == "done", "activity_id": job.get("activity_id")}
+            if job.get("duplicate"):
+                res["duplicate"] = True
+            if job.get("error"):
+                res["error"] = job["error"]
+            return self.send_json(200 if res["ok"] else 502, res)
         if ride_action:
             rid, act = ride_action[1], ride_action[2]
             if act == "delete":
@@ -351,9 +366,7 @@ class Handler(SimpleHTTPRequestHandler):
             r = srv.load_ride(rid)
             if r is None:
                 return self.send_json(404, {"error": "no such ride"})
-            path = self.cfg.rides / f"{H.file_base(r)}.fit"
-            atomic_write(path, H.fit_encode(r))
-            return self.upload_file(path, rid)
+            return self.garmin_ride(rid, r)
         if p == "/api/garmin/upload":
             return self.garmin_upload(raw)
         try:
@@ -409,6 +422,84 @@ class Handler(SimpleHTTPRequestHandler):
             self.server.engine._bump()
         return self.send_json(200, hub.status())
 
+    def garmin_ride(self, rid: str, r: dict):
+        """Upload button for one ride: one attempt through the job runner, answered in the old shape."""
+        srv, path = self.server, self.cfg.rides / f"{H.file_base(r)}.fit"
+        if not srv.garmin_enabled or not srv.garmin.linked():
+            atomic_write(path, H.fit_encode(r))  # the FIT is always kept locally
+            if not srv.garmin_enabled:
+                return self.send_json(503, {"ok": False, "disabled": True, "error": DISABLED_MSG, "saved": str(path)})
+            return self.send_json(401, {"ok": False, "error": "not signed in, run: justwatts login-garmin", "saved": str(path)})
+        job = srv.integrations.runner.run_now(rid, "garmin")
+        if job.get("state") == "done":
+            res = {"ok": True, "saved": str(path)}
+            if job.get("activity_id"):
+                res["activityId"] = job["activity_id"]
+            if job.get("duplicate"):
+                res["duplicate"] = True
+            return self.send_json(200, res)
+        return self.send_json(502, {"ok": False, "error": job.get("error"), "kind": job.get("kind"), "saved": str(path)})
+
+    # ---------- integrations (docs/INTEGRATIONS.md) ----------
+    def integrations_get(self, p: str, q: dict):
+        if not self.trusted():
+            return self.send_json(403, {"error": "forbidden"})
+        hub = self.server.integrations
+        if p == "/api/integrations":
+            return self.send_json(200, {"integrations": hub.list()})
+        if p == "/api/integrations/planned":
+            day = q.get("date", [time.strftime("%Y-%m-%d")])[0]
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                return self.send_json(400, {"error": "date must be YYYY-MM-DD"})
+            return self.send_json(200, hub.planned(day))
+        m = UPLOADS_RE.fullmatch(p)
+        if m:
+            return self.send_json(200, hub.ride_uploads(m[1]) if m[2] == "uploads" else hub.targets(m[1]))
+        return self.send_json(404, {"error": "not found"})
+
+    def integrations_post(self, p: str, m: re.Match, raw: bytes):
+        srv, hub = self.server, self.server.integrations
+        try:
+            body = json.loads(raw or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            return self.send_json(400, {"error": "bad json"})
+        if not isinstance(body, dict):
+            return self.send_json(400, {"error": "body must be an object"})
+        ride_route = p.startswith("/api/rides/")
+        try:
+            if ride_route:
+                rid, svc = m[1], m[2]
+                if srv.load_ride(rid) is None:
+                    return self.send_json(404, {"error": "no such ride"})
+                return self.send_json(200, {"ride_id": rid, "upload": hub.retry(rid, svc)})
+            svc, act = m[1], m[2]
+            if act == "connect":
+                # credentials are the rider's: only the page may send them, never a token caller
+                if self.token_ok() or self.headers.get("X-HW") != "1":
+                    return self.send_json(403, {"error": "connect from the app's Settings page"})
+                rid = safe_id(body.pop("ride_id", "")) or None
+                if rid and srv.load_ride(rid) is None:
+                    return self.send_json(404, {"error": "no such ride"})
+                return self.send_json(200, hub.connect(svc, body, rid))
+            if act == "syncs":
+                if svc != "garmin":
+                    return self.send_json(404, {"error": "only Garmin forwards rides"})
+                try:
+                    hub.set_syncs_to(body.get("syncs_to"))
+                except ValueError as e:
+                    return self.send_json(400, {"error": str(e)})
+            elif act == "disconnect":
+                hub.disconnect(svc)
+            else:
+                hub.set_auto(svc, bool(body.get("on")))
+            return self.send_json(200, {"integrations": hub.list()})
+        except KeyError:
+            return self.send_json(404, {"error": "no such integration"})
+        except IntegrationError as e:
+            c = None if ride_route else hub.conns.get(m[1])
+            msg = scrub(str(e), (c.secrets() if c else []) + [str(v) for v in body.values() if isinstance(v, str)])
+            return self.send_json(401 if e.kind == "auth" else 502, {"error": msg[:300], "kind": e.kind})
+
     def garmin_upload(self, data: bytes):
         name = re.sub(r"[^\w\- .]+", "", self.headers.get("X-Filename", "ride.fit"))[:120].strip(" .") or "ride.fit"
         if not name.lower().endswith(".fit"):
@@ -461,6 +552,19 @@ class AppServer(ThreadingHTTPServer):
         self.engine = RideEngine(self.hub, cfg.data, self.log_event, lambda: self.settings)
         self.engine.on_finish = self._after_finish
         self.strava = StravaLink(cfg.data, http=strava_http) if strava_http else StravaLink(cfg.data)
+        idir = cfg.data / "integrations"
+        self.integrations = Integrations(cfg.data, [
+            GarminConnector(self.garmin, cfg.rides, enabled=self.garmin_enabled),
+            StravaConnector(self.strava),
+            TrainingPeaksConnector(idir),
+            IntervalsConnector(idir),
+            *manual_only()],
+            self._upload_payload, log=self.log_event, on_done=self._upload_done,
+            auto_hooks={"strava": (lambda: bool(self.settings.get("autoStrava")),
+                                   lambda v: self.update_settings({"autoStrava": v})),
+                        "garmin": (lambda: bool(self.settings.get("autoGarmin") and self.garmin_enabled),
+                                   lambda v: self.update_settings({"autoGarmin": v}))})
+        self.integrations.start()
         super().__init__(("127.0.0.1", cfg.port), Handler)
         self.engine.resume()
         if devices:
@@ -578,43 +682,28 @@ class AppServer(ThreadingHTTPServer):
         base = (self.settings.get("shareBaseUrl") or "").rstrip("/")
         return f"{base}/share/{rid}.png" if base else None
 
-    def upload_strava(self, ride: dict) -> dict:
-        rid = ride["id"]
+    def _upload_payload(self, rid: str) -> tuple[bytes, RideMeta] | None:
+        """FIT bytes plus name and description for an upload job (Strava's description format for every service)."""
+        ride = self.load_ride(rid)
+        if ride is None:
+            return None
         meta = self.ride_meta(rid)
         d = H.detail(ride, H.active_hr_zones(self.settings)["floors"], meta)
         desc = summary_text(d, self.card_url(rid), meta.get("description"))
-        res = self.strava.upload(H.fit_encode(ride), ride.get("name") or "Just Watts ride", desc, rid)
-        if res.get("activity_id"):
-            self.set_ride_meta(rid, {"strava": res["activity_id"], "strava_at": int(time.time() * 1000)})
-        self.log_event(f"STRAVA {'uploaded' if res.get('ok') else 'failed: ' + str(res.get('error'))[:120]}")
-        return res
+        return H.fit_encode(ride), RideMeta(rid, ride.get("name") or "Just Watts ride", desc, ride.get("start"),
+                                            f"{H.file_base(ride)}.fit",
+                                            {"duration_s": (ride["samples"][-1][0] - ride["samples"][0][0]) / 1000})
+
+    def _upload_done(self, svc: str, rid: str, job: dict) -> None:
+        """History badges: ride meta <service> = activity id (True when unknown), <service>_at."""
+        aid = job.get("activity_id")
+        if svc == "strava" and not aid:
+            return  # as before: the Strava badge links the activity, so it needs the id
+        self.set_ride_meta(rid, {svc: aid or True, f"{svc}_at": int(time.time() * 1000)})
 
     def _after_finish(self, ride: dict) -> None:
-        """Auto-uploads on the server, so they happen even with no page open."""
-        if self.settings.get("autoStrava") and self.strava.status()["connected"]:
-            def strava():
-                try:
-                    self.upload_strava(ride)
-                except Exception as e:  # noqa: BLE001
-                    self.log_event(f"STRAVA failed: {e}"[:200])
-            threading.Thread(target=strava, name="strava-upload", daemon=True).start()
-        if not (self.settings.get("autoGarmin") and self.garmin_enabled):
-            return
-
-        def go():
-            try:
-                path = self.cfg.rides / f"{H.file_base(ride)}.fit"
-                atomic_write(path, H.fit_encode(ride))
-                if not self.garmin.linked():
-                    self.log_event("GARMIN skipped: not signed in")
-                    return
-                res = self.garmin.upload(path)
-                if res.get("ok"):
-                    self.set_ride_meta(ride["id"], {"garmin": res.get("activityId") or True, "garmin_at": int(time.time() * 1000)})
-                self.log_event(f"GARMIN {'uploaded' if res.get('ok') else 'failed: ' + str(res.get('error'))[:120]}")
-            except Exception as e:  # noqa: BLE001
-                self.log_event(f"GARMIN failed: {e}"[:200])
-        threading.Thread(target=go, name="garmin-upload", daemon=True).start()
+        """Auto-uploads on the server, so they happen even with no page open. Only queues jobs."""
+        self.integrations.after_ride(ride["id"])
 
     def load_ride(self, rid: str) -> dict | None:
         if not rid:
@@ -681,12 +770,14 @@ class AppServer(ThreadingHTTPServer):
 
     def shutdown(self) -> None:
         self.stopping = True
+        self.integrations.stop()
         with self.engine.changed:
             self.engine.changed.notify_all()
         super().shutdown()
 
     def server_close(self) -> None:
         self.stopping = True
+        self.integrations.stop()
         try:
             with self.engine.lock:
                 self.engine.save()

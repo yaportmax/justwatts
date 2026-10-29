@@ -123,7 +123,6 @@ tbody tr:hover{background:var(--panel2)}
     <span class="pill"><i class="dot" id="hDot"></i><span id="hTxt">HR off</span></span>
     <button id="btnTrainer" class="pri">Connect trainer</button>
     <button id="btnHR">Connect HR</button>
-    <button id="btnSim" title="Fake trainer data for trying the app">Sim</button>
   </div>
 </header>
 
@@ -540,7 +539,6 @@ function setStatus() {
   $('#tTxt').textContent = { none: 'Trainer off', wait: 'Connecting…', ble: trainer?.name || 'Trainer', sim: 'Simulated' }[dev.mode];
   $('#btnTrainer').textContent = dev.mode === 'ble' ? 'Disconnect' : 'Connect trainer';
   $('#btnTrainer').className = dev.mode === 'ble' ? '' : 'pri';
-  $('#btnSim').textContent = dev.mode === 'sim' ? 'Stop sim' : 'Sim';
   const hrOn = dev.hrSrc && performance.now() - dev.hrLast < 5000;
   h.className = 'dot ' + (hrOn ? 'on' : dev.hrSrc ? 'wait' : '');
   $('#hTxt').textContent = hrOn ? `HR ${dev.hrSrc}` : dev.hrSrc ? 'HR waiting' : 'HR off';
@@ -633,7 +631,7 @@ async function autoReconnect() {
 }
 $('#btnTrainer').onclick = () => dev.mode === 'ble' ? disconnectTrainer() : connectTrainer();
 $('#btnHR').onclick = connectHR;
-$('#btnSim').onclick = () => {
+window.__sim = () => {  // fake trainer for tests and demos; no button
   if (dev.mode === 'sim') { dev.mode = 'none'; dev.power = dev.cadence = dev.speed = 0; if (dev.hrSrc === 'sim') { dev.hrSrc = null; dev.hr = 0; } }
   else { if (dev.mode === 'ble') disconnectTrainer(); dev.mode = 'sim'; dev.hrSrc = 'sim'; }
   setStatus();

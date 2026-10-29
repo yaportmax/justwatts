@@ -50,6 +50,17 @@ def test_intensity_logged_as_manual_only_from_the_page(srv):
     assert eng.hub.wanted_cmd == {"k": "erg", "w": 97}
 
 
+def test_step_target_on_a_ramp_shifts_the_ramp(srv):
+    eng = ride(srv, text="10m 40-80%, 5m 50%", n=300)  # halfway up the ramp: 120 W of 80..160
+    assert st(srv)["target_w"] == 120
+    assert ctl(srv, "target", delta=10)[1]["w"] == 130
+    s = st(srv)["steps"][0]
+    assert (s["start_w"], s["end_w"]) == (90, 170) and s["override_w"] == [90, 170]  # same slope, 10 W up
+    ticks(srv, 60)
+    assert st(srv)["target_w"] == 138  # still climbing
+    assert eng.ride.steps[1]["a"] == 0.5
+
+
 def test_step_target_is_the_watts_the_trainer_gets_now(srv):
     eng = ride(srv, n=70)  # step 2: 200 W
     ctl(srv, "intensity", percent=110)
@@ -79,12 +90,19 @@ def test_skip_and_back(srv):
     assert ctl(srv, "back")[0] == 200  # later in a step: restart it
     r = st(srv)
     assert [s["duration_s"] for s in r["steps"]] == [60, 5, 20, 60, 120, 60] and r["step"]["index"] == 4 and r["step"]["into_s"] == 0
-    assert ctl(srv, "skip")[0] == 200
+    assert ctl(srv, "skip")[0] == 200  # skipped in its first second: the step leaves the plan
     ticks(srv, 1)
-    assert st(srv)["step"]["index"] == 5 and st(srv)["target_w"] == 200
-    assert manual_lines(srv) == ["MANUAL back step 1", "MANUAL back step 3", "MANUAL skip step 4"]
+    r = st(srv)
+    assert [s["duration_s"] for s in r["steps"]] == [60, 5, 20, 120, 60] and r["step"]["index"] == 4 and r["target_w"] == 200
+    ticks(srv, 30)
+    assert ctl(srv, "skip")[0] == 200  # later: the step ends now, ride time and plan time stay one clock
+    ticks(srv, 1)
+    r = st(srv)
+    assert [s["duration_s"] for s in r["steps"]] == [60, 5, 20, 31, 60] and r["step"]["index"] == 5
+    assert abs(r["el"] - (r["steps"][4]["start_s"] + 1)) < 1.5
+    assert manual_lines(srv) == ["MANUAL back step 1", "MANUAL back step 3", "MANUAL skip step 4", "MANUAL skip step 4"]
     types = [e["type"] for e in srv.client.events(200)]
-    assert types.count("step_start") == 4  # repeats are steps of their own; step 4 was skipped before its first second
+    assert types.count("step_start") == 5  # repeats are steps of their own
 
 
 def test_back_at_the_very_start_of_a_step_and_at_the_first_step(srv):

@@ -14,7 +14,7 @@ function run(r) {
         return { ok: true, steps, text: core.toText(steps), total: steps.reduce((a, s) => a + s.d, 0) };
       } catch (e) { return { ok: false, error: e.message }; }
     case 'presets':
-      return core.PRESETS;
+      return [...core.PRESETS, ...core.FTP_TESTS];
     case 'fit':
       return { b64: Buffer.from(core.fitEncode(r.ride)).toString('base64'), summary: core.summarize(r.ride) };
     case 'tcx':

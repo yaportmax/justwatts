@@ -18,7 +18,7 @@ export class Ride {
   plainSteps() { return this.steps ? this.steps.map(({ t0, ...s }) => s) : null; }
   applyOverride(i, w) {
     const s = this.steps?.[i]; if (!s || s.free) return false;
-    s.a = s.b = w; s.u = 'w'; this.ov[i] = w; return true;
+    [s.a, s.b] = Array.isArray(w) ? w : [w, w]; s.u = 'w'; this.ov[i] = w; return true;  // [start, end] keeps a ramp's shape
   }
   payload() {
     return { id: this.id, name: this.name, text: this.text, steps: this.plainSteps(), test: this.test, ftp: this.ftp, events: this.events,
@@ -119,7 +119,11 @@ export class Engine {
   resumeRide() { const r = this.ride; if (!r) return; if (!r.started) return this.start(); r.paused = r.auto = false; }
   skip() {
     const r = this.ride; if (!r?.steps) return; const at = stepAt({ steps: r.steps }, r.el);
-    if (at) { r.el = at.s.t0 + at.s.d + 0.01; this.applyTarget(); this.changed(`skip step ${at.i + 1}`, at.i + 1); }
+    if (!at) return;  // the rest of the step leaves the plan, so ride time and plan time stay the same clock
+    if (at.into >= 1) at.s.d = Math.max(1, Math.ceil(at.into));
+    else { r.steps.splice(at.i, 1); const ov = {}; for (const [k, v] of Object.entries(r.ov)) if (+k !== at.i) ov[+k > at.i ? +k - 1 : k] = v; r.ov = ov; }
+    r.retime(); if (at.into >= 1) r.el = Math.max(r.el, at.s.t0 + at.s.d + 0.01);
+    this.applyTarget(); this.changed(`skip step ${at.i + 1}`, at.i + 1);
   }
   // like a music player's previous button: restart the current step, or in its first 10 s go back to the
   // previous one, by inserting copies now (time only moves forward). After the plan: the last step again.
@@ -184,7 +188,9 @@ export class Engine {
     const s = r.steps[idx]; if (s.free) throw new Error('free step: no ERG target');
     const kk = r.test ? 1 : r.k, now = idx === at.i ? this.curTarget() : stepWatts(s, 0, r.ftp, kk);
     let w = body.w != null ? +body.w : (now || 0) + +(body.delta || 0); w = Math.max(0, Math.min(2000, jsr(w)));
-    r.applyOverride(idx, jsr(w / kk)); s.m = 1;  // set by hand: the built-in coach leaves this step alone
+    if (s.a !== s.b && now) { const plan = x => s.u === 'w' ? x : x * r.ftp, d = (w - now) / kk; r.applyOverride(idx, [Math.max(0, jsr(plan(s.a) + d)), Math.max(0, jsr(plan(s.b) + d))]); }
+    else r.applyOverride(idx, jsr(w / kk));
+    s.m = 1;  // set by hand: the built-in coach leaves this step alone
     this.applyTarget(); this.changed(`target step ${idx + 1} ${w}W`, idx + 1); return { step: idx + 1, w };
   }
   feel(body) {

@@ -25,7 +25,9 @@ export function parseDur(str) {
   while ((m = re.exec(str))) t += +m[1] * (m[2] === 'h' ? 3600 : m[2][0] === 'm' ? 60 : 1);
   return Math.round(t);
 }
-export function parseWorkout(src) {
+// Workout text <-> tree. A tree node is a step { d, a, b, u } | { d, free: true } or a repeat { n, items }.
+// The builder edits the tree; the text stays the stored format.
+export function parseTree(src) {
   const s = src.toLowerCase(); let i = 0;
   const DUR = '((?:\\d+(?:\\.\\d+)?\\s*(?:h|min|m|sec|s)(?![a-z])\\s*)+)';  // unit may be followed by digits: 1m30s
   const reRep = /^(\d+)\s*x\s*\(/, reFree = new RegExp('^' + DUR + '\\s*@?\\s*free'),
@@ -33,31 +35,53 @@ export function parseWorkout(src) {
   const ws = () => { while (i < s.length && /[\s,;]/.test(s[i])) i++; };
   function list(end) {
     const out = [];
-    for (;;) { ws(); if (i >= s.length || s[i] === end || s[i] === ')') break; out.push(...item()); }
+    for (;;) { ws(); if (i >= s.length || s[i] === end || s[i] === ')') break; out.push(item()); }
     return out;
   }
   function item() {
     const rest = s.slice(i); let m;
     if ((m = reRep.exec(rest))) {
-      i += m[0].length; const inner = list(')');
+      i += m[0].length; const items = list(')');
       if (s[i] !== ')') throw new Error('Missing )');
-      i++; const out = [];
-      for (let k = 0; k < +m[1]; k++) out.push(...inner.map(x => ({ ...x })));
-      return out;
+      i++; return { n: +m[1], items };
     }
-    if ((m = reFree.exec(rest))) { i += m[0].length; return [{ d: parseDur(m[1]), free: true }]; }
+    if ((m = reFree.exec(rest))) { i += m[0].length; return { d: parseDur(m[1]), free: true }; }
     if ((m = reStep.exec(rest))) {
       i += m[0].length; const u = m[4] || '%';
       let a = +m[2], b = m[3] != null ? +m[3] : a;
       if (u === '%') { a /= 100; b /= 100; }
       const d = parseDur(m[1]);
       if (!d) throw new Error(`Zero duration near "${rest.slice(0, 14)}"`);
-      return [{ d, a, b, u }];
+      return { d, a, b, u };
     }
     throw new Error(`Can't read "${rest.slice(0, 16).trim()}"`);
   }
-  const steps = list(null);
+  const tree = list(null);
   if (i < s.length) throw new Error('Unexpected )');
+  return tree;
+}
+export function flattenTree(tree) {
+  const out = [];
+  for (const x of tree) {
+    if (x.items) { const inner = flattenTree(x.items); for (let k = 0; k < x.n; k++) out.push(...inner.map(y => ({ ...y }))); }
+    else out.push({ ...x });
+  }
+  return out;
+}
+// Same order as flattenTree, with the tree path of each step (repeats share the path).
+export function flattenPaths(tree, pre = []) {
+  const out = [];
+  tree.forEach((x, j) => {
+    if (x.items) { const inner = flattenPaths(x.items, [...pre, j]); for (let k = 0; k < x.n; k++) out.push(...inner); }
+    else out.push([...pre, j]);
+  });
+  return out;
+}
+export function treeText(tree) {
+  return tree.map(x => x.items ? `${x.n}x(${treeText(x.items)})` : stepText(x)).join(', ');
+}
+export function parseWorkout(src) {
+  const steps = flattenTree(parseTree(src));
   if (!steps.length) throw new Error('Empty workout');
   return steps;
 }
@@ -125,8 +149,13 @@ export const PRESETS = [
   { id: 'p-vo2', name: 'VO2 5×3', text: '12m 40-75%, 2m 50%, 5x(3m 115%, 3m 50%), 8m 50-40%' },
   { id: 'p-3030', name: '30/30s', text: '10m 45-75%, 2x(10x(30s 130%, 30s 50%), 5m 50%), 6m 50-40%' },
   { id: 'p-pyramid', name: 'Pyramid', text: '10m 45-75%, 1m 100%, 1m 50%, 2m 100%, 2m 50%, 3m 100%, 3m 50%, 4m 100%, 4m 50%, 3m 100%, 3m 50%, 2m 100%, 2m 50%, 1m 100%, 8m 50-40%' },
-  { id: 'p-ramp', name: 'Ramp FTP test', text: rampTestText(), test: true },
 ];
+// FTP tests live outside the library. Ramp: FTP = 75% of the best minute. 20 min: FTP = 95% of the 20 min free effort.
+export const FTP_TESTS = [
+  { id: 't-ramp', kind: 'ramp', name: 'Ramp FTP test', text: rampTestText(), test: true },
+  { id: 't-20', kind: '20', name: '20 min FTP test', text: '10m 45-65%, 3x(1m 100%, 1m 50%), 4m 55%, 5m 105%, 10m 50%, 20m free, 10m 50-40%', test: true },
+];
+export const testKind = steps => steps.some(s => s.free && s.d >= 1200) ? '20' : 'ramp';
 
 /* ---------- ride summary ---------- */
 // sample = [epochMs, elapsedS, watts, cadence, hr, speedKmh, targetW]

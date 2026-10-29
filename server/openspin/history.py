@@ -58,6 +58,19 @@ def best_mean(p: list[float], w: int) -> float:
     return best / w
 
 
+def ftp_estimate(r: dict, m: dict, P: list[float]) -> int | None:
+    """FTP from a test ride: 95% of the best 20 min when the plan has a 20 min free effort, else 75% of the best minute (ramp)."""
+    if not r.get("test"):
+        return None
+    try:
+        twenty = any(s.get("free") and s["d"] >= 1200 for s in compile_workout(r.get("text") or "")[0])
+    except WorkoutError:
+        twenty = False
+    if twenty:
+        return js_round(best_mean(P, 1200) * 0.95) if len(P) >= 1200 else None
+    return js_round(m["best60"] * 0.75) if m["best60"] else None
+
+
 def best_efforts(P: list[float]) -> dict:
     """Best mean power for 1/5/20 min; None when the ride is shorter than the window (never 0)."""
     return {f"{w // 60}m": (round(best_mean(P, w)) if len(P) >= w else None) for w in BEST_WINDOWS}
@@ -102,7 +115,8 @@ def ride_steps(r: dict) -> list[dict] | None:
     for i, w in (r.get("ov") or {}).items():
         i = int(i)
         if 0 <= i < len(steps) and not steps[i].get("free"):
-            steps[i].update(a=w, b=w, u="w")
+            a, b = (w[0], w[1]) if isinstance(w, (list, tuple)) else (w, w)
+            steps[i].update(a=a, b=b, u="w")
     return steps
 
 
@@ -159,8 +173,9 @@ def detail(r: dict, hr_floors: list | None = None, meta: dict | None = None) -> 
         "description": (meta or {}).get("description"),
         "agent": r.get("agent") or {"wakes": None, "local_cues": None, "usage": {}},
     }
-    if r.get("test") and m["best60"]:
-        out["ftp_estimate"] = js_round(m["best60"] * 0.75)
+    est = ftp_estimate(r, m, P)
+    if est:
+        out["ftp_estimate"] = est
     return out
 
 
@@ -172,7 +187,7 @@ def ride_meta_row(r: dict, meta: dict | None = None) -> dict:
             "time_s": m["dur"], "avg_w": round(m["avgP"]), "np": round(m["np"]), "tss": round(m["tss"]),
             "if": round(m["IF"], 2), "kJ": round(m["kJ"]), "avg_hr": round(m["avgHR"]) or None,
             "best": best_efforts(P),
-            "ftp_estimate": js_round(m["best60"] * 0.75) if r.get("test") and m["best60"] else None,
+            "ftp_estimate": ftp_estimate(r, m, P),
             "garmin": (meta or {}).get("garmin"), "strava": (meta or {}).get("strava"),
             "agent_wakes": (r.get("agent") or {}).get("wakes"), "local_cues": (r.get("agent") or {}).get("local_cues"),
             "agent_tokens": _tokens((r.get("agent") or {}).get("usage") or {}),

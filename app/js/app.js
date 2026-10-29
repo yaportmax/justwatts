@@ -3,10 +3,11 @@
 // interrupts a ride. Pure logic (workout format, summaries, FIT/TCX) lives in core.js.
 import {
   fmtT, esc, ZONES, zoneIdx, HRZ_COLORS, hrZone as hrZoneOf, parseWorkout, toText, compile, stepAt, stepWatts,
-  estimate, toZwo as toZwoCore, PRESETS, summarize, fitEncode, toTcx,
+  estimate, toZwo as toZwoCore, PRESETS, FTP_TESTS, testKind, summarize, fitEncode, toTcx,
 } from './core.js';
 import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
+import { createBuilder } from './builder.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -95,15 +96,17 @@ function editWorkout(w) {
   renderBuilder(); $('#bName').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 function builderWorkout() { return { id: editing || 'c-' + Date.now().toString(36), name: $('#bName').value.trim() || 'Untitled', text: $('#bText').value }; }
+const builder = createBuilder({ list: $('#bList'), chart: $('#bChart'), palette: $('#bPal'), fit, css, ftp: () => settings.ftp, onEdit: text => { $('#bText').value = text; renderBuilder(); } });
 function renderBuilder() {
-  const w = builderWorkout();
+  const w = builderWorkout(), ok = builder.load(w.text);
   try {
     const cw = compile(w), e = estimate(cw, settings.ftp);
     $('#bErr').textContent = ''; $('#bStats').textContent = `${fmtT(cw.total)} · TSS ${Math.round(e.tss)} · IF ${e.IF.toFixed(2)} · NP ${Math.round(e.np)} W`;
-    drawThumb($('#bChart'), cw, settings.ftp); return cw;
-  } catch (err) { $('#bErr').textContent = err.message; $('#bStats').textContent = ''; fit($('#bChart')); return null; }
+    builder.draw(); return cw;
+  } catch (err) { $('#bErr').textContent = ok ? err.message : err.message + ' (blocks show the last valid version)'; $('#bStats').textContent = ''; builder.draw(); return null; }
 }
 $('#bText').oninput = renderBuilder;
+$('#bUndo').onclick = () => { if (!builder.undo()) toast('Nothing to undo'); };
 $('#bSave').onclick = () => {
   const w = builderWorkout(); if (!renderBuilder()) return;
   const i = custom.findIndex(x => x.id === w.id); i >= 0 ? custom[i] = w : custom.unshift(w);
@@ -170,6 +173,7 @@ function onLive(msg) {
   coachUpdate();
   voiceUpdate();
   beeps();
+  testGuide();
   if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) finishedRide(S.last_finished);
   setStatus(); renderLive(); renderMeter(); if (V) renderRide();
 }
@@ -215,7 +219,6 @@ function setStatus() {
   const again = d.reconnect?.trainer;  // web: after a reload the browser needs one click to reconnect
   $('#btnTrainer').textContent = mode === 'ble' || mode === 'wait' ? 'Disconnect' : again ? `Reconnect ${d.trainer_name || 'trainer'}` : 'Connect trainer';
   $('#btnTrainer').className = mode === 'ble' || mode === 'wait' ? '' : again ? 'pri reconnect' : 'pri';
-  $('#btnSim').textContent = mode === 'sim' ? 'Stop sim' : 'Sim';
   $('#hDot').className = 'dot ' + (d.hr ? 'on' : d.hr_waiting || d.hr_name ? 'wait' : '');
   $('#hTxt').textContent = d.hr ? `HR ${d.hr}` : d.hr_state === 'waiting_heartbeat' ? 'Strap found, waiting for heartbeat (wet the contacts)' : d.hr_state === 'connecting' ? 'HR connecting…' : d.hr_waiting || d.hr_name ? 'HR waiting' : 'HR off';
   $('#btnHR').textContent = d.hr_name ? 'Disconnect HR' : d.reconnect?.hr ? 'Reconnect HR' : 'Connect HR';
@@ -255,7 +258,6 @@ $('#btnHR').onclick = () => {
   else if (WEB) apiJson('/api/devices', { action: 'choose', kind: 'hr' }).catch(e => { if (!/cancel/i.test(e.message)) toast(e.message); });
   else openDevices('hr');
 };
-$('#btnSim').onclick = () => apiJson('/api/devices', { action: 'sim', kind: 'trainer', on: S?.devices?.trainer !== 'sim' }).catch(e => toast(e.message));
 
 /* ---------- ride ---------- */
 let loadArmed = 0;
@@ -283,6 +285,64 @@ function beeps() {  // 3-2-1 countdown to the next step, computed from server st
   if (!r || !r.started || r.paused || !r.step || !V?.cw) return;
   const i = r.step.index - 1, left = Math.ceil(V.cw.steps[i].t0 + V.cw.steps[i].d - r.el);
   if (left <= 3 && left >= 1 && i < r.step.count - 1 && lastBeep !== i * 10 + left) { lastBeep = i * 10 + left; beep(left === 1 ? 1320 : 880, left === 1 ? 0.25 : 0.09); }
+}
+/* ---------- FTP test guide: prompts on screen and spoken, from the plan and the live samples ---------- */
+const TG = { id: null, said: new Set(), low: 0, est: null };
+const meanOver = (t0, t1) => { let s = 0, n = 0; for (const x of samples) if (x[1] >= t0 && x[1] < t1) { s += x[2]; n++; } return n ? s / n : 0; };
+function bestMinute() { let best = 0, sum = 0; for (let i = 0; i < samples.length; i++) { sum += samples[i][2]; if (i >= 60) sum -= samples[i - 60][2]; if (i >= 59) best = Math.max(best, sum / 60); } return best; }
+function testGuide() {
+  const box = $('#testCue');
+  if (!V?.test || !V.cw) { box.style.display = 'none'; return; }
+  if (TG.id !== rideId) Object.assign(TG, { id: rideId, said: new Set(), low: 0, est: null });
+  const once = (k, t) => { if (!TG.said.has(k)) { TG.said.add(k); if (V.started) say(t, true); } };
+  const steps = V.cw.steps, kind = testKind(steps), at = stepAt(V.cw, V.el), left = at ? Math.round(at.s.d - at.into) : 0;
+  let main = '', sub = '';
+  if (!V.started) {
+    main = kind === 'ramp' ? 'Ramp FTP test' : '20 minute FTP test';
+    sub = kind === 'ramp' ? "5 min warm up, then +20 W every minute. Ride until you can't hold it." : 'Warm up, 5 min hard, recover, then 20 min as hard as you can hold.';
+  } else if (kind === 'ramp') {
+    const b = bestMinute(), est = Math.round(b * 0.75);
+    if (!at || at.i === 0) {
+      main = 'Warm up'; sub = at ? `Ramp starts in ${fmtT(left)}` : '';
+      once('w', 'Warm up easy. The ramp starts in 5 minutes.');
+      if (at && left <= 10) once('w10', 'Ramp starts in 10 seconds. Power goes up 20 watts every minute.');
+    } else {
+      const tgt = S.ride.target_w ?? stepWatts(at.s, 0, V.ftp);
+      main = `${tgt} W · step ${at.i}`; sub = `Hold it as long as you can · best minute ${Math.round(b)} W · FTP ≈ ${est} W`;
+      once('r' + at.i, `${tgt} watts`);
+      // failure: under 60% of the target (or stopped) for 8 s ends the test
+      const p3 = S.live?.power_3s || 0;
+      if (V.paused || p3 < tgt * 0.6) TG.low ||= Date.now(); else TG.low = 0;
+      if (TG.low && Date.now() - TG.low >= 8000 && !TG.said.has('end')) { once('end', `Test over. Your FTP is about ${est} watts.`); toast(`FTP ≈ ${est} W`); control('end').catch(() => {}); }
+    }
+  } else {
+    const E = steps.findIndex(s => s.free && s.d >= 1200), eff = steps[E];
+    const i = at ? at.i : steps.length;
+    if (i < E - 2) {
+      main = 'Warm up'; sub = `20 min effort in ${fmtT(eff.t0 - V.el)}`;
+      once('w', 'Warm up easy. About 20 minutes, with a few short pickups.');
+      if (!at.s.free && at.s.a >= 1 && at.s.d <= 60) once('s' + i, 'One minute faster. Spin it up.');
+    } else if (i === E - 2) {
+      main = '5 min hard'; sub = `${fmtT(left)} left · steady, not a sprint`;
+      once('h', 'Five minutes hard. Steady, not a sprint.'); if (left <= 60) once('h1', 'One minute left.');
+    } else if (i === E - 1) {
+      main = 'Recover'; sub = `20 min effort in ${fmtT(left)}`;
+      once('rec', 'Easy now. Ten minutes to recover.');
+      if (left <= 60) once('rec1', 'One minute to go. In the effort you set the resistance with plus and minus, or your gears.');
+      if (left <= 10) once('rec10', 'Ten seconds.');
+    } else if (i === E) {
+      const avg = Math.round(meanOver(eff.t0, eff.t0 + eff.d));
+      main = `${fmtT(left)} left`; sub = `Avg ${avg} W · FTP ≈ ${Math.round(avg * 0.95)} W · + and − change resistance`;
+      once('go', 'Go. Twenty minutes, as hard as you can hold steady. Start a little easy.');
+      for (const q of [5, 10, 15]) if (at.into >= q * 60) once('q' + q, `${20 - q} minutes left. Average ${avg} watts.`);
+      if (left <= 60) once('last', 'One minute left. Empty the tank.');
+    } else {
+      TG.est ??= Math.round(meanOver(eff.t0, eff.t0 + eff.d) * 0.95);
+      main = `FTP ≈ ${TG.est} W`; sub = 'Cool down easy. End the ride to save it and set your FTP.';
+      once('done', `Done. Your FTP is about ${TG.est} watts. Cool down easy.`);
+    }
+  }
+  box.style.display = ''; $('#tcMain').textContent = main; $('#tcSub').textContent = sub;
 }
 let wakeLock = null;
 async function wake(on) { try { if (on && !wakeLock && navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; } } catch {} }
@@ -451,15 +511,16 @@ function renderAdjust() {
   $('#rowVal').style.display = m === 'k' ? 'none' : '';
   $('#aValL').textContent = { g: 'Grade', w: 'Watts', r: 'Level' }[m] || '';
   $('#aVal').textContent = m === 'k' ? '' : valText(m).replace(/^(grade|level) /, '');
-  if (!nextDirty) { const [txt, base] = nextText(); $('#aNext').value = txt; nextBase = base; $('#aNextErr').textContent = ''; }
+  if (!nextDirty) { const [txt, base] = nextText(); $('#aNext').value = txt; nextBase = base; $('#aNextErr').textContent = ''; nextBuilder.load(txt); nextBuilder.draw(); }
   else if (nextBase != null && curStep() !== nextBase) { $('#aNextErr').textContent = 'Step changed. Reset to see the new plan.'; }
-  $$('#aAfter button').forEach(b => b.classList.toggle('on', b.dataset.v === (settings.afterWorkout || 'hold')));
   const [lo, hi] = settings.cadRange || [85, 95];
   $('#aCadLo').textContent = lo; $('#aCadHi').textContent = hi;
   $$('#aCoach button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!lcOn()));
   $$('#aBeeps button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!settings.beeps));
 }
-$('#aNext').oninput = () => { nextDirty = true; $('#aNextErr').textContent = ''; };
+$('#aNext').oninput = () => { nextDirty = true; $('#aNextErr').textContent = ''; nextBuilder.load($('#aNext').value); nextBuilder.draw(); };
+const nextBuilder = createBuilder({ list: $('#aNextList'), chart: $('#aNextChart'), palette: $('#aNextPal'), fit, css, ftp: () => V?.ftp || settings.ftp,
+  onEdit: text => { $('#aNext').value = text; nextDirty = true; $('#aNextErr').textContent = ''; nextBuilder.draw(); } });
 function applyNext() {
   const txt = $('#aNext').value.trim();
   if (txt) { try { parseWorkout(txt); } catch (e) { $('#aNextErr').textContent = e.message; return; } }
@@ -509,7 +570,9 @@ const KEYS = {
 };
 function onKey(e) {
   if (e.key === 'Escape') { sheet(false); $('#keysModal').classList.remove('on'); return; }
-  if (!V || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '');
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !typing && $('#v-workouts').classList.contains('on')) { e.preventDefault(); builder.undo(); return; }
+  if (!V || typing) return;
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); return doUndo(); }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === '?') { e.preventDefault(); return $('#keysModal').classList.toggle('on'); }
@@ -642,7 +705,7 @@ async function openSummary(id) {
   $('#sStats').innerHTML = st.map(([k, v]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }
-  else if (r.text) { try { cw = compile(r); for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { s.a = s.b = w; s.u = 'w'; } } } catch {} }
+  else if (r.text) { try { cw = compile(r); for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { [s.a, s.b] = Array.isArray(w) ? w : [w, w]; s.u = 'w'; } } } catch {} }
   if (cw && r.samples.at(-1)[1] > cw.total) cw.total = r.samples.at(-1)[1];  // free riding after the plan
   requestAnimationFrame(() => drawChart($('#sumChart'), { cw, ftp: r.ftp, samples: r.samples, el: null, k: 1 }));
   const zt = Object.values(d.power_zones_s), tot = zt.reduce((a, b) => a + b, 0) || 1;
@@ -854,6 +917,13 @@ function show(v) {
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
 $('#btnJust').onclick = $('#btnJust2').onclick = () => loadRide(null);
+$('#btnFtp').onclick = () => $('#ftpModal').classList.add('on');
+$('#ftpClose').onclick = () => $('#ftpModal').classList.remove('on');
+$('#ftpModal').onclick = e => {
+  if (e.target?.id === 'ftpModal') return $('#ftpModal').classList.remove('on');
+  const b = e.target?.closest?.('[data-t]'); if (!b) return;
+  $('#ftpModal').classList.remove('on'); loadRide(FTP_TESTS.find(t => t.id === b.dataset.t));
+};
 function showSettings() {
   $('#ftp').value = settings.ftp; $('#weight').value = settings.weight || ''; $('#beeps').value = settings.beeps ? '1' : '0';
   renderLib(); renderBuilder();

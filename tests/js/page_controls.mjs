@@ -117,7 +117,7 @@ async function step(what, fn, cond) { fn(); await until(cond, what); log.push([w
 
 // ---------- boot 1: ride and change everything by hand ----------
 await boot(1);
-$('#btnSim').click();
+await (WEB ? (u, o) => hw.backend.fetch(u, o) : (u, o) => fetch(u, o))('/api/devices', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => hw.state().devices.trainer === 'sim', 'sim');
 $('#bText').value = '10m 50%, 20m 100%, 10m 50%, 5m free'; $('#bName').value = 'Hands';
 $('#bRide').click();

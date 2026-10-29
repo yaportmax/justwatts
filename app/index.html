@@ -24,13 +24,12 @@
     <span class="pill"><i class="dot" id="hDot"></i><span id="hTxt">HR off</span></span>
     <button id="btnTrainer" class="pri">Connect trainer</button>
     <button id="btnHR">Connect HR</button>
-    <button id="btnSim" title="Fake trainer data for trying the app">Sim</button>
   </div>
 </header>
 
 <main>
 <div id="webNotice" class="panel warnbanner webonly" style="display:none" role="note">
-  <b>This browser has no Web Bluetooth.</b> Use Chrome or Edge on a computer or Android phone. iOS Safari cannot connect to trainers; on iPhone or iPad try the Bluefy browser. <b>Sim</b> works everywhere.
+  <b>This browser has no Web Bluetooth.</b> Use Chrome or Edge on a computer or Android phone. iOS Safari cannot connect to trainers; on iPhone or iPad try the Bluefy browser.
 </div>
 <!-- WORKOUTS -->
 <section class="view on" id="v-workouts">
@@ -39,7 +38,7 @@
       <label class="f">FTP (W)<input id="ftp" type="number" min="50" max="600" step="1"></label>
       <label class="f">Weight (kg)<input id="weight" type="number" min="0" max="200" step="0.1"></label>
     </div>
-    <button id="btnJust" class="pri">Just ride</button>
+    <div class="row" style="gap:6px"><button id="btnFtp">FTP test</button><button id="btnJust" class="pri">Just ride</button></div>
   </div>
 
   <h2>Library</h2>
@@ -47,28 +46,31 @@
 
   <h2>Builder</h2>
   <div class="panel builder">
-    <div>
-      <div class="row" style="margin-bottom:8px">
-        <input id="bName" placeholder="Name" style="flex:1;min-width:140px">
+    <div class="row" style="gap:8px">
+      <input id="bName" placeholder="Name" style="flex:1;min-width:140px">
+      <button id="bUndo" title="Undo (Ctrl+Z)">Undo</button>
+    </div>
+    <canvas id="bChart"></canvas>
+    <div class="row bbar">
+      <span class="num" id="bStats" style="color:var(--dim)"></span>
+      <div class="row" style="gap:6px">
+        <button id="bImport">Import .zwo</button>
+        <button id="bZwo">.zwo</button>
+        <button id="bDel" class="danger" style="display:none">Delete</button>
+        <button id="bSave">Save</button>
+        <button id="bRide" class="pri">Ride</button>
       </div>
+    </div>
+    <div class="hint">Drag a block's top to change power, its right edge to change length.</div>
+    <div class="pal" id="bPal"></div>
+    <div class="blist" id="bList"></div>
+    <details class="adv" id="bTextBox">
+      <summary>Edit as text</summary>
       <textarea id="bText" spellcheck="false"></textarea>
-      <div class="err" id="bErr"></div>
       <div class="hint">10m 50% · 5m 50-90% · 5x(3m 115%, 3m 50%) · 1m 300w · 10m free</div>
-    </div>
-    <div>
-      <canvas id="bChart"></canvas>
-      <div class="row" style="margin-top:8px;justify-content:space-between">
-        <span class="num" id="bStats" style="color:var(--dim)"></span>
-        <div class="row" style="gap:6px">
-          <button id="bImport">Import .zwo</button>
-          <button id="bZwo">.zwo</button>
-          <button id="bDel" class="danger" style="display:none">Delete</button>
-          <button id="bSave">Save</button>
-          <button id="bRide" class="pri">Ride</button>
-        </div>
-      </div>
-      <input type="file" id="zwoFile" accept=".zwo,.xml" hidden>
-    </div>
+    </details>
+    <div class="err" id="bErr"></div>
+    <input type="file" id="zwoFile" accept=".zwo,.xml" hidden>
   </div>
 </section>
 
@@ -95,7 +97,8 @@
       <span id="ivNow"></span><span class="num" id="ivNext" style="color:var(--dim)"></span>
       <div class="bar"><i id="ivBar"></i></div>
     </div>
-    <div class="panel coach" id="coach">
+    <div class="panel testcue" id="testCue" style="display:none" role="status" aria-live="polite"><div class="tcm" id="tcMain"></div><div class="tcs" id="tcSub"></div></div>
+    <div class="panel coach serveronly" id="coach">
       <div><span class="k">Coach</span><span id="coachMsg">Watching</span><div id="coachPrev"></div><div id="coachSaid"></div></div>
       <div class="row" style="gap:6px"><button id="coachMute" class="mute" title="Mute or unmute the coach voice (or say &quot;mute&quot;)">Mute</button><select id="coachVerb" title="What the coach reads aloud"><option value="all">Speak all</option><option value="important">Important only</option><option value="silent">Silent</option></select><button data-feel="easier">Easier</button><button data-feel="good">Good</button><button data-feel="harder">Harder</button></div>
     </div>
@@ -116,19 +119,26 @@
     </div>
   </div>
   <div class="sheet" id="adjPanel" role="dialog" aria-label="Adjust">
-    <div class="row shead"><b>Adjust</b><span class="hint">changes apply now</span><span style="flex:1"></span><button data-a="close">Close</button></div>
+    <div class="row shead"><b>Adjust</b><span class="hint">changes apply now · hover a label for help</span><span style="flex:1"></span><button data-a="close">Close</button></div>
     <div class="sgrid">
-      <div class="r wk" id="rowInt"><span class="l">Intensity</span><div class="b"><button data-a="int" data-v="-5">−5</button><button data-a="int" data-v="-1">−1</button><b class="num" id="aInt">100%</b><button data-a="int" data-v="1">+1</button><button data-a="int" data-v="5">+5</button><button data-a="int0">100%</button></div></div>
-      <div class="r wk" id="rowTgt"><span class="l">Step watts</span><div class="b"><button data-a="tgt" data-v="-10">−10</button><button data-a="tgt" data-v="-5">−5</button><b class="num" id="aTgt">–</b><button data-a="tgt" data-v="5">+5</button><button data-a="tgt" data-v="10">+10</button></div></div>
-      <div class="r wk" id="rowStep"><span class="l">Step time</span><div class="b"><button data-a="ext" data-v="-60">−1m</button><button data-a="ext" data-v="-30">−30s</button><b class="num" id="aStep">–</b><button data-a="ext" data-v="30">+30s</button><button data-a="ext" data-v="60">+1m</button></div></div>
-      <div class="r wk" id="rowLen"><span class="l">Workout</span><div class="b"><button id="cShorter">−5m</button><b class="num" id="cLen">–</b><button id="cLonger">+5m</button></div></div>
-      <div class="r wk"><span class="l">Steps</span><div class="b"><button data-a="back">Back</button><button data-a="skip">Skip</button></div></div>
-      <div class="r"><span class="l">Trainer</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
+      <h3 class="sh wk">This step</h3>
+      <div class="r wk" id="rowTgt"><span class="l" title="Target for the step you are on now. Later steps keep their plan.">Watts</span><div class="b"><button data-a="tgt" data-v="-10">−10</button><button data-a="tgt" data-v="-5">−5</button><b class="num" id="aTgt">–</b><button data-a="tgt" data-v="5">+5</button><button data-a="tgt" data-v="10">+10</button></div></div>
+      <div class="r wk" id="rowStep"><span class="l" title="Makes the current step longer or shorter. Everything after it moves.">Time left</span><div class="b"><button data-a="ext" data-v="-60">−1m</button><button data-a="ext" data-v="-30">−30s</button><b class="num" id="aStep">–</b><button data-a="ext" data-v="30">+30s</button><button data-a="ext" data-v="60">+1m</button></div></div>
+      <div class="r wk"><span class="l" title="Back restarts this step (in its first 10 s it goes to the previous one). Skip jumps to the next step.">Go to</span><div class="b"><button data-a="back">Back</button><button data-a="skip">Skip</button></div></div>
+      <h3 class="sh wk">Whole workout</h3>
+      <div class="r wk" id="rowInt"><span class="l" title="Scales every target, now and later. 95% = all 5% easier.">Intensity</span><div class="b"><button data-a="int" data-v="-5">−5</button><button data-a="int" data-v="-1">−1</button><b class="num" id="aInt">100%</b><button data-a="int" data-v="1">+1</button><button data-a="int" data-v="5">+5</button><button data-a="int0">100%</button></div></div>
+      <div class="r wk" id="rowLen"><span class="l" title="Adds or removes time at the end of the plan.">Length</span><div class="b"><button id="cShorter">−5m</button><b class="num" id="cLen">–</b><button id="cLonger">+5m</button></div></div>
+      <div class="r wk nextrow" id="rowNext"><span class="l" title="The step you are on and everything after it. Drag a block's top for watts, its right edge for time. Apply to use it.">Edit the plan</span><div class="b col">
+        <canvas id="aNextChart"></canvas>
+        <div class="pal" id="aNextPal"></div>
+        <div class="blist" id="aNextList"></div>
+        <details class="adv"><summary>Edit as text</summary><textarea id="aNext" spellcheck="false" rows="2" placeholder="5m 55%, 3x(3m 110%, 2m 50%)"></textarea></details>
+        <div class="row"><button data-a="next" class="pri">Apply</button><button data-a="nextReset">Reset</button><span class="err" id="aNextErr"></span></div></div></div>
+      <h3 class="sh">Trainer</h3>
+      <div class="r"><span class="l" title="ERG: the trainer holds the target watts. Grade or Level: ERG off, you set the resistance and ride by feel or gears.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
       <div class="r" id="rowVal"><span class="l" id="aValL">Grade</span><div class="b"><button data-a="adj" data-v="-5">−−</button><button data-a="adj" data-v="-1">−</button><b class="num" id="aVal">–</b><button data-a="adj" data-v="1">+</button><button data-a="adj" data-v="5">++</button></div></div>
-      <div class="r wk" id="rowNext"><span class="l">Next steps</span><div class="b col"><textarea id="aNext" spellcheck="false" rows="2" placeholder="5m 55%, 3x(3m 110%, 2m 50%)"></textarea><div class="row"><button data-a="next" class="pri">Apply</button><button data-a="nextReset">Reset</button><span class="err" id="aNextErr"></span></div></div></div>
-      <div class="r wk"><span class="l">After plan</span><div class="b"><span class="seg" id="aAfter"><button data-a="after" data-v="hold">Hold</button><button data-a="after" data-v="grade0">Flat</button></span></div></div>
-      <div class="r"><span class="l">Cadence</span><div class="b"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></div></div>
-      <div class="r"><span class="l">Coach</span><div class="b"><span class="seg" id="aCoach"><button data-a="coach" data-v="1">On</button><button data-a="coach" data-v="0">Off</button></span><span class="seg" id="aBeeps"><button data-a="beeps" data-v="1">Beeps</button><button data-a="beeps" data-v="0">No beeps</button></span></div></div>
+      <div class="r"><span class="l" title="The cadence tile turns green inside this range.">Cadence</span><div class="b"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></div></div>
+      <div class="r"><span class="l">Sound</span><div class="b"><span class="seg serveronly" id="aCoach" title="Built-in coach voice"><button data-a="coach" data-v="1">Coach on</button><button data-a="coach" data-v="0">Off</button></span><span class="seg" id="aBeeps" title="Beeps in the last 3 s of each step"><button data-a="beeps" data-v="1">Beeps</button><button data-a="beeps" data-v="0">No beeps</button></span></div></div>
     </div>
   </div>
 </section>
@@ -165,8 +175,8 @@
     </div>
     <h2>Intervals</h2>
     <div class="tablewrap"><table class="laps"><thead><tr><th>#</th><th>Time</th><th>Target</th><th>Avg W</th><th>Max W</th><th>NP</th><th>Avg HR</th><th>Max HR</th><th>Cad</th></tr></thead><tbody id="sLaps"></tbody></table></div>
-    <h2>Coach transcript</h2>
-    <div id="sEvents" class="transcript"></div>
+    <h2 class="serveronly">Coach transcript</h2>
+    <div id="sEvents" class="transcript serveronly"></div>
   </div>
   <div class="tablewrap panel" style="padding:0">
     <table>
@@ -196,7 +206,7 @@
         <span class="hint" id="gImportHint"></span>
       </div>
     </div>
-    <div class="panel">
+    <div class="panel serveronly">
       <h2>Built-in coach</h2>
       <div class="checks"><label><input type="checkbox" data-lc="enabled"> Spoken cues and safe target adjustments</label></div>
       <details class="adv"><summary>Advanced</summary>
@@ -208,12 +218,18 @@
         </div>
         <div class="row" style="margin-top:10px">
           <label class="f">Auto-adjust targets<select id="lcAuto"><option value="no_agent">When no agent coaches</option><option value="always">Always</option><option value="off">Off</option></select></label>
-          <label class="f">When the plan ends<select id="afterWk"><option value="hold">Hold last target</option><option value="grade0">Free ride, flat</option></select></label>
-          <label class="f">Beeps<select id="beeps"><option value="1">On</option><option value="0">Off</option></select></label>
-          <label class="f">Distance in History<select id="virtDist"><option value="0">Virtual distance</option><option value="1">Hide</option></select></label>
         </div>
-        <div class="hint" style="margin-top:6px">Auto-adjust: Easier lowers the step 5% FTP, Harder raises it 3% (not in HR zone 5), 30 s over the HR cap eases 5%. Indoor distance comes from the trainer's virtual speed; FIT files keep it.</div>
+        <div class="hint" style="margin-top:6px">Auto-adjust: Easier lowers the step 5% FTP, Harder raises it 3% (not in HR zone 5), 30 s over the HR cap eases 5%.</div>
       </details>
+    </div>
+    <div class="panel">
+      <h2>Ride</h2>
+      <div class="row">
+        <label class="f" title="What the trainer does if you keep riding after the last step">After the last step<select id="afterWk"><option value="hold">Keep the last target</option><option value="grade0">Ride free, flat road</option></select></label>
+        <label class="f">Beeps<select id="beeps"><option value="1">On</option><option value="0">Off</option></select></label>
+        <label class="f">Distance in History<select id="virtDist"><option value="0">Virtual distance</option><option value="1">Hide</option></select></label>
+      </div>
+      <div class="hint" style="margin-top:6px">Indoor distance comes from the trainer's virtual speed; FIT files keep it.</div>
     </div>
     <div class="panel">
       <h2>Uploads</h2>
@@ -260,6 +276,14 @@
 </section>
 
 </main>
+<div class="modal" id="ftpModal">
+  <div class="panel">
+    <div class="row" style="justify-content:space-between"><b>FTP test</b><button id="ftpClose">Close</button></div>
+    <button class="ftpopt" data-t="t-ramp"><b>Ramp test</b><span>About 20 min. +20 W every minute until you can't hold it. FTP = 75% of your best minute.</span></button>
+    <button class="ftpopt" data-t="t-20"><b>20 minute test</b><span>About 1 h. Warm up, 5 min hard, recover, then 20 min as hard as you can hold. FTP = 95% of that average.</span></button>
+    <div class="hint">Prompts on screen and spoken as you go. Set the result as your FTP from the ride summary.</div>
+  </div>
+</div>
 <div class="modal" id="devModal">
   <div class="panel">
     <div class="row" style="justify-content:space-between"><b id="devTitle">Trainer</b><button id="devClose">Close</button></div>

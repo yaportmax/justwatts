@@ -28,7 +28,7 @@ pick it from the scan list. The server remembers it and reconnects by itself. A 
 controller at a time: close Zwift or any other app using it first. `start.cmd` (Windows) or
 `./start.sh` (macOS, Linux) starts the server and opens the browser.
 
-No trainer? Press **Sim** in the header.
+No trainer? `openspin simulate` drives a fake ride through the server.
 
 ## What you get
 

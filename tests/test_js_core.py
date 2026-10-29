@@ -89,7 +89,7 @@ def test_presets_round_trip(js):
         _same_steps(o["steps"], js([{"op": "parse", "text": o["text"]}])[0]["steps"])
     sweet = next(o for p, o in zip(presets, outs) if p["id"] == "p-sweetspot")
     assert sweet["text"] == "10m 40-75%, 3x(10m 90%, 5m 55%), 5m 50-40%"
-    ramp = next(o for p, o in zip(presets, outs) if p["id"] == "p-ramp")
+    ramp = next(o for p, o in zip(presets, outs) if p["id"] == "t-ramp")
     assert ramp["total"] == 300 + 26 * 60
 
 

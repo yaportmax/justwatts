@@ -64,11 +64,12 @@ class Ride:
     def id(self) -> str:
         return f"r-{self.start_ts or 0}"
 
-    def apply_override(self, idx: int, w: int) -> bool:
+    def apply_override(self, idx: int, w) -> bool:
+        """w: watts for a steady step, or [start, end] watts for a ramp (a ramp keeps its shape)."""
         if not self.steps or not 0 <= idx < len(self.steps) or self.steps[idx].get("free"):
             return False
         s = self.steps[idx]
-        s["a"] = s["b"] = w
+        s["a"], s["b"] = (w[0], w[1]) if isinstance(w, (list, tuple)) else (w, w)
         s["u"] = "w"
         self.ov[idx] = w
         return True
@@ -455,7 +456,12 @@ class RideEngine:
         now_w = self.cur_target() if idx == at[0] else step_watts(s, 0, r.ftp, kk)
         w = float(body["w"]) if body.get("w") is not None else (now_w or 0) + float(body.get("delta", 0))
         w = max(0, min(2000, E.js_round(w)))
-        r.apply_override(idx, E.js_round(w / kk))
+        if s["a"] != s["b"] and now_w:  # a ramp moves up or down as a whole
+            plan = lambda x: x if s.get("u") == "w" else x * r.ftp
+            d = (w - now_w) / kk
+            r.apply_override(idx, [max(0, E.js_round(plan(s["a"]) + d)), max(0, E.js_round(plan(s["b"]) + d))])
+        else:
+            r.apply_override(idx, E.js_round(w / kk))
         s["m"] = 1  # set by hand: the built-in coach leaves this step alone
         self.apply_target()
         self._changed(f"target step {idx + 1} {w}W", idx + 1)
@@ -466,8 +472,16 @@ class RideEngine:
         if not r or not r.steps:
             return
         at = step_at(r.steps, r.el)
-        if at:
-            r.el = at[1]["t0"] + at[1]["d"] + 0.01
+        if at:  # the rest of the step leaves the plan, so ride time and plan time stay the same clock
+            i, s, into = at
+            if into >= 1:
+                s["d"] = max(1, math.ceil(into))
+            else:
+                r.steps.pop(i)
+                r.ov = {(k - 1 if k > i else k): v for k, v in r.ov.items() if k != i}
+            r.retime()
+            if into >= 1:
+                r.el = max(r.el, s["t0"] + s["d"] + 0.01)
             self.apply_target()
             self._changed(f"skip step {at[0] + 1}", at[0] + 1)
 

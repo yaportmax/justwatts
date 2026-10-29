@@ -95,7 +95,7 @@ if (MODE === 'boot') {
            tTxt: $('#tTxt').textContent, coachMsg: $('#coachMsg').textContent, said: $('#coachSaid').innerHTML, spoken, posts: posts.map(p => p.path) });
 }
 
-$('#btnSim').click();
+await fetch('/api/devices', { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => S().devices.trainer === 'sim', 'sim on');
 $('#bText').value = '1m 50%, 1m 100%';
 $('#bName').value = 'Smoke';

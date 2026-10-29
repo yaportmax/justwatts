@@ -15,7 +15,7 @@ export function rideSteps(r) {
   if (r.steps) steps = r.steps.map(s => ({ ...s }));
   else if (r.text) {
     try { steps = parseWorkout(r.text); } catch { return null; }
-    for (const [i, w] of Object.entries(r.ov || {})) { const s = steps[i]; if (s && !s.free) Object.assign(s, { a: w, b: w, u: 'w' }); }
+    for (const [i, w] of Object.entries(r.ov || {})) { const s = steps[i]; if (s && !s.free) Object.assign(s, { a: Array.isArray(w) ? w[0] : w, b: Array.isArray(w) ? w[1] : w, u: 'w' }); }
   }
   if (steps) { let t = 0; for (const s of steps) { s.t0 = t; t += s.d; } }
   return steps;
@@ -35,6 +35,13 @@ export function laps(r) {
       max_hr: hr.length ? Math.max(...hr) : null, avg_cad: cad.length ? avg(cad) : null, kJ: +(P.reduce((a, b) => a + b, 0) / 1000).toFixed(1), start_s: g[0][1] - 1 };
   });
 }
+// FTP from a test ride: 95% of the best 20 min when the plan has a 20 min free effort, else 75% of the best minute (ramp)
+export function ftpEstimate(r, m, P) {
+  if (!r.test) return null;
+  let twenty = false; try { twenty = parseWorkout(r.text || '').some(s => s.free && s.d >= 1200); } catch {}
+  if (twenty) return P.length >= 1200 ? jsr(bestMean(P, 1200) * 0.95) : null;
+  return m.best60 ? jsr(m.best60 * 0.75) : null;
+}
 export function detail(r, floors, meta = {}) {
   const m = summarize(r), P = r.samples.map(x => x[2]), hz = [0, 0, 0, 0, 0];
   for (const x of r.samples) { const i = hrZone(x[4], floors); if (i >= 0) hz[i]++; }
@@ -44,7 +51,7 @@ export function detail(r, floors, meta = {}) {
     best: bestEfforts(P), power_zones_s: Object.fromEntries(ZONES.map((z, i) => [z[2], m.zt[i]])),
     hr_zones_s: floors ? Object.fromEntries(hz.map((t, i) => [`Z${i + 1}`, t])) : null, laps: laps(r), events: r.events || [],
     garmin: null, strava: meta.strava || null, description: meta.description || null, agent: r.agent || { wakes: null, local_cues: null, usage: {} } };
-  if (r.test && m.best60) out.ftp_estimate = jsr(m.best60 * 0.75);
+  const est = ftpEstimate(r, m, P); if (est) out.ftp_estimate = est;
   return out;
 }
 export function metaRow(r, meta = {}) {
@@ -52,7 +59,7 @@ export function metaRow(r, meta = {}) {
   const tokens = ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens'].reduce((s, k) => s + (u[k] || 0), 0);
   return { id: r.id, name: r.name, start: r.start || r.samples[0]?.[0], samples: r.samples.length, source: r.source, ftp: r.ftp, test: !!r.test,
     time_s: m.dur, avg_w: jsr(m.avgP), np: jsr(m.np), tss: jsr(m.tss), if: +m.IF.toFixed(2), kJ: jsr(m.kJ), avg_hr: jsr(m.avgHR) || null,
-    best: bestEfforts(P), ftp_estimate: r.test && m.best60 ? jsr(m.best60 * 0.75) : null, garmin: null, strava: meta.strava || null,
+    best: bestEfforts(P), ftp_estimate: ftpEstimate(r, m, P), garmin: null, strava: meta.strava || null,
     agent_wakes: a.wakes ?? null, local_cues: a.local_cues ?? null, agent_tokens: tokens || null, agent_cost_usd: u.cost_usd ?? null };
 }
 const iso = d => d.toISOString().slice(0, 10);

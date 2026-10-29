@@ -50,5 +50,5 @@ def test_web_mode_ride_with_reload(dist, node):
     assert f["rides"] == 1 and f["samples"] == 247 and f["fit"] == ".FIT" and f["backupRides"] == 1 and f["steps"] == 3
     assert f["garminStatus"] == 503 and f["agent"] == {"connected": False} and f["meter"] == "none"
     assert [e.split(" ")[0] + " " + e.split(" ")[1] for e in f["events"]] == ["RIDE START", "RIDE RESUMED", "EDIT insert", "WORKOUT DONE", "RIDE END"]
-    assert out["coachDefault"] is False                                       # coach off until switched on
-    assert "Rep done" in " ".join(out["spoken"])                            # built-in coach in the page, once on
+    assert out["coachDefault"] is False                                       # no built-in coach on the web
+    assert "Rep done" not in " ".join(out["spoken"])                        # and nothing coach-spoken

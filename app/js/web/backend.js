@@ -5,7 +5,6 @@ import { Engine } from './engine.js';
 import { WebHub } from './ble.js';
 import { openDB, MemStore } from './idb.js';
 import { detail, metaRow, trends } from './history.js';
-import { LocalCoach } from './coach.js';
 import { parseLine } from './lines.js';
 
 const SETTINGS_DEFAULTS = { ftp: 200, weight: 0, beeps: true, autoGarmin: false, hrZones: null, hrMax: null, hrZonesSrc: null, cadRange: [85, 95],
@@ -24,7 +23,7 @@ export class WebBackend {
     this.engine = new Engine({ hub: this.hub, logEvent: l => this.logEvent(l), settings: () => this.settings,
       save: p => this.persist(p), archive: p => this.store.putRide(p).then(() => this.bump()) });
     this.engine.onFinish = p => this.afterFinish(p);
-    this.coach = new LocalCoach({ settings: () => this.settings, say: (t, imp) => this.localSay(t, imp), adjust: (s, w, why) => this.localAdjust(s, w, why) });
+    this.coach = null;  // no built-in coach on the public site for now (the local server keeps it)
     this.lastSnap = 0;
   }
   async init() {
@@ -45,7 +44,7 @@ export class WebBackend {
   bump() { this.engine.bump(); }
   tick() {
     this.engine.tick(1);
-    const st = this.state(); this.coach.observe(st);
+    const st = this.state(); this.coach?.observe(st);
     // crash safety: a snapshot at the first sample and every 30 s, the samples since then every second
     const r = this.engine.ride;
     if (r?.started && r.samples.length) {
@@ -67,7 +66,7 @@ export class WebBackend {
       if (UNMUTE.test(ev.said)) { this.updateSettings({ voiceMode: 'all' }); this.logEvent('VOICE UNMUTED (said)'); }
       else if (MUTE.test(ev.said)) { this.updateSettings({ voiceMode: 'silent' }); this.voiceEvent('speech_start'); this.logEvent('VOICE MUTED (said)'); }
     }
-    this.coach.onEvent(line);
+    this.coach?.onEvent(line);
     this.bump();
   }
   addCmd(fields) { this.seq = Math.max(Date.now(), this.seq + 1); return { seq: this.seq, ...fields }; }

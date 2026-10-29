@@ -83,9 +83,9 @@ const out = {};
 let hw = await boot(1);
 out.mode = hw.mode; out.webClass = document.body.classList.contains('web');
 out.notice = $('#webNotice').style.display;            // no navigator.bluetooth in node
-out.coachDefault = hw.backend.coach.cfg().enabled;  // the web build starts with the coach off
-hw.backend.updateSettings({ localCoach: { enabled: true } });
-$('#btnSim').click();
+out.coachDefault = hw.backend.coach !== null;  // the web build has no built-in coach
+hw.backend.updateSettings({ localCoach: { enabled: true } });  // even if a setting asks for it
+await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => hw.state().devices.trainer === 'sim', 'sim');
 $('#bText').value = '1m 50%, 2m 100%'; $('#bName').value = 'Web ride';
 $('#bRide').click();
@@ -100,7 +100,7 @@ hw = await boot(2);
 await until(() => hw.state().ride, 'resumed ride');
 const r = hw.state().ride;
 out.resumed = { name: r.name, samples: r.samples, paused: r.paused, auto: r.auto_paused, notice: hw.state().notice };
-$('#btnSim').click();
+await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => hw.state().devices.trainer === 'sim', 'sim again');
 await hw.backend.fetch('/api/coach', { method: 'POST', body: JSON.stringify({ edit: { op: 'insert', steps: '30s 120%' } }) });
 for (let i = 0; i < 200; i++) hw.backend.tick();

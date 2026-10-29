@@ -19,6 +19,8 @@ function run(r) {
       return { b64: Buffer.from(core.fitEncode(r.ride)).toString('base64'), summary: core.summarize(r.ride) };
     case 'tcx':
       return core.toTcx(r.ride);
+    case 'ergmrc':
+      try { return core.fromErgMrc(r.text); } catch (e) { return { error: e.message }; }
     case 'zwo':
       return core.toZwo(core.compile(r.workout), r.ftp);
     case 'watts': {

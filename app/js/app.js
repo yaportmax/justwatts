@@ -4,7 +4,7 @@
 import {
   fmtT, esc, ZONES, zoneIdx, HRZ_COLORS, hrZone as hrZoneOf, parseWorkout, toText, compile, stepAt, stepWatts,
   estimate, toZwo as toZwoCore, PRESETS, FTP_TESTS, testKind, summarize, fitEncode, toTcx,
-  activeHrZones, validHrFloors, HR_MAX_DEFAULT, weightShow, weightKg, weightUnit, distText, treeText,
+  activeHrZones, validHrFloors, HR_MAX_DEFAULT, fromErgMrc, weightShow, weightKg, weightUnit, distText, treeText,
 } from './core.js';
 import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
@@ -195,7 +195,7 @@ $('#bZwo').onclick = () => { const cw = renderBuilder(); if (cw) download(cw.nam
 $('#bImport').onclick = () => $('#zwoFile').click();
 $('#zwoFile').onchange = async e => {
   const f = e.target.files[0]; if (!f) return; e.target.value = '';
-  try { const { name, text } = fromZwo(await f.text()); editing = null; $('#bName').value = name; $('#bText').value = text; $('#bDel').style.display = 'none'; renderBuilder(); toast('Imported'); }
+  try { const src = await f.text(), { name, text } = /\.(erg|mrc)$/i.test(f.name) ? fromErgMrc(src) : fromZwo(src); editing = null; $('#bName').value = name; $('#bText').value = text; $('#bDel').style.display = 'none'; renderBuilder(); toast('Imported'); }
   catch (err) { toast('Import failed: ' + err.message); }
 };
 function fromZwo(xml) {

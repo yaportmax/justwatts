@@ -80,6 +80,7 @@ def test_auto_pause_with_real_trainer_mode(srv):
 
 
 def test_finish_archives_and_short_rides_are_dropped(srv):
+    srv.server.update_settings({"afterWorkout": "hold"})  # the default is grade0 (ride free)
     eng = ride(srv, "30s 50%")
     ticks(eng, 35)
     st = state(srv)

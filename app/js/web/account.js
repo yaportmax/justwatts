@@ -272,17 +272,18 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     const u = me.user, ids = me.identities, has = p => ids.find(i => i.provider === p), em = has('email');
     const methods = ids.length;
     const linkRow = p => {
-      const i = has(p), sub = i ? (i.email || 'Linked') : '';
+      // no password yet: the email row offers one for the account's own email (Google already gave it)
+      const i = has(p), pw = p === 'email' && !i, sub = i ? (i.email || 'Linked') : pw ? (u.email ? `Also sign in with ${u.email}` : 'Sign in with an email') : '';
       const act = i ? `<button data-a="unlink" data-p="${p}" ${methods < 2 ? 'disabled title="Keep at least one way to sign in"' : ''}>Unlink</button>`
-        : p === 'email' ? `<button data-a="linkemail">Add</button>` : `<button data-a="link" data-p="${p}">Link</button>`;
-      return `<div class="srow sprov"><span class="sl"><span class="pv">${ICONS[p]}${PROV[p]}</span><small>${esc(sub)}</small></span><span class="sc">${act}</span></div>`;
+        : pw ? `<button data-a="linkemail">Set password</button>` : `<button data-a="link" data-p="${p}">Link</button>`;
+      return `<div class="srow sprov"><span class="sl"><span class="pv">${ICONS[p]}${pw ? 'Password' : PROV[p]}</span><small>${esc(sub)}</small></span><span class="sc">${act}</span></div>`;
     };
     const emailRow = em || u.email
       ? `<div class="srow"><span class="sl">Email<small>${esc(u.email)} · ${u.verified ? '<span class="okc">Confirmed</span>' : 'Not confirmed'}</small></span><span class="sc">${em && !u.verified && providers?.emailVerification ? '<button data-a="resend">Resend link</button>' : ''}</span></div>`
       : providers?.emailVerification
         ? `<form class="srow" data-f="claim"><span class="sl">Email<small>Strava does not share it. Add one to sign in without Strava.</small></span><span class="sc"><input name="email" type="email" placeholder="you@example.com" aria-label="Email"><button type="submit">Add</button></span></form>`
         : '';
-    const linkForm = linkOpen ? `<form class="srow sub" data-f="linkemail"><span class="sl">Email and password</span><span class="sc"><input name="email" type="email" placeholder="Email" aria-label="Email"><input name="password" type="password" placeholder="Password" aria-label="Password" autocomplete="new-password"><button type="submit" class="pri">Add</button></span></form>` : '';
+    const linkForm = linkOpen ? `<form class="srow sub" data-f="linkemail"><span class="sl">${u.email ? esc(u.email) : 'Email and password'}</span><span class="sc">${u.email ? `<input name="email" type="hidden" value="${esc(u.email)}">` : '<input name="email" type="email" placeholder="Email" aria-label="Email">'}<input name="password" type="password" placeholder="Password" aria-label="Password" autocomplete="new-password"><button type="submit" class="pri">Save</button></span></form>` : '';
     const pwRow = u.hasPassword
       ? `<div class="srow"><span class="sl">Password</span><span class="sc"><button data-a="pw">${pwOpen ? 'Cancel' : 'Change password'}</button></span></div>${pwOpen ? `<form class="srow sub" data-f="password"><span class="sl"></span><span class="sc"><input name="current" type="password" placeholder="Current" aria-label="Current password" autocomplete="current-password"><input name="password" type="password" placeholder="New" aria-label="New password" autocomplete="new-password"><button type="submit" class="pri">Save</button></span></form>` : ''}`
       : em && providers?.passwordReset ? `<div class="srow"><span class="sl">Password<small>None yet</small></span><span class="sc"><button data-a="setpw">Email me a link</button></span></div>` : '';

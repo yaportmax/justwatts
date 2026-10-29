@@ -131,6 +131,7 @@ def edit(srv, **e):
 
 
 def test_overtime_then_insert_more(srv):
+    srv.server.update_settings({"afterWorkout": "hold"})  # the default is grade0 (ride free)
     eng = ride(srv, "1m 50%", 75)
     st = srv.client.state()["state"]["ride"]
     assert st["overtime"] and st["target_w"] == 100

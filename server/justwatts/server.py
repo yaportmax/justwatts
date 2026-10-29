@@ -530,7 +530,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 SETTINGS_DEFAULTS = {"ftp": 200, "weight": 0, "beeps": True, "autoGarmin": False, "hrZones": None, "hrMax": None,
-                     "hrZonesSrc": None, "cadRange": [85, 95], "afterWorkout": "hold", "ftpSrc": None, "profileImported": False,
+                     "hrZonesSrc": None, "cadRange": [85, 95], "afterWorkout": "grade0", "ftpSrc": None, "profileImported": False,
                      "autoStrava": False, "shareBaseUrl": "", "hideVirtualDistance": False, "units": "imperial", "cadOn": True}
 
 

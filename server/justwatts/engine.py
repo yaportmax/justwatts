@@ -279,7 +279,7 @@ class RideEngine:
             return r.jr["w"] if r.jr["m"] == "w" else None
         at = step_at(r.steps, r.el)
         if not at:
-            if r.overtime and self.settings().get("afterWorkout", "hold") == "hold":
+            if r.overtime and self.settings().get("afterWorkout", "grade0") == "hold":
                 last = r.steps[-1]
                 return step_watts(last, last["d"], r.ftp, 1 if r.test else r.k)
             return None
@@ -317,7 +317,7 @@ class RideEngine:
         it holds the last grade, or 0 % with afterWorkout grade0. Rate limited: a change over 0.1 % goes out
         at once, smaller ones at most every 2 s (many trainers dislike floods)."""
         r = self.ride
-        base = 0.0 if r.cs["end"] and self.settings().get("afterWorkout", "hold") != "hold" else grade_at(r.course, r.cs["d"])
+        base = 0.0 if r.cs["end"] and self.settings().get("afterWorkout", "grade0") != "hold" else grade_at(r.course, r.cs["d"])
         want = _r1(min(G_MAX, max(G_MIN, base + r.jr["g"])))
         if r.sg is None or abs(want - r.sg) > 0.1 + 1e-9 or r.el - r.st >= 2:
             r.sg, r.st = want, r.el
@@ -939,7 +939,7 @@ class RideEngine:
                 "started": r.started, "paused": r.paused, "auto_paused": r.auto, "elapsed_s": round(r.el), "el": r.el,
                 "ftp": r.ftp, "intensity": r.k, "test": r.test, "target_w": self.cur_target(),
                 "grade": None if r.steps else r.jr["g"], "level": None if r.steps else r.jr.get("r"),
-                "overtime": r.overtime, "after_workout": self.settings().get("afterWorkout", "hold"),
+                "overtime": r.overtime, "after_workout": self.settings().get("afterWorkout", "grade0"),
                 "jr": r.jr, "samples": len(r.samples), "control": self.control_mode(),
                 "ov": {str(k): v for k, v in r.ov.items()},
                 "last30": {"power": E.js_round(_mean([x[2] for x in l30])), "cadence": E.js_round(_mean([x[3] for x in l30])),

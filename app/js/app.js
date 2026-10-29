@@ -868,7 +868,7 @@ async function renderSettings() {
   $('#units').value = settings.units || 'imperial'; showUnits();
   renderHrZones();
   $('#virtDist').value = settings.hideVirtualDistance ? '1' : '0';
-  $('#afterWk').value = settings.afterWorkout || 'hold';
+  $('#afterWk').value = settings.afterWorkout || 'grade0';
   $('#gImport').style.display = garminOn ? '' : 'none';
   conn.renderSettings();
   if (WEB) return;

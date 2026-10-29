@@ -224,6 +224,7 @@ def test_pause_during_auto_pause_sticks(srv):
 
 
 def test_overtime_controls(srv):
+    srv.server.update_settings({"afterWorkout": "hold"})  # the default is grade0 (ride free)
     eng = ride(srv, "1m 50%", n=70)
     assert st(srv)["overtime"] and st(srv)["target_w"] == 100
     ctl(srv, "adjust", dir=1)  # hold: +/- scales the held target

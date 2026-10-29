@@ -71,7 +71,7 @@ export class Engine {
     if (!r.steps) return r.jr.m === 'w' ? r.jr.w : null;
     const at = stepAt({ steps: r.steps }, r.el);
     if (!at) {
-      if (r.overtime && (this.settings().afterWorkout || 'hold') === 'hold') { const last = r.steps.at(-1); return stepWatts(last, last.d, r.ftp, r.test ? 1 : r.k); }
+      if (r.overtime && (this.settings().afterWorkout || 'grade0') === 'hold') { const last = r.steps.at(-1); return stepWatts(last, last.d, r.ftp, r.test ? 1 : r.k); }
       return null;
     }
     return stepWatts(at.s, at.into, r.ftp, r.test ? 1 : r.k);
@@ -91,7 +91,7 @@ export class Engine {
   // grade sent on a course: the road under the rider plus the +/- offset (jr.g); after the finish the last grade,
   // or 0 % with afterWorkout grade0. Rate limited: over 0.1 % at once, smaller changes at most every 2 s.
   courseGrade() {
-    const r = this.ride, base = r.cs.end && (this.settings().afterWorkout || 'hold') !== 'hold' ? 0 : gradeAt(r.course, r.cs.d);
+    const r = this.ride, base = r.cs.end && (this.settings().afterWorkout || 'grade0') !== 'hold' ? 0 : gradeAt(r.course, r.cs.d);
     const want = r1(Math.min(G_MAX, Math.max(G_MIN, base + r.jr.g)));
     if (r.sg == null || Math.abs(want - r.sg) > 0.1 + 1e-9 || r.el - r.st >= 2) { r.sg = want; r.st = r.el; }
     return r.sg;
@@ -381,7 +381,7 @@ export class Engine {
     const ride = st.ride = { id: r.id, name: r.name, text: r.text, mode: r.steps ? 'workout' : { w: 'erg', r: 'resistance' }[r.jr.m] || 'grade',
       started: r.started, paused: r.paused, auto_paused: r.auto, elapsed_s: jsr(r.el), el: r.el, ftp: r.ftp, intensity: r.k, test: r.test,
       target_w: this.curTarget(), grade: r.steps ? null : r.jr.g, level: r.steps ? null : r.jr.r, overtime: r.overtime,
-      after_workout: this.settings().afterWorkout || 'hold',
+      after_workout: this.settings().afterWorkout || 'grade0',
       jr: r.jr, samples: r.samples.length, control: this.controlMode(), ov: Object.fromEntries(Object.entries(r.ov)),
       last30: { power: jsr(mean(l30.map(x => x[2]))), cadence: jsr(mean(l30.map(x => x[3]))), hr: h.at(-1) || null, hr_delta: h.length ? h.at(-1) - h[0] : null },
       total_s: null, step: null, steps: null, course: null };

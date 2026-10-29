@@ -8,7 +8,7 @@ import { detail, metaRow, trends } from './history.js';
 import { parseLine } from './lines.js';
 
 const SETTINGS_DEFAULTS = { ftp: 200, weight: 0, beeps: true, autoGarmin: false, hrZones: null, hrMax: null, hrZonesSrc: null, cadRange: [85, 95],
-  afterWorkout: 'hold', ftpSrc: null, hideVirtualDistance: false, units: 'imperial', cadOn: true };
+  afterWorkout: 'grade0', ftpSrc: null, hideVirtualDistance: false, units: 'imperial', cadOn: true };
 const NOT_WEB = 'not available in the web version; use the local app';
 const pad = n => String(n).padStart(2, '0'), hms = d => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 const resp = (status, obj, type = 'application/json') => new Response(type === 'application/json' ? JSON.stringify(obj) : obj, { status, headers: { 'Content-Type': type } });

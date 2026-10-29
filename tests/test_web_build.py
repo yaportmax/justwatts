@@ -47,6 +47,7 @@ def test_web_mode_ride_with_reload(dist, node):
     assert rs["name"] == "Web ride" and rs["samples"] == 47 and rs["paused"] and rs["auto"]
     assert out["overtime"] is True
     f = out["final"]
+    assert out["restored"] == {"custom": ["c-test1"], "courses": ["k-test1"]}
     assert f["rides"] == 1 and f["samples"] == 247 and f["fit"] == ".FIT" and f["backupRides"] == 1 and f["steps"] == 3
     assert f["garminStatus"] == 503 and f["agent"] == {"connected": False} and f["meter"] == "none"
     assert [e.split(" ")[0] + " " + e.split(" ")[1] for e in f["events"]] == ["RIDE START", "RIDE RESUMED", "EDIT insert", "WORKOUT DONE", "RIDE END"]

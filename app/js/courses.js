@@ -77,5 +77,5 @@ export function createCourses({ $, store, toast, fit, css, units, ride }) {
   }
 
   render();
-  return { selected, render, renderRide };
+  return { selected, render, renderRide, reload: () => { mine = store.get('hw.courses', []); render(); } };
 }

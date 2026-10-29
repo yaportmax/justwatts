@@ -12,6 +12,7 @@ import { createBuilder } from './builder.js';
 import { LIBRARY, CATEGORIES } from './library.js';
 import { createCourses } from './courses.js';
 import { drawMap } from './map.js';
+import { checkCourse } from './course.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -987,11 +988,19 @@ const fileBaseOf = r => `${new Date(r.start || r.samples[0][0]).toISOString().sl
 if (WEB) {
   document.body.classList.add('web');
   if (!navigator.bluetooth) $('#webNotice').style.display = '';
-  $('#bkExport').onclick = async () => { const j = await (await F('/api/backup')).json(); download(`openspin-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(j), 'application/json'); };
+  // rides and settings live in IndexedDB (the backend); custom workouts and imported courses in localStorage
+  $('#bkExport').onclick = async () => { const j = await (await F('/api/backup')).json(); j.local = { custom, courses: store.get('hw.courses', []) }; download(`openspin-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(j), 'application/json'); };
   $('#bkImport').onclick = () => $('#bkFile').click();
   $('#bkFile').onchange = async e => {
     const f = e.target.files[0]; if (!f) return; e.target.value = '';
-    try { const j = await apiJson('/api/restore', JSON.parse(await f.text())); toast(`Imported ${j.rides} rides`); await loadSettings(); renderHistory(); } catch (err) { toast('Import failed: ' + err.message); }
+    try {
+      const b = JSON.parse(await f.text()), j = await apiJson('/api/restore', b);
+      const merge = (mine, add, ok) => [...mine, ...(Array.isArray(add) ? add : []).filter(x => ok(x) && !mine.some(m => m.id === x.id))];
+      const nw = merge(custom, b.local?.custom, x => typeof x?.id === 'string' && x.id.startsWith('c-') && typeof x.text === 'string' && typeof x.name === 'string');
+      const nc = merge(store.get('hw.courses', []), b.local?.courses, x => { if (typeof x?.id !== 'string' || !x.id.startsWith('k-')) return false; try { checkCourse(x); return true; } catch { return false; } });
+      const added = nw.length - custom.length; custom = nw; store.set('hw.custom', custom); store.set('hw.courses', nc); courses.reload();
+      toast(`Imported ${j.rides} rides` + (added ? `, ${added} workouts` : '')); await loadSettings(); renderHistory(); renderLib();
+    } catch (err) { toast('Import failed: ' + err.message); }
   };
 }
 

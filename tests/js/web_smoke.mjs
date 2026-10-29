@@ -116,6 +116,10 @@ const garmin = await hw.backend.fetch(`/api/rides/${rides.rides[0].id}/garmin`, 
 out.final = { rides: rides.rides.length, samples: rides.rides[0].samples, fit: Buffer.from(fit.slice(8, 12)).toString(), backupRides: backup.rides.length,
   steps: backup.rides[0].steps.length, garminStatus: garmin.status, events: backup.rides[0].events.map(e => e[1]).filter(l => /^(RIDE|EDIT|WORKOUT)/.test(l)),
   agent: hw.state().agent, meter: $('#agentMeter').style.display };
+// a backup carries custom workouts and imported courses (localStorage) next to the rides (IndexedDB)
+const wk = { id: 'c-test1', name: 'Backup test', text: '10m 60%' }, crs = { id: 'k-test1', name: 'Backup hill', dist: 2000, gain: 80, ele: Array.from({ length: 201 }, (_, i) => i * 0.4), ll: [] };
+await $('#bkFile').onchange({ target: { files: [{ text: async () => JSON.stringify({ ...backup, local: { custom: [wk, { id: 'x', text: 1 }], courses: [crs, { id: 'k-bad' }] } }) }], value: '' } });
+out.restored = { custom: JSON.parse(mem.get('hw.custom')).map(w => w.id), courses: JSON.parse(mem.get('hw.courses')).map(c => c.id) };
 out.spoken = spoken.slice(0, 6);
 // ---------- boot 3: a course is in use, Just ride rides it ----------
 mem.set('hw.course', JSON.stringify('s-climb'));

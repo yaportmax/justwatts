@@ -38,9 +38,10 @@ def test_vercel_headers(dist):
     v = json.loads((dist / "vercel.json").read_text())
     h = {x["key"]: x["value"] for x in v["headers"][0]["headers"]}
     csp = h["Content-Security-Policy"]
-    assert "default-src 'self'" in csp and "script-src 'self';" in csp and "worker-src 'self';" in csp
-    connect = re.search(r"connect-src ([^;]+);", csp).group(1).split()                 # map tiles + terrain only
-    assert connect[0] == "'self'" and all(h.startswith("https://") and "*" not in h for h in connect[1:])
+    assert "default-src 'self'" in csp and "script-src 'self' https://www.googletagmanager.com;" in csp and "worker-src 'self';" in csp
+    connect = re.search(r"connect-src ([^;]+);", csp).group(1).split()                 # map tiles, terrain, GA4 only
+    ga = {"https://*.google-analytics.com", "https://*.analytics.google.com", "https://www.googletagmanager.com"}
+    assert connect[0] == "'self'" and all(h.startswith("https://") and ("*" not in h or h in ga) for h in connect[1:])
     assert "https://s3.amazonaws.com" in connect and "https://server.arcgisonline.com" in csp
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
     assert h["X-Content-Type-Options"] == "nosniff" and "bluetooth=(self)" in h["Permissions-Policy"]

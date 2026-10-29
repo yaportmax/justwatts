@@ -10,6 +10,7 @@ import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
 import { createBuilder } from './builder.js';
 import { fromWords } from './words.js';
+import { view as aView, track, workoutTag } from './analytics.js';
 import { LIBRARY, CATEGORIES, FEATURED } from './library.js';
 import { createCourses } from './courses.js';
 import { drawMap } from './map.js';
@@ -178,8 +179,8 @@ $('#bText').oninput = renderBuilder;
 // plain words -> the same text format (rules in words.js, nothing leaves the page)
 const buildFromWords = () => {
   const t = $('#bWords').value.trim(); if (!t) return;
-  try { $('#bText').value = treeText(fromWords(t)); renderBuilder(); $('#bErr').textContent = ''; }
-  catch (err) { $('#bErr').textContent = err.message; }
+  try { $('#bText').value = treeText(fromWords(t)); renderBuilder(); $('#bErr').textContent = ''; track('words_build', { ok: 1 }); }
+  catch (err) { $('#bErr').textContent = err.message; track('words_build', { ok: 0 }); }
 };
 $('#bWordsGo').onclick = buildFromWords;
 $('#bWords').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); buildFromWords(); } };
@@ -187,7 +188,7 @@ $('#bUndo').onclick = () => { if (!builder.undo()) toast('Nothing to undo'); };
 $('#bSave').onclick = () => {
   const w = builderWorkout(); if (!renderBuilder()) return;
   const i = custom.findIndex(x => x.id === w.id); i >= 0 ? custom[i] = w : custom.unshift(w);
-  editing = w.id; $('#bDel').style.display = ''; store.set('hw.custom', custom); renderLibBar(); renderLib(); toast('Saved');
+  editing = w.id; $('#bDel').style.display = ''; track('workout_save'); store.set('hw.custom', custom); renderLibBar(); renderLib(); toast('Saved');
 };
 $('#bDel').onclick = () => { custom = custom.filter(x => x.id !== editing); store.set('hw.custom', custom); editing = null; $('#bDel').style.display = 'none'; renderLibBar(); renderLib(); toast('Deleted'); };
 $('#bRide').onclick = () => { if (renderBuilder()) loadRide(builderWorkout()); };
@@ -324,6 +325,7 @@ function loadRide(w, course = null) {  // course: the one picked for this ride, 
   // loading ends the ride in progress: a second tap within 4 s confirms
   if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return; }
   loadArmed = 0;
+  track('ride_load', { workout: workoutTag(w), course: !course ? 'flat' : String(course.id).startsWith('k-') ? 'imported' : course.id });
   control('load', { workout: w ? { name: w.name, text: w.text, test: !!w.test } : null, course }).then(() => show('ride')).catch(() => {});
 }
 function rideShell() {
@@ -666,7 +668,7 @@ async function migrateLocalRides() {
   if (ok) store.set('hw.migrated', true);
 }
 async function finishedRide(f) {
-  beep(660, 0.4);
+  beep(660, 0.4); track('ride_finish', { minutes: Math.round((f.samples || 0) / 60) });
   show('history'); await renderHistory(); openSummary(f.id);
 }
 let openId = null, openRide = null;
@@ -922,6 +924,7 @@ if (WEB) {
 
 /* ---------- nav + settings + init ---------- */
 function show(v) {
+  aView(v);
   $$('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   $$('.view').forEach(s => s.classList.toggle('on', s.id === 'v-' + v));
   if (v === 'workouts') showTab(wkTab);

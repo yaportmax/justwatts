@@ -10,7 +10,7 @@ const crypto = require('node:crypto');
 const MIN = 60000, HOUR = 3600000;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const OAUTH = '__Host-jw_oauth';
-const TOKEN_TTL = { verify: 2 * DAY, reset: HOUR };
+const TOKEN_TTL = { verify: 2 * DAY, reset: HOUR, claim: DAY };
 
 function readEmail(v) {
   const e = String(v ?? '').trim().toLowerCase();
@@ -48,12 +48,15 @@ async function sendMail(ctx, to, subject, text) {
   }).catch(() => null);
   if (!r || !r.ok) console.error('email send failed', r ? r.status : 'network');
 }
-async function mailToken(ctx, user, email, purpose) {
+async function mailToken(ctx, user, email, purpose, opts = {}) {
   const token = randomId(32);
   await ctx.store.putToken({ hash: sha256(token), userId: user.id, purpose, data: email, expiresAt: ctx.now + TOKEN_TTL[purpose] });
   const link = `${ctx.origin}/?${purpose}=${token}`;
   if (purpose === 'verify') await sendMail(ctx, email, 'Confirm your Just Watts email', `Confirm your email for Just Watts:\n\n${link}\n\nThe link works for 48 hours. If you did not sign up, ignore this email.`);
-  else await sendMail(ctx, email, 'Reset your Just Watts password', `Set a new Just Watts password:\n\n${link}\n\nThe link works for 1 hour. If you did not ask for this, ignore this email.`);
+  else if (purpose === 'reset') await sendMail(ctx, email, 'Reset your Just Watts password', `Set a new Just Watts password:\n\n${link}\n\nThe link works for 1 hour. If you did not ask for this, ignore this email.`);
+  // claim: an account without an email (Strava sign-in) asked for this address; the link only works in that browser
+  else if (opts.taken) await sendMail(ctx, email, 'Add a Strava sign-in to your Just Watts account', `Someone signed in to Just Watts with Strava and entered this address, which already has a Just Watts account.\n\nTo add that sign-in to your account, open this link in the browser where you signed in with Strava:\n\n${link}\n\nThe link works for 24 hours. If this was not you, ignore this email. Nothing changes.`);
+  else await sendMail(ctx, email, 'Confirm your Just Watts email', `Confirm this email for your Just Watts account. Open the link in the browser where you signed in:\n\n${link}\n\nThe link works for 24 hours. If this was not you, ignore this email.`);
 }
 
 /* ---------- providers, me ---------- */
@@ -212,6 +215,44 @@ route('POST', '/api/auth/link/email', async ctx => {
   if (mailOn()) await mailToken(ctx, u, email, 'verify');
   return ok(await publicUser(ctx, { ...u, passHash: 'set' }));
 });
+// An account without an email (Strava gives none) asks for one. The answer never says whether the address
+// has an account: the address gets a link either way. Free address: the link adds it, verified. Taken: the
+// link merges this (new) account into the owner's, so the Strava sign-in joins it. The link only works in
+// the browser that asked (same session), so mailing it to someone else's inbox cannot pull them in.
+route('POST', '/api/auth/email/claim', async ctx => {
+  checkWrite(ctx.req);
+  const u = await requireUser(ctx), b = await readJson(ctx.req);
+  if (!mailOn()) fail(503, 'email_unavailable');
+  const email = readEmail(b.email);
+  if ((await ctx.store.identitiesOf(u.id)).some(i => i.provider === 'email')) fail(409, 'already_linked');
+  await limit(ctx, [[`claim:${u.id}`, HOUR, 5], [`claim:ip:${ctx.ip}`, HOUR, 10], [`mail:${email}`, HOUR, 5]]);
+  const owner = await ctx.store.identityByEmail(email);
+  await mailToken(ctx, u, email, 'claim', { taken: !!(owner && owner.userId !== u.id) });
+  return ok({ status: 'email_sent' }, 202);
+});
+route('POST', '/api/auth/email/confirm', async ctx => {
+  checkWrite(ctx.req);
+  const u = await requireUser(ctx), b = await readJson(ctx.req);
+  await limit(ctx, [[`token:ip:${ctx.ip}`, HOUR, 30]]);
+  const t = await ctx.store.takeToken(sha256(String(b.token ?? '').slice(0, 100)), 'claim', ctx.now);
+  if (!t || t.userId !== u.id) fail(400, 'bad_token');
+  const email = t.data, mine = await ctx.store.identitiesOf(u.id);
+  if (mine.some(i => i.provider === 'email')) fail(409, 'already_linked');
+  const owner = await ctx.store.identityByEmail(email);
+  if (!owner || owner.userId === u.id) {  // free: this account's email, confirmed by the link
+    try { await ctx.store.addIdentity({ provider: 'email', subject: email, userId: u.id, email, verified: true, createdAt: ctx.now }); }
+    catch (e) { if (e.code === 'exists') fail(400, 'bad_token'); throw e; }
+    return ok({ ...(await publicUser(ctx, u)), merged: false });
+  }
+  // taken: move this account's sign-ins and synced data into the owner's account, then drop this one
+  const theirs = await ctx.store.identitiesOf(owner.userId);
+  if (mine.some(i => theirs.some(x => x.provider === i.provider))) fail(409, 'already_linked');
+  try { await ctx.store.mergeUser(u.id, owner.userId); } catch (e) { if (e.code === 'exists') fail(409, 'already_linked'); throw e; }
+  if (owner.provider === 'email' && !owner.verified) await ctx.store.setIdentityVerified('email', owner.subject, true);  // the link proved the address
+  const target = await ctx.store.getUser(owner.userId);
+  startSession(ctx, target);
+  return ok({ ...(await publicUser(ctx, target)), merged: true });
+});
 route('POST', '/api/auth/unlink', async ctx => {
   checkWrite(ctx.req);
   const u = await requireUser(ctx), b = await readJson(ctx.req);
@@ -313,12 +354,14 @@ for (const [name, cfg] of Object.entries(OAUTH_CFG)) {
         catch (e) { if (e.code === 'exists') return back({ auth: 'error', reason: 'already_linked' }); throw e; }
       }
     }
+    let created = false;
     if (!user) {
       await limit(ctx, [[`signup:ip:${ctx.ip}`, HOUR, 10]]);
       user = await ctx.store.createUserWithIdentity({ id: randomId(12), name: prof.name, passHash: null, createdAt: ctx.now }, { provider: name, subject: prof.subject, email: prof.email, verified: prof.verified });
+      created = true;
     }
     startSession(ctx, user);
-    return back({ auth: 'ok' });
+    return back(created ? { auth: 'ok', new: '1' } : { auth: 'ok' });  // new: the page shows its first-run steps
   });
 }
 

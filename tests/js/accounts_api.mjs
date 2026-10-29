@@ -350,7 +350,7 @@ S.google = async () => {
   r = await a.get('/api/auth/google/start?return=/workouts');
   const st = new URL(r.headers.location).searchParams; lastNonce = st.get('nonce');
   r = await a.get(`/api/auth/google/callback?code=authcode123&state=${st.get('state')}`);
-  assert.equal(r.headers.location, '/workouts?provider=google&auth=ok');
+  assert.equal(r.headers.location, '/workouts?provider=google&auth=ok&new=1');
   // PKCE verifier matches the challenge
   const v = seen.at(-1).code_verifier;
   assert.equal(crypto.createHash('sha256').update(v).digest('base64url'), st.get('code_challenge'));
@@ -423,7 +423,7 @@ S.google = async () => {
   me = (await g.get('/api/auth/me')).body; assert.equal(me.user.id, vid); assert.deepEqual(me.identities.map(i => i.provider), ['email', 'google']);
   // OAuth-only delete needs a fresh sign-in
   const go = client(); fetchImpl = googleStub(() => ({ sub: '555', email: 'only@example.com', email_verified: true, nonce: lastNonce }));
-  assert.equal(await flow(go), '/?provider=google&auth=ok');
+  assert.equal(await flow(go), '/?provider=google&auth=ok&new=1');
   advance(20 * 60000);
   assert.equal((await go.post('/api/auth/delete', { confirm: 'DELETE' })).body.error, 'reauth_required');
   assert.equal(await flow(go), '/?provider=google&auth=ok');
@@ -439,7 +439,7 @@ S.strava = async () => {
   assert.equal(f.start.origin + f.start.pathname, 'https://www.strava.com/oauth/authorize');
   assert.equal(f.start.searchParams.get('client_id'), '4242'); assert.equal(f.start.searchParams.get('scope'), 'read');
   assert.equal(f.start.searchParams.get('redirect_uri'), ORIGIN + '/api/auth/strava/callback');
-  assert.equal(f.back, '/?provider=strava&auth=ok');
+  assert.equal(f.back, '/?provider=strava&auth=ok&new=1');
   assert.deepEqual(seen[0].body, { client_id: '4242', client_secret: 'stsecret', code: 'authcode123', grant_type: 'authorization_code' });
   const me = (await a.get('/api/auth/me')).body;
   assert.equal(me.user.name, 'Eddy'); assert.equal(me.user.email, null); assert.deepEqual(me.identities.map(i => i.provider), ['strava']);
@@ -757,6 +757,96 @@ S.moderation = async () => {
   const fake = await signup('boss@example.com');
   assert.equal((await fake.get('/api/auth/me')).body.admin, false);
   assert.equal((await fake.get('/api/admin/hidden')).status, 403);
+};
+
+// Strava gives no email: the account asks for one once. Free address: a link adds it. Taken: the link merges
+// the new account into the owner's. The answer is the same either way, and the link only works in the asking browser.
+S.claim = async () => {
+  await reset({ STRAVA_CLIENT_ID: '4242', STRAVA_CLIENT_SECRET: 'stsecret' });
+  let athlete = 1;
+  const stub = c => c.url === 'https://www.strava.com/oauth/token' ? { status: 200, body: { athlete: { id: athlete, firstname: 'Eddy' } } } : { status: 200, body: { id: 'm' } };
+  fetchImpl = stub;
+  const s0 = client('203.0.113.200'); await oauth(s0, 'strava');
+  let r = await s0.post('/api/auth/email/claim', { email: 'x@example.com' });
+  assert.deepEqual([r.status, r.body.error], [503, 'email_unavailable']);  // without Resend there is no link to send
+
+  await reset({ STRAVA_CLIENT_ID: '4242', STRAVA_CLIENT_SECRET: 'stsecret', RESEND_API_KEY: 're_k', EMAIL_FROM: 'a@b.c' });
+  fetchImpl = stub;
+  const linkOf = m => /\?claim=([\w-]{43})$/m.exec(m.body.text)[1];
+  assert.equal((await client().post('/api/auth/email/claim', { email: 'x@example.com' })).status, 401);
+  // free address
+  athlete = 101; const a = client('203.0.113.201');
+  assert.equal((await oauth(a, 'strava')).back, '/?provider=strava&auth=ok&new=1');
+  const aid = (await a.get('/api/auth/me')).body.user.id;
+  assert.equal((await a.post('/api/auth/email/claim', { email: 'nope' })).body.error, 'bad_email');
+  const free = await a.post('/api/auth/email/claim', { email: ' Free@Example.com ' });
+  assert.deepEqual([free.status, free.body], [202, { status: 'email_sent' }]);
+  assert.equal((await a.get('/api/auth/me')).body.user.email, null);  // nothing changes until the link is opened
+  let m = mails().at(-1); assert.deepEqual(m.body.to, ['free@example.com']); assert.doesNotMatch(m.body.text, /already has/);
+  const tok = linkOf(m);
+  assert.equal((await client().post('/api/auth/email/confirm', { token: tok })).status, 401);  // another browser, signed out: kept
+  athlete = 150; const other = client('203.0.113.209'); await oauth(other, 'strava');
+  assert.equal((await other.post('/api/auth/email/confirm', { token: tok })).body.error, 'bad_token');  // another account: refused (and spent)
+  await a.post('/api/auth/email/claim', { email: 'free@example.com' });
+  r = await a.post('/api/auth/email/confirm', { token: linkOf(mails().at(-1)) });
+  assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.merged, false); assert.equal(r.body.user.id, aid);
+  assert.equal(r.body.user.email, 'free@example.com'); assert.equal(r.body.user.verified, true); assert.equal(r.body.user.hasPassword, false);
+  assert.deepEqual(r.body.identities.map(i => i.provider), ['strava', 'email']);
+  assert.equal((await a.post('/api/auth/email/claim', { email: 'two@example.com' })).body.error, 'already_linked');
+  // no password yet: a reset link sets one
+  await client('203.0.113.202').post('/api/auth/reset/request', { email: 'free@example.com' });
+  const rt = /reset=([\w-]{43})/.exec(mails().at(-1).body.text)[1];
+  assert.equal((await client().post('/api/auth/reset/confirm', { token: rt, password: 'password123' })).status, 200);
+  assert.equal((await client().post('/api/auth/login', { email: 'free@example.com', password: 'password123' })).status, 200);
+
+  // taken address: the existing account (unconfirmed email) with synced data and a community item
+  const e = client('203.0.113.203');
+  await e.post('/api/auth/signup', { email: 'owner@example.com', password: 'password123', name: 'Owner' });
+  await e.post('/api/auth/verify', { token: /verify=([\w-]{43})/.exec(mails().at(-1).body.text)[1] });
+  const eid = (await e.get('/api/auth/me')).body.user.id;
+  await e.post('/api/sync/push', { records: [{ kind: 'workout', id: 'c-own', data: { name: 'Own' }, updatedAt: NOW - 5000 }, { kind: 'settings', id: 'main', data: { ftp: 250 }, updatedAt: NOW - 5000 }] });
+  const item = (await e.post('/api/community', { kind: 'workout', name: 'Merge test', text: '10m 60%, 5m 90%', tags: [] })).body.item;
+  await e.post(`/api/community/${item.id}/like`);
+  athlete = 102; const b = client('203.0.113.204'); await oauth(b, 'strava');
+  const bid = (await b.get('/api/auth/me')).body.user.id;
+  await b.post('/api/sync/push', { records: [{ kind: 'workout', id: 'c-new', data: { name: 'New' }, updatedAt: NOW - 1000 }, { kind: 'settings', id: 'main', data: { ftp: 270 }, updatedAt: NOW - 1000 }] });
+  assert.equal((await b.put(`/api/sync/rides/r-1?updatedAt=${NOW - 1000}`, gz({ id: 'r-1', name: 'Merged ride', samples: [[NOW, 200]] }))).status, 200);
+  await b.post(`/api/community/${item.id}/like`);
+  assert.equal((await e.get(`/api/community/${item.id}`)).body.item.likes, 2);
+  const before = mails().length;
+  const taken = await b.post('/api/auth/email/claim', { email: 'OWNER@example.com' });
+  assert.deepEqual([taken.status, taken.body], [free.status, free.body]);  // the same answer as a free address
+  assert.equal(mails().length, before + 1); m = mails().at(-1);
+  assert.deepEqual(m.body.to, ['owner@example.com']); assert.match(m.body.text, /already has a Just Watts account/);
+  r = await b.post('/api/auth/email/confirm', { token: linkOf(m) });
+  assert.equal(r.status, 200); assert.equal(r.body.merged, true); assert.equal(r.body.user.id, eid);
+  assert.deepEqual(r.body.identities.map(i => i.provider).sort(), ['email', 'strava']);
+  assert.equal((await b.get('/api/auth/me')).body.user.id, eid);  // this browser is now in the owner's account
+  assert.equal((await e.get('/api/auth/me')).body.user.id, eid);  // the owner's other sessions stay
+  const ch = (await e.get('/api/sync/changes?since=0')).body;
+  assert.deepEqual(ch.records.map(x => x.id).sort(), ['c-new', 'c-own', 'main']);
+  assert.equal(ch.records.find(x => x.id === 'main').data.ftp, 270);  // newer wins
+  assert.deepEqual(ch.rides.map(x => [x.id, x.name]), [['r-1', 'Merged ride']]);
+  assert.equal((await e.get(`/api/community/${item.id}`)).body.item.likes, 1);  // one like per account after the merge
+  athlete = 102; const again = client('203.0.113.205');
+  assert.equal((await oauth(again, 'strava')).back, '/?provider=strava&auth=ok');  // Strava now signs in to the owner's account
+  assert.equal((await again.get('/api/auth/me')).body.user.id, eid);
+  assert.equal((await client('203.0.113.206').post('/api/auth/login', { email: 'owner@example.com', password: 'password123' })).status, 200);
+  assert.notEqual(bid, eid);
+  // the owner already has a Strava sign-in: nothing merges
+  athlete = 103; const c = client('203.0.113.207'); await oauth(c, 'strava');
+  await c.post('/api/auth/email/claim', { email: 'owner@example.com' });
+  r = await c.post('/api/auth/email/confirm', { token: linkOf(mails().at(-1)) });
+  assert.deepEqual([r.status, r.body.error], [409, 'already_linked']);
+  assert.ok((await c.get('/api/auth/me')).body.user);
+  // expired link, and rate limits per account
+  athlete = 104; const d = client('203.0.113.208'); await oauth(d, 'strava');
+  await d.post('/api/auth/email/claim', { email: 'late@example.com' });
+  const lt = linkOf(mails().at(-1)); advance(DAY + 1000);
+  assert.equal((await d.post('/api/auth/email/confirm', { token: lt })).body.error, 'bad_token');
+  for (let i = 0; i < 5; i++) assert.equal((await d.post('/api/auth/email/claim', { email: `rl${i}@example.com` })).status, 202);
+  r = await d.post('/api/auth/email/claim', { email: 'rl9@example.com' });
+  assert.deepEqual([r.status, r.body.error], [429, 'rate_limited']);
 };
 
 /* ---------- run ---------- */

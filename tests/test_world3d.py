@@ -137,3 +137,27 @@ def test_sky_colours_follow_the_sun(out):
 def test_procedural_textures(out):
     t = out["tex"]
     assert t["n"] == 64 * 64 * 4 and t["same"] and t["smooth"] < 40 and t["waveFlat"] in range(118, 138)
+
+
+def test_world_sound_gain_curves(out):
+    a = out["audio"]
+    assert a["windStill"] == 0 and a["wind10"] == 0.067 and a["windCap"] == 0.22 and a["windUp"]      # wind grows with speed, capped
+    assert a["tireStill"] == 0 and a["tire10"] == 0.066 and a["tireGravel"] > a["tire10"] and a["tireUp"]
+    assert a["hz"] == [70, 160]
+    assert a["tickPedal"] == 0 and a["tickStill"] == 0 and a["tick5"] == 57.011 and a["tickCap"] == 140  # ticks only coasting
+    assert a["seaNone"] == 0 and a["seaHalf"] == 0.1 and a["seaSome"]
+
+
+def test_cars_pass_a_rider_in_their_lane(out):
+    p = out["pass"]
+    assert p["clear"] == {"v": 20, "pull": 0} and p["beside"] == {"v": 20, "pull": 0} and p["behind"] == {"v": 20, "pull": 0}
+    assert p["closing"] == {"v": 11, "pull": 1}                               # close behind: rider speed + 3, pulled out
+
+
+def test_rider_stands_on_steep_climbs_and_tucks_descending(out):
+    s = out["stance"]
+    assert s["up"] == {"up": True, "sb": 1} and s["held"]                     # stands above 7.5 percent, stays up at 7
+    assert s["down"] == {"up": False, "sb": 0}                                 # sits again below 6
+    assert s["level"] == 0 and s["still"] == 0                                 # coasting: cranks level and still
+    assert s["tuck"] == {"tuck": True, "tb": 1}                                # fast downhill: tucked
+    assert s["thigh"] == 0.46 and s["shin"] == 0.47 and s["forward"]           # the IK keeps bone lengths, knee forward

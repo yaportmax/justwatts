@@ -48,8 +48,9 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
   Station) or a tap on the map. Ride real roads with no route: you stay on the road; at a junction you go
   straight on or follow the main road unless you pick another way, and no way leads out of the world. A
   workout can run on top, and the road ridden can be saved as a course. The ride map shows it as a 3D world
-  (three.js, vendored): terrain, roads with their lanes and markings, trees, towns, the Golden Gate Bridge
-  and the city across the water, a chase camera (V: first person, T: time of day), other riders, and their
+  (three.js, vendored): terrain, grass that moves in the wind, roads with their lanes and markings, trees, towns,
+  the Golden Gate Bridge and the city across the water, a little traffic and wildlife, wind and road sound, a
+  chase camera (V: first person, T: time of day, G: fog, M: sound, K: kit colour), other riders, and their
   draft when you sit on a wheel. Without WebGL2, or if it runs too slowly, the 3D map or the 2D map shows
   instead. Roads, terrain and ground data are OpenStreetMap and Mapzen terrain, baked into the app
   (`app/roads/marin`, `app/world`) so a ride never waits on a server.

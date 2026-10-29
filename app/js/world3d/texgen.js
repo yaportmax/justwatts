@@ -8,6 +8,15 @@ export function vnoise(x, y, per, seed) {
   const h = (a, b) => hash2(((a % per) + per) % per + seed * 1013, ((b % per) + per) % per - seed * 7);
   return (h(i, j) * (1 - u) + h(i + 1, j) * u) * (1 - v) + (h(i, j + 1) * (1 - u) + h(i + 1, j + 1) * u) * v;
 }
+// tileable gradient (Perlin) noise, about -0.7..0.7, wrapping every `per` cells: no square blocks like value noise
+export function gnoise(x, y, per, seed) {
+  const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+  const g = (a, b) => { const h = hash2(((a % per) + per) % per + seed * 977, ((b % per) + per) % per - seed * 13) * 6.283185; return [Math.cos(h), Math.sin(h)]; };
+  const d = (a, b, dx, dy) => { const q = g(a, b); return q[0] * dx + q[1] * dy; };
+  const u = fx * fx * fx * (fx * (fx * 6 - 15) + 10), v = fy * fy * fy * (fy * (fy * 6 - 15) + 10);
+  const n0 = d(i, j, fx, fy) * (1 - u) + d(i + 1, j, fx - 1, fy) * u, n1 = d(i, j + 1, fx, fy - 1) * (1 - u) + d(i + 1, j + 1, fx - 1, fy - 1) * u;
+  return n0 * (1 - v) + n1 * v;
+}
 // size x size RGBA bytes: four tileable fractal noises, R finest (base 16 cells) to A coarsest (base 2 cells); no
 // octave finer than 8 pixels a cell, so the texture stays smooth when magnified
 export function noisePixels(size = 256) {
@@ -15,8 +24,8 @@ export function noisePixels(size = 256) {
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     for (let c = 0; c < 4; c++) {
       let s = 0, a = 0.5, w = 0, f = base[c];
-      for (let o = 0; o < 4 && f <= size / 8; o++, f *= 2, a *= 0.55) { s += a * vnoise(x / size * f, y / size * f, f, c * 5 + o); w += a; }
-      out[(y * size + x) * 4 + c] = Math.round(255 * Math.max(0, Math.min(1, (s / w - 0.5) * 1.6 + 0.5)));
+      for (let o = 0; o < 4 && f <= size / 8; o++, f *= 2, a *= 0.55) { s += a * gnoise(x / size * f, y / size * f, f, c * 5 + o); w += a; }
+      out[(y * size + x) * 4 + c] = Math.round(255 * Math.max(0, Math.min(1, s / w * 1.25 + 0.5)));
     }
   }
   return out;

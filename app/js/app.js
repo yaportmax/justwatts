@@ -794,6 +794,7 @@ const KEYS = {
   Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
   KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo,
   KeyV: () => courses.map.toggleCamera(), KeyT: () => courses.map.cycleTime(),  // the 3D world
+  KeyG: () => courses.map.toggleFog(), KeyM: () => courses.map.toggleSound(), KeyK: () => courses.map.cycleKit(),
 };
 function onKey(e) {
   if (e.key === 'Escape') { if (conn.escape()) return; picker.close(); detail.close(); sheet(false); $('#keysModal').classList.remove('on'); return; }

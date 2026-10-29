@@ -49,6 +49,9 @@ float jwFogI(float d0, float H, float y0, float ry, float dist) {
   #else
   float od = jwFogI(fogNear * 1e-6, 1400.0, y0, ry, fdist) + jwFogI(fogFar * 1e-6, 110.0, y0 + 8.0, ry, fdist);
   #endif
+  #ifdef JW_FOG_SCALE
+  od *= JW_FOG_SCALE;
+  #endif
   float fogFactor = 1.0 - exp(-max(od, 0.0));
   vec3 fogC = fogColor;
   #if defined(JW_LIT) && NUM_DIR_LIGHTS > 0
@@ -121,7 +124,7 @@ export function createSky(scene, { far, quality = 0 }) {
   /* Karl the fog: soft puffs low over the sea, one instanced draw, facing the camera */
   const banks = { mesh: null, amount: 1, on: true };
   const bankMat = new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, fog: true,
+    transparent: true, depthWrite: false, fog: true, defines: { JW_FOG_SCALE: 0.3 },
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: T.puff }, op: { value: 0.6 }, lit: { value: new THREE.Color() }, shade: { value: new THREE.Color() }, sunD: { value: new THREE.Vector3() } }]),
     vertexShader: `#include <common>
       #include <fog_pars_vertex>
@@ -142,8 +145,8 @@ export function createSky(scene, { far, quality = 0 }) {
       void main() {
         #include <logdepthbuf_fragment>
         vec4 t = texture2D(map, vUv);
-        float top = smoothstep(0.2, 0.9, vUv.y);
-        gl_FragColor = vec4(mix(shade, lit, 0.55 + 0.45 * top), t.a * op * vA);
+        float top = smoothstep(0.15, 0.95, vUv.y), side = 0.5 + 0.5 * vSide;
+        gl_FragColor = vec4(mix(shade, lit, 0.35 + 0.65 * top), t.a * op * vA);
         #include <fog_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -157,7 +160,7 @@ export function createSky(scene, { far, quality = 0 }) {
     banks.mesh = new THREE.Mesh(g, bankMat); banks.mesh.frustumCulled = false; banks.mesh.renderOrder = 5; scene.add(banks.mesh);
     showBanks();
   }
-  const showBanks = () => { if (banks.mesh) banks.mesh.visible = banks.on && banks.amount > 0.05; bankMat.uniforms.op.value = 0.85 * banks.amount; };
+  const showBanks = () => { if (banks.mesh) banks.mesh.visible = banks.on && banks.amount > 0.05; bankMat.uniforms.op.value = 0.95 * banks.amount; };
 
   /* the time of day */
   let t = 'golden', exposure = 1, sunI = 3, hemiI = 1;
@@ -186,8 +189,8 @@ export function createSky(scene, { far, quality = 0 }) {
     wu.sunC.value.copy(sun.color).multiplyScalar(sun.intensity); wu.sunD.value.copy(sunDir);
     wu.deep.value.setRGB(0.018, 0.075, 0.105, THREE.LinearSRGBColorSpace);
     const bu = bankMat.uniforms;
-    bu.lit.value.setRGB(0.25 + 0.75 * tint[0], 0.25 + 0.72 * tint[1], 0.27 + 0.66 * tint[2], THREE.LinearSRGBColorSpace).multiplyScalar(0.55 + 0.45 * Math.min(1, P.el / 20));
-    bu.shade.value.setRGB(hz[0] * 0.8, hz[1] * 0.84, hz[2] * 0.92, THREE.LinearSRGBColorSpace);
+    bu.lit.value.setRGB(0.35 + 0.65 * tint[0], 0.35 + 0.62 * tint[1], 0.37 + 0.56 * tint[2], THREE.LinearSRGBColorSpace).multiplyScalar(1.05 * (0.6 + 0.4 * Math.min(1, P.el / 20)));
+    bu.shade.value.setRGB(zen[0] * 0.7 + 0.25, zen[1] * 0.7 + 0.27, zen[2] * 0.6 + 0.32, THREE.LinearSRGBColorSpace);
     banks.amount = P.banks; showBanks();
     exposure = P.exp; sunI = sun.intensity; hemiI = hemi.intensity;
   }

@@ -13,6 +13,8 @@ import { treeGeometries, species, buildingGeometry } from './props.js';
 import { createSky } from './sky.js';
 import { createPost } from './post.js';
 import { createGrass } from './grass.js';
+import { createLife } from './life.js';
+import { createAudio } from './audio.js';
 import { makeRider } from './rider.js';
 import { createLandmarks } from './marin.js';
 
@@ -28,7 +30,7 @@ export const QUALITY = [
 const CAP = { 0: 6000, 1: 1600 };
 const OCC = 512;  // the road mask per tile: cells of about 3.8 m (no grass, trees or shrubs on a road)  // trees per tile at full share, by detail
 
-export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, quality = 0, time = 'golden' }) {
+export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, quality = 0, time = 'golden', sound = true, fog = true, kit = null }) {
   let q = Math.max(0, Math.min(2, quality)), dead = false, raf = 0;
   const canvas = document.createElement('canvas'); canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block'; container.appendChild(canvas);
   const tags = document.createElement('div'); tags.className = 'w3tags'; container.appendChild(tags);
@@ -52,6 +54,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const trees = treeGeometries(), treesLo = treeGeometries(true), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera);
+  const life = createLife({ THREE, scene, proj, marks, quality: q }), audio = createAudio({ on: sound });
+  sky.setBanks(fog);
 
   /* ---------- streaming ---------- */
   const near = new Map(), far = new Map(), jobs = jobQueue();
@@ -129,7 +133,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     const B = builder(), pillars = [], hAt = hOf(c), g = c.grid, occ = new Uint8Array(OCC * OCC), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     const mark = (x, z, r) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = 1; };
-    const minor = c.lod > 0, lanes = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
+    const minor = c.lod > 0, lanes = [], drive = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     for (const r of t.roads) {
       if (r.fl & 2) continue;                          // tunnels: under the hill
       if (minor && /path|footway|track|bridleway|service/.test(r.hw)) continue;
@@ -140,6 +144,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (pts.length < 2) continue;
       const dk = r.fl & 16 && r.dk ? [marks.deckLine(...pts[0]), marks.deckLine(...pts.at(-1))] : r.dk;  // the approaches meet the deck
       const centre = ribbon(B, pts, { ...st, hAt, lift: roadLift(r.hw), deck: dk || null, step: minor ? 12 : 5 });
+      if (!minor && st.lm && st.lanes >= 2 && !st.surf && centre.length > 3) drive.push({ P: centre, w: st.w, lanes: st.lanes, one: !!(r.fl & 8), big: /motorway|trunk|primary/.test(r.hw) });
       if (dk) {
         pillars.push(...deckSides(B, centre, st.w, 1.4, hAt));
         for (let i = 1; i < centre.length; i++) c.decks.push([centre[i - 1], centre[i], st.w / 2 + 0.6]);
@@ -147,7 +152,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (!minor) centre.forEach((q, i) => { mark(q[0], q[2], st.w / 2 + 1.2); lanes.push(q[0], q[2], st.w / 2); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, st.w / 2 + 1.2); } });
       }
     }
-    c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes);
+    c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive;
     if (!B.n) return setPart(c, 'roads', null);
     const d = B.done(), geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); geo.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2));
@@ -392,9 +397,14 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const tunnelAt = (x, z) => { const [tx, ty] = tileOf(x, z); return tunnelNear(near.get(key(NEAR_Z, tx, ty)), x, z); };
 
   /* ---------- riders ---------- */
-  const me = makeRider(THREE, { kit: 0xf2c230, kit2: 0x1b1f25, accent: 0xe8b21e }); scene.add(me.group);
+  const me = makeRider(THREE, { kit: kit ?? 0xf2c230, kit2: 0x1b1f25 }); scene.add(me.group);
   const others = new Map();  // id -> { r, tag, x, z, yaw, seen }
-  let grade = 0, dark = 0;
+  let grade = 0, dark = 0, camOver = null, sea = 0, seaAt = 0;
+  // how much of the ground round a point is sea (for the sound of the waves): 16 points at 250 and 700 m
+  function seaShare(x, z) {
+    let n = 0; for (let k = 0; k < 16; k++) { const a = k * 0.785 + (k > 7 ? 0.39 : 0), r = k > 7 ? 700 : 250, h = groundAt(x + Math.cos(a) * r, z + Math.sin(a) * r); if (h == null || h < 0.4) n++; }
+    return n / 16;
+  }
   let chase = [6.5, 2.6], side = 0, rx = 0, rz = 0, camInit = false, st = null, dShown = 0, dAt = 0, tAt = 0, yaw = 0, camYaw = null, mode = 'chase';
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
   function course(s) {
@@ -532,6 +542,9 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (ready) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1.5 : 3);
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
+      life.update(dt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt, roads: () => {
+        const out = []; for (const c of near.values()) if (c.lod === 0 && c.drive) for (const r of c.drive) if (Math.hypot(r.P[0][0] - p[0], r.P[0][2] - p[1]) < 900 || Math.hypot(r.P.at(-1)[0] - p[0], r.P.at(-1)[2] - p[1]) < 900) out.push(r);
+        return out; } });
       // camera: behind and above, looking down the road; first person: at the eyes
       const ahead = at(d + 14), hd = yAt(ahead[0], ahead[1], d + 14);
       const look = Math.atan2(ahead[0] - pa[0], -(ahead[1] - pa[1]));
@@ -550,10 +563,13 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         me.group.visible = false;
       }
       camera.position.copy(camPos); camera.lookAt(camLook);
+      if (camOver) { const [la, lo, h, hd, pitch] = camOver, [x, z] = proj.xz(la, lo), r = hd * Math.PI / 180; camera.position.set(x, h, z); camera.lookAt(x + Math.sin(r) * 100, h + Math.tan(pitch * Math.PI / 180) * 100, z - Math.cos(r) * 100); }
       sky.update(camera, me.group.position, dt, QUALITY[q].span);
       // inside a tunnel: the daylight fades out
       const tk = tunnelAt(camPos.x, camPos.z)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
       sky.sun.intensity = sky.sunI * (1 - 0.92 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.8 * dark);
+      if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
+      audio.update({ dt, v, cad: st.cad || 0, sea, inside: dark });
       renderer.info.reset();
       post.render(sky.exposure * (1 + dark * 0.6));
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
@@ -569,7 +585,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     if (dead) return; dead = true; cancelAnimationFrame(raf);
     for (const m of [near, far]) for (const k of [...m.keys()]) dropChunk(m, k);
     me.dispose(); for (const e of others.values()) e.r.dispose();
-    grass.dispose(); post.dispose();
+    grass.dispose(); post.dispose(); life.dispose(); audio.dispose();
     renderer.dispose(); renderer.forceContextLoss?.(); canvas.remove(); tags.remove();
   }
   raf = requestAnimationFrame(frame);
@@ -584,9 +600,13 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     // Karl the fog's banks on or off
     setFog(on) { return sky.setBanks(on); }, fog: () => sky.banksOn,
     setKit(kit, accent) { me.setKit?.(kit, accent); },
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count }),
+    // world sound on or off
+    setSound(on) { return audio.set(on); }, sound: () => audio.on,
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, life: life.counts }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     debug: () => ({ scene, camera, THREE }),
+    // a fixed camera for screenshots and checks: [lat, lon, height m, heading deg, pitch deg], null to follow the rider
+    viewFrom(v) { camOver = v; },
   };
 }

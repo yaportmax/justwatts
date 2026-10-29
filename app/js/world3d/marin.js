@@ -93,35 +93,56 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const city = new THREE.Group(); root.add(city);
   baked?.index?.().then(ix => buildCity(ix)).catch(() => {});
   function buildCity() {
-    const blocks = [], landmarks = [];
-    // the downtown towers rise around the Financial District; low blocks on the hills around
+    // San Francisco's hills (Telegraph, Russian, Nob, Rincon) under the blocks: [lat, lon, height, radius m]
+    const HILLS = [[37.8024, -122.4058, 80, 260], [37.8011, -122.4194, 88, 420], [37.7930, -122.4161, 96, 480], [37.7862, -122.3925, 30, 250], [37.7975, -122.4260, 40, 500]];
+    const groundSF = (x, z) => { let h = 4; for (const [la, lo, hh, r] of HILLS) { const [hx, hz] = proj.xz(la, lo), d2 = (x - hx) ** 2 + (z - hz) ** 2; h = Math.max(h, 4 + hh * Math.exp(-d2 / (r * r))); } return h; };
+    const blocks = [];
     const fidi = proj.xz(37.7915, -122.3990);
-    for (let la = 37.765; la < 37.809; la += 0.0011) for (let lo = -122.4195; lo < -122.384; lo += 0.0014) {
-      const i = Math.round(la * 1e4), j = Math.round(lo * 1e4); if (hash2(i, j) < 0.25) continue;
-      const lat = la + (hash2(j, i) - 0.5) * 0.0006, lon = lo + (hash2(i + 3, j) - 0.5) * 0.0007;
+    for (let la = 37.765; la < 37.809; la += 0.001) for (let lo = -122.4295; lo < -122.384; lo += 0.0013) {
+      const i = Math.round(la * 1e4), j = Math.round(lo * 1e4); if (hash2(i, j) < 0.22) continue;
+      const lat = la + (hash2(j, i) - 0.5) * 0.0005, lon = lo + (hash2(i + 3, j) - 0.5) * 0.0006;
       // the bay: roughly north of the Embarcadero / Marina shore
-      const shore = lon > -122.395 ? 37.7985 + (lon + 122.395) * 1.3 : lon > -122.41 ? 37.8075 : 37.8045;
+      const shore = lon > -122.395 ? 37.7985 + (lon + 122.395) * 1.3 : lon > -122.41 ? 37.8075 : lon > -122.425 ? 37.8050 : 37.8035;
       if (lat > shore || (lon > -122.388 && lat > 37.79)) continue;
       const [x, z] = proj.xz(lat, lon), d = Math.hypot(x - fidi[0], z - fidi[1]);
-      const tall = Math.exp(-(d * d) / (700 * 700)), h = 8 + hash2(i, j + 9) * 14 + tall * (40 + hash2(j, i + 4) * 180);
-      const w = 22 + hash2(i + 7, j) * 26 + tall * 10;
-      blocks.push([x, z, w, h, w * (0.7 + hash2(j + 2, i) * 0.6)]);
+      const tall = Math.exp(-(d * d) / (650 * 650)), h = 9 + hash2(i, j + 9) * 12 + tall * (25 + hash2(j, i + 4) * 120);
+      const w = 20 + hash2(i + 7, j) * 22 + tall * 8;
+      blocks.push([x, z, w, h, w * (0.7 + hash2(j + 2, i) * 0.6), groundSF(x, z)]);
     }
-    landmarks.push(['salesforce', 37.7898, -122.3968], ['transamerica', 37.7952, -122.4028], ['coit', 37.8024, -122.4058]);
-    const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), im = new THREE.InstancedMesh(geo, mat(0xffffff), blocks.length);
-    const m4 = new THREE.Matrix4(), c = new THREE.Color(), tones = [0xe9e6df, 0xd9d4ca, 0xc8c6c2, 0xb9b8b6, 0xe2d6c0, 0xa9b2ba];
-    blocks.forEach(([x, z, w, h, dep], i) => {
-      im.setMatrixAt(i, m4.makeScale(w, h, dep).setPosition(x, 4, z));
+    // a city block: a box with floors of windows in its own shader (bands that fade out far away)
+    const cityMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    cityMat.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vCw;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvCw = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCw;').replace('#include <color_fragment>', `#include <color_fragment>
+        float fl = vCw.y / 3.6, fw = fwidth(fl), band = smoothstep(0.35, 0.5, fract(fl)) * (1.0 - smoothstep(0.85, 1.0, fract(fl)));
+        diffuseColor.rgb *= mix(1.0, mix(0.62, 0.86, step(0.5, fract(vCw.x * 0.05 + vCw.z * 0.03))), band * (1.0 - smoothstep(0.15, 0.5, fw)) * step(0.3, abs(normalize(vNormal).x) + abs(normalize(vNormal).z)));`);
+    };
+    cityMat.customProgramCacheKey = () => 'jw-city-1';
+    const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), im = new THREE.InstancedMesh(geo, cityMat, blocks.length);
+    const m4 = new THREE.Matrix4(), c = new THREE.Color(), tones = [0xe9e6df, 0xd9d4ca, 0xc8c6c2, 0xb9b8b6, 0xe2d6c0, 0xa9b2ba, 0xf0ece4, 0xcfc2ae];
+    blocks.forEach(([x, z, w, h, dep, g], i) => {
+      im.setMatrixAt(i, m4.makeScale(w, h + g, dep).setPosition(x, 0, z));
       im.setColorAt(i, c.set(tones[Math.floor(hash2(i, 3) * tones.length)]));
     });
     im.computeBoundingSphere(); city.add(im);
-    const [sx, sz] = proj.xz(37.7898, -122.3968);
-    const sf = new THREE.Mesh(new THREE.CylinderGeometry(19, 26, 300, 12).translate(0, 150, 0), mat(0xd9dde0)); sf.position.set(sx, 4, sz); city.add(sf);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(19, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xd9dde0)); cap.position.set(sx, 304, sz); cap.scale.y = 1.4; city.add(cap);
-    const [tx, tz] = proj.xz(37.7952, -122.4028);
-    const tp = new THREE.Mesh(new THREE.ConeGeometry(30, 260, 4).translate(0, 130, 0), mat(0xeeeae2)); tp.position.set(tx, 4, tz); tp.rotation.y = Math.PI / 4; city.add(tp);
-    const [cx, cz] = proj.xz(37.8024, -122.4058);
-    const coit = new THREE.Mesh(new THREE.CylinderGeometry(5, 5.5, 64, 10).translate(0, 32, 0), mat(0xece6d8)); coit.position.set(cx, 80, cz); city.add(coit);
+    const at = (la, lo) => { const [x, z] = proj.xz(la, lo); return [x, groundSF(x, z), z]; };
+    const put = (geo, color, la, lo, ry = 0) => { const [x, y, z] = at(la, lo), m = new THREE.Mesh(geo, mat(color, { flatShading: false })); m.position.set(x, y - 2, z); m.rotation.y = ry; city.add(m); return m; };
+    // Salesforce Tower (326 m): a rounded square tapering a little, a pale lattice crown
+    put(new THREE.CylinderGeometry(20, 26, 300, 24, 1).translate(0, 150, 0), 0xc9d0d6, 37.7898, -122.3968);
+    put(new THREE.CylinderGeometry(19.5, 20, 26, 24, 1, true).translate(0, 313, 0), 0xe9ecee, 37.7898, -122.3968).material.side = THREE.DoubleSide;
+    // Transamerica Pyramid (260 m): a slender four-sided pyramid with its wings, a spire
+    put(new THREE.CylinderGeometry(2.5, 27, 212, 4, 1).translate(0, 106, 0), 0xeeeae2, 37.7952, -122.4028, Math.PI / 4);
+    put(new THREE.CylinderGeometry(0.3, 2.5, 48, 4, 1).translate(0, 236, 0), 0xeeeae2, 37.7952, -122.4028, Math.PI / 4);
+    for (const s of [-1, 1]) put(new THREE.BoxGeometry(9, 150, 6).translate(s * 20, 135, 0).applyMatrix4(new THREE.Matrix4().makeRotationZ(-s * 0.1)), 0xe6e2da, 37.7952, -122.4028, 0.15);
+    // Coit Tower on Telegraph Hill: a fluted column
+    put(new THREE.CylinderGeometry(5.5, 6, 64, 16).translate(0, 32, 0), 0xece6d8, 37.8024, -122.4058);
+    // more of the skyline: 181 Fremont, Millennium, 555 California (dark), 345 California, the Embarcadero Center, One Rincon,
+    // the Ferry Building's clock tower
+    for (const [la, lo, h, w, col] of [[37.7897, -122.3954, 245, 30, 0xb7c0c8], [37.7906, -122.3963, 197, 30, 0xc9ced4], [37.7920, -122.4038, 237, 46, 0x4b3f3a],
+      [37.7926, -122.4006, 212, 36, 0xd8d2c6], [37.7948, -122.3990, 172, 40, 0xe4e0d8], [37.7951, -122.3975, 150, 40, 0xe4e0d8], [37.7955, -122.3962, 125, 40, 0xe4e0d8],
+      [37.7864, -122.3918, 188, 28, 0xbfc6cc], [37.7937, -122.3984, 160, 38, 0xd2ccc0], [37.7889, -122.4014, 180, 34, 0xa8b0b8]]) put(new THREE.BoxGeometry(w, h, w * 0.8).translate(0, h / 2, 0), col, la, lo, 0.3);
+    put(new THREE.BoxGeometry(14, 75, 14).translate(0, 37.5, 0), 0xf0ead8, 37.7955, -122.3937, 0.3);
+    put(new THREE.BoxGeometry(200, 14, 30).translate(0, 7, 0), 0xe8e0cc, 37.7953, -122.3930, 0.3);
   }
 
   /* ---------- lighthouses ---------- */
@@ -137,15 +158,25 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   lighthouse(37.82648, -122.42246, 38, 26);    // Alcatraz
   { const [x, z] = proj.xz(37.8267, -122.4231); const cell = new THREE.Mesh(new THREE.BoxGeometry(40, 14, 150), mat(0xd8cdb4)); cell.position.set(x, 38, z); cell.rotation.y = 0.5; root.add(cell); }
 
-  /* ---------- Karl the fog ---------- */
+  /* ---------- Karl the fog: banks lying on the sea along the coast, rolling in through the Golden Gate ---------- */
+  // [lat, lon] of each end of a bank's spine, its width (m) and height (m)
   const banks = [];
-  for (const [lat, lon, s] of [[37.806, -122.505, 1600], [37.812, -122.54, 2000], [37.80, -122.58, 2400], [37.835, -122.585, 2000], [37.855, -122.63, 2600],
-    [37.88, -122.665, 2400], [37.895, -122.71, 2800], [37.79, -122.63, 3000], [37.83, -122.66, 3200], [37.80, -122.475, 1100], [37.94, -122.76, 3000]]) {
-    for (let k = 0; k < 3; k++) { const [x, z] = proj.xz(lat + (hash2(k, s) - 0.5) * 0.01, lon + (hash2(s, k) - 0.5) * 0.012); banks.push([x, z, s * (0.6 + 0.5 * hash2(k + 1, s)), 30 + 60 * hash2(k, 7)]); }
+  for (const [a, b, w, h] of [[[37.8085, -122.492], [37.8035, -122.545], 900, 150], [[37.818, -122.548], [37.842, -122.585], 1100, 190],
+    [[37.85, -122.6], [37.885, -122.655], 1300, 210], [[37.89, -122.67], [37.93, -122.735], 1400, 230], [[37.79, -122.56], [37.79, -122.64], 1800, 260],
+    [[37.95, -122.76], [37.99, -122.83], 1600, 240]]) {
+    const [ax, az] = proj.xz(...a), [bx, bz] = proj.xz(...b), L = Math.hypot(bx - ax, bz - az), n = Math.max(10, Math.round(L / 160));
+    for (let k = 0; k < n; k++) {
+      const t = (k + hash2(k, L | 0)) / n, side = (hash2(L | 0, k) - 0.5) * w, mid = 1 - Math.abs(t - 0.5) * 1.4;
+      const x = ax + (bx - ax) * t - (bz - az) / L * side, z = az + (bz - az) * t + (bx - ax) / L * side;
+      const s = (300 + 500 * hash2(k, 3)) * (0.6 + 0.6 * mid), y = s * 0.16 + h * mid * hash2(k, 9);
+      banks.push([x, z, s, y]);
+    }
   }
   sky.placeBanks(banks);
 
   // the deck's height line, also past its ends (the curved approaches the road renderer draws)
   const deckLine = (x, z) => deckH((x - mid[0]) * ux + (z - mid[1]) * uz);
-  return { ggb: true, deckAt, deckLine, update() {}, dispose() { root.traverse(o => o.geometry?.dispose()); scene.remove(root); } };
+  // a point on the bridge's road deck: s metres along from mid span (south to north), t across (east +), its heading
+  const lane = (s, t) => { const p = W(s, t, deckH(s) + 0.05); return { x: p.x, y: p.y, z: p.z, yaw: yaw }; };
+  return { ggb: true, deckAt, deckLine, lane, span: GGB.ends, update() {}, dispose() { root.traverse(o => o.geometry?.dispose()); scene.remove(root); } };
 }

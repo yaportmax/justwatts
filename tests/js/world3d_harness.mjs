@@ -5,12 +5,14 @@ import { heightsOf, makeSampler, makeGrid, gridHeight, carve, rasterClasses, gri
 import { cellPoints, cellsAround, clumpGeometry } from '../../app/js/world3d/grass.js';
 import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels } from '../../app/js/world3d/texgen.js';
+import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
+import { passPlan } from '../../app/js/world3d/life.js';
 import { builder, ribbon, resample, roadStyle, clipLine, deckSides } from '../../app/js/world3d/ribbon.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
 import { packTile, unpackTile, gridAt } from '../../app/js/world3d/baked.js';
 import { makeProj, tileX, tileY, latOf, lonOf } from '../../app/js/world3d/geo.js';
-import { knee, BIKE } from '../../app/js/world3d/rider.js';
+import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js';
 import { probeWebGL2, resetProbe, pickView } from '../../app/js/world3d/probe.js';
 import { RoadGraph, Plan } from '../../app/js/roads.js';
 import { inWorld, BOUNDS } from '../../app/js/world.js';
@@ -195,6 +197,23 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   for (let y = 0; y < S; y++) { wrap = Math.max(wrap, Math.abs(np[(y * S + S - 1) * 4] - np[(y * S) * 4])); for (let x = 1; x < S; x++) step = Math.max(step, Math.abs(np[(y * S + x) * 4 + 3] - np[(y * S + x - 1) * 4 + 3])); }
   for (let i = 0; i < S * S; i++) mean += wp[i * 4] / (S * S);
   out.tex = { n: np.length, wrap, smooth: step, waveFlat: Math.round(mean), same: noisePixels(S).every((v, i) => v === np[i]) };
+}
+
+{
+  const vs = [0, 0.5, 2, 5, 10, 15, 20, 30], mono = f => vs.every((v, i) => !i || f(v) >= f(vs[i - 1]));
+  out.audio = { windStill: windGain(0), wind10: r3(windGain(10)), windCap: windGain(60), windUp: mono(windGain), tireStill: tireGain(0.3), tire10: r3(tireGain(10)), tireGravel: r3(tireGain(10, 1)), tireUp: mono(v => tireGain(v)),
+    hz: [tireHz(0), tireHz(10)], tickPedal: tickRate(10, 85), tickStill: tickRate(0.5, 0), tick5: r3(tickRate(5, 0)), tickCap: tickRate(40, 0), seaNone: oceanGain(0), seaHalf: r3(oceanGain(0.5)), seaSome: oceanGain(0.2) > 0 && oceanGain(0.2) < oceanGain(0.5) };
+  out.pass = { clear: passPlan(80, 0, 20, 8), beside: passPlan(10, 5, 20, 8), closing: passPlan(10, 0.8, 20, 8), behind: passPlan(-10, 0, 20, 8) };
+}
+
+{
+  const run = (s, secs, cad, v, g) => { for (let i = 0; i < secs * 60; i++) stance(s, 1 / 60, cad, v, g); return s; };
+  const s = newStance(0); run(s, 3, 85, 4, 0.09); const up = { up: s.up, sb: r3(s.sb) };
+  run(s, 1, 85, 4, 0.07); const held = s.up; run(s, 2, 85, 6, 0.04); const down = { up: s.up, sb: r3(s.sb) };
+  const c = newStance(1.0); run(c, 3, 0, 8, 0); const level = r3(Math.abs((c.ca % Math.PI) - Math.PI / 2)), still = r3(Math.abs(c.cw));
+  const t = newStance(0); run(t, 2, 0, 15, -0.06); const tuck = { tuck: t.tuck, tb: r3(t.tb) };
+  const root = [0, 1, 0], mid = ik(root, [0, 0.2, -0.3], 0.46, 0.47, [0, 0, -1]), L = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  out.stance = { up, held, down, level, still, tuck, thigh: r3(L(root, mid)), shin: r3(L(mid, [0, 0.2, -0.3])), forward: mid[2] < -0.15 };
 }
 
 console.log(JSON.stringify(out));

@@ -56,7 +56,7 @@ async function reset(env = {}) {
 }
 
 /* ---------- fake requests ---------- */
-function call(method, path, { body, raw, headers = {}, jar = null, ip = '198.51.100.1' } = {}) {
+function call(method, path, { body, raw, headers = {}, jar = null, ip = '198.51.100.1', handler = app.handler } = {}) {
   const buf = raw !== undefined ? Buffer.from(raw) : body !== undefined ? Buffer.from(JSON.stringify(body)) : Buffer.alloc(0);
   const h = { host: 'justwatts.test', 'x-real-ip': ip, ...headers };
   if (jar && jar.size) h.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
@@ -73,7 +73,7 @@ function call(method, path, { body, raw, headers = {}, jar = null, ip = '198.51.
         resolve(out);
       },
     };
-    const t0 = realNow(); Promise.resolve(app.handler(req, res)).then(() => { if (process.env.SLOW && realNow() - t0 > 500) console.error('slow', method, path, realNow() - t0); }).catch(reject);
+    const t0 = realNow(); Promise.resolve(handler(req, res)).then(() => { if (process.env.SLOW && realNow() - t0 > 500) console.error('slow', method, path, realNow() - t0); }).catch(reject);
   });
 }
 // a browser: cookie jar, same-origin headers on writes
@@ -757,6 +757,77 @@ S.moderation = async () => {
   const fake = await signup('boss@example.com');
   assert.equal((await fake.get('/api/auth/me')).body.admin, false);
   assert.equal((await fake.get('/api/admin/hidden')).status, 403);
+};
+
+// /api/integrations wired to accounts: the session cookie is the caller, secrets sealed in integration_data
+S.integrations = async () => {
+  await reset();
+  process.env.JUSTWATTS_INTEGRATIONS_KEY = Buffer.alloc(32, 9).toString('base64');
+  const H = { handler: require(`${repo}/web/api/integrations.js`) };
+  const KEYV = 'icukey-0123456789abcdef';
+  const FIT = Buffer.concat([Buffer.from([14, 32, 0, 0, 0, 0, 0, 0]), Buffer.from('.FIT'), Buffer.alloc(40)]);
+  const saved = globalThis.fetch, calls = [];
+  const res = (status, obj) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
+  globalThis.fetch = async (url, opt = {}) => {
+    calls.push(`${opt.method || 'GET'} ${url}`);
+    if (/intervals\.icu\/api\/v1\/athlete\/i42$/.test(url)) return res(200, { id: 'i42', name: 'Test Rider' });
+    if (/intervals\.icu\/api\/v1\/athlete\/i42\/activities/.test(url)) return res(201, { id: 'i42', activities: [{ id: 'i900' }] });
+    return res(404, {});
+  };
+  try {
+    // signed out: 401, the page offers manual upload and sign in
+    let r = await call('GET', '/api/integrations?op=list', H);
+    assert.equal(r.status, 401);
+    const a = await signup('icu@example.com'), uid = (await a.get('/api/auth/me')).body.user.id;
+    r = await a.get('/api/integrations?op=list', H);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.integrations.map(x => x.id), ['garmin', 'strava', 'trainingpeaks', 'intervals', 'coros', 'polar', 'suunto', 'wahoo']);
+    // a write without the page's Origin + X-HW is refused, even with the session
+    r = await call('POST', '/api/integrations?op=connect&service=intervals', { ...H, jar: a.jar, body: { athlete_id: 'i42', api_key: KEYV } });
+    assert.equal(r.status, 403);
+    r = await a.post('/api/integrations?op=connect&service=intervals', { athlete_id: 'i42', api_key: KEYV }, H);
+    assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.connected, true);
+    assert.ok(!r.raw.toString().includes(KEYV), 'never echo the key');
+    r = await a.get('/api/integrations?op=list', H);
+    const icu = r.body.integrations.find(x => x.id === 'intervals');
+    assert.deepEqual([icu.status.connected, icu.status.account], [true, 'Test Rider']);
+    assert.ok(!r.raw.toString().includes(KEYV));
+    // sealed at rest in the accounts store, bound to this user
+    const st = app.storeOrNull(), sealed = (await st.getIntegrationData(uid, 'secret', 'intervals')).toString('utf8');
+    assert.match(sealed, /^v1\./); assert.ok(!sealed.includes(KEYV));
+    const b = await signup('other@example.com'), uidB = (await b.get('/api/auth/me')).body.user.id;
+    assert.equal((await b.get('/api/integrations?op=list', H)).body.integrations.find(x => x.id === 'intervals').status.connected, false);
+    await st.putIntegrationData(uidB, 'secret', 'intervals', Buffer.from(sealed), NOW);  // copied to another user: does not open
+    r = await b.get('/api/integrations?op=list', H);
+    assert.equal(r.body.integrations.find(x => x.id === 'intervals').status.connected, false);
+    // a ride's FIT: queued and uploaded, kept for retries and the manual link
+    r = await call('POST', `/api/integrations?op=upload&ride=r-1&name=Test&start=${NOW}&duration=3600`, { ...H, jar: a.jar, raw: FIT, headers: { origin: ORIGIN, 'x-hw': '1' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const up = r.body.targets.find(x => x.id === 'intervals').upload;
+    assert.deepEqual([up.state, up.activity_id, up.url], ['done', 'i900', 'https://intervals.icu/activities/i900']);
+    r = await a.get('/api/integrations?op=fit&ride=r-1', H);
+    assert.equal(r.status, 200); assert.ok(r.raw.equals(FIT));
+    assert.equal((await b.get('/api/integrations?op=fit&ride=r-1', H)).status, 404);
+    // auto upload choice and the Garmin answer persist in the user's state
+    r = await a.post('/api/integrations?op=auto&service=intervals', { on: false }, H);
+    assert.equal(r.body.integrations.find(x => x.id === 'intervals').auto, false);
+    r = await a.post('/api/integrations?op=syncs', { syncs_to: ['strava', 'bogus'] }, H);
+    assert.deepEqual(r.body.integrations.find(x => x.id === 'garmin').syncs_to, ['strava']);
+    // old FIT files are pruned; the secret and state stay
+    await st.pruneIntegrationData(NOW + 31 * DAY);
+    assert.equal(await st.getIntegrationData(uid, 'file', 'fit:r-1'), null);
+    assert.ok(await st.getIntegrationData(uid, 'secret', 'intervals'));
+    // disconnect deletes the secret
+    r = await a.post('/api/integrations?op=disconnect&service=intervals', {}, H);
+    assert.equal(r.body.integrations.find(x => x.id === 'intervals').status.connected, false);
+    assert.equal(await st.getIntegrationData(uid, 'secret', 'intervals'), null);
+    // deleting the account deletes everything integrations kept for it
+    assert.ok(await st.countIntegrationData(uid) > 0);
+    assert.equal((await a.post('/api/auth/delete', { confirm: 'DELETE', password: 'password123' })).status, 200);
+    assert.equal(await st.countIntegrationData(uid), 0);
+    assert.equal((await a.get('/api/integrations?op=list', H)).status, 401);
+    assert.ok(calls.every(c => c.includes('intervals.icu')), 'only the stubbed service was called');
+  } finally { globalThis.fetch = saved; delete process.env.JUSTWATTS_INTEGRATIONS_KEY; }
 };
 
 /* ---------- run ---------- */

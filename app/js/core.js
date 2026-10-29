@@ -16,7 +16,7 @@ export const zoneIdx = f => ZONES.findIndex(z => f < z[0]);
 export const HRZ_COLORS = ['--z1', '--z2', '--z3', '--z5', '--z6'];
 export function hrZone(h, zones) {
   if (!zones || !(h > 0)) return -1;
-  let i = -1; zones.forEach((f, k) => { if (h >= f) i = k; }); return i;
+  let i = 0; zones.forEach((f, k) => { if (h >= f) i = k; }); return i;  // Z1 is everything below Z2
 }
 // Active zones: manual or Garmin floors when set, else 50/60/70/80/90% of max HR (185 when unset).
 // Mirrored by history.active_hr_zones.

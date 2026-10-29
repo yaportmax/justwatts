@@ -68,13 +68,26 @@ def test_web_mode_ride_with_reload(dist, node):
     assert f["rides"] == 1 and f["samples"] == 247 and f["fit"] == ".FIT" and f["backupRides"] == 1 and f["steps"] == 3
     assert f["garminStatus"] == 503 and out["oldKeys"] == []
     assert [e.split(" ")[0] + " " + e.split(" ")[1] for e in f["events"]] == ["RIDE START", "RIDE RESUMED", "EDIT insert", "WORKOUT DONE", "RIDE END"]
+    sr = out["source"]                                                        # no community library: no Community source, All instead
+    assert sr["value"] == "all" and sr["crs"] == "all" and sr["options"] == ['value="all"', 'value="jw"', 'value="mine"']
+    assert sr["authors"] == ["Just Watts", "You", "Just Watts", "You"]          # the Author column, workouts and courses
+    assert sr["mine"] == ["Backup test"] and sr["jw"] is False
+    so = out["sort"]                                                          # sortable headers, in step with the Sort select
+    assert so["asc"] and so["desc"] and so["st1"] == {"sort": "short", "aria": "ascending", "up": True} and so["st2"] == {"sort": "long", "aria": "descending"}
+    assert so["author"] == {"sort": "h:author:asc", "extra": True, "first": "Just Watts", "aria": "ascending", "timeAria": "none"} and so["stored"] == "h:author:asc"
+    assert so["preset"] == {"level": "descending", "extra": False} and so["featured"] is False
+    assert so["courses"] == {"asc": True, "desc": True, "select": "long", "stored": "long"}
     k = out["picks"]                                                          # per-ride course picks
     assert out["oldCourse"] is False                                         # the old global course is dropped
     assert k["flatWorkout"] == {"name": "Sweet spot 2x12", "course": None, "plan": True}
-    assert k["wPicker"] == {"sel": "lrow sel", "html": True}
+    assert k["wPicker"] == {"open": True, "html": True}                          # the workout dialog: Flat, Open world, the courses
     assert k["workoutCourse"] == {"name": "Sweet spot 2x12", "course": "Rolling hills", "plan": True}
-    assert k["cPicker"] == {"sel": "lrow sel", "html": True}
+    assert k["remembered"] == {"name": "Recovery spin 20", "course": "Rolling hills", "plan": True}  # one-click Ride: the last pick
+    assert k["cPicker"] == {"open": True, "map": True, "html": True}              # the course dialog: map first, a workout list
+    assert k["search"] == {"hit": True, "other": False}
     assert k["courseWorkout"] == {"name": "Sweet spot 2x12", "course": "Hawk Hill, Marin", "plan": True}
+    assert k["courseFree"] == {"name": "The climb", "course": "The climb", "plan": False}
+    assert k["thumbs"] == {"map": True, "nomap": True, "ow": True, "jr": True}
     assert k["test"]["course"] is None                                       # FTP tests never take a course
     assert k["justFlat"]["course"] is None and not k["justFlat"]["plan"]      # Just ride: one click, flat
     c = out["course"]                                                         # Just ride on the course picked next to it
@@ -96,9 +109,12 @@ def test_web_account_sync_and_community(dist, node):
     p = subprocess.run([node, str(REPO / "tests/js/account_web.mjs"), str(REPO), str(dist)], capture_output=True, text=True, timeout=180, encoding="utf-8")
     assert p.returncode == 0, p.stderr[-4000:]
     out = json.loads(p.stdout)
-    assert out["off"]["slot"] == "" and out["off"]["account"] is None and out["off"]["setAccount"] == "none"   # no accounts on the server: nothing shows
+    off = out["off"]
+    assert off["slot"] == "" and off["account"] is None and off["setAccount"] == "none"              # no accounts on the server: nothing shows
+    assert off["src"] == ['value="all"', 'value="jw"', 'value="mine"'] and off["srcValue"] == "all" and off["crsSrc"]  # no Community source
+    assert out["migrated"] == {"stored": "lib", "value": "all"}                                      # the old source bar's Library is All
     so = out["signedOut"]
-    assert so["slot"] and so["settings"] and so["comm"] == ""                                       # Sign in, and Community to browse
+    assert so["slot"] and so["settings"] and so["comm"]                                             # Sign in, and Community to browse
     d = out["dialog"]
     assert d["on"] and d["title"] == "Sign in" and 'data-a="forgot"' in d["html"] and 'data-a="signup"' in d["html"]
     assert "oauth" not in d["html"]                                                                  # no Google / Strava env: no buttons
@@ -118,9 +134,28 @@ def test_web_account_sync_and_community(dist, node):
     assert out["after"] == {"ftp": 300, "pending": None}
     assert out["localEdit"] == 310
     assert out["offline"] == {"status": "offline", "slot": True} and out["backOnline"] == "synced"
-    li = out["list"]
-    assert li["tab"] == "" and "by Ann" in li["row"] and "sweet spot" in li["row"] and 'title="Comments"' in li["row"] and ">1</span>" in li["row"]
-    assert "Time" in li["head"] and "TSS" in li["head"]
+    # one list per tab with a Source filter (All, Just Watts, Mine, Community) and an Author column
+    a = out["all"]
+    assert a["src"] == "all" and a["stored"] == '"all"' and a["comm"] == 1 and a["after"]             # community items after the local ones
+    assert a["authors"] == ["You", "Just Watts", "Ann"] and a["you"] == "You" and a["communityAuthor"] == "Ann"
+    assert a["likes"] == "0" and not a["edit"]                                                       # the publisher's likes; no Edit on a community row
+    assert out["jw"]["authors"] == ["Just Watts"] and out["jw"]["n"] > 30
+    assert out["mine"] == {"names": ["Local over-unders"], "authors": ["You"]}
+    li = out["list"]                                                                                 # Community: only community items
+    assert li["tab"] == "" and li["value"] == "comm" and li["names"] == ["Sweet spot ladder"] and li["more"] == "none"
+    assert "<span>Ann</span>" in li["row"] and '<div class="c">Sweet spot</div>' in li["row"] and 'title="Likes"' in li["row"]  # the tag names the category
+    assert '<span class="pau">Ann</span>' in li["row"] and "· </i>sweet spot" not in li["row"] and li["row"].count('class="m num r"') == 2  # time, TSS
+    assert out["likedSort"] == {"first": "Sweet spot ladder", "second": "You"}                       # Most liked: community first, then Featured
+    assert out["search"] == {"names": ["Sweet spot ladder"]} and out["searchYou"] == {"authors": ["You"]}  # search matches the author
+    assert out["catTag"] == {"comm": True, "mine": False, "cats": ["Sweet spot"]} and out["catOther"] == {"comm": False}  # chips match community tags
+    assert out["failNow"]["local"] > 0 and out["failAfter"] == {"local": out["failNow"]["local"], "comm": 0, "empty": "none"}  # a failed fetch: local rows stay
+    assert out["failComm"] == {"rows": 0, "empty": "", "text": "No connection."}
+    assert out["rowOpen"] == {"pane": "", "lib": "none", "crumb": True}                             # a community row opens its page
+    assert out["dedupe"] == {"mine": ["You"]} and out["dedupeComm"] == {"comm": True}                # saved to mine: listed once in All
+    c = out["courses"]                                                                               # Courses: the same Source filter and Author column
+    assert c["tab"] == "" and c["src"] == "all" and c["last"] and c["local"] == "Just Watts" and c["author"] == "Dan" and c["ride"] and not c["del"]
+    assert out["coursesComm"] == {"names": ["Hawk Hill loop"], "lib": "comm"}                       # one Source for both tabs
+    assert out["coursesJw"] == {"authors": ["Just Watts"], "hawk": False}
     it = out["item"]
     for want in ("Sweet spot ladder", "Comments", "Great one", 'data-a="like"', "Save to mine", 'data-a="ride"', "Add a comment"):
         assert want in it["html"], want
@@ -129,12 +164,13 @@ def test_web_account_sync_and_community(dist, node):
     assert out["published"] == {"item": ["Local over-unders", ["vo2", "threshold"]], "modal": False}
     assert out["courseItem"]["map"] and out["courseItem"]["profile"]                                 # a community course shows its route
     sa = out["signedOutAgain"]
-    assert sa["slot"] and sa["custom"] == 1 and sa["sync"] == "null"                                 # local data stays on the device
+    assert sa["slot"] and sa["custom"] == 2 and sa["sync"] == "null"                                 # local data stays on the device (with the saved copy)
     assert out["sameAgain"] == {"step": None, "owner": True}                                        # the same account again: no question
     ak = out["asked"]                                                                                # another account: ask, nothing goes up yet
     assert ak["title"] == "Data on this device" and "Add this device's data to Bob" in ak["html"] and "Start clean" in ak["html"] and ak["server"] == 0
     assert out["afterMerge"] == {"step": "connect"}                                                  # then the sign-up's connect step
-    assert out["merged"] == {"records": ["settings:main", "workout:c-local1"], "rides": True}
+    mg = out["merged"]                                                                               # local data, the saved community copy too
+    assert mg["rides"] and mg["records"][:2] == ["settings:main", "workout:c-local1"] and len(mg["records"]) == 3 and mg["records"][2].startswith("workout:c-")
     assert out["dismissed"] == {"status": "error", "error": "choose", "step": None, "server": 0}      # dismissed: no merge, sync waits
     assert out["clean"] == {"custom": 0, "courses": 0, "rides": 0, "server": [], "serverRides": 0, "step": None}
     st = out["strava"]                                                                               # Strava sign-up: ask for the email once

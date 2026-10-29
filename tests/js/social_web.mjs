@@ -88,7 +88,6 @@ let els = {}, made = [], M = {};
 const multi = () => ({
   'nav button': ['workouts', 'ride', 'history', 'settings'].map(v => new El('nav', { v })),
   '.view': ['workouts', 'ride', 'history', 'settings'].map(v => Object.assign(new El('view'), { id: 'v-' + v })),
-  '[data-src]': ['lib', 'mine', 'comm'].map(src => new El('src', { src })),
   '#jrMode button': [],
 });
 globalThis.window = globalThis;

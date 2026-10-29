@@ -79,7 +79,9 @@ class El {
   constructor(sel, data = {}) { this.sel = sel; this.dataset = data; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } }; this.classList = new ClassList(); this.kids = {}; this.value = ''; this.textContent = ''; this.innerHTML = ''; this.tagName = 'DIV'; this.offsetHeight = 50; }
   querySelector(s) { return this.kids[s] ??= new El(s); }
   get parentElement() { return this._p ??= new El('parent'); }
-  appendChild() {} scrollIntoView() {} addEventListener() {} setAttribute(k, v) { (this.attrs ??= {})[k] = v; } focus() {}
+  get innerHTML() { return this._html; }
+  set innerHTML(v) { this._html = v; this.rows = []; }  // a list's rows in order: innerHTML = '' clears, appendChild adds
+  appendChild(e) { this.rows.push(e); } scrollIntoView() {} addEventListener() {} setAttribute(k, v) { (this.attrs ??= {})[k] = v; } focus() {}
   getBoundingClientRect() { return { width: 300, height: 100 }; }
   getContext() { return ctx; }
   click() { this.onclick?.(); }
@@ -88,7 +90,7 @@ let els = {}, made = [], M = {};
 const multi = () => ({
   'nav button': ['workouts', 'ride', 'history', 'settings'].map(v => new El('nav', { v })),
   '.view': ['workouts', 'ride', 'history', 'settings'].map(v => Object.assign(new El('view'), { id: 'v-' + v })),
-  '[data-src]': ['lib', 'mine', 'comm'].map(src => new El('src', { src })),
+  '[data-tab]': ['workouts', 'courses'].map(tab => new El('tab', { tab })),
   '#jrMode button': [],
 });
 globalThis.window = globalThis;
@@ -109,6 +111,7 @@ async function until(fn, what, ms = 10000) { const t0 = Date.now(); while (!(awa
 let hw = null;
 async function boot(n, search = '') {
   els = {}; M = multi(); made = [];
+  for (const v of M['.view']) els['#' + v.id] = v;  // #v-workouts is the same element as its .view
   globalThis.location = { search, pathname: '/', hash: '', hostname: 'localhost', href: '/' };
   globalThis.document = { querySelector: s => els[s] ??= new El(s), querySelectorAll: s => M[s] || [], createElement: () => { const e = new El('new'); made.push(e); return e; },
     addEventListener() {}, getElementById: id => els['#' + id] ??= new El('#' + id), documentElement: new El('html'), body: new El('body'), activeElement: { tagName: 'BODY' }, hidden: false };
@@ -126,15 +129,19 @@ const synced = () => until(async () => { await hw.account.sync.flush(); return h
 delete process.env.JUSTWATTS_SESSION_SECRET;
 await boot(1);
 await sleep(30);
-out.off = { slot: $('#acctSlot').innerHTML, account: hw.account, comm: $('[data-src=comm]').style.display, setAccount: $('#set-account').style.display };
+out.off = { slot: $('#acctSlot').innerHTML, account: hw.account, setAccount: $('#set-account').style.display,
+  src: $('#libSrc').innerHTML.match(/value="\w+"/g), srcValue: $('#libSrc').value, crsSrc: $('#crsSrc').innerHTML === $('#libSrc').innerHTML };
 process.env.JUSTWATTS_SESSION_SECRET = ENV.JUSTWATTS_SESSION_SECRET;
 
 /* ---------- 2. signed out, local data; sign up; connect step; sync merges local data ---------- */
 mem.set('hw.custom', JSON.stringify([{ id: 'c-local1', name: 'Local over-unders', text: '3x(4m 95%, 2m 105%)' }]));
+mem.set('hw.libSrc', '"lib"');  // the old source bar's "Library": All now
 await boot(2);
 await until(() => hw.account?.providers(), 'providers');
+await until(() => hw.community, 'community module');
+out.migrated = { stored: 'lib', value: $('#libSrc').value };
 await hw.backend.store.putRide({ id: 'r-1790000000000', name: 'Old ride', start: 1790000000000, samples: Array.from({ length: 120 }, (_, i) => [1790000000000 + i * 1000, i, 180, 85, 0, 30]) });
-out.signedOut = { slot: $('#acctSlot').innerHTML.includes('Sign in'), comm: $('[data-src=comm]').style.display, settings: $('#acctSet').innerHTML.includes('Sign in') };
+out.signedOut = { slot: $('#acctSlot').innerHTML.includes('Sign in'), comm: $('#libSrc').innerHTML.includes('value="comm"'), settings: $('#acctSet').innerHTML.includes('Sign in') };
 tap($('#acctSlot'), { dataset: { a: 'signin' } });
 out.dialog = { on: $('#authModal').classList.contains('on'), title: $('#authTitle').textContent, html: $('#authBody').innerHTML };
 await hw.account.signUp('ann@example.com', 'password123', 'Ann');
@@ -184,10 +191,62 @@ const pub = await hw.account.api('POST', '/api/community', { kind: 'workout', na
 assert.equal(pub.status, 201, JSON.stringify(pub.body));
 await dev2.post(`/api/community/${pub.body.item.id}/comments`, { body: 'Great one' });
 await until(() => hw.community, 'community module');
-{ const b = M['[data-src]'].find(x => x.dataset.src === 'comm'); b.onclick(); }
-const rowOf = name => made.findLast(e => e.className === 'lrow' && String(e.innerHTML).includes(`<div class="t">${name}</div>`));
-await until(() => rowOf('Sweet spot ladder'), 'community row');
-out.list = { tab: $('#tabComm').style.display, row: rowOf('Sweet spot ladder').innerHTML, head: $('#cmHead').innerHTML };
+M['nav button'].find(b => b.dataset.v === 'workouts').onclick();
+// one list per tab, a Source filter: All mixes community items in after the local ones
+const lib = $('#lib'), names = () => lib.rows.map(r => /<div class="t">([^<]*)</.exec(r.innerHTML)?.[1]);
+const libRow = name => lib.rows.find(r => r.innerHTML.includes(`<div class="t">${name}</div>`));
+const author = r => /<div class="au[^"]*"><span>([^<]*)<\/span>/.exec(r.innerHTML)?.[1];
+const setSrc = v => $('#libSrc').onchange({ target: { value: v } });
+const setSort = v => $('#libSort').onchange({ target: { value: v } });
+setSrc('all');
+await until(() => libRow('Sweet spot ladder'), 'community row in All');
+{
+  const rows = lib.rows, cm = rows.filter(r => r.className.includes('cm')), i = rows.indexOf(libRow('Sweet spot ladder'));
+  out.all = { src: $('#libSrc').value, comm: cm.length, after: i === rows.length - cm.length && rows.slice(0, i).every(r => !r.className.includes('cm')),
+    authors: [...new Set(rows.map(author))], you: author(libRow('Local over-unders')), communityAuthor: author(libRow('Sweet spot ladder')),
+    likes: /class="lk num" title="Likes">.*?<\/svg>(\d+)</.exec(libRow('Sweet spot ladder').innerHTML)?.[1], edit: libRow('Sweet spot ladder').innerHTML.includes('data-a="edit"'),
+    stored: mem.get('hw.libSrc') };
+}
+setSrc('jw'); out.jw = { authors: [...new Set(lib.rows.map(author))], n: lib.rows.length };
+setSrc('mine'); out.mine = { names: names(), authors: [...new Set(lib.rows.map(author))] };
+setSrc('comm');
+await until(() => libRow('Sweet spot ladder'), 'community row');
+out.list = { tab: $('#tabWorkouts').style.display, names: names(), row: libRow('Sweet spot ladder').innerHTML, more: $('#libMore').style.display, value: $('#libSrc').value };
+// sorts: the community ones put community items first
+setSrc('all'); setSort('liked');
+await until(() => names()[0] === 'Sweet spot ladder', 'community first when Most liked');
+out.likedSort = { first: names()[0], second: author(lib.rows[1]) };
+setSort('');
+// search matches the author: local "Just Watts" / "You", community publisher names (server side)
+$('#libQ').oninput({ target: { value: 'ann' } });
+await until(() => libRow('Sweet spot ladder'), 'author search');
+out.search = { names: names() };
+$('#libQ').oninput({ target: { value: 'you' } });
+out.searchYou = { authors: [...new Set(lib.rows.map(author))] };
+$('#libQ').oninput({ target: { value: '' } });
+await until(() => libRow('Sweet spot ladder'), 'search cleared');
+// category chips: community items match by tag
+const setCat = c => $('#libCat').onclick({ target: { closest: () => ({ dataset: { cat: c } }) } });
+setCat('Sweet spot'); out.catTag = { comm: !!libRow('Sweet spot ladder'), mine: !!libRow('Local over-unders'), cats: [...new Set(lib.rows.map(r => /<div class="c">([^<]*)</.exec(r.innerHTML)?.[1]))] };
+setCat('Threshold'); out.catOther = { comm: !!libRow('Sweet spot ladder') };
+setCat('');
+// the community fetch fails: local rows show right away and stay
+netDown = true;
+const setDur = v => $('#libDur').onchange({ target: { value: v } });
+setDur('45-75');  // a new filter: a new fetch, which fails
+out.failNow = { local: lib.rows.filter(r => !r.className.includes('cm')).length, comm: lib.rows.filter(r => r.className.includes('cm')).length };
+await sleep(400);
+out.failAfter = { local: lib.rows.filter(r => !r.className.includes('cm')).length, comm: lib.rows.filter(r => r.className.includes('cm')).length, empty: $('#libEmpty').style.display };
+setSrc('comm');
+await until(() => $('#libEmpty').textContent !== 'Loading', 'community fetch fails');
+out.failComm = { rows: lib.rows.length, empty: $('#libEmpty').style.display, text: $('#libEmpty').textContent };
+netDown = false; setDur(''); setSrc('all');
+await until(() => libRow('Sweet spot ladder'), 'back online');
+// a community row: the row opens its page, Ride rides it
+tap(libRow('Sweet spot ladder'), null);
+await until(() => hw.community.detail(), 'item page from the row');
+out.rowOpen = { pane: $('#commPane').style.display, lib: $('#libPane').style.display, crumb: $('#commPane').innerHTML.includes('</svg>Workouts</button>') };
+hw.community.itemAction('back');
 await hw.community.openItem(pub.body.item.id);
 out.item = { pane: $('#commPane').style.display, html: $('#commPane').innerHTML };
 await hw.community.itemAction('like');
@@ -200,6 +259,15 @@ await hw.backend.fetch('/api/ride/control', { method: 'POST', body: JSON.stringi
 hw.community.openPublish({ kind: 'workout', name: 'Local over-unders', text: '3x(4m 95%, 2m 105%)' });
 const item = await hw.community.publish('Local over-unders', 'vo2, Threshold');
 out.published = { item: item && [item.name, item.tags], modal: $('#pubModal').classList.contains('on') };
+// Save to mine: in All the community copy is not listed twice
+await hw.community.openItem(pub.body.item.id);
+await hw.community.itemAction('save');
+hw.community.itemAction('back');
+setSrc('all');
+out.dedupe = { mine: lib.rows.filter(r => r.innerHTML.includes('<div class="t">Sweet spot ladder</div>')).map(author) };
+setSrc('comm');
+out.dedupeComm = { comm: !!libRow('Sweet spot ladder') };
+setSrc('all');
 hw.community.itemAction('back');
 // a community course: its route on a small map above the profile, before it is saved
 const hawk = hw.courses.byId('r-hawk');
@@ -210,6 +278,23 @@ await hw.community.openItem(pubC.item.id);
 await sleep(30);
 out.courseItem = { map: $('#commPane').innerHTML.includes('id="cmMap"'), profile: $('#commPane').innerHTML.includes('id="cmChart"') };
 hw.community.itemAction('back');
+// the Courses tab: the same Source filter and Author column; community courses after the local ones
+M['nav button'].find(b => b.dataset.v === 'workouts').onclick();  // back from the ride screen
+M['[data-tab]'].find(b => b.dataset.tab === 'courses').onclick();
+const crs = $('#crsList'), crsRow = name => crs.rows.find(r => r.innerHTML.includes(`<div class="t">${name}</div>`));
+await until(() => crsRow('Hawk Hill loop'), 'community course in All');
+{
+  const rows = crs.rows, i = rows.indexOf(crsRow('Hawk Hill loop'));
+  out.courses = { tab: $('#tabCourses').style.display, src: $('#crsSrc').value, last: i === rows.length - 1, local: author(rows[0]), author: author(crsRow('Hawk Hill loop')),
+    ride: crsRow('Hawk Hill loop').innerHTML.includes('data-a="ride"'), del: crsRow('Hawk Hill loop').innerHTML.includes('data-a="del"') };
+}
+$('#crsSrc').onchange({ target: { value: 'comm' } });
+await until(() => crs.rows.length && crs.rows.every(r => r.className.includes('cm')), 'community courses');
+out.coursesComm = { names: crs.rows.map(r => /<div class="t">([^<]*)</.exec(r.innerHTML)?.[1]), lib: $('#libSrc').value };
+$('#crsSrc').onchange({ target: { value: 'jw' } });
+out.coursesJw = { authors: [...new Set(crs.rows.map(author))], hawk: !!crsRow('Hawk Hill loop') };
+$('#crsSrc').onchange({ target: { value: 'all' } });
+M['[data-tab]'].find(b => b.dataset.tab === 'workouts').onclick();
 
 /* ---------- 5. sign out: the slot goes back to Sign in, local data stays ---------- */
 await hw.account.signOut();

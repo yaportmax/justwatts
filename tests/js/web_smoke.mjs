@@ -35,7 +35,7 @@ globalThis.indexedDB = {
 
 // ---------- DOM stub (same idea as app_smoke.mjs) ----------
 class ClassList { constructor() { this.s = new Set(); } add(c) { this.s.add(c); } remove(c) { this.s.delete(c); } toggle(c, on) { (on ?? !this.s.has(c)) ? this.s.add(c) : this.s.delete(c); } contains(c) { return this.s.has(c); } }
-const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
+const ctx = new Proxy({}, { get: (t, k) => k in t ? t[k] : k === 'measureText' ? () => ({ width: 40 }) : () => {}, set: (t, k, v) => { t[k] = v; return true; } });
 class El {
   constructor(sel, data = {}) { this.sel = sel; this.dataset = data; this.style = { props: {}, setProperty(k, v) { this.props[k] = v; } }; this.classList = new ClassList(); this.kids = {}; this.value = ''; this.textContent = ''; this.innerHTML = ''; this.tagName = 'DIV'; this.offsetHeight = 50; this.checked = false; }
   querySelector(s) { return this.kids[s] ??= new El(s); }
@@ -120,6 +120,7 @@ await $('#bkFile').onchange({ target: { files: [{ text: async () => JSON.stringi
 out.restored = { custom: JSON.parse(mem.get('hw.custom')).map(w => w.id), courses: JSON.parse(mem.get('hw.courses')).map(c => c.id) };
 // ---------- boot 3: per-ride course picks ----------
 mem.set('hw.course', JSON.stringify('s-climb'));  // the old global course: dropped, rides are flat unless picked
+mem.set('hw.libSrc', JSON.stringify('comm'));      // the old source bar's Community: no community library here, so All
 hw = await boot(3);
 await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
 await until(() => hw.state().devices.trainer === 'sim', 'sim 3');
@@ -128,20 +129,56 @@ out.oldCourse = mem.has('hw.course');
 const rowOf = name => made.findLast(e => e.className?.startsWith('lrow') && String(e.innerHTML).includes(`<div class="t">${name}</div>`));
 const tap = el => el.onclick({ target: { closest: () => null } });
 const load = async (go, what) => { go(); await until(() => hw.state().ride && what(hw.state().ride), 'load'); const r = hw.state().ride; return { name: r.name, course: r.course?.name ?? null, plan: !!r.steps?.length }; };
+// Source and Author without a community library: All is Just Watts plus yours
+{
+  const au = name => /<div class="au[^"]*"><span>([^<]*)<\/span>/.exec(String(rowOf(name)?.innerHTML))?.[1];
+  const rowsAfter = (go, kind) => { const n = made.length; go(); return made.slice(n).filter(e => e.className?.startsWith('lrow')).map(e => /<div class="t">([^<]*)</.exec(String(e.innerHTML))?.[1]); };
+  out.source = { value: $('#libSrc').value, options: String($('#libSrc').innerHTML).match(/value="\w+"/g), crs: $('#crsSrc').value,
+    authors: [au('Sweet spot 2x12'), au('Backup test'), au('Hawk Hill, Marin'), au('Backup hill')],
+    mine: rowsAfter(() => $('#libSrc').onchange({ target: { value: 'mine' } })), jw: rowsAfter(() => $('#libSrc').onchange({ target: { value: 'jw' } })).includes('Backup test') };
+  $('#libSrc').onchange({ target: { value: 'all' } });
+  // sortable headers, one state with the Sort select: a header sorts, again flips; a preset sets the arrow; persisted
+  const secs = t => t.split(':').reduce((a, x) => a * 60 + +x, 0);
+  const times = rows => rows.map(n => secs(/<div class="m num r">([\d:]+)</.exec(String(rowOf(n).innerHTML))[1]));
+  const sorted = (a, d) => a.every((x, i) => !i || (d > 0 ? a[i - 1] <= x : a[i - 1] >= x));
+  const head = k => $('#libHead').onclick({ target: { closest: () => ({ dataset: { sort: k } }) } });
+  const aria = k => (new RegExp(`data-sort="${k}" aria-sort="([a-z]+)"`).exec(String($('#libHead').innerHTML)) || [])[1];
+  const asc = rowsAfter(() => head('time')), st1 = { sort: $('#libSort').value, aria: aria('time'), up: String($('#libHead').innerHTML).includes('↑') };
+  const desc = rowsAfter(() => head('time')), st2 = { sort: $('#libSort').value, aria: aria('time') };
+  const byAuthor = rowsAfter(() => head('author'));
+  out.sort = { asc: sorted(times(asc), 1), desc: sorted(times(desc), -1), st1, st2, author: { sort: $('#libSort').value, extra: String($('#libSort').innerHTML).includes('<option value="h:author:asc">Author ↑</option>'),
+    first: au(byAuthor[0]), aria: aria('author'), timeAria: aria('time') }, stored: JSON.parse(mem.get('hw.libFilter')).sort };
+  $('#libSort').onchange({ target: { value: 'hard' } }); out.sort.preset = { level: aria('level'), extra: String($('#libSort').innerHTML).includes('h:author') };
+  $('#libSort').onchange({ target: { value: '' } }); out.sort.featured = String($('#libHead').innerHTML).includes('aria-sort="ascending"') || String($('#libHead').innerHTML).includes('aria-sort="descending"');
+  // courses: Distance, then flipped
+  const chead = k => $('#crsHead').onclick({ target: { closest: () => ({ dataset: { sort: k } }) } });
+  const dists = rows => rows.filter(n => n !== 'Open world: Marin').map(n => parseFloat(/<div class="m num r">([\d.]+) /.exec(String(rowOf(n).innerHTML))[1]));
+  const cAsc = rowsAfter(() => chead('dist')), cDesc = rowsAfter(() => chead('dist'));
+  out.sort.courses = { asc: sorted(dists(cAsc), 1), desc: sorted(dists(cDesc), -1), select: $('#crsSort').value, stored: JSON.parse(mem.get('hw.crsFilter')).sort };
+  chead('dist'); $('#crsSort').onchange({ target: { value: '' } });
+}
 out.picks = {};
-// a workout row: Ride alone is flat; selected, it offers a course picker
+// a workout row: Ride alone rides the last course pick (flat at first); the row opens its dialog with the course choice
 out.picks.flatWorkout = await load(() => rowOf('Sweet spot 2x12').querySelector('[data-a=ride]').onclick(), r => r.name === 'Sweet spot 2x12');
+const D = hw.detail;
 tap(rowOf('Sweet spot 2x12'));
-let row = rowOf('Sweet spot 2x12');
-out.picks.wPicker = { sel: row.className, html: String(row.innerHTML).includes('<option value="">Flat</option>') && String(row.innerHTML).includes('The climb · ') };
-row.querySelector('[data-a=pick]').onchange({ target: { value: 's-rolling' } });
-out.picks.workoutCourse = await load(() => row.querySelector('[data-a=ride]').onclick(), r => r.course?.name === 'Rolling hills');
-// a course row, selected: a workout picker; Ride starts the course with that workout
+out.picks.wPicker = { open: D.isOpen(), html: D.html().includes('data-v="">') && D.html().includes('data-v="ow"') && D.html().includes('>The climb</span>') && D.html().includes('Edit a copy') };
+D.act('pick', { dataset: { v: 's-rolling' } });
+out.picks.workoutCourse = await load(() => D.ride(), r => r.course?.name === 'Rolling hills');
+// the pick is remembered: the row's one-click Ride uses it now
+out.picks.remembered = await load(() => rowOf('Recovery spin 20').querySelector('[data-a=ride]').onclick(), r => r.name === 'Recovery spin 20' && r.course?.name === 'Rolling hills');
+// a course row opens its dialog: map first, the profile, distance, climb, max grade, a searchable workout list
 tap(rowOf('Hawk Hill, Marin'));
-row = rowOf('Hawk Hill, Marin');
-out.picks.cPicker = { sel: row.className, html: String(row.innerHTML).includes('Free ride on this course') && String(row.innerHTML).includes('>Sweet spot 2x12</option>') };
-row.querySelector('[data-a=pick]').onchange({ target: { value: 'l-ss-2x12' } });
-out.picks.courseWorkout = await load(() => row.querySelector('[data-a=ride]').onclick(), r => r.course?.name === 'Hawk Hill, Marin' && r.name === 'Sweet spot 2x12');
+out.picks.cPicker = { open: D.isOpen(), map: D.html().includes('class="dmap big"'), html: ['Max grade', 'Free ride', '>Sweet spot 2x12</span>'].every(t => D.html().includes(t)) };
+$('#detModal').oninput({ target: { dataset: { d: 'q' }, value: 'sweet spot 2x12' } });
+{ const l = String($('#detDlg').querySelector('.wlist').innerHTML); out.picks.search = { hit: l.includes('>Sweet spot 2x12</span>'), other: l.includes('>Recovery spin 20</span>') }; }  // the list redraws under the search box
+D.pickWorkout('l-ss-2x12');
+out.picks.courseWorkout = await load(() => D.ride(), r => r.course?.name === 'Hawk Hill, Marin' && r.name === 'Sweet spot 2x12');
+// a course row's Ride alone: a free ride on it
+out.picks.courseFree = await load(() => rowOf('The climb').querySelector('[data-a=ride]').onclick(), r => r.course?.name === 'The climb' && !r.steps?.length);
+// course rows: a map thumb for courses with GPS, the profile for the synthetic ones; Open world is the first row
+out.picks.thumbs = { map: String(rowOf('Hawk Hill, Marin').innerHTML).includes('<canvas class="tmap">'), nomap: String(rowOf('The climb').innerHTML).includes('cthumb nomap'),
+  ow: !!rowOf('Open world: Marin') && String(rowOf('Open world: Marin').className) === 'lrow ow', jr: String($('#jrCourse').innerHTML).includes('<option value="ow">Open world: Marin</option>') };
 // FTP tests never take a course
 out.picks.test = await load(() => $('#ftpModal').onclick({ target: { closest: () => ({ dataset: { t: 't-ramp' } }) } }), r => /ramp/i.test(r.name));
 // Just ride: flat in one click, or on the course picked next to it

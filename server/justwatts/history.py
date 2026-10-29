@@ -26,7 +26,7 @@ def zone_idx(f: float) -> int:
 def hr_zone(h: int, floors: list | None) -> int:
     if not floors or not h > 0:
         return -1
-    i = -1
+    i = 0  # Z1 is everything below Z2
     for k, f in enumerate(floors):
         if h >= f:
             i = k

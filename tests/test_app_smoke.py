@@ -64,8 +64,10 @@ def test_page_rides_a_workout_on_the_server_engine(node, srv):
 
 
 def test_page_picks_course_and_workout_per_ride(node, srv):
-    """Workouts tab: a course picked on a workout row. Courses tab: a workout picked on a course row."""
+    """Workouts tab: a workout's dialog picks the course. Courses tab: a course's dialog picks the workout."""
     out = run_page(node, srv, "pick")
+    assert out["wDialog"] == {"open": True, "html": True} and out["cDialog"] == {"open": True, "html": True}
+    assert out["picked"] == {"on": True, "stored": "s-climb"} and out["closed"]          # the pick is remembered per browser
     assert out["workoutCourse"] == {"name": "Sweet spot 2x12", "course": "The climb"}
     assert out["courseWorkout"] == {"name": "Sweet spot 2x12", "course": "Rolling hills"}
     assert out["posts"] == [{"w": "Sweet spot 2x12", "c": "s-climb"}, {"w": "Sweet spot 2x12", "c": "s-rolling"}]

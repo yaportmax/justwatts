@@ -201,7 +201,7 @@ function memoryStore() {
       if (f.tag) list = list.filter(i => i.tags.includes(f.tag));
       if (f.durMin != null) list = list.filter(i => i.minutes != null && i.minutes >= f.durMin);
       if (f.durMax != null) list = list.filter(i => i.minutes != null && i.minutes < f.durMax);
-      if (f.q) list = list.filter(i => i.search.includes(f.q));
+      if (f.q) list = list.filter(i => i.search.includes(f.q) || String(users.get(i.owner)?.name || '').toLowerCase().includes(f.q));  // name, tags or the publisher
       const since = f.since || 0;
       if (f.sort === 'new' && since) list = list.filter(i => i.createdAt >= since);
       const score = i => f.sort === 'liked' ? (since ? [...likes.values()].filter(l => l.itemId === i.id && l.createdAt >= since).length : i.likes)

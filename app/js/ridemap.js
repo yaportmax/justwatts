@@ -66,7 +66,9 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
       keep.add(o.id);
       let m = marks.get(o.id);
       if (!m) { const el = document.createElement('div'); el.className = 'rmo'; m = new globalThis.maplibregl.Marker({ element: el, anchor: 'left', offset: [-6, 0] }).setLngLat([o.lon, o.lat]).addTo(map); marks.set(o.id, m); }
-      const el = m.getElement(); el.className = 'rmo' + (o.hi ? ' hi' : ''); if (!el.firstChild) el.innerHTML = '<i></i><span></span>'; el.lastChild.textContent = o.label;
+      const el = m.getElement(); el.classList.toggle('hi', !!o.hi);  // classList: MapLibre adds its own classes
+      if (!el.firstChild) el.innerHTML = '<i></i><span></span>';
+      el.lastChild.textContent = o.label;
       m.setLngLat([o.lon, o.lat]);
     }
     for (const [id, m] of marks) if (!keep.has(id)) { m.remove(); marks.delete(id); }

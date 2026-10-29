@@ -113,7 +113,7 @@ export function createSocial({ $, toast, account, units, workouts, starts, posit
     $('#socChatBox').style.display = group ? '' : 'none';
     if (group) {
       const msgs = chat.slice(chatOpen ? -6 : -2);
-      $('#socMsgs').innerHTML = msgs.map(m => `<div class="sm${m.mine ? ' mine' : ''}"><b>${esc(m.name)}</b> ${esc(m.body)}</div>`).join('');
+      $('#socMsgs').innerHTML = msgs.map(m => `<div class="sm${m.mine ? ' mine' : ''}"><b>${esc(m.mine ? 'You' : m.name)}</b> ${esc(m.body)}</div>`).join('');
     }
   }
   async function sayRide(text) {
@@ -188,7 +188,7 @@ export function createSocial({ $, toast, account, units, workouts, starts, posit
     const parts = [];
     if (d.incoming.length) parts.push('<h3 class="ssub">Requests</h3>' + d.incoming.map(f => row(esc(f.name), '', btn('accept', 'Accept', f.id, 'pri') + btn('remove', 'Decline', f.id, 'ghost'))).join(''));
     const riding = d.friends.filter(f => f.riding), idle = d.friends.filter(f => !f.riding);
-    if (riding.length) parts.push('<h3 class="ssub">Riding now</h3>' + riding.map(f => row(`<i class="sdot on"></i>${esc(f.name)}`, `${esc(where(f.riding))} · <span class="num">${f.riding.w} W</span>`,
+    if (riding.length) parts.push('<h3 class="ssub">Riding now</h3>' + riding.map(f => row(`<span><i class="sdot"></i>${esc(f.name)}</span>`, `${esc(where(f.riding))} · <span class="num">${f.riding.w} W</span>`,
       btn('here', 'Ride here', f.id, 'pri') + btn('chat', 'Chat', f.id, 'ghost'))).join(''));
     parts.push('<h3 class="ssub">Friends</h3>' + (idle.length || riding.length ? idle.map(f => row(esc(f.name), '', btn('chat', 'Chat', f.id, 'ghost') + btn('remove', 'Remove', f.id, 'ghost') + btn('block', 'Block', f.id, 'ghost danger'))).join('')
       : '<div class="hint socempty">No friends yet. Find riders by name or share your link.</div>'));

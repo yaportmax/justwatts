@@ -46,14 +46,16 @@ export function pointAt(ll, D, d) {
   return ll.at(-1);
 }
 
-// draw the whole route fitted to the canvas; done = metres ridden (null: no rider)
-export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = 'osm', attr = true }) {
+// draw the whole route fitted to the canvas; done = metres ridden (null: no rider); ends: start and finish dots;
+// alts: other roads to show dashed (an open-world junction); view: { at: [lat, lon], m } centres on a point, m metres across
+export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = 'osm', attr = true, ends = true, alts = null, view = null }) {
   const st = styleOf(style), filter = filterOf(st);
   const [c, w, h] = fit(cv); if (!ll?.length || w < 10 || h < 10) return;
   const pad = 14, xs = ll.map(p => wx(p[1])), ys = ll.map(p => wy(p[0]));
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const z = Math.min(MAXZ, Math.log2(Math.min((w - 2 * pad) / Math.max(x1 - x0, 1e-9), (h - 2 * pad) / Math.max(y1 - y0, 1e-9))));
-  const s = 2 ** z, cx = (x0 + x1) / 2 * s - w / 2, cy = (y0 + y1) / 2 * s - h / 2;
+  const z = view ? Math.min(MAXZ, Math.log2(40075016.686 * Math.cos(view.at[0] * Math.PI / 180) / TILE / (view.m / Math.min(w, h))))
+    : Math.min(MAXZ, Math.log2(Math.min((w - 2 * pad) / Math.max(x1 - x0, 1e-9), (h - 2 * pad) / Math.max(y1 - y0, 1e-9))));
+  const s = 2 ** z, cx = (view ? wx(view.at[1]) : (x0 + x1) / 2) * s - w / 2, cy = (view ? wy(view.at[0]) : (y0 + y1) / 2) * s - h / 2;
   const P = (lat, lon) => [wx(lon) * s - cx, wy(lat) * s - cy];
 
   c.fillStyle = css('--panel'); c.fillRect(0, 0, w, h);
@@ -73,9 +75,15 @@ export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = '
   c.lineJoin = c.lineCap = 'round';
   c.strokeStyle = 'rgba(0,0,0,.55)'; c.lineWidth = 6; line(0, pts.length - 1);
   c.strokeStyle = css('--ink'); c.lineWidth = 3; line(0, pts.length - 1);
-  // start and finish
-  c.fillStyle = css('--good'); c.beginPath(); c.arc(...pts[0], 4, 0, 2 * Math.PI); c.fill();
-  c.fillStyle = css('--bad'); c.beginPath(); c.arc(...pts.at(-1), 4, 0, 2 * Math.PI); c.fill();
+  if (alts?.length) {
+    c.strokeStyle = css('--warn'); c.setLineDash([6, 5]); c.globalAlpha = 0.85; c.lineWidth = 3;
+    for (const a of alts) { c.beginPath(); a.forEach((p, i) => (i ? c.lineTo : c.moveTo).apply(c, P(p[0], p[1]))); c.stroke(); }
+    c.setLineDash([]); c.globalAlpha = 1;
+  }
+  if (ends) {  // start and finish
+    c.fillStyle = css('--good'); c.beginPath(); c.arc(...pts[0], 4, 0, 2 * Math.PI); c.fill();
+    c.fillStyle = css('--bad'); c.beginPath(); c.arc(...pts.at(-1), 4, 0, 2 * Math.PI); c.fill();
+  }
   if (done != null) {
     const D = lineDist(ll, dist), d = Math.min(done, dist);
     let k = 0; while (k < D.length - 1 && D[k + 1] <= d) k++;

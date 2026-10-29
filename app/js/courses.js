@@ -10,7 +10,8 @@ const FT = 3.28084;
 
 // ride(course, workout|null) starts a ride; workouts() lists what the course row can pair with.
 // mineOnly() lists imported courses only; publish(c) returns a handler when the course may be published (web, signed in).
-export function createCourses({ $, store, toast, fit, css, units, ride, workouts, relayout, mineOnly = () => false, publish = () => null }) {
+// world: the open-world road provider (world.js), for its map line, junction prompt and road name.
+export function createCourses({ $, store, toast, fit, css, units, ride, workouts, relayout, mineOnly = () => false, publish = () => null, world = null }) {
   let mine = store.get('hw.courses', []);
   store.del('hw.course');  // the old "use this course for every ride" choice: rides now pick a course each time
   let sel = '', pickW = '';  // the selected course row and the workout picked on it
@@ -21,10 +22,10 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
   // <option>s for a course picker: Flat (no course), then every course with its distance and climb
   const options = cur => `<option value="">Flat</option>` + all().map(c => `<option value="${esc(c.id)}"${c.id === cur ? ' selected' : ''}>${esc(c.name)} · ${info(c)}</option>`).join('');
   // <option>s for a workout picker on a course: free ride, then my workouts, then the library by category
-  function wOptions(cur) {
+  function wOptions(cur, free = 'Free ride on this course') {
     const groups = new Map();
     for (const w of workouts()) { const g = w.id.startsWith('c-') ? 'Mine' : w.category || 'Other'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(w); }
-    return `<option value="">Free ride on this course</option>` + [...groups].map(([g, ws]) => `<optgroup label="${esc(g)}">${ws.map(w => `<option value="${esc(w.id)}"${w.id === cur ? ' selected' : ''}>${esc(w.name)}</option>`).join('')}</optgroup>`).join('');
+    return `<option value="">${esc(free)}</option>` + [...groups].map(([g, ws]) => `<optgroup label="${esc(g)}">${ws.map(w => `<option value="${esc(w.id)}"${w.id === cur ? ' selected' : ''}>${esc(w.name)}</option>`).join('')}</optgroup>`).join('');
   }
 
   // elevation profile; done = metres ridden (null: no marker). Flat courses get a 20 m scale so they look flat.
@@ -88,14 +89,34 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
   // ride screen: map, profile with the rider's position, distance left, grade, speed (distance and climbed are in the top row)
   function renderRide(rc) {
     const box = $('#crsRide'); if (!box) return;
-    // the map: the ride state has no line, so take it from the course list (gone if the course was deleted)
-    const src = rc && all().find(c => c.name === rc.name && Math.abs(c.dist - rc.dist_m) < 1);
+    // the map: the ride state has no line, so take it from the course list (gone if the course was deleted); open world: from the page's road plan
+    const ow = rc?.open ? world?.view() : null, src = rc && !rc.open && all().find(c => c.name === rc.name && Math.abs(c.dist - rc.dist_m) < 1);
     box.style.display = rc ? '' : 'none';
-    map.update(src?.ll, rc); if (!rc) return;
+    map.update(rc?.open ? ow?.ll : src?.ll, rc, ow?.alts); turnPrompt(ow); if (!rc) return;
+    const u = units(), spd = isMetric(u) ? `${Math.round(rc.speed_kmh)} km/h` : `${Math.round(rc.speed_kmh * 0.621371)} mph`;
+    if (ow) {  // open world: about 1 km behind and 2.5 km ahead
+      const i = Math.floor(ow.d / 10), a = Math.max(0, i - 100), b = Math.min(ow.ele.length, i + 250);
+      draw($('#crsChart'), ow.ele.slice(a, b), (b - a - 1) * 10, ow.d - a * 10);
+      $('#crsK').innerHTML = `<span><b>${rc.grade.toFixed(1)}%</b></span>${ow.road ? `<span>${esc(ow.road)}</span>` : ''}<span>${spd}</span>`;
+      return;
+    }
     draw($('#crsChart'), rc.profile, rc.dist_m, rc.done_m);
-    const u = units(), [left, lu] = distText(Math.max(0, rc.dist_m - rc.done_m) / 1000, u).split(' '), spd = isMetric(u) ? `${Math.round(rc.speed_kmh)} km/h` : `${Math.round(rc.speed_kmh * 0.621371)} mph`;
+    const [left, lu] = distText(Math.max(0, rc.dist_m - rc.done_m) / 1000, u).split(' ');
     $('#crsK').innerHTML = `<span><b>${rc.grade.toFixed(1)}%</b></span>${rc.end ? '<span>Finished</span>' : `<span><b>${left}</b> ${lu} to go</span>`}<span>${spd}</span>`;
   }
+  // open world: the junction ahead, its ways left to right (tap one, or the arrow keys), the road ahead still loading
+  let turnKey = '';
+  function turnPrompt(ow) {
+    const el = $('#owTurn'); if (!el) return;
+    const t = ow?.turn, k = !ow ? '' : t ? JSON.stringify(t.opts) + t.dead : ow.wait ? 'wait' : '';
+    if (k !== turnKey) {
+      turnKey = k; el.classList.toggle('on', !!k);
+      el.innerHTML = !k ? '' : !t ? '<span class="owm">Loading roads</span>' : `<span class="owm num" id="owDist"></span>` + (t.dead ? '<span class="owd">Dead end</span>'
+        : t.opts.map(o => `<button data-to="${o.to}" class="${o.on ? 'on' : ''}" aria-pressed="${o.on}"><svg class="owa" viewBox="0 0 20 20" aria-hidden="true" style="transform:rotate(${o.a}deg)"><path d="M10 17V4M5 9l5-5 5 5"/></svg>${esc(o.name)}</button>`).join(''));
+    }
+    if (t) { const m = t.m, ft = m * 3.28084; $('#owDist').textContent = isMetric(units()) ? `${Math.round(m / 10) * 10} m` : `${Math.round(ft / 50) * 50} ft`; }
+  }
+  if ($('#owTurn')) $('#owTurn').onclick = e => { const b = e?.target?.closest?.('[data-to]'); if (b) world?.choose(+b.dataset.to); };
 
   render();
   // a copy of a course (community "Save to mine"): imported like a file
@@ -104,5 +125,5 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     if (!store.set('hw.courses', [k, ...mine])) { toast('No room to save it'); return null; }
     mine = [k, ...mine]; render(); return k;
   }
-  return { byId, options, render, renderRide, map, upText, draw, add, reload: () => { mine = store.get('hw.courses', []); render(); } };
+  return { byId, options, wOptions, render, renderRide, map, upText, draw, add, reload: () => { mine = store.get('hw.courses', []); render(); } };
 }

@@ -5,7 +5,7 @@ import { drawMap, MAP_STYLES, styleOf, lineDist, pointAt } from './map.js';
 const ML = 'vendor/maplibre-gl-5.24.0/';
 const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png', DEM_ATTR = 'Terrain © Mapzen, AWS';
 let mlLoad = null;
-function loadML() {
+export function loadML() {
   return mlLoad ??= new Promise((ok, bad) => {
     const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = ML + 'maplibre-gl.css'; document.head.appendChild(l);
     const s = document.createElement('script'); s.src = ML + 'maplibre-gl-csp.js';
@@ -19,12 +19,14 @@ const bearing = (a, b) => Math.atan2(Math.sin((b[1] - a[1]) * R) * Math.cos(b[0]
   Math.cos(a[0] * R) * Math.sin(b[0] * R) - Math.sin(a[0] * R) * Math.cos(b[0] * R) * Math.cos((b[1] - a[1]) * R)) / R;
 const NONE = { type: 'FeatureCollection', features: [] };
 const lineGeo = pts => pts.length > 1 ? { type: 'Feature', geometry: { type: 'LineString', coordinates: pts.map(p => [p[1], p[0]]) } } : NONE;
+const linesGeo = ls => ({ type: 'FeatureCollection', features: ls.filter(l => l.length > 1).map(lineGeo) });
+const OSM_ROADS = 'Roads © OpenStreetMap contributors';
 
 export function createRideMap({ $, store, fit, css, toast, relayout }) {
   let style = MAP_STYLES[store.get('hw.mapStyle', 'osm')] ? store.get('hw.mapStyle', 'osm') : 'osm';
   let d3 = !!store.get('hw.map3d', false), focus = !!store.get('hw.mapFocus', false);
-  let cur = null;  // { ll, D, dist, done }
-  let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, busy = false, size = '', placedOn = false;
+  let cur = null;  // { ll, n, D, dist, done, open, alts }
+  let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, mapAlts = '', busy = false, size = '', placedOn = false;
   const box = $('#crsMapBox'), cv = $('#crsMap'), v3 = $('#crsMap3d');
   $('#mapStyle').innerHTML = Object.entries(MAP_STYLES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
 
@@ -43,25 +45,34 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     $('#mapStyle').value = style;
     $('#map3d').classList.toggle('on', d3); $('#map3d').setAttribute('aria-pressed', String(d3));
     $('#mapFocus').classList.toggle('on', focus); $('#mapFocus').title = focus ? 'Chart focus (F)' : 'Map focus (F)';
-    $('#mapAttr').textContent = styleOf(style).attr + (live ? ' · ' + DEM_ATTR : '');
+    const a = styleOf(style).attr;
+    $('#mapAttr').textContent = a + (cur?.open && !a.includes('OpenStreetMap') ? ' · ' + OSM_ROADS : '') + (live ? ' · ' + DEM_ATTR : '');
     v3.style.display = d3 ? '' : 'none'; cv.style.display = live ? 'none' : '';  // 2D shows until the terrain is up
   }
-  const draw2d = () => { if (cur && !(d3 && ready)) drawMap(cv, { ll: cur.ll, dist: cur.dist, done: cur.done, fit, css, redraw: draw2d, style, attr: false }); };
+  // 2D: the whole course; an open-world ride: about 1.6 km across, centred on the rider (points every 10 m)
+  function draw2d() {
+    if (!cur || (d3 && ready)) return;
+    if (!cur.open) return drawMap(cv, { ll: cur.ll, dist: cur.dist, done: cur.done, fit, css, redraw: draw2d, style, attr: false });
+    const i = Math.floor(cur.done / 10), a = Math.max(0, i - 150), b = Math.min(cur.ll.length, i + 250), w = cur.ll.slice(a, b);
+    drawMap(cv, { ll: w, dist: (w.length - 1) * 10, done: cur.done - a * 10, fit, css, redraw: draw2d, style, attr: false, ends: false, alts: cur.alts,
+      view: { at: pointAt(cur.ll, cur.D, cur.done), m: 1600 } });
+  }
   function draw() { if (!cur) return; ui(); if (d3) draw3d(); draw2d(); }
 
   function spec() {
     const st = styleOf(style), round = { 'line-join': 'round', 'line-cap': 'round' };
     const paint = st.dark ? { 'raster-brightness-min': 0.8, 'raster-brightness-max': 0.04, 'raster-hue-rotate': 180, 'raster-saturation': -0.6 }  // inverted, like the 2D map
       : st.dim ? { 'raster-brightness-max': st.dim } : {};
-    mapStyle = style; mapLL = cur.ll;
+    mapStyle = style; mapLL = cur.ll; mapAlts = '';
     return { version: 8,
       sources: {
         base: { type: 'raster', tiles: [st.tiles], tileSize: 256, maxzoom: st.max },
         dem: { type: 'raster-dem', tiles: [DEM], tileSize: 256, maxzoom: 15, encoding: 'terrarium' },
-        route: { type: 'geojson', data: lineGeo(cur.ll) }, done: { type: 'geojson', data: NONE },
+        route: { type: 'geojson', data: lineGeo(cur.ll) }, done: { type: 'geojson', data: NONE }, alts: { type: 'geojson', data: NONE },
       },
       layers: [
         { id: 'base', type: 'raster', source: 'base', paint },
+        { id: 'alts', type: 'line', source: 'alts', layout: round, paint: { 'line-color': css('--warn'), 'line-opacity': 0.75, 'line-width': 4 } },
         { id: 'casing', type: 'line', source: 'route', layout: round, paint: { 'line-color': '#000', 'line-opacity': 0.5, 'line-width': 9 } },
         { id: 'route', type: 'line', source: 'route', layout: round, paint: { 'line-color': css('--ink'), 'line-width': 4 } },
         { id: 'done', type: 'line', source: 'done', layout: round, paint: { 'line-color': css('--acc'), 'line-width': 5 } },
@@ -73,7 +84,9 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   async function draw3d() {
     if (map) {
       if (!ready) return;
-      if (mapLL !== cur.ll || mapStyle !== style) map.setStyle(spec());
+      if (mapStyle !== style) map.setStyle(spec());
+      else if (mapLL !== cur.ll) { map.getSource('route')?.setData(lineGeo(cur.ll)); mapLL = cur.ll; }  // a course that grows: no restyle
+      const ak = JSON.stringify(cur.alts || []); if (ak !== mapAlts) { mapAlts = ak; map.getSource('alts')?.setData(linesGeo(cur.alts || [])); }
       const D = cur.D, d = Math.max(0, Math.min(cur.done ?? 0, cur.dist)); let k = 0; while (k < D.length - 1 && D[k + 1] <= d) k++;
       map.getSource('done')?.setData(lineGeo([...cur.ll.slice(0, k + 1), pointAt(cur.ll, D, d)]));
       // glide from where the rider is drawn now to the new position over the next second
@@ -111,16 +124,24 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
     frame.t = now;
     rider.setLngLat([at[1], at[0]]);
     const center = [at[1], at[0]];  // elevation given: jumpTo looks it up at a fractional zoom and gets 0 (MapLibre 5.24)
-    map.jumpTo({ center, elevation: map.queryTerrainElevation(center) ?? 0, bearing: camB, pitch: w > 600 ? 62 : 56, zoom: w > 600 ? 14.8 : 13.8, padding: { top: Math.round(h * 0.42), bottom: 0, left: 0, right: 0 } });
+    const z = (w > 600 ? 14.8 : 13.8) + (cur.open ? 1.2 : 0);  // open world: closer, to see the junction ahead
+    map.jumpTo({ center, elevation: map.queryTerrainElevation(center) ?? 0, bearing: camB, pitch: w > 600 ? 62 : 56, zoom: z, padding: { top: Math.round(h * 0.42), bottom: 0, left: 0, right: 0 } });
     if (now - anim.t0 < 1100 || Math.abs(turn) > 0.3) raf = requestAnimationFrame(frame);
     else frame.t = 0;
   }
 
-  // ll: the course line ([lat, lon]); rc: the ride's course state. Returns true when the layout moved.
-  function update(ll, rc) {
+  // ll: the course line ([lat, lon]); rc: the ride's course state; alts: other roads at a junction (open world).
+  // Returns true when the layout moved.
+  function update(ll, rc, alts = null) {
     const has = !!(rc && ll?.length > 1);
     if (!has) cur = null;
-    else { if (cur?.ll !== ll) { cur = { ll, D: lineDist(ll, rc.dist_m) }; anim = null; } cur.dist = rc.dist_m; cur.done = rc.done_m; }
+    else {
+      if (cur?.ll !== ll) {  // an open-world course grows: the rider glides on
+        const keep = cur?.open && rc.open;
+        cur = { ll, open: !!rc.open, D: lineDist(ll, rc.open ? (ll.length - 1) * 10 : rc.dist_m) }; if (!keep) anim = null;
+      }
+      cur.dist = rc.open ? (ll.length - 1) * 10 : rc.dist_m; cur.done = Math.min(rc.done_m, cur.dist); cur.alts = alts;
+    }
     const moved = place();
     $('#crsSlot').style.display = has ? '' : 'none';
     draw();

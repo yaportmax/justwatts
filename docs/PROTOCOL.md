@@ -39,6 +39,7 @@ curl -s -H "Authorization: Bearer $(cat ~/.justwatts/token)" http://127.0.0.1:87
 | GET | `/api/state` | page/token | | `{state}` (state object below) |
 | GET | `/api/events` | page/token | `?n=50` (1..2000) | `{events: [parsed]}` from `live/events.log` |
 | POST | `/api/ride/control` | page/token | `{action, ...}` | `{ok, ...}`; actions below |
+| GET | `/api/ride/course` | page/token | | `{course, d}`: the ride's whole course and the metres ridden (an open-world page rebuilds its road plan from it) |
 | GET/POST | `/api/settings` | none / page/token | partial settings | `{settings, stored, garmin}` |
 | GET | `/api/devices` | none | | device status |
 | POST | `/api/devices` | page/token | `{action: scan\|connect\|disconnect\|sim, kind: trainer\|hr, address?, name?, on?, timeout?}` | status, or `{devices: [{address, name, rssi}]}` for scan; `503` when Bluetooth is off |
@@ -68,7 +69,7 @@ curl -s -H "Authorization: Bearer $(cat ~/.justwatts/token)" http://127.0.0.1:87
 `load {workout: {name, text, test?} | null, course?}` (null = free ride; finishes a started ride first;
 `course` see Courses below),
 `start`, `hold` (pause; during an auto-pause it makes the pause stick), `resume`, `pause` (toggle),
-`skip`, `back` (restart the current step, or in its first 10 s ride the previous one again; inserts
+`road` (open world, see Courses), `skip`, `back` (restart the current step, or in its first 10 s ride the previous one again; inserts
 copies, time only moves forward; after the plan it rides the last step again), `save` (archive the
 ride so far, keep riding), `end` (finish and save), `adjust {dir: 1|-1, big?}` (intensity 1 %, or
 grade 0.5 % / 5 W / level 0.5 when the trainer is not following the plan in ERG; `big` is 5 times
@@ -108,6 +109,12 @@ always advances while riding, whatever the trainer follows.
 - Workout + course: steps with a target ride ERG as usual; `free` steps (and ERG off) send the road
   grade. With no course, grade mode is flat (0 % plus +/-).
 - Grade commands are rate limited: a change over 0.1 % goes out at once, smaller ones at most every 2 s.
+- Open world: `{name, open: true, ele, ll, nd?}` with `ll` one `[lat, lon]` per `ele` point (so `dist` is
+  10 m times the points less one) and `nd` the page's road plan, ascending `[metres, OSM node id]`. The
+  page (`app/js/world.js`, `app/js/roads.js`) loads OpenStreetMap roads, plans the road ahead and adds it
+  with `road {at, ele, ll, nd?}`: the points from index `at` on are replaced (`nd` from its first entry on),
+  never the segment under the rider; `at` at the end appends. Answers `{n}` (points now). The rider
+  waits at the end of the known road; there is no finish. On `end` the course keeps only the road ridden.
 - At the finish the ride does not stop: `COURSE DONE` is written, the distance keeps counting, and
   the grade holds the last segment (`afterWorkout: hold`) or goes to 0 % (`grade0`) until `end`.
 
@@ -169,7 +176,7 @@ move with their steps. Each edit writes an `EDIT ...` event line.
 - `control`: what the trainer follows and +/- changes: `k` (ERG at plan times intensity), `w` (ERG
   watts), `g` (grade), `r` (level). `jr.wm` is the workout trainer mode (`e`, `g`, `r`).
 - `course`: null, or `{name, dist_m, gain_m, done_m, odo_m, ele_m, climbed_m, grade, speed_kmh, end,
-  profile}`. `done_m` stops at the finish, `odo_m` keeps counting; `grade` is the road under the rider
+  profile, open, n}` (`open`: an open-world course, `n` its points). `done_m` stops at the finish, `odo_m` keeps counting; `grade` is the road under the rider
   (before rate limiting and the +/- offset); `profile` is the elevation in at most 300 points for drawing.
 - `source` is `server` (`web` in the web build).
 

@@ -14,7 +14,9 @@ import { view as aView, track, workoutTag } from './analytics.js';
 import { LIBRARY, CATEGORIES, FEATURED } from './library.js';
 import { createCourses } from './courses.js';
 import { drawMap } from './map.js';
-import { checkCourse } from './course.js';
+import { checkCourse, buildCourse } from './course.js';
+import { createWorld } from './world.js';
+import { createPicker } from './worldpick.js';
 import { createConnect } from './connect.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
@@ -109,7 +111,10 @@ const conn = createConnect({ $, F, WEB, toast,
   onPlanned: list => { planned = list; if ($('#v-workouts').classList.contains('on') && wkTab === 'workouts') renderLib(); },
   stravaSetup: () => { const d = $('#stOwnBox'); d.open = true; d.scrollIntoView?.({ behavior: 'smooth', block: 'center' }); },
 });
-const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide(),
+// open world: the page provides the road ahead (world.js); quiet controls (a refused road update is not an error to show)
+const world = createWorld({ control: (action, b) => apiJson('/api/ride/control', { action, ...b }),
+  course: async () => (await F('/api/ride/course', { headers: { 'X-HW': '1' } })).json(), onChange: () => { if (V) renderRide(); } });
+const courses = createCourses({ world, $, store, toast, fit, css, units: () => settings.units, ride: (c, w) => loadRide(w, c), workouts: () => allWorkouts(), relayout: () => V && renderRide(),
   mineOnly: () => libSrc === 'mine', publish: c => community && account?.me() ? () => community.openPublish({ kind: 'course', course: c }) : null });
 
 /* ---------- library + builder ---------- */
@@ -306,6 +311,7 @@ function onLive(msg) {
   testGuide();
   if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) finishedRide(S.last_finished);
   if (prev?.ride && !r && account) { account.sync.applyPending(); account.sync.kick(); }  // ride over: pending settings apply, the ride syncs
+  world.update(r?.course, r?.id);
   setStatus(); renderLive(); if (V) renderRide();
 }
 function setOnline(on) {
@@ -384,6 +390,16 @@ function loadRide(w, course = null) {  // course: the one picked for this ride, 
   track('ride_load', { workout: workoutTag(w), course: !course ? 'flat' : String(course.id).startsWith('k-') ? 'imported' : String(course.id).startsWith('m-') ? 'community' : course.id });
   return control('load', { workout: w ? { name: w.name, text: w.text, test: !!w.test } : null, course }).then(() => { show('ride'); return true; }).catch(() => false);
 }
+// open world from a start point (picker): roads load, then the ride loads like any course ride
+async function rideWorld(p, wid) {
+  if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return false; }
+  loadArmed = 0;
+  const w = wid ? allWorkouts().find(x => x.id === wid && !x.test) : null;
+  await world.start({ name: p.id ? p.name : 'Open world', lat: p.lat, lon: p.lon, heading: p.heading, workout: w && { name: w.name, text: w.text, test: false } });
+  track('ride_load', { workout: workoutTag(w), course: 'open' }); show('ride'); return true;
+}
+const picker = createPicker({ $, store, world, wOptions: (cur, free) => courses.wOptions(cur, free), go: rideWorld });
+$('#owOpen').onclick = () => picker.open();
 function rideShell() {
   const on = !!V;
   $('#rideEmpty').style.display = on ? 'none' : ''; $('#rideOn').style.display = on ? '' : 'none';
@@ -675,13 +691,14 @@ const KEYS = {
   KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo,
 };
 function onKey(e) {
-  if (e.key === 'Escape') { if (conn.escape()) return; sheet(false); $('#keysModal').classList.remove('on'); return; }
+  if (e.key === 'Escape') { if (conn.escape()) return; picker.close(); sheet(false); $('#keysModal').classList.remove('on'); return; }
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '');
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !typing && $('#v-workouts').classList.contains('on')) { e.preventDefault(); builder.undo(); return; }
   if (!V || typing) return;
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); return doUndo(); }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === '?') { e.preventDefault(); return $('#keysModal').classList.toggle('on'); }
+  if (!e.shiftKey && world.key(e.code)) { e.preventDefault(); return; }  // open world: arrows pick the way at a junction
   const f = KEYS[e.code]; if (!f) return;
   e.preventDefault(); f(e);
 }
@@ -757,6 +774,8 @@ async function openSummary(id) {
   // a course ride: its route, with how far the rider got
   const ll = r.course?.ll, done = r.samples.at(-1)?.[8], mapDraw = () => drawMap($('#sMap'), { ll, dist: r.course.dist, done, fit, css, redraw: () => openRide === r && mapDraw() });
   $('#sMap').style.display = ll?.length > 1 ? '' : 'none'; if (ll?.length > 1) requestAnimationFrame(mapDraw);
+  $('#sSaveCrs').style.display = r.course?.open && r.course.dist >= 100 ? '' : 'none';  // open world: keep the road ridden as a course
+  $('#sSaveCrs').disabled = false; $('#sSaveCrs').textContent = 'Save route';
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }
   else if (r.text) { try { cw = compile(r); for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { [s.a, s.b] = Array.isArray(w) ? w : [w, w]; s.u = 'w'; } } } catch {} }
@@ -784,6 +803,10 @@ async function openSummary(id) {
 }
 function closeSummary() { $('#summary').style.display = 'none'; $('#histMain').style.display = ''; openId = null; }
 $('#sClose').onclick = () => { closeSummary(); renderTrends(); };
+$('#sSaveCrs').onclick = () => {
+  const r = openRide, c = r?.course; if (!c?.open) return;
+  try { if (courses.add(buildCourse(r.name, c.ll.map((p, i) => ({ lat: p[0], lon: p[1], ele: c.ele[i] }))))) { toast('Saved to Courses'); $('#sSaveCrs').disabled = true; $('#sSaveCrs').textContent = 'Saved'; } } catch (e) { toast(e.message); }
+};
 $('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); closeSummary(); renderHistory(); toast(WEB ? 'Deleted' : 'Deleted (kept in rides/trash)'); account?.sync.kick(); };
 const fileLink = async (ext, id = openId) => {
   if (!id) return;

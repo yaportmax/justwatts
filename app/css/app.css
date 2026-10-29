@@ -221,7 +221,7 @@ details.adv>summary:hover{color:var(--ink)}
 main:has(#v-ride.on){max-width:none;padding:18px 28px 16px}
 #rideOn{display:flex;flex-direction:column;flex:1;min-height:0}
 #rideOn>*{flex:none}
-#rideOn>#rideBig{flex:1;min-height:140px;display:flex;background:none;border:0;padding:0}
+#rideOn>#rideBig{flex:1;min-height:140px;display:flex;background:none;border:0;padding:0;position:relative}
 #rideChart{width:100%;height:100%;display:block}
 .rtop{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 #rName{font-size:16px;font-weight:600;letter-spacing:-.01em}
@@ -314,6 +314,25 @@ main:has(#v-ride.on){max-width:none;padding:18px 28px 16px}
 #mapFocus{margin-left:auto;font-size:14px}
 .rmapattr{position:absolute;right:0;bottom:0;z-index:2;max-width:100%;padding:1px 6px;font-size:10px;color:var(--dim);background:rgba(11,13,16,.7);border-top-left-radius:6px;text-align:right}
 .rmapdot{width:16px;height:16px;border-radius:50%;background:var(--acc);border:3px solid var(--bg);box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+/* open world: the junction ahead (over the big panel), the start picker */
+.owturn{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:5;display:none;align-items:center;gap:4px;max-width:calc(100% - 20px);padding:5px;background:rgba(11,13,16,.86);border-radius:12px;box-shadow:var(--shadow);backdrop-filter:blur(6px)}
+.owturn.on{display:flex;animation:owin .14s ease-out}
+@keyframes owin{from{opacity:0}to{opacity:1}}
+.owturn .owm{padding:0 10px 0 8px;font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap}
+.owturn .owd{padding:0 10px 0 0;font-size:13px;color:var(--warn)}
+.owturn button{height:34px;min-width:0;padding:0 12px 0 8px;gap:6px;background:none;border-color:transparent;color:var(--dim);overflow:hidden;text-overflow:ellipsis}
+.owturn button:hover{background:var(--panel2);color:var(--ink)}
+.owturn button.on{background:var(--acc-soft);border-color:rgba(56,189,248,.45);color:var(--ink)}
+.owa{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.owturn button.on .owa{stroke:var(--acc)}
+.dlg.owdlg{width:min(920px,100%)}
+.owpre{margin:0}
+.owmap{position:relative;height:min(56vh,520px);border-radius:8px;overflow:hidden;background:var(--bg)}
+#owMap{position:absolute;inset:0}
+#owMap .maplibregl-canvas{cursor:crosshair}
+.owdlg .dfoot .hint{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--dim)}
+.owdlg .dfoot .hint.err{color:var(--bad)}
+#owWk{height:32px;width:200px}
 
 /* ---------- history ---------- */
 .kpis{display:flex;flex-wrap:wrap}
@@ -467,6 +486,8 @@ body.web .serveronly{display:none !important}
   .sc{justify-content:flex-start}
   .sgrid .r{grid-template-columns:1fr;gap:4px}
   .sheet{top:auto;left:0;right:0;bottom:0;width:100%;max-height:80vh;border-radius:12px 12px 0 0}
+  .owturn{top:6px;flex-wrap:wrap;justify-content:center}.owturn button{height:32px}
+  .modal:has(.owdlg){padding:8px}.owmap{height:52vh}.owdlg .dfoot{flex-wrap:wrap}#owWk{width:auto;flex:1}
 }
 @media (hover:none){.lrow .lact{visibility:visible;display:none}.lrow.sel .lact{display:flex}}
 

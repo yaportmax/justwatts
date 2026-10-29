@@ -54,7 +54,7 @@
   <div class="srcbar" id="libSrc" role="group" aria-label="Source"><button data-src="lib" class="on">Library</button><button data-src="mine">Mine</button><button data-src="comm" class="webonly" style="display:none">Community</button></div>
 
   <div class="tabpane" id="tabCourses" role="tabpanel" style="display:none">
-    <div class="toolbar crsbar"><span class="hint">With a workout: watt segments stay ERG, free segments follow the road.</span><button id="crsImport" title="GPX, TCX or FIT"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3M6 7l4-4 4 4M4 13v3h12v-3"/></svg>Import route</button></div>
+    <div class="toolbar crsbar"><span class="hint">With a workout: watt segments stay ERG, free segments follow the road.</span><button id="owOpen" title="Ride any road from a start you pick"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg>Open world</button><button id="crsImport" title="GPX, TCX or FIT"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 13V3M6 7l4-4 4 4M4 13v3h12v-3"/></svg>Import route</button></div>
     <div class="lhead crs-cols"><span></span><span>Course</span><span class="r">Distance</span><span class="r">Climb</span></div>
     <div class="llist" id="crsList"></div>
     <input type="file" id="crsFile" accept=".gpx,.tcx,.fit" hidden>
@@ -161,7 +161,7 @@
       <div class="bar"><i id="ivBar"></i></div>
     </div>
     <div class="panel testcue" id="testCue" style="display:none" role="status" aria-live="polite"><div class="tcm" id="tcMain"></div><div class="tcs" id="tcSub"></div></div>
-    <div class="panel" id="rideBig"><canvas id="rideChart"></canvas></div>
+    <div class="panel" id="rideBig"><div class="owturn" id="owTurn" role="group" aria-label="Way at the junction ahead" aria-live="polite"></div><canvas id="rideChart"></canvas></div>
     <div class="crs" id="crsRide" style="display:none"><div class="crsslot" id="crsSlot"><div class="rmap" id="crsMapBox"><canvas id="crsMap"></canvas><div id="crsMap3d" style="display:none"></div>
       <div class="rmapui"><select id="mapStyle" aria-label="Map style"></select><button id="map3d" aria-pressed="false" title="Terrain, following the rider">3D</button><button id="mapFocus" aria-label="Swap map and chart" title="Map focus (F)">⤢</button></div>
       <div class="rmapattr" id="mapAttr"></div></div></div><div class="crsp"><canvas id="crsChart"></canvas><div class="crsk num" id="crsK"></div></div></div>
@@ -230,6 +230,7 @@
         <button id="sCard" class="ghost" title="PNG to download or share">Share card</button>
         <button id="sFit" class="ghost" title="Download .fit">.fit</button>
         <button id="sTcx" class="ghost" title="Download .tcx">.tcx</button>
+        <button id="sSaveCrs" class="ghost" style="display:none" title="Keep the road ridden as a course">Save route</button>
         <button id="sDel" class="ghost danger">Delete</button>
         <button id="sUpload" class="pri">Upload</button>
       </div>
@@ -373,6 +374,14 @@
     </div>
   </div>
 </div>
+<div class="modal" id="owModal">
+  <div class="panel dlg owdlg" role="dialog" aria-labelledby="owTitle">
+    <div class="dhead"><b id="owTitle">Open world</b><button id="owClose" class="x" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+    <div class="owpre chips" id="owPre"></div>
+    <div class="owmap"><div id="owMap"></div><div class="rmapattr" id="owAttr"></div></div>
+    <div class="dfoot"><span class="hint" id="owAt"></span><div class="row" style="gap:8px"><select id="owWk" class="pick" aria-label="Workout"></select><button id="owGo" class="pri">Ride</button></div></div>
+  </div>
+</div>
 <div class="modal" id="keysModal">
   <div class="panel dlg" role="dialog" aria-labelledby="keysTitle">
     <div class="dhead"><b id="keysTitle">Keyboard shortcuts</b><button id="keysClose" class="x" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
@@ -385,6 +394,7 @@
       <tr><td><kbd>-</kbd> <kbd>=</kbd></td><td>Segment watts −5, +5</td></tr>
       <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>ERG, grade, level</td></tr>
       <tr><td><kbd>A</kbd></td><td>Adjust</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd></td><td>Open world: the way at the junction ahead</td></tr>
       <tr><td><kbd>F</kbd></td><td>Map or chart focus (courses with a map)</td></tr>
       <tr><td><kbd>Z</kbd></td><td>Undo</td></tr>
       <tr><td><kbd>Esc</kbd></td><td>Close</td></tr>

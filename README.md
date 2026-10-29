@@ -42,6 +42,11 @@ No trainer? `justwatts simulate` starts a workout on the server's fake trainer; 
 - **Ride screen** on one page: power, target, distance (and climb on a course), cadence against your
   target range, HR with zones, interval timer, the chart with a right-hand HR axis. On a course: the
   route map in four styles or a 3D terrain view that follows you (MapLibre GL JS, vendored).
+- **Open world**: start anywhere (Golden Gate Bridge, Hawk Hill, Alpe d'Huez or a tap on the map) and
+  ride real roads with no route. You stay on the road; at a junction you go straight on or follow the
+  main road unless you pick another way. Roads are OpenStreetMap data loaded around you (Overpass),
+  the grade comes from terrain tiles, a workout can run on top, and the road ridden can be saved as a
+  course.
 - **History**: every ride with NP, IF, TSS, best 1/5/20 min, power and HR zones, laps per interval,
   FIT and TCX export, a share card (PNG) to download or share; weekly TSS, FTP history and best
   efforts.
@@ -68,6 +73,7 @@ and intensity, watts, segment time, length, trainer mode and settings can be und
 | After the plan: hold the last target or ride flat | Adjust | |
 | Cadence on/off and range (off: no readout, target or cues), beeps | Adjust | |
 | Map style (Map, Satellite, Topo, Cycling), 3D terrain, map or chart focus (courses with a route) | map | F |
+| Open world: the way at the junction ahead (shown about 200 m before it) | tap | ← ↑ → |
 | Undo, Save, End (two taps) | bar | Z, S |
 | Reconnect trainer or HR | header | |
 

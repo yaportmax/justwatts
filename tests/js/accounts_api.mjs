@@ -1141,6 +1141,70 @@ S.social = async () => {
   assert.deepEqual((await ann.post('/api/social/search', { q: 'bob' })).body.users, []);
 };
 
+// desktop app sign-in: system browser with a PKCE challenge, a one-time code back to the app, the app's exchange
+S.app = async () => {
+  await reset({ GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsecret' });
+  let lastNonce = null, sub = '501';
+  fetchImpl = googleStub(() => ({ sub, email: 'app@example.com', email_verified: true, nonce: lastNonce }));
+  const pkce = () => { const v = crypto.randomBytes(32).toString('base64url'); return { v, c: crypto.createHash('sha256').update(v).digest('base64url') }; };
+  const browser = client('203.0.113.200'), appC = client('203.0.113.201');
+  const flow = async (c, q) => {
+    const s = await c.get(`/api/auth/google/start?${q}`);
+    if (s.headers.location.startsWith('justwatts://')) return new URL(s.headers.location);
+    const sp = new URL(s.headers.location).searchParams; lastNonce = sp.get('nonce');
+    return new URL((await c.get(`/api/auth/google/callback?code=authcode123&state=${sp.get('state')}`)).headers.location, ORIGIN);
+  };
+  // login: the code goes to justwatts://auth, the browser is not signed in
+  let k = pkce();
+  let back = await flow(browser, `app=${k.c}&return=${encodeURIComponent('/#settings')}`);
+  assert.equal(back.protocol, 'justwatts:'); assert.equal(back.searchParams.get('auth'), 'ok'); assert.equal(back.searchParams.get('new'), '1');
+  assert.equal(back.searchParams.get('return'), '/#settings'); assert.equal(back.searchParams.get('provider'), 'google');
+  assert.ok(!browser.jar.has('__Host-jw_session'));
+  assert.equal((await browser.get('/api/auth/me')).body.user, null);
+  const code = back.searchParams.get('code');
+  // wrong verifier: refused, and the code is spent
+  assert.equal((await appC.post('/api/auth/app/exchange', { code, verifier: pkce().v })).body.error, 'bad_token');
+  assert.equal((await appC.post('/api/auth/app/exchange', { code, verifier: k.v })).body.error, 'bad_token');
+  k = pkce(); back = await flow(browser, `app=${k.c}`);
+  assert.equal(back.searchParams.get('new'), null);
+  // the exchange needs the site's Origin like every write
+  assert.equal((await appC.post('/api/auth/app/exchange', { code: back.searchParams.get('code'), verifier: k.v }, { headers: { origin: 'https://evil.test' } })).status, 403);
+  let r = await appC.post('/api/auth/app/exchange', { code: back.searchParams.get('code'), verifier: k.v });
+  assert.equal(r.status, 200, JSON.stringify(r.body)); assert.equal(r.body.user.email, 'app@example.com');
+  assert.equal((await appC.get('/api/auth/me')).body.user.email, 'app@example.com');
+  // expired code
+  k = pkce(); back = await flow(browser, `app=${k.c}`); advance(6 * 60000);
+  assert.equal((await client().post('/api/auth/app/exchange', { code: back.searchParams.get('code'), verifier: k.v })).body.error, 'bad_token');
+  // a bad challenge is ignored: the plain web flow
+  back = await flow(client(), 'app=short');
+  assert.equal(back.protocol, 'https:');
+  // linking from the app: a ticket names the signed-in account
+  const owner = await signup('linker@example.com');
+  assert.equal((await client().post('/api/auth/app/ticket')).status, 401);
+  const ticket = (await owner.post('/api/auth/app/ticket')).body.ticket;
+  assert.ok(ticket.length >= 40);
+  sub = '777'; k = pkce();
+  back = await flow(client('203.0.113.202'), `mode=link&app=${k.c}&ticket=${ticket}`);
+  assert.equal(back.searchParams.get('auth'), 'linked');
+  assert.deepEqual((await owner.get('/api/auth/me')).body.identities.map(i => i.provider), ['email']);  // nothing linked before the exchange
+  // someone else's session cannot finish it
+  const other = await signup('other@example.com');
+  assert.equal((await other.post('/api/auth/app/exchange', { code: back.searchParams.get('code'), verifier: k.v })).status, 403);
+  const t2 = (await owner.post('/api/auth/app/ticket')).body.ticket; k = pkce();
+  back = await flow(client('203.0.113.203'), `mode=link&app=${k.c}&ticket=${t2}`);
+  r = await owner.post('/api/auth/app/exchange', { code: back.searchParams.get('code'), verifier: k.v });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body.identities.map(i => i.provider).sort(), ['email', 'google']);
+  // a ticket is single use; link without one is refused before leaving the site
+  k = pkce();
+  back = await flow(client('203.0.113.204'), `mode=link&app=${k.c}&ticket=${t2}`);
+  assert.equal(back.protocol, 'justwatts:'); assert.equal(back.searchParams.get('reason'), 'signed_out');
+  // the same Google account linked elsewhere: identity_in_use
+  const t3 = (await other.post('/api/auth/app/ticket')).body.ticket; k = pkce();
+  back = await flow(client('203.0.113.205'), `mode=link&app=${k.c}&ticket=${t3}`);
+  assert.equal(back.searchParams.get('reason'), 'identity_in_use');
+};
+
 /* ---------- run ---------- */
 const names = which === 'all' ? Object.keys(S) : which.split(',');
 const out = {};

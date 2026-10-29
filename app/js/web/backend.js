@@ -14,11 +14,11 @@ const pad = n => String(n).padStart(2, '0'), hms = d => `${pad(d.getHours())}:${
 const resp = (status, obj, type = 'application/json') => new Response(type === 'application/json' ? JSON.stringify(obj) : obj, { status, headers: { 'Content-Type': type } });
 
 export class WebBackend {
-  constructor({ store, nav = globalThis.navigator, location = globalThis.location, tickMs = 1000 } = {}) {
+  constructor({ store, hub = null, nav = globalThis.navigator, location = globalThis.location, tickMs = 1000 } = {}) {
     this.store = store; this.location = location; this.tickMs = tickMs;
     this.settings = { ...SETTINGS_DEFAULTS }; this.settingsStored = false;
     this.log = [];
-    this.hub = new WebHub({ store });
+    this.hub = hub || new WebHub({ store });
     this.engine = new Engine({ hub: this.hub, logEvent: l => this.logEvent(l), settings: () => this.settings,
       save: p => this.persist(p), archive: p => this.store.putRide(p).then(() => this.bump()) });
     this.engine.onFinish = p => this.afterFinish(p);
@@ -152,7 +152,12 @@ export function makeEventSource(backend) {
 export async function createWebBackend(opts = {}) {
   let store = opts.store;
   if (!store) { try { store = await openDB(); } catch { store = new MemStore(); } }
-  const b = new WebBackend({ ...opts, store });
+  // a native shell (apps/desktop) brings its own device hub with the WebHub interface: JustWattsNative.hubModule names a
+  // module that exports createHub({ store }). Bluetooth then lives outside the page and survives reloads.
+  const hubModule = globalThis.JustWattsNative?.hubModule;
+  let hub = opts.hub || null;
+  if (!hub && typeof hubModule === 'string') { try { hub = (await import(hubModule)).createHub({ store }); } catch (e) { console.error('native hub', e); } }
+  const b = new WebBackend({ ...opts, store, hub });
   await b.init();
   return b;
 }

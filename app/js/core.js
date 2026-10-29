@@ -1,5 +1,6 @@
 // Pure logic shared by the browser app and the node test harness. No DOM, no globals.
 'use strict';
+import { track } from './course.js';
 
 export function fmtT(s) {
   s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
@@ -223,12 +224,12 @@ export function fitCrc(bytes, c = 0) {
   return c;
 }
 export function fitEncode(r) {
-  const ENUM = 0x00, U8 = 0x02, U16 = 0x84, U32 = 0x86, U32Z = 0x8C;
-  const SZ = { [ENUM]: 1, [U8]: 1, [U16]: 2, [U32]: 4, [U32Z]: 4 }, INV = { [ENUM]: 0xFF, [U8]: 0xFF, [U16]: 0xFFFF, [U32]: 0xFFFFFFFF, [U32Z]: 0 };
+  const ENUM = 0x00, U8 = 0x02, U16 = 0x84, S32 = 0x85, U32 = 0x86, U32Z = 0x8C;
+  const SZ = { [ENUM]: 1, [U8]: 1, [U16]: 2, [S32]: 4, [U32]: 4, [U32Z]: 4 }, INV = { [ENUM]: 0xFF, [U8]: 0xFF, [U16]: 0xFFFF, [S32]: 0x7FFFFFFF, [U32]: 0xFFFFFFFF, [U32Z]: 0 };
   const b = [], defs = {};
   const put = (v, n) => { for (let i = 0; i < n; i++) b.push(Math.floor(v / 2 ** (8 * i)) & 255); };
   function def(local, global, fields) { defs[local] = fields; b.push(0x40 | local, 0, 0); put(global, 2); b.push(fields.length); for (const [num, t] of fields) b.push(num, SZ[t], t); }
-  function msg(local, vals) { b.push(local); defs[local].forEach(([, t], i) => { let v = vals[i]; if (v == null || !isFinite(v)) v = INV[t]; else v = Math.max(0, Math.min(INV[t] === 0 ? 0xFFFFFFFE : INV[t] - 1, Math.round(v))); put(v, SZ[t]); }); }
+  function msg(local, vals) { b.push(local); defs[local].forEach(([, t], i) => { let v = vals[i]; if (v == null || !isFinite(v)) v = INV[t]; else if (t === S32) v = Math.max(-0x7FFFFFFF, Math.min(0x7FFFFFFE, Math.round(v))) >>> 0; else v = Math.max(0, Math.min(INV[t] === 0 ? 0xFFFFFFFE : INV[t] - 1, Math.round(v))); put(v, SZ[t]); }); }
   const s = r.samples, m = summarize(r), ts = x => Math.round(x / 1000) - FIT_EPOCH;
   const t0 = ts(s[0][0]), tEnd = ts(s[s.length - 1][0]);
   def(0, 0, [[0, ENUM], [1, U16], [2, U16], [3, U32Z], [4, U32]]);           // file_id
@@ -236,21 +237,23 @@ export function fitEncode(r) {
   def(1, 21, [[253, U32], [0, ENUM], [1, ENUM]]);                            // event
   msg(1, [t0, 0, 0]);                                                        // timer start
   const crs = onCourse(s);  // a course ride also records altitude (scale 5, offset 500) and its own distance
-  def(2, 20, [[253, U32], [7, U16], [4, U8], [3, U8], [6, U16], [5, U32], ...(crs ? [[2, U16]] : [])]);  // record
+  const pos = crs ? track(r.course) : null, semi = x => x * 2 ** 31 / 180;  // and, with a map line, a position
+  def(2, 20, [[253, U32], [7, U16], [4, U8], [3, U8], [6, U16], [5, U32], ...(crs ? [[2, U16]] : []), ...(pos ? [[0, S32], [1, S32]] : [])]);  // record
   let dist = 0, prevT = null;
   for (const x of s) {
     const t = ts(x[0]);
     if (prevT != null && t - prevT > 2) { msg(1, [prevT, 0, 4]); msg(1, [t, 0, 0]); }  // pause gap: stop_all, start
     if (t === prevT) continue;
     dist = crs ? x[8] : dist + x[5] / 3.6;
-    msg(2, [t, x[2], x[3], x[4] || null, x[5] / 3.6 * 1000, dist * 100, ...(crs ? [(x[7] + 500) * 5] : [])]); prevT = t;
+    const at = pos?.(dist);
+    msg(2, [t, x[2], x[3], x[4] || null, x[5] / 3.6 * 1000, dist * 100, ...(crs ? [(x[7] + 500) * 5] : []), ...(at ? [semi(at[0]), semi(at[1])] : [])]); prevT = t;
   }
   msg(1, [tEnd, 0, 4]);                                                      // timer stop_all
   const kcal = m.kJ * 1.0;  // ~1 kcal per kJ of mechanical work
   def(3, 19, [[253, U32], [2, U32], [7, U32], [8, U32], [9, U32], [11, U16], [15, U8], [16, U8], [17, U8], [19, U16], [20, U16], [0, ENUM], [1, ENUM], [25, ENUM], [39, ENUM]]);
-  msg(3, [tEnd, t0, m.elapsed * 1000, m.dur * 1000, dist * 100, kcal, m.avgHR || null, m.maxHR || null, m.avgC, m.avgP, m.maxP, 9, 1, 2, 6]);
+  msg(3, [tEnd, t0, m.elapsed * 1000, m.dur * 1000, dist * 100, kcal, m.avgHR || null, m.maxHR || null, m.avgC, m.avgP, m.maxP, 9, 1, 2, pos ? 58 : 6]);
   def(4, 18, [[253, U32], [2, U32], [7, U32], [8, U32], [9, U32], [5, ENUM], [6, ENUM], [11, U16], [16, U8], [17, U8], [18, U8], [20, U16], [21, U16], [34, U16], [35, U16], [36, U16], [45, U16], [25, U16], [26, U16], [0, ENUM], [1, ENUM], [28, ENUM]]);
-  msg(4, [tEnd, t0, m.elapsed * 1000, m.dur * 1000, dist * 100, 2, 6, kcal, m.avgHR || null, m.maxHR || null, m.avgC, m.avgP, m.maxP, m.np, m.tss * 10, m.IF * 1000, r.ftp, 0, 1, 8, 1, 0]);
+  msg(4, [tEnd, t0, m.elapsed * 1000, m.dur * 1000, dist * 100, 2, pos ? 58 : 6, kcal, m.avgHR || null, m.maxHR || null, m.avgC, m.avgP, m.maxP, m.np, m.tss * 10, m.IF * 1000, r.ftp, 0, 1, 8, 1, 0]);
   def(5, 34, [[253, U32], [0, U32], [1, U16], [2, ENUM], [3, ENUM], [4, ENUM], [5, U32]]);  // activity
   msg(5, [tEnd, m.dur * 1000, 1, 0, 26, 1, tEnd - new Date().getTimezoneOffset() * 60]);
   const H = [14, 0x20, 2132 & 255, 2132 >> 8, b.length & 255, (b.length >> 8) & 255, (b.length >> 16) & 255, (b.length >>> 24) & 255, 0x2E, 0x46, 0x49, 0x54];
@@ -260,8 +263,8 @@ export function fitEncode(r) {
 }
 export function toTcx(r) {
   const s = r.samples, m = summarize(r), iso = x => new Date(x).toISOString().replace(/\.\d+Z$/, 'Z');
-  let dist = 0; const crs = onCourse(s);
-  const pts = s.map(x => { dist = crs ? x[8] : dist + x[5] / 3.6; return `<Trackpoint><Time>${iso(x[0])}</Time>${crs ? `<AltitudeMeters>${(+x[7]).toFixed(1)}</AltitudeMeters>` : ''}<DistanceMeters>${dist.toFixed(1)}</DistanceMeters>${x[4] ? `<HeartRateBpm><Value>${x[4]}</Value></HeartRateBpm>` : ''}<Cadence>${x[3]}</Cadence><Extensions><ns3:TPX><ns3:Speed>${(x[5] / 3.6).toFixed(2)}</ns3:Speed><ns3:Watts>${x[2]}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>`; }).join('\n');
+  let dist = 0; const crs = onCourse(s), pos = crs ? track(r.course) : null;
+  const pts = s.map(x => { dist = crs ? x[8] : dist + x[5] / 3.6; const at = pos?.(dist); return `<Trackpoint><Time>${iso(x[0])}</Time>${at ? `<Position><LatitudeDegrees>${at[0]}</LatitudeDegrees><LongitudeDegrees>${at[1]}</LongitudeDegrees></Position>` : ''}${crs ? `<AltitudeMeters>${(+x[7]).toFixed(1)}</AltitudeMeters>` : ''}<DistanceMeters>${dist.toFixed(1)}</DistanceMeters>${x[4] ? `<HeartRateBpm><Value>${x[4]}</Value></HeartRateBpm>` : ''}<Cadence>${x[3]}</Cadence><Extensions><ns3:TPX><ns3:Speed>${(x[5] / 3.6).toFixed(2)}</ns3:Speed><ns3:Watts>${x[2]}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>`; }).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
 <Activities><Activity Sport="Biking"><Id>${iso(s[0][0])}</Id><Lap StartTime="${iso(s[0][0])}"><TotalTimeSeconds>${m.dur}</TotalTimeSeconds><DistanceMeters>${dist.toFixed(1)}</DistanceMeters><Calories>${Math.round(m.kJ)}</Calories><Intensity>Active</Intensity><TriggerMethod>Manual</TriggerMethod><Track>

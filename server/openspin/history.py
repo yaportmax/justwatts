@@ -10,6 +10,7 @@ import math
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from .course import track
 from .events import js_round
 from .workout import WorkoutError, compile_workout, step_at
 
@@ -292,9 +293,9 @@ def fit_crc(data, c: int = 0) -> int:
 
 def fit_encode(r: dict, tz_offset_s: float | None = None) -> bytes:
     """Activity FIT file, byte-identical to core.js fitEncode() on the same machine."""
-    ENUM, U8, U16, U32, U32Z = 0x00, 0x02, 0x84, 0x86, 0x8C
-    SZ = {ENUM: 1, U8: 1, U16: 2, U32: 4, U32Z: 4}
-    INV = {ENUM: 0xFF, U8: 0xFF, U16: 0xFFFF, U32: 0xFFFFFFFF, U32Z: 0}
+    ENUM, U8, U16, S32, U32, U32Z = 0x00, 0x02, 0x84, 0x85, 0x86, 0x8C
+    SZ = {ENUM: 1, U8: 1, U16: 2, S32: 4, U32: 4, U32Z: 4}
+    INV = {ENUM: 0xFF, U8: 0xFF, U16: 0xFFFF, S32: 0x7FFFFFFF, U32: 0xFFFFFFFF, U32Z: 0}
     b = bytearray()
     defs: dict[int, list] = {}
 
@@ -311,6 +312,8 @@ def fit_encode(r: dict, tz_offset_s: float | None = None) -> bytes:
         for (_, t), v in zip(defs[local], vals):
             if v is None or not math.isfinite(v):
                 v = INV[t]
+            elif t == S32:
+                v = max(-0x7FFFFFFF, min(0x7FFFFFFE, js_round(v))) & 0xFFFFFFFF
             else:
                 v = max(0, min(0xFFFFFFFE if INV[t] == 0 else INV[t] - 1, js_round(v)))
             _put(b, int(v), SZ[t])
@@ -323,7 +326,10 @@ def fit_encode(r: dict, tz_offset_s: float | None = None) -> bytes:
     define(1, 21, [(253, U32), (0, ENUM), (1, ENUM)])
     msg(1, [t0, 0, 0])
     crs = _on_course(s)  # a course ride also records altitude (scale 5, offset 500) and its own distance
-    define(2, 20, [(253, U32), (7, U16), (4, U8), (3, U8), (6, U16), (5, U32)] + ([(2, U16)] if crs else []))
+    pos = track(r.get("course")) if crs else None  # and, with a map line, a position
+    semi = lambda x: x * 2 ** 31 / 180  # noqa: E731
+    define(2, 20, [(253, U32), (7, U16), (4, U8), (3, U8), (6, U16), (5, U32)] + ([(2, U16)] if crs else [])
+           + ([(0, S32), (1, S32)] if pos else []))
     dist, prev = 0.0, None
     for x in s:
         t = ts(x[0])
@@ -333,18 +339,20 @@ def fit_encode(r: dict, tz_offset_s: float | None = None) -> bytes:
         if t == prev:
             continue
         dist = x[8] if crs else dist + x[5] / 3.6
-        msg(2, [t, x[2], x[3], x[4] or None, x[5] / 3.6 * 1000, dist * 100] + ([(x[7] + 500) * 5] if crs else []))
+        at = pos(dist) if pos else None
+        msg(2, [t, x[2], x[3], x[4] or None, x[5] / 3.6 * 1000, dist * 100] + ([(x[7] + 500) * 5] if crs else [])
+            + ([semi(at[0]), semi(at[1])] if at else []))
         prev = t
     msg(1, [t_end, 0, 4])
     kcal = m["kJ"]
     define(3, 19, [(253, U32), (2, U32), (7, U32), (8, U32), (9, U32), (11, U16), (15, U8), (16, U8), (17, U8),
                    (19, U16), (20, U16), (0, ENUM), (1, ENUM), (25, ENUM), (39, ENUM)])
     msg(3, [t_end, t0, m["elapsed"] * 1000, m["dur"] * 1000, dist * 100, kcal, m["avgHR"] or None, m["maxHR"] or None,
-            m["avgC"], m["avgP"], m["maxP"], 9, 1, 2, 6])
+            m["avgC"], m["avgP"], m["maxP"], 9, 1, 2, 58 if pos else 6])
     define(4, 18, [(253, U32), (2, U32), (7, U32), (8, U32), (9, U32), (5, ENUM), (6, ENUM), (11, U16), (16, U8),
                    (17, U8), (18, U8), (20, U16), (21, U16), (34, U16), (35, U16), (36, U16), (45, U16), (25, U16),
                    (26, U16), (0, ENUM), (1, ENUM), (28, ENUM)])
-    msg(4, [t_end, t0, m["elapsed"] * 1000, m["dur"] * 1000, dist * 100, 2, 6, kcal, m["avgHR"] or None,
+    msg(4, [t_end, t0, m["elapsed"] * 1000, m["dur"] * 1000, dist * 100, 2, 58 if pos else 6, kcal, m["avgHR"] or None,
             m["maxHR"] or None, m["avgC"], m["avgP"], m["maxP"], m["np"], m["tss"] * 10, m["IF"] * 1000, r["ftp"],
             0, 1, 8, 1, 0])
     if tz_offset_s is None:
@@ -362,6 +370,11 @@ def fit_encode(r: dict, tz_offset_s: float | None = None) -> bytes:
     return bytes(allb)
 
 
+def _jsnum(x: float) -> str:
+    """A number as JS prints it in a template (x is rounded to 1e-6, so repr matches for these values)."""
+    return str(int(x)) if x == int(x) else repr(x)
+
+
 def _fixed(x: float, n: int) -> str:
     return format(Decimal(x).quantize(Decimal(1).scaleb(-n), rounding=ROUND_HALF_UP), "f")
 
@@ -376,11 +389,14 @@ def tcx(r: dict) -> str:
     dist = 0.0
     pts = []
     crs = _on_course(s)
+    pos = track(r.get("course")) if crs else None
     for x in s:
         dist = x[8] if crs else dist + x[5] / 3.6
+        at = pos(dist) if pos else None
+        where = f"<Position><LatitudeDegrees>{_jsnum(at[0])}</LatitudeDegrees><LongitudeDegrees>{_jsnum(at[1])}</LongitudeDegrees></Position>" if at else ""
         hr = f"<HeartRateBpm><Value>{x[4]}</Value></HeartRateBpm>" if x[4] else ""
         alt = f"<AltitudeMeters>{_fixed(x[7], 1)}</AltitudeMeters>" if crs else ""
-        pts.append(f"<Trackpoint><Time>{iso(x[0])}</Time>{alt}<DistanceMeters>{_fixed(dist, 1)}</DistanceMeters>{hr}"
+        pts.append(f"<Trackpoint><Time>{iso(x[0])}</Time>{where}{alt}<DistanceMeters>{_fixed(dist, 1)}</DistanceMeters>{hr}"
                    f"<Cadence>{x[3]}</Cadence><Extensions><ns3:TPX><ns3:Speed>{_fixed(x[5] / 3.6, 2)}</ns3:Speed>"
                    f"<ns3:Watts>{x[2]}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>")
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'

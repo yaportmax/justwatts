@@ -450,7 +450,8 @@ function renderRide() {
     $('#ivBar').style.background = at.s.free ? css('--z1') : zoneColor(stepWatts(at.s, at.into, V.ftp, V.k) / V.ftp);
   } else {
     $('#lI').textContent = '–'; $('#lIs').textContent = ''; $('#lEs').textContent = '';
-    $('#ivNow').textContent = S.ride.course ? '' : V.jr.m === 'w' ? `ERG ${V.jr.w} W` : V.jr.m === 'r' ? `Resistance level ${(+V.jr.r).toFixed(1)}` : valText('g').replace(/^\w/, c => c.toUpperCase());  // a course shows its own grade under the chart $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
+    $('#ivNow').textContent = S.ride.course ? '' : V.jr.m === 'w' ? `ERG ${V.jr.w} W` : V.jr.m === 'r' ? `Resistance level ${(+V.jr.r).toFixed(1)}` : valText('g').replace(/^\w/, c => c.toUpperCase());  // a course shows its own grade under the chart
+    $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
   }
   $('#rClock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const cwDraw = V.cw && V.el > V.cw.total ? { ...V.cw, total: V.el * 1.02 } : V.cw;

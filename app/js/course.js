@@ -88,6 +88,22 @@ export function buildCourse(name, pts) {
 }
 
 /* ---------- lookups on a course ---------- */
+// position on the map line at d metres -> [lat, lon] (1e-6 deg), or null without a line.
+// The line is decimated, so its length is scaled to the course length.
+export function track(c) {
+  const ll = Array.isArray(c?.ll) ? c.ll : []; if (ll.length < 2) return null;
+  const D = [0]; for (let i = 1; i < ll.length; i++) D.push(D[i - 1] + haversine({ lat: ll[i - 1][0], lon: ll[i - 1][1] }, { lat: ll[i][0], lon: ll[i][1] }));
+  const k = D[D.length - 1] > 0 ? c.dist / D[D.length - 1] : 0, r6 = x => Math.floor(x * 1e6 + 0.5) / 1e6;
+  for (let i = 0; i < D.length; i++) D[i] *= k;
+  let j = 1;
+  return d => {
+    d = clamp(d, 0, D[D.length - 1]); if (D[j - 1] > d) j = 1;
+    while (j < D.length - 1 && D[j] < d) j++;
+    const f = D[j] > D[j - 1] ? (d - D[j - 1]) / (D[j] - D[j - 1]) : 0, a = ll[j - 1], b = ll[j];
+    return [r6(a[0] + (b[0] - a[0]) * f), r6(a[1] + (b[1] - a[1]) * f)];
+  };
+}
+
 export function eleAt(c, d) {
   const e = c.ele, x = clamp(d, 0, (e.length - 1) * STEP_M), i = Math.min(e.length - 2, Math.floor(x / STEP_M));
   return e[i] + (e[i + 1] - e[i]) * ((x - i * STEP_M) / STEP_M);

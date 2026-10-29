@@ -5,6 +5,7 @@ import io
 import json
 import math
 import random
+import re
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -308,6 +309,34 @@ def test_fit_and_tcx_carry_course_distance_and_altitude(js, tmp_path):
     tps = root.findall(".//t:Trackpoint", ns)
     assert float(tps[-1].find("t:AltitudeMeters", ns).text) == pytest.approx(last[7], abs=0.05)
     assert float(tps[-1].find("t:DistanceMeters", ns).text) == pytest.approx(last[8], abs=0.05)
+
+
+def test_exports_carry_gps_from_the_map_line(js, tmp_path):
+    # a course with a map line: FIT records and TCX trackpoints get positions along it, and FIT says virtual
+    fitdecode = pytest.importorskip("fitdecode")
+    alpe = json.loads(re.search(r"ROUTE_COURSES = (.*);", (REPO / "app/js/course-routes.js").read_text(encoding="utf-8"))[1])[2]
+    res, eng = run_python(tmp_path, [["power", 300], ["load", {"workout": None, "course": alpe}], ["start", {}], ["tick", 600]])
+    p = res["payload"]
+    data = H.fit_encode(p)
+    recs, ses = [], None
+    with fitdecode.FitReader(io.BytesIO(data), check_crc=fitdecode.CrcCheck.RAISE) as fr:
+        for frame in fr:
+            if isinstance(frame, fitdecode.FitDataMessage) and frame.name == "record":
+                recs.append(frame)
+            if isinstance(frame, fitdecode.FitDataMessage) and frame.name == "session":
+                ses = frame
+    deg = lambda v: v * 180 / 2 ** 31  # noqa: E731
+    first, last = recs[0], recs[-1]
+    assert deg(first.get_value("position_lat")) == pytest.approx(alpe["ll"][0][0], abs=1e-4)
+    assert deg(first.get_value("position_long")) == pytest.approx(alpe["ll"][0][1], abs=1e-4)
+    assert 45.05 < deg(last.get_value("position_lat")) < 45.1 and 6.03 < deg(last.get_value("position_long")) < 6.08
+    assert ses.get_value("sub_sport", raw_value=True) == 58
+    out = js([{"op": "export", "ride": p}])[0]
+    assert base64.b64decode(out["fit"]) == data and out["tcx"] == H.tcx(p)
+    root = ET.fromstring(H.tcx(p).encode())
+    ns = {"t": "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"}
+    lat = [float(e.text) for e in root.findall(".//t:Position/t:LatitudeDegrees", ns)]
+    assert len(lat) == len(p["samples"]) and lat[0] == pytest.approx(alpe["ll"][0][0], abs=1e-4)
 
 
 def test_course_ride_resumes_after_restart(js, tmp_path):

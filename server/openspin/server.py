@@ -35,7 +35,7 @@ HISTORY_LEN = 1200  # state snapshots kept (~1 h at one per 3 s)
 QUIET_PATHS = ("/api/state", "/api/event", "/api/current", "/api/coach?", "/api/health",
                "/api/strava/callback")  # the callback query carries the OAuth code: keep it out of logs
 # A page served from here may never be framed (clickjacking) and runs only its own scripts.
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; "
        "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 CSP_INLINE = CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")  # browser.html is one inline page
 # headers a reverse proxy or tunnel adds: such a request came from the network, not this computer

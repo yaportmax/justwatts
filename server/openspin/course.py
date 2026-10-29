@@ -33,6 +33,31 @@ def haversine(a: dict, b: dict) -> float:
     return 2 * R_EARTH * math.asin(min(1, math.sqrt(h)))
 
 
+def track(c):
+    """Position on the map line at d metres -> [lat, lon] (1e-6 deg), or None without a line. Mirrors course.js track()."""
+    ll = c.get("ll") if isinstance(c, dict) and isinstance(c.get("ll"), list) else []
+    if len(ll) < 2:
+        return None
+    D = [0.0]
+    for i in range(1, len(ll)):
+        D.append(D[-1] + haversine({"lat": ll[i - 1][0], "lon": ll[i - 1][1]}, {"lat": ll[i][0], "lon": ll[i][1]}))
+    k = c["dist"] / D[-1] if D[-1] > 0 else 0
+    D = [x * k for x in D]
+    r6 = lambda x: math.floor(x * 1e6 + 0.5) / 1e6  # noqa: E731
+    st = {"j": 1}
+
+    def at(d):
+        d = min(D[-1], max(0, d))
+        j = 1 if D[st["j"] - 1] > d else st["j"]
+        while j < len(D) - 1 and D[j] < d:
+            j += 1
+        st["j"] = j
+        f = (d - D[j - 1]) / (D[j] - D[j - 1]) if D[j] > D[j - 1] else 0
+        a, b = ll[j - 1], ll[j]
+        return [r6(a[0] + (b[0] - a[0]) * f), r6(a[1] + (b[1] - a[1]) * f)]
+    return at
+
+
 # ---------- import ----------
 NUM = r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
 

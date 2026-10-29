@@ -25,7 +25,11 @@ def test_build_output(dist):
     ml = "vendor/maplibre-gl-5.24.0/"                                                # 3D map, pinned, no CDN (CSP)
     assert {ml + f for f in ("maplibre-gl-csp.js", "maplibre-gl-csp-worker.js", "maplibre-gl.css", "LICENSE.txt")} <= files
     assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
-    assert {f for f in files if f.startswith("api/")} == {"api/strava/token.js"}     # only the Strava token service
+    api = {f for f in files if f.startswith("api/")}                                  # the Strava token relay + accounts API
+    assert {f for f in api if not f.startswith("api/_lib/")} == {"api/strava/token.js", "api/accounts.js"}  # _lib is not routed
+    pkg = json.loads((dist / "package.json").read_text())                             # Vercel installs the one dependency
+    assert pkg["dependencies"] == {"@neondatabase/serverless": "1.2.0"} and (dist / "package-lock.json").exists()
+    assert "privacy.html" in files
     assert "MODE = 'web'" in (dist / "js/mode.js").read_text()
     assert "MODE = 'server'" in (REPO / "app/js/mode.js").read_text()                # the local app is untouched
 
@@ -40,7 +44,10 @@ def test_vercel_headers(dist):
     assert "https://s3.amazonaws.com" in connect and "https://server.arcgisonline.com" in csp
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp
     assert h["X-Content-Type-Options"] == "nosniff" and "bluetooth=(self)" in h["Permissions-Policy"]
-    assert v["rewrites"] == [{"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the function
+    assert v["rewrites"] == [{"source": "/privacy", "destination": "/privacy.html"},
+                             {"source": "/api/(auth|sync|community|admin)(/.*)?", "destination": "/api/accounts?__path=/api/$1$2"},
+                             {"source": "/((?!api/)[^.]*)", "destination": "/index.html"}]  # /api/* reaches the functions
+    assert v["regions"] == ["pdx1"]                                                   # next to the Neon database
 
 
 def test_web_mode_ride_with_reload(dist, node):

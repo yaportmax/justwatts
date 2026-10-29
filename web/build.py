@@ -41,7 +41,10 @@ def build(out: Path) -> dict:
         digest.update(rel.encode())
         digest.update((out / rel).read_bytes())
     shutil.copy2(WEB / "vercel.json", out / "vercel.json")
-    shutil.copytree(WEB / "api", out / "api")  # the shared Strava token function (serverless)
+    # serverless functions: the Strava token relay and the accounts/sync/community API (shared code in api/_lib)
+    shutil.copytree(WEB / "api", out / "api", ignore=shutil.ignore_patterns("node_modules"))
+    for name in ("package.json", "package-lock.json"):  # Vercel installs the functions' one dependency from these
+        shutil.copy2(WEB / name, out / name)
     return {"out": str(out), "version": digest.hexdigest()[:12], "files": len(files) + 1}
 
 

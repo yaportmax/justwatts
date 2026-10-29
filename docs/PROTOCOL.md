@@ -77,7 +77,8 @@ curl -s -H "Authorization: Bearer $(cat ~/.openspin/token)" http://127.0.0.1:876
 
 ### Ride control actions
 
-`load {workout: {name, text, test?} | null}` (null = free ride; finishes a started ride first),
+`load {workout: {name, text, test?} | null, course?}` (null = free ride; finishes a started ride first;
+`course` see Courses below),
 `start`, `hold` (pause; during an auto-pause it makes the pause stick), `resume`, `pause` (toggle),
 `skip`, `back` (restart the current step, or in its first 10 s ride the previous one again; inserts
 copies, time only moves forward; after the plan it rides the last step again), `save` (archive the
@@ -102,6 +103,27 @@ When the planned workout ends the ride does not stop: it writes `WORKOUT DONE`, 
 grade 0 (`afterWorkout: grade0`) until `end`. Inserting steps in overtime turns the time ridden
 since into a free step and starts the new steps now.
 
+### Courses
+
+A ride can carry a course: `{name, dist, ele, ll?}` with `dist` in metres (100..500000), `ele` the
+smoothed elevation every 10 m from the start, `ll` an optional decimated `[[lat, lon]]` polyline.
+The page builds it from a GPX or TCX file (`app/js/course.js`, mirrored by `server/openspin/course.py`):
+track points, haversine distance, resampled every 10 m, 50 m median then 90 m moving average; the
+grade of each 10 m segment is clamped to -15..+20 %. The engine checks it and keeps it with the ride.
+
+Each second the engine turns power into a virtual speed (rider weight from settings, 75 kg when
+unset, plus a 9 kg bike; CdA 0.32, Crr 0.004, air 1.2 kg/m3, drivetrain 0.97; kinetic energy
+integrated, so the rider speeds up, slows down and coasts) and moves along the course. Position
+always advances while riding, whatever the trainer follows.
+
+- Course alone: grade mode sends the road grade under the rider (+/- adds an offset, `jr.g`). ERG
+  watts and level modes still work and the position still advances.
+- Workout + course: steps with a target ride ERG as usual; `free` steps (and ERG off) send the road
+  grade. With no course, grade mode is flat (0 % plus +/-).
+- Grade commands are rate limited: a change over 0.1 % goes out at once, smaller ones at most every 2 s.
+- At the finish the ride does not stop: `COURSE DONE` is written, the distance keeps counting, and
+  the grade holds the last segment (`afterWorkout: hold`) or goes to 0 % (`grade0`) until `end`.
+
 Agent presence: any bearer-token request marks an agent as connected for 5 min
 (`state.agent.connected`); the page shows agent-only UI only then. Wakes count batches actually
 delivered by `/api/agent-events`, so with no agent there are no wakes.
@@ -109,7 +131,7 @@ delivered by `/api/agent-events`, so with no agent there are no wakes.
 ## Agent stream (event gate)
 
 Every event line still goes to `events.log`. The agent stream keeps only: `step_start`, `step_end`,
-`feel`, `said`, `paused`, `resumed`, `ride_start`, `ride_end`, `ride_resumed`, `workout_done`,
+`feel`, `said`, `paused`, `resumed`, `ride_start`, `ride_end`, `ride_resumed`, `workout_done`, `course_done`,
 `edit` (not the agent's own edits), `manual` (the rider's changes; repeated presses of one control in a
 batch become one event with the final value), `alert` (`hr_cap`, `zone_jump`, `cadence_low`, `power_dev`,
 `trainer_lost`, `trainer_back`, `hr_lost`) and `status` (at most one per `status_every_s` of quiet
@@ -198,6 +220,9 @@ writes an `EDIT ...` event line.
 - `control`: what the trainer follows and +/- changes: `k` (ERG at plan times intensity), `w` (ERG
   watts), `g` (grade), `r` (level). `jr.wm` is the workout trainer mode (`e`, `g`, `r`).
 - `manual`: the rider's last change by hand, or null.
+- `course`: null, or `{name, dist_m, gain_m, done_m, odo_m, ele_m, climbed_m, grade, speed_kmh, end,
+  profile}`. `done_m` stops at the finish, `odo_m` keeps counting; `grade` is the road under the rider
+  (before rate limiting and the +/- offset); `profile` is the elevation in at most 300 points for drawing.
 - `source` is `server`, or `page`/`sim` when a browser-mode page or the headless simulator posts state.
 
 ## Event lines
@@ -221,6 +246,7 @@ writes an `EDIT ...` event line.
 | `coach` | `COACH <seq> \| set <step> <w>W \| edit ... \| msg <text>` | seq, set, msg |
 | `cue` (type `other`) | `CUE <text>` (local coach) | |
 | `workout_done` | `WORKOUT DONE at T+<el>, riding free until End` | elapsed_s |
+| `course_done` | `COURSE DONE at T+<el>, riding on until End` | elapsed_s |
 | `said` | `SAID (whisper): "<text>"` | said, source |
 | `voice` | `VOICE ON\|OFF (whisper)`, `VOICE MUTED\|UNMUTED (said)` | on, state, source |
 
@@ -238,6 +264,9 @@ writes an `EDIT ...` event line.
 ```
 
 Sample: `[epoch_ms, elapsed_s, watts, cadence, hr (0 = none), speed_kmh, target_w (0 = none)]`, 1 Hz.
+On a course each sample adds `altitude_m, distance_m` (course metres ridden) and `speed_kmh` is the
+virtual speed; FIT and TCX then carry altitude and that distance. Course rides also store `course`
+and `cs` (`{d, v, up, end}`: metres ridden, m/s, metres climbed, finished).
 `steps` is the final step list (edits included); `text` is regenerated from it.
 
 ## Persistence and recovery

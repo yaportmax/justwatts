@@ -184,12 +184,13 @@ export const FTP_TESTS = [
 export const testKind = steps => steps.some(s => s.free && s.d >= 1200) ? '20' : 'ramp';
 
 /* ---------- ride summary ---------- */
-// sample = [epochMs, elapsedS, watts, cadence, hr, speedKmh, targetW]
+// sample = [epochMs, elapsedS, watts, cadence, hr, speedKmh, targetW] (+ [altitudeM, distanceM] on a course)
+const onCourse = s => s.length > 0 && s[s.length - 1].length > 8;
 export function summarize(r) {
   const s = r.samples, n = s.length, P = s.map(x => x[2]);
   const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
   const np = normPower(P), IF = np / r.ftp, hr = s.map(x => x[4]).filter(x => x > 0), cad = s.map(x => x[3]).filter(x => x > 0);
-  let dist = 0; for (const x of s) dist += x[5] / 3.6;
+  let dist = 0; if (onCourse(s)) dist = s[n - 1][8]; else for (const x of s) dist += x[5] / 3.6;
   let best60 = 0; if (n >= 60) { let sum = 0; for (let i = 0; i < n; i++) { sum += P[i]; if (i >= 60) sum -= P[i - 60]; if (i >= 59) best60 = Math.max(best60, sum / 60); } }
   const zt = ZONES.map(() => 0); for (const p of P) zt[zoneIdx(p / r.ftp)]++;
   return { dur: n, avgP: avg(P), np, IF, tss: n * np * IF / (r.ftp * 3600) * 100, maxP: Math.max(0, ...P), kJ: P.reduce((a, b) => a + b, 0) / 1000, avgHR: avg(hr), maxHR: Math.max(0, ...hr), avgC: avg(cad), dist, best60, zt, elapsed: n ? (s[n - 1][0] - s[0][0]) / 1000 + 1 : 0 };
@@ -234,14 +235,15 @@ export function fitEncode(r) {
   msg(0, [4, 255, 1, 0x48554221, t0]);
   def(1, 21, [[253, U32], [0, ENUM], [1, ENUM]]);                            // event
   msg(1, [t0, 0, 0]);                                                        // timer start
-  def(2, 20, [[253, U32], [7, U16], [4, U8], [3, U8], [6, U16], [5, U32]]);  // record
+  const crs = onCourse(s);  // a course ride also records altitude (scale 5, offset 500) and its own distance
+  def(2, 20, [[253, U32], [7, U16], [4, U8], [3, U8], [6, U16], [5, U32], ...(crs ? [[2, U16]] : [])]);  // record
   let dist = 0, prevT = null;
   for (const x of s) {
     const t = ts(x[0]);
     if (prevT != null && t - prevT > 2) { msg(1, [prevT, 0, 4]); msg(1, [t, 0, 0]); }  // pause gap: stop_all, start
     if (t === prevT) continue;
-    dist += x[5] / 3.6;
-    msg(2, [t, x[2], x[3], x[4] || null, x[5] / 3.6 * 1000, dist * 100]); prevT = t;
+    dist = crs ? x[8] : dist + x[5] / 3.6;
+    msg(2, [t, x[2], x[3], x[4] || null, x[5] / 3.6 * 1000, dist * 100, ...(crs ? [(x[7] + 500) * 5] : [])]); prevT = t;
   }
   msg(1, [tEnd, 0, 4]);                                                      // timer stop_all
   const kcal = m.kJ * 1.0;  // ~1 kcal per kJ of mechanical work
@@ -258,8 +260,8 @@ export function fitEncode(r) {
 }
 export function toTcx(r) {
   const s = r.samples, m = summarize(r), iso = x => new Date(x).toISOString().replace(/\.\d+Z$/, 'Z');
-  let dist = 0;
-  const pts = s.map(x => { dist += x[5] / 3.6; return `<Trackpoint><Time>${iso(x[0])}</Time><DistanceMeters>${dist.toFixed(1)}</DistanceMeters>${x[4] ? `<HeartRateBpm><Value>${x[4]}</Value></HeartRateBpm>` : ''}<Cadence>${x[3]}</Cadence><Extensions><ns3:TPX><ns3:Speed>${(x[5] / 3.6).toFixed(2)}</ns3:Speed><ns3:Watts>${x[2]}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>`; }).join('\n');
+  let dist = 0; const crs = onCourse(s);
+  const pts = s.map(x => { dist = crs ? x[8] : dist + x[5] / 3.6; return `<Trackpoint><Time>${iso(x[0])}</Time>${crs ? `<AltitudeMeters>${(+x[7]).toFixed(1)}</AltitudeMeters>` : ''}<DistanceMeters>${dist.toFixed(1)}</DistanceMeters>${x[4] ? `<HeartRateBpm><Value>${x[4]}</Value></HeartRateBpm>` : ''}<Cadence>${x[3]}</Cadence><Extensions><ns3:TPX><ns3:Speed>${(x[5] / 3.6).toFixed(2)}</ns3:Speed><ns3:Watts>${x[2]}</ns3:Watts></ns3:TPX></Extensions></Trackpoint>`; }).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
 <Activities><Activity Sport="Biking"><Id>${iso(s[0][0])}</Id><Lap StartTime="${iso(s[0][0])}"><TotalTimeSeconds>${m.dur}</TotalTimeSeconds><DistanceMeters>${dist.toFixed(1)}</DistanceMeters><Calories>${Math.round(m.kJ)}</Calories><Intensity>Active</Intensity><TriggerMethod>Manual</TriggerMethod><Track>

@@ -34,7 +34,7 @@ LOCAL_DEFAULTS = {"enabled": True, "countdown": True, "cadence": True, "recap": 
                   "auto_adjust": "no_agent", "easier_pct": 5, "harder_pct": 3, "hr_cap_pct": 5}
 
 PASS_TYPES = {"step_start", "step_end", "feel", "said", "paused", "resumed", "ride_start", "ride_end",
-              "ride_resumed", "workout_done", "edit", "manual"}
+              "ride_resumed", "workout_done", "course_done", "edit", "manual"}
 MANUAL_HOLD_S = 60  # after a change by hand, the built-in coach does not auto-adjust for this long
 
 

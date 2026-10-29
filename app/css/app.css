@@ -261,3 +261,10 @@ body.web .agentcol{display:none}
 .lvl{display:inline-flex;gap:2px;margin-left:4px;vertical-align:1px}
 .lvl i{width:4px;height:9px;border-radius:1px;background:var(--line)}
 .lvl i.on{background:var(--warn)}
+/* courses */
+.crsbar{justify-content:space-between;margin-bottom:10px}
+.card button.on{border-color:var(--acc);color:var(--ink)}
+.crs{margin-top:8px}
+.crs canvas{width:100%;height:56px;display:block}
+.crsk{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--dim);font-size:13px;margin-top:4px}
+.crsk b{color:var(--ink);font-weight:600}

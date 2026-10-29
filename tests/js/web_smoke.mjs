@@ -117,5 +117,19 @@ out.final = { rides: rides.rides.length, samples: rides.rides[0].samples, fit: B
   steps: backup.rides[0].steps.length, garminStatus: garmin.status, events: backup.rides[0].events.map(e => e[1]).filter(l => /^(RIDE|EDIT|WORKOUT)/.test(l)),
   agent: hw.state().agent, meter: $('#agentMeter').style.display };
 out.spoken = spoken.slice(0, 6);
+// ---------- boot 3: a course is in use, Just ride rides it ----------
+mem.set('hw.course', JSON.stringify('s-climb'));
+hw = await boot(3);
+await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });
+await until(() => hw.state().devices.trainer === 'sim', 'sim 3');
+$('#btnJust').click();
+await until(() => hw.state().ride?.course, 'course loaded');
+$('#cStart').click();
+await until(() => hw.state().ride?.started, 'course started');
+for (let i = 0; i < 60; i++) hw.backend.tick();
+await sleep(20);
+const rc = hw.state().ride.course;
+out.course = { name: hw.state().ride.name, course: rc.name, done: rc.done_m, profile: rc.profile.length, want: hw.backend.engine?.hub?.wantCmd ?? null,
+  strip: $('#crsRide').style.display, text: $('#crsK').innerHTML, now: $('#crsNow').textContent };
 process.stdout.write(JSON.stringify(out));
 process.exit(0);

@@ -17,6 +17,7 @@ const P = [
   ['edit', new RegExp(`^EDIT (insert|replace|delete|end|duration|rest) (.*) \\| (\\d+) steps, ${T}$`), g => ({ op: g[1], detail: `${g[1]} ${g[2]}`, steps: +g[3], total_s: parseT(g[4]) })],
   ['manual', /^MANUAL (\w+)(?: (.*))?$/, g => ({ action: g[1], detail: g[2] || '' })],
   ['workout_done', new RegExp(`^WORKOUT DONE at T\\+${T}, riding free until End$`), g => ({ elapsed_s: parseT(g[1]) })],
+  ['course_done', new RegExp(`^COURSE DONE at T\\+${T}, riding on until End$`), g => ({ elapsed_s: parseT(g[1]) })],
   ['said', /^SAID(?: \((\w+)\))?: "(.*)"$/, g => ({ source: g[1] || 'browser', said: g[2] })],
   ['voice', /^VOICE (ON|OFF|MUTED|UNMUTED)(?: \((\w+)\))?$/, g => ({ on: ['ON', 'UNMUTED'].includes(g[1]), state: g[1].toLowerCase(), source: g[2] || null })],
   ['coach', /^COACH (\d+)((?: \| .*)?)$/, g => ({ seq: +g[1] })],

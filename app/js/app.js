@@ -10,6 +10,7 @@ import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
 import { createBuilder } from './builder.js';
 import { LIBRARY, CATEGORIES } from './library.js';
+import { createCourses } from './courses.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -87,6 +88,7 @@ function hoverable(cv) {
   cv.onpointerleave = () => { hoverT.delete(cv); redraw(); };
 }
 hoverable($('#rideChart')); hoverable($('#sumChart'));
+const courses = createCourses({ $, store, toast, fit, css, units: () => settings.units, ride: c => loadRide(null, c) });
 
 /* ---------- library + builder ---------- */
 // library filters are a per-browser convenience
@@ -303,11 +305,11 @@ $('#btnHR').onclick = () => {
 
 /* ---------- ride ---------- */
 let loadArmed = 0;
-function loadRide(w) {
+function loadRide(w, course = w?.test ? null : courses.selected()) {  // the course in use, if any (never for FTP tests)
   // loading ends the ride in progress: a second tap within 4 s confirms
   if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return; }
   loadArmed = 0;
-  control('load', { workout: w ? { name: w.name, text: w.text, test: !!w.test } : null }).then(() => show('ride')).catch(() => {});
+  control('load', { workout: w ? { name: w.name, text: w.text, test: !!w.test } : null, course }).then(() => show('ride')).catch(() => {});
 }
 function rideShell() {
   const on = !!V;
@@ -438,15 +440,18 @@ function renderRide() {
     $('#ivBar').style.background = at.s.free ? css('--z1') : zoneColor(stepWatts(at.s, at.into, V.ftp, V.k) / V.ftp);
   } else {
     $('#lI').textContent = '–'; $('#lIs').textContent = ''; $('#lEs').textContent = '';
-    $('#ivNow').textContent = V.jr.m === 'w' ? `ERG ${V.jr.w} W` : V.jr.m === 'r' ? `Resistance level ${(+V.jr.r).toFixed(1)}` : `Grade ${(+V.jr.g).toFixed(1)}%`; $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
+    $('#ivNow').textContent = V.jr.m === 'w' ? `ERG ${V.jr.w} W` : V.jr.m === 'r' ? `Resistance level ${(+V.jr.r).toFixed(1)}` : valText('g').replace(/^\w/, c => c.toUpperCase()); $('#ivNext').textContent = ''; $('#ivBar').style.width = '0';
   }
   $('#rClock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const cwDraw = V.cw && V.el > V.cw.total ? { ...V.cw, total: V.el * 1.02 } : V.cw;
   if ($('#v-ride').classList.contains('on')) drawChart($('#rideChart'), { cw: cwDraw, ftp: V.ftp, samples, el: V.el, k: kk });
   wake(V.started);
+  courses.renderRide(S.ride.course);
   renderAdjust(); renderUndo();
 }
-const valText = m => m === 'r' ? `level ${(+V.jr.r).toFixed(1)}` : m === 'w' ? `${V.jr.w} W` : `grade ${(+V.jr.g).toFixed(1)}%`;
+// on a course, grade mode follows the road; +/- adds an offset to it
+const gradeText = () => { const c = S?.ride?.course, g = +V.jr.g; return c ? `road ${c.grade.toFixed(1)}%${g ? ` ${g > 0 ? '+' : ''}${g.toFixed(1)}` : ''}` : `grade ${g.toFixed(1)}%`; };
+const valText = m => m === 'r' ? `level ${(+V.jr.r).toFixed(1)}` : m === 'w' ? `${V.jr.w} W` : gradeText();
 
 /* ---------- ride controls: everything a coach or an agent can change, by hand, mid-ride ---------- */
 // Each control is one request; the engine applies it at once, logs it as a MANUAL line (coaches see
@@ -855,7 +860,7 @@ async function renderSettings() {
 $('#sFtp').onchange = e => { $('#ftp').value = e.target.value; $('#ftp').onchange({ target: $('#ftp') }); renderSettings(); };
 $('#sWeight').onchange = e => { $('#weight').value = e.target.value; $('#weight').onchange({ target: $('#weight') }); renderSettings(); };
 $('#units').onchange = e => { settings.units = e.target.value === 'metric' ? 'metric' : 'imperial'; saveSettings(['units']); showSettings(); renderSettings(); };
-function showUnits() { $$('.wUnit').forEach(x => { x.textContent = weightUnit(settings.units); }); }
+function showUnits() { $$('.wUnit').forEach(x => { x.textContent = weightUnit(settings.units); }); courses.render(); }
 // HR zones: % of max HR (default), Custom floors, or Garmin (local server with Garmin on)
 function renderHrZones() {
   const z = hrZ();

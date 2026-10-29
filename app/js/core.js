@@ -39,7 +39,7 @@ export function weightShow(kg, units) {  // value for the weight input; '' when 
   if (!(kg > 0)) return '';
   return Math.round((isMetric(units) ? kg : kg * LB_PER_KG) * 10) / 10;
 }
-export function weightKg(v, units) {  // input value -> kg (2 decimals so 195.8 lb round-trips)
+export function weightKg(v, units) {  // input value -> kg (2 decimals so 182.3 lb round-trips)
   v = +v; if (!(v > 0)) return 0;
   return Math.round((isMetric(units) ? v : v / LB_PER_KG) * 100) / 100;
 }

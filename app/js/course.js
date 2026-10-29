@@ -47,6 +47,44 @@ export function parseTrack(text) {
   return { name: name.slice(0, 80), pts };
 }
 
+// FIT course or activity (bytes) -> { name, pts }: record messages with a position; altitude from
+// enhanced_altitude or altitude; the name from the course message. Throws on a file that is not FIT.
+export function parseFit(buf) {
+  const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf), v = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  if (u.length < 12 || String.fromCharCode(u[8], u[9], u[10], u[11]) !== '.FIT') throw new Error('Not a FIT file');
+  const hs = u[0], end = Math.min(u.length, hs + v.getUint32(4, true)), defs = {}, pts = [];
+  let p = hs, name = '';
+  const read = (o, size, base, le) => {
+    const t = base & 0x1F;  // base type number
+    if (t === 7) { let s = ''; for (let i = 0; i < size && u[o + i]; i++) s += String.fromCharCode(u[o + i]); return s; }
+    if (size === 1) return t === 1 ? v.getInt8(o) : u[o];
+    if (size === 2) return t === 3 ? v.getInt16(o, le) : v.getUint16(o, le);
+    if (size === 4) return t === 5 ? v.getInt32(o, le) : v.getUint32(o, le);
+    return null;
+  };
+  while (p < end) {
+    const h = u[p++];
+    if (h & 0x80) { const d = defs[(h >> 5) & 3]; if (!d) throw new Error('Bad FIT file'); p = msg(d, p); continue; }  // compressed timestamp
+    if (h & 0x40) {
+      const le = u[p + 1] === 0, g = le ? v.getUint16(p + 2, true) : v.getUint16(p + 2, false), n = u[p + 4], fields = [];
+      p += 5; for (let i = 0; i < n; i++, p += 3) fields.push([u[p], u[p + 1], u[p + 2]]);
+      let dev = 0; if (h & 0x20) { const nd = u[p++]; for (let i = 0; i < nd; i++, p += 3) dev += u[p + 1]; }
+      defs[h & 0xF] = { g, le, fields, dev };
+    } else { const d = defs[h & 0xF]; if (!d) throw new Error('Bad FIT file'); p = msg(d, p); }
+  }
+  function msg(d, o) {
+    const f = {};
+    for (const [num, size, base] of d.fields) { if (o + size > u.length) throw new Error('Bad FIT file'); f[num] = read(o, size, base, d.le); o += size; }
+    if (d.g === 20 && f[0] != null && f[1] != null && f[0] !== 0x7FFFFFFF && f[1] !== 0x7FFFFFFF) {
+      const alt = f[78] != null && f[78] !== 0xFFFFFFFF ? f[78] : f[2] != null && f[2] !== 0xFFFF ? f[2] : null;
+      pts.push({ lat: f[0] * 180 / 2 ** 31, lon: f[1] * 180 / 2 ** 31, ele: alt == null ? null : alt / 5 - 500 });
+    }
+    if (d.g === 31 && typeof f[5] === 'string') name = f[5];
+    return o + d.dev;
+  }
+  return { name: name.slice(0, 80), pts };
+}
+
 /* ---------- profile ---------- */
 // median over +-k points, edges use the points that exist (upper median for an even count)
 function median(a, k) {

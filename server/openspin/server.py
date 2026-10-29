@@ -37,7 +37,6 @@ QUIET_PATHS = ("/api/state", "/api/event", "/api/current", "/api/coach?", "/api/
 # A page served from here may never be framed (clickjacking) and runs only its own scripts.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; "
        "connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
-CSP_INLINE = CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")  # browser.html is one inline page
 # headers a reverse proxy or tunnel adds: such a request came from the network, not this computer
 PROXY_HEADERS = ("X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "Forwarded", "CF-Connecting-IP", "True-Client-IP")
 
@@ -219,7 +218,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         path = urlsplit(self.path or "").path
-        self.send_header("Content-Security-Policy", CSP_INLINE if path.endswith("/browser.html") else CSP)
+        self.send_header("Content-Security-Policy", CSP)
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")

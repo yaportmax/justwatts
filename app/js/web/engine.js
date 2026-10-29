@@ -335,7 +335,7 @@ export class Engine {
     this.pHist = [...this.pHist, d.power].slice(-3);
     const r = this.ride;
     if (r?.started) {
-      const pedaling = d.cadence > 0 || d.power > 0;
+      const pedaling = d.cadence > 0 || d.power > 0 || (!!r.course && r.cs.v > 0.5);  // coasting downhill on a course still moves
       if (h.mode !== 'sim') {
         if (!pedaling) { if (++r.idle >= 3 && !r.paused) r.paused = r.auto = true; }
         else { r.idle = 0; if (r.auto) r.paused = r.auto = false; }

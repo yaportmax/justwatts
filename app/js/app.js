@@ -11,6 +11,7 @@ import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
 import { createBuilder } from './builder.js';
 import { LIBRARY, CATEGORIES } from './library.js';
 import { createCourses } from './courses.js';
+import { drawMap } from './map.js';
 
 // One codebase, two backends: the local python server, or (web build) an in-page backend with the
 // ride engine, Web Bluetooth and IndexedDB that answers the same /api/* requests.
@@ -761,6 +762,9 @@ async function openSummary(id) {
   const heroHtml = hero.map(([k, v]) => `<div><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
   const restHtml = rest.map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('');
   $('#sStats').innerHTML = `<div class="shero">${heroHtml}</div><div class="srest">${restHtml}</div>`;
+  // a course ride: its route, with how far the rider got
+  const ll = r.course?.ll, done = r.samples.at(-1)?.[8], mapDraw = () => drawMap($('#sMap'), { ll, dist: r.course.dist, done, fit, css, redraw: () => openRide === r && mapDraw() });
+  $('#sMap').style.display = ll?.length > 1 ? '' : 'none'; if (ll?.length > 1) requestAnimationFrame(mapDraw);
   let cw = null;
   if (r.steps) { let t = 0; cw = { steps: r.steps.map(s => { const x = { ...s, t0: t }; t += s.d; return x; }) }; cw.total = r.steps.reduce((a, s) => a + s.d, 0); }
   else if (r.text) { try { cw = compile(r); for (const [i, w] of Object.entries(r.ov || {})) { const s = cw.steps[i]; if (s && !s.free) { [s.a, s.b] = Array.isArray(w) ? w : [w, w]; s.u = 'w'; } } } catch {} }

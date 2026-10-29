@@ -1,7 +1,7 @@
 // Courses UI: the course list on the Workouts page and the elevation strip on the ride screen.
 // DOM only. The course math is in course.js; position, grade and speed come from the ride engine.
 import { esc, distText, isMetric } from './core.js';
-import { parseTrack, buildCourse, SAMPLE_COURSES } from './course.js';
+import { parseTrack, parseFit, buildCourse, SAMPLE_COURSES } from './course.js';
 import { ROUTE_COURSES } from './course-routes.js';
 import { drawMap } from './map.js';
 
@@ -50,7 +50,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride }) {
 
   async function importFile(file) {
     try {
-      const t = parseTrack(await file.text());
+      const t = /\.fit$/i.test(file.name) ? parseFit(new Uint8Array(await file.arrayBuffer())) : parseTrack(await file.text());
       if (!t.pts.length) throw new Error('No track points');
       const c = { id: 'k-' + Date.now().toString(36), ...buildCourse(t.name || file.name.replace(/\.\w+$/, ''), t.pts) };
       if (!store.set('hw.courses', [c, ...mine])) throw new Error('No room to save it');

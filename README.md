@@ -52,7 +52,7 @@ No trainer? `openspin simulate` drives a fake ride through the server.
   efforts.
 - **Uploads** (optional): Garmin Connect and Strava.
 - **Crash-safe**: every second of the ride is fsync'd to disk; a crash, kill or restart resumes the ride. See [docs/RELIABILITY.md](docs/RELIABILITY.md) for what is guaranteed and how it is tested.
-- `browser.html` keeps an older single-tab Web Bluetooth mode as a fallback (Chrome or Edge).
+- The web version (openspin.maxyaport.com) runs the same app with Bluetooth in the browser tab (Chrome or Edge).
 
 ## Ride controls
 

@@ -21,7 +21,7 @@ def dist(tmp_path_factory):
 def test_build_output(dist):
     files = {p.relative_to(dist).as_posix() for p in dist.rglob("*") if p.is_file()}
     assert {"index.html", "js/app.js", "js/core.js", "js/mode.js", "js/web/backend.js", "css/app.css", "vercel.json", "icon.svg"} <= files
-    assert not {"browser.html", "connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
+    assert not {"connect.html", "js/package.json", "sw.js"} & files  # server-only pages, no PWA cache
     assert {f for f in files if f.startswith("api/")} == {"api/strava/token.js"}     # only the Strava token service
     assert "MODE = 'web'" in (dist / "js/mode.js").read_text()
     assert "MODE = 'server'" in (REPO / "app/js/mode.js").read_text()                # the local app is untouched

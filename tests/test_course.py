@@ -265,7 +265,27 @@ SCRIPTS = {
                 [["power", 180], ["start", {}], ["tick", 70], ["tick", 130], ["skip", {}], ["tick", 90], ["tick", 5]]),
     "flat": (None, "s-flat", {"weight": 0}, [["power", 150], ["start", {}], ["tick", 100], ["pause", {}], ["tick", 5],
                                              ["pause", {}], ["tick", 50]]),
+    "coast": (None, "s-rolling", {}, [["power", 300], ["start", {}], ["tick", 400], ["power", 0], ["tick", 60]]),
 }
+
+
+def test_coasting_downhill_does_not_auto_pause(tmp_path):
+    down = {"name": "Down", "dist": 3000, "ele": [300 - i * 0.6 for i in range(301)]}  # -6%
+    res, eng = run_python(tmp_path, [["power", 200], ["load", {"workout": None, "course": down}], ["start", {}], ["tick", 30],
+                                     ["power", 0], ["tick", 20]])
+    r = eng.state({})["ride"]
+    assert not r["paused"] and r["course"]["speed_kmh"] > 20
+    flat = {"name": "Flat", "dist": 3000, "ele": [10.0] * 301}
+    res, eng = run_python(tmp_path, [["power", 200], ["load", {"workout": None, "course": flat}], ["start", {}], ["tick", 30],
+                                     ["power", 0], ["tick", 120]])
+    assert eng.state({})["ride"]["paused"]  # on the flat the rider rolls to a stop, then it pauses
+
+
+def test_summary_has_elevation_gain_on_a_course(js, tmp_path):
+    res, eng = run_python(tmp_path, [["power", 260], ["load", {"workout": None, "course": samples(js)["s-climb"]}], ["start", {}], ["tick", 900]])
+    p = res["payload"]
+    up = H.detail(p)["summary"]["elevation_gain_m"]
+    assert up > 20 and up == round(sum(max(0, b[7] - a[7]) for a, b in zip(p["samples"], p["samples"][1:])))
 
 
 @pytest.mark.parametrize("name", SCRIPTS)
@@ -337,6 +357,19 @@ def test_exports_carry_gps_from_the_map_line(js, tmp_path):
     ns = {"t": "http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"}
     lat = [float(e.text) for e in root.findall(".//t:Position/t:LatitudeDegrees", ns)]
     assert len(lat) == len(p["samples"]) and lat[0] == pytest.approx(alpe["ll"][0][0], abs=1e-4)
+
+
+def test_fit_import_reads_positions_and_altitude(js, tmp_path):
+    # an exported course ride is a valid FIT track: importing it gives back the road
+    alpe = json.loads(re.search(r"ROUTE_COURSES = (.*);", (REPO / "app/js/course-routes.js").read_text(encoding="utf-8"))[1])[2]
+    res, eng = run_python(tmp_path, [["power", 400], ["load", {"workout": None, "course": alpe}], ["start", {}], ["tick", 900]])
+    p = res["payload"]
+    t = js([{"op": "parseFit", "b64": base64.b64encode(H.fit_encode(p)).decode()}])[0]
+    assert len(t["pts"]) == len(p["samples"])
+    assert t["pts"][0]["lat"] == pytest.approx(alpe["ll"][0][0], abs=1e-4)
+    assert t["pts"][-1]["ele"] == pytest.approx(p["samples"][-1][7], abs=0.2)
+    bad = js([{"op": "parseFit", "b64": base64.b64encode(b"<gpx></gpx>").decode()}, {"op": "parseFit", "b64": base64.b64encode(H.fit_encode(p)[:40]).decode()}])
+    assert bad[0] == {"error": "Not a FIT file"} and "error" in bad[1]
 
 
 def test_course_ride_resumes_after_restart(js, tmp_path):

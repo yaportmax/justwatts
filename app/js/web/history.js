@@ -42,12 +42,18 @@ export function ftpEstimate(r, m, P) {
   if (twenty) return P.length >= 1200 ? jsr(bestMean(P, 1200) * 0.95) : null;
   return m.best60 ? jsr(m.best60 * 0.75) : null;
 }
+// metres climbed on a course ride (sample altitude), null otherwise. Same as history.py _climbed().
+function climbed(s) {
+  if (!(s.length && s[s.length - 1].length > 8)) return null;
+  let up = 0; for (let i = 1; i < s.length; i++) up += Math.max(0, s[i][7] - s[i - 1][7]);
+  return jsr(up);
+}
 export function detail(r, floors, meta = {}) {
   const m = summarize(r), P = r.samples.map(x => x[2]), hz = [0, 0, 0, 0, 0];
   for (const x of r.samples) { const i = hrZone(x[4], floors); if (i >= 0) hz[i]++; }
   const out = { id: r.id, name: r.name, start: r.start, ftp: r.ftp, test: r.test,
     summary: { time_s: m.dur, elapsed_s: jsr(m.elapsed), avg_w: jsr(m.avgP), np: jsr(m.np), max_w: m.maxP, if: +m.IF.toFixed(2), tss: jsr(m.tss), kJ: jsr(m.kJ),
-      avg_hr: jsr(m.avgHR) || null, max_hr: m.maxHR || null, avg_cad: jsr(m.avgC), distance_km: +(m.dist / 1000).toFixed(2) },
+      avg_hr: jsr(m.avgHR) || null, max_hr: m.maxHR || null, avg_cad: jsr(m.avgC), distance_km: +(m.dist / 1000).toFixed(2), elevation_gain_m: climbed(r.samples) },
     best: bestEfforts(P), power_zones_s: Object.fromEntries(ZONES.map((z, i) => [z[2], m.zt[i]])),
     hr_zones_s: floors ? Object.fromEntries(hz.map((t, i) => [`Z${i + 1}`, t])) : null, laps: laps(r), events: r.events || [],
     garmin: null, strava: meta.strava || null, description: meta.description || null, agent: r.agent || { wakes: null, local_cues: null, usage: {} } };

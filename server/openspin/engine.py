@@ -865,7 +865,8 @@ class RideEngine:
             self.p_hist = (self.p_hist + [d.power])[-3:]
             r = self.ride
             if r and r.started:
-                pedaling = d.cadence > 0 or d.power > 0
+                # coasting downhill on a course still moves: only a stop pauses
+                pedaling = d.cadence > 0 or d.power > 0 or (r.course is not None and r.cs["v"] > 0.5)
                 if h.mode != "sim":
                     if not pedaling:
                         r.idle += 1

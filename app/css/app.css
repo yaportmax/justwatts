@@ -314,3 +314,5 @@ body.web .agentcol{display:none}
 @media (max-width:700px){.crs{flex-direction:column;gap:8px}.crs #crsMap{width:100%;max-width:none;height:170px}.crs #crsChart{height:56px}}
 .crsk{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--dim);font-size:13px;margin-top:4px}
 .crsk b{color:var(--ink);font-weight:600}
+
+#sMap{width:100%;height:220px;display:block;border-radius:6px;margin:4px 0 14px}

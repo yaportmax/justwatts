@@ -42,10 +42,10 @@
   </div>
 
   <h2>Courses</h2>
-  <div class="row crsbar"><span class="hint" id="crsNow"></span><button id="crsImport">Import GPX</button></div>
+  <div class="row crsbar"><span class="hint" id="crsNow"></span><button id="crsImport" title="GPX, TCX or FIT">Import route</button></div>
   <div class="llist" id="crsList"></div>
   <div class="hint" style="margin-top:6px">With a workout: watt segments stay ERG, free segments follow the road.</div>
-  <input type="file" id="crsFile" accept=".gpx,.tcx" hidden>
+  <input type="file" id="crsFile" accept=".gpx,.tcx,.fit" hidden>
 
   <h2>Library</h2>
   <div class="libbar">
@@ -169,6 +169,7 @@
     </div>
     <div id="sTest" class="row" style="margin-top:10px;display:none"></div>
     <div class="stats" id="sStats"></div>
+    <canvas id="sMap" style="display:none"></canvas>
     <canvas id="sumChart"></canvas>
     <div class="zones" id="sZones"></div>
     <div class="zlegend" id="sZleg"></div>
@@ -305,7 +306,7 @@
     <div class="devlist" id="devList"></div>
     <div class="row" style="justify-content:space-between">
       <button id="devScan" class="pri">Scan</button>
-      <a href="browser.html" class="hint serveronly" title="Bluetooth in this tab">Use browser Bluetooth instead</a>
+      <a href="https://openspin.maxyaport.com" class="hint serveronly" target="_blank" rel="noopener" title="Same app, Bluetooth in the browser tab (Chrome, Edge)">Web version</a>
     </div>
   </div>
 </div>

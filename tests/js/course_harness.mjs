@@ -34,6 +34,7 @@ function ride({ workout, course, settings: s0, script }) {
 function run(r) {
   switch (r.op) {
     case 'parse': return C.parseTrack(r.text);
+    case 'parseFit': { try { return C.parseFit(Buffer.from(r.b64, 'base64')); } catch (e) { return { error: e.message }; } }
     case 'build': { try { const t = C.parseTrack(r.text); return C.buildCourse(t.name, t.pts); } catch (e) { return { error: e.message }; } }
     case 'buildPts': { try { return C.buildCourse(r.name, r.pts); } catch (e) { return { error: e.message }; } }
     case 'lookup': return r.at.map(d => [C.gradeAt(r.course, d), C.eleAt(r.course, d)]);

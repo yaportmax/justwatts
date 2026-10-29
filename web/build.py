@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "app"
 WEB = ROOT / "web"
-SERVER_ONLY = {"browser.html", "connect.html", "js/package.json"}
+SERVER_ONLY = {"connect.html", "js/package.json"}
 
 
 def build(out: Path) -> dict:

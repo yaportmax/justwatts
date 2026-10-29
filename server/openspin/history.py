@@ -118,6 +118,13 @@ def _on_course(s: list) -> bool:
     return bool(s) and len(s[-1]) > 8
 
 
+def _climbed(s: list) -> int | None:
+    """Metres climbed on a course ride (sample altitude), None otherwise. Same as history.js climbed()."""
+    if not _on_course(s):
+        return None
+    return js_round(sum(max(0, s[i][7] - s[i - 1][7]) for i in range(1, len(s))))
+
+
 def summarize(r: dict) -> dict:
     """Same numbers as core.js summarize()."""
     s = r["samples"]
@@ -205,7 +212,7 @@ def detail(r: dict, hr_floors: list | None = None, meta: dict | None = None) -> 
         "summary": {"time_s": m["dur"], "elapsed_s": round(m["elapsed"]), "avg_w": round(m["avgP"]), "np": round(m["np"]),
                     "max_w": m["maxP"], "if": round(m["IF"], 2), "tss": round(m["tss"]), "kJ": round(m["kJ"]),
                     "avg_hr": round(m["avgHR"]) or None, "max_hr": m["maxHR"] or None, "avg_cad": round(m["avgC"]),
-                    "distance_km": round(m["dist"] / 1000, 2)},
+                    "distance_km": round(m["dist"] / 1000, 2), "elevation_gain_m": _climbed(r["samples"])},
         "best": best_efforts(P),
         "power_zones_s": dict(zip([z for _, z in ZONES], m["zt"])),
         "hr_zones_s": dict(zip([f"Z{i + 1}" for i in range(5)], hz)) if hr_floors else None,

@@ -134,3 +134,41 @@ def test_web_account_sync_and_community(dist, node):
     assert out["claimed"] == {"email": "eddy@example.com", "verified": True, "toast": "Email confirmed"}
     oe = out["oauthError"]
     assert oe["step"] == "signin" and "Strava sign-in is full for now" in oe["html"] and "limited for now" in oe["html"] and oe["stripped"] == "/"
+
+
+def test_web_social(dist, node):
+    # presence, friends, group rides, chat and ride-ons on the page against the real API, see tests/js/social_web.mjs
+    p = subprocess.run([node, str(REPO / "tests/js/social_web.mjs"), str(REPO), str(dist)], capture_output=True, text=True, timeout=240, encoding="utf-8")
+    assert p.returncode == 0, p.stderr[-4000:]
+    out = json.loads(p.stdout)
+    assert out["off"] == {"social": None, "calls": 0}                                              # no accounts: no social at all
+    assert out["signedOut"]["calls"] == 0 and out["signedOut"].get("strip") in (None, "none")      # signed out: sends nothing, sees nobody
+    assert 'data-a="friends">Friends' in out["menu"]                                               # the Friends panel opens from the account menu
+    pn = out["panel"]
+    assert pn["on"] and pn["title"] == "Friends" and "Requests" in pn["html"] and "Accept" in pn["html"] and "Copy link" in pn["html"]
+    assert out["accepted"] == ["Bob"] and 'data-s="add"' in out["found"] and out["catIncoming"] == ["Ann"]
+    rd = out["riding"]                                                                             # a course ride: the friend on the strip
+    assert rd["riders"] == [["Bob", True, 240, "Hawk Hill, Marin|2907"]] and rd["here"] == "1 riding here" and rd["strip"] == ""
+    assert 2 <= out["rate"] <= 4                                                                   # about every 2 s, never piling up
+    assert out["bobSees"] == [["Ann", True, "Hawk Hill, Marin|2907", "number", "number"]]
+    assert "Riding now" in out["ridingNow"] and "Ride here" in out["ridingNow"] and "240 W" in out["ridingNow"]
+    assert out["hidden"] == {"bob": [], "sees": ["Bob"]}                                           # switched off: others no longer see you
+    assert out["netDown"]["ride"] and out["netDown"]["samples"] >= 5                               # the network fails: the ride goes on
+    assert out["ended"] == {"strip": "none", "riders": 0}
+    assert out["activity"] == ["Ann", "Hawk Hill, Marin", True, False]                             # the finished ride reaches friends
+    assert "Activity" in out["activityHtml"] and "1 ride-on" in out["activityHtml"]
+    nf = out["newForm"]
+    assert 'value="o:ggb"' in nf and 'value="c:r-hawk"' in nf and 'type="datetime-local"' in nf and 'name="invite"' in nf
+    assert out["created"] == ["Tuesday spin", "course", "r-hawk"]
+    assert out["lobby"]["title"] == "Tuesday spin" and "Ready" in out["lobby"]["html"] and "invited" in out["lobby"]["html"]
+    assert out["bobInvited"] == [["Tuesday spin", "invited"]]
+    assert "In 0:0" in out["lobby2"] and out["armed"] and out["loadedEarly"]                        # loads ahead, starts at the time
+    gr = out["groupRide"]
+    assert "<b>Right now</b>" in gr["grp"] and 'class="on">Bob' in gr["grp"] and "Go go go" in gr["msgs"] and gr["chat"] == ""
+    assert gr["mates"] == [["Bob", True]]
+    assert out["said"] is True and out["bobReads"] == [["Bob", "Go go go"], ["Ann", "On your wheel"]]
+    lk = out["links"]                                                                              # share links, then a clean URL
+    assert lk["stripped"] == "/" and lk["view"] == "group" and lk["toast"] == "Request sent to Cat"
+    assert out["afterSignOut"]["calls"] == 0 and out["afterSignOut"].get("strip") in (None, "none")
+    for k in ("panel", "ridingNow", "activityHtml", "newForm", "lobby", "lobby2"):
+        assert "\u2014" not in json.dumps(out[k]), k                                               # no em dashes on screen

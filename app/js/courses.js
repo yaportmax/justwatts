@@ -17,6 +17,8 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
   let sel = '', pickW = '';  // the selected course row and the workout picked on it
   const all = () => [...mine, ...ROUTE_COURSES, ...SAMPLE_COURSES];
   const byId = id => (id && all().find(c => c.id === id)) || null;
+  // the course a ride is on (the ride state has its name and length, not its line)
+  const srcOf = rc => (rc && !rc.open && all().find(c => c.name === rc.name && Math.abs(c.dist - rc.dist_m) < 1)) || null;
   const upText = m => isMetric(units()) ? `${Math.round(m)} m` : `${Math.round(m * FT)} ft`;
   const info = c => `${distText(c.dist / 1000, units())} · ${upText(c.gain)} up`;
   // <option>s for a course picker: Flat (no course), then every course with its distance and climb
@@ -90,7 +92,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
   function renderRide(rc) {
     const box = $('#crsRide'); if (!box) return;
     // the map: the ride state has no line, so take it from the course list (gone if the course was deleted); open world: from the page's road plan
-    const ow = rc?.open ? world?.view() : null, src = rc && !rc.open && all().find(c => c.name === rc.name && Math.abs(c.dist - rc.dist_m) < 1);
+    const ow = rc?.open ? world?.view() : null, src = srcOf(rc);
     box.style.display = rc ? '' : 'none';
     map.update(rc?.open ? ow?.ll : src?.ll, rc, ow?.alts); turnPrompt(ow); if (!rc) return;
     const u = units(), spd = isMetric(u) ? `${Math.round(rc.speed_kmh)} km/h` : `${Math.round(rc.speed_kmh * 0.621371)} mph`;
@@ -125,5 +127,5 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     if (!store.set('hw.courses', [k, ...mine])) { toast('No room to save it'); return null; }
     mine = [k, ...mine]; render(); return k;
   }
-  return { byId, options, wOptions, render, renderRide, map, upText, draw, add, reload: () => { mine = store.get('hw.courses', []); render(); } };
+  return { byId, srcOf, builtIn: () => [...ROUTE_COURSES, ...SAMPLE_COURSES], options, wOptions, render, renderRide, map, upText, draw, add, reload: () => { mine = store.get('hw.courses', []); render(); } };
 }

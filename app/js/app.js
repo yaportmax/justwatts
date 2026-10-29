@@ -13,9 +13,9 @@ import { fromWords } from './words.js';
 import { view as aView, track, workoutTag } from './analytics.js';
 import { LIBRARY, CATEGORIES, FEATURED } from './library.js';
 import { createCourses } from './courses.js';
-import { drawMap } from './map.js';
+import { drawMap, lineDist, pointAt } from './map.js';
 import { checkCourse, buildCourse } from './course.js';
-import { createWorld } from './world.js';
+import { createWorld, PRESETS as WORLD_PRESETS } from './world.js';
 import { createPicker } from './worldpick.js';
 import { createConnect } from './connect.js';
 
@@ -31,7 +31,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let onSaved = () => {};  // web build with an account: a synced key changed (custom workouts, courses, settings)
 const SYNCED = new Set(['hw.custom', 'hw.courses', 'hw.settingsAt']);
-let account = null, community = null, libSrc = 'lib';  // web build: accounts and the community library
+let account = null, community = null, social = null, libSrc = 'lib';  // web build: accounts, the community library, social
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); if (SYNCED.has(k)) onSaved(k); return true; } catch { return false; } },
@@ -309,10 +309,11 @@ function onLive(msg) {
   if (S.notice && S.notice_id && S.notice_id !== store.get('hw.noticeId', 0)) { toast(S.notice); store.set('hw.noticeId', S.notice_id); }
   beeps();
   testGuide();
-  if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) finishedRide(S.last_finished);
+  if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) { finishedRide(S.last_finished); social?.finished(S.last_finished); }
   if (prev?.ride && !r && account) { account.sync.applyPending(); account.sync.kick(); }  // ride over: pending settings apply, the ride syncs
   world.update(r?.course, r?.id);
   setStatus(); renderLive(); if (V) renderRide();
+  if (social) try { social.tick(); } catch (e) { console.warn('social', e); }  // never in the ride's way
 }
 function setOnline(on) {
   $('#srvState').setAttribute('aria-hidden', on ? 'true' : 'false');
@@ -392,11 +393,49 @@ function loadRide(w, course = null) {  // course: the one picked for this ride, 
 }
 // open world from a start point (picker): roads load, then the ride loads like any course ride
 async function rideWorld(p, wid) {
+  const w = wid ? allWorkouts().find(x => x.id === wid && !x.test) : null;
+  return startWorld({ ...p, name: p.id ? p.name : 'Open world' }, w);
+}
+async function startWorld(p, w) {
   if (S?.ride?.started && Date.now() - loadArmed > 4000) { loadArmed = Date.now(); toast('Ride in progress. Tap again to end it and load this.'); return false; }
   loadArmed = 0;
-  const w = wid ? allWorkouts().find(x => x.id === wid && !x.test) : null;
-  await world.start({ name: p.id ? p.name : 'Open world', lat: p.lat, lon: p.lon, heading: p.heading, workout: w && { name: w.name, text: w.text, test: false } });
+  await world.start({ name: p.name || 'Open world', lat: p.lat, lon: p.lon, heading: p.heading, workout: w && { name: w.name, text: w.text, test: false } });
   track('ride_load', { workout: workoutTag(w), course: 'open' }); show('ride'); return true;
+}
+// social (web): a group ride's start or a friend's spot; plan { kind: 'course', id } | { kind: 'open', name, lat, lon, heading }
+async function rideAt(plan, w) {
+  if (plan?.kind === 'course') { const c = courses.byId(plan.id); if (!c) { toast('Course not on this device'); return false; } return loadRide(w, c); }
+  if (plan?.kind !== 'open') return false;
+  try { return await startWorld(plan, w); } catch (e) { toast(e.message || 'Could not load the roads'); return false; }
+}
+// where the rider is, for social presence: only while a course or open-world ride runs
+const lineCache = new WeakMap();
+function along(ll, dist, d) {  // [lat, lon, heading] d metres along a line dist metres long
+  let D = lineCache.get(ll); if (!D || D.dist !== dist) { D = lineDist(ll, dist); D.dist = dist; lineCache.set(ll, D); }
+  const x = Math.max(0, Math.min(d, dist)), p = pointAt(ll, D, x);
+  const a0 = Math.max(0, Math.min(x, dist - 20)), a = pointAt(ll, D, a0), q = pointAt(ll, D, Math.min(dist, a0 + 20));
+  const h = Math.atan2((q[1] - a[1]) * Math.cos(a[0] * Math.PI / 180), q[0] - a[0]) * 180 / Math.PI;
+  return [p[0], p[1], Math.round(h) || 0];
+}
+function ridePos() {
+  const r = S?.ride, rc = r?.course; if (!rc || !r.started) return null;
+  const w = S.live?.power_3s || 0, v = rc.speed_kmh || 0;
+  if (rc.open) {
+    const ow = world.view(); if (!ow?.ll?.length || ow.ll.length < 2) return null;
+    const [lat, lon, h] = along(ow.ll, (ow.ll.length - 1) * 10, ow.d);
+    return { open: true, lat, lon, h, w, v, d: rc.odo_m, road: ow.road || '' };
+  }
+  const src = courses.srcOf(rc), at = src?.ll?.length > 1 ? along(src.ll, rc.dist_m, rc.done_m) : null;
+  return { open: false, course: `${rc.name}|${Math.round(rc.dist_m)}`, cid: src && !String(src.id).startsWith('k-') ? src.id : null,
+    road: rc.name, d: rc.done_m, w, v, ...(at ? { lat: at[0], lon: at[1], h: at[2] } : {}) };
+}
+// other riders onto the ride maps: on my course, placed by distance along my own line
+function placeRiders(list) {
+  const rc = S?.ride?.course, src = rc && !rc.open ? courses.srcOf(rc) : null, key = rc && `${rc.name}|${Math.round(rc.dist_m)}`;
+  return list.map(o => {
+    const p = src?.ll?.length > 1 && !o.open && o.course === key ? along(src.ll, rc.dist_m, o.d) : [o.lat, o.lon];
+    return p[0] == null ? null : { id: o.id, lat: p[0], lon: p[1], label: `${o.name} ${o.w} W`, hi: o.friend || o.group };
+  }).filter(Boolean);
 }
 const picker = createPicker({ $, store, world, wOptions: (cur, free) => courses.wOptions(cur, free), go: rideWorld });
 $('#owOpen').onclick = () => picker.open();
@@ -998,7 +1037,7 @@ if (WEB) {
   };
   const { createAccount } = await import('./web/account.js');
   account = createAccount({ $, toast, show, store, local, download,
-    onUser: () => { pubBtn(); if (wkTab === 'courses' && libSrc !== 'comm') courses.render(); community?.redraw(); },
+    onUser: m => { pubBtn(); if (wkTab === 'courses' && libSrc !== 'comm') courses.render(); community?.redraw(); social?.onUser(m); },
     onRides: () => { if ($('#v-history').classList.contains('on') && !openId) renderHistory(); } });
   account.init().then(async on => {
     if (!on) { account = null; return; }
@@ -1012,6 +1051,12 @@ if (WEB) {
       saveCourse: c => courses.add(c), onBack: () => showTab(wkTab) });
     $('[data-src=comm]').style.display = '';
     pubBtn(); if ($('#v-workouts').classList.contains('on')) showTab(wkTab);
+    // social: riders nearby, friends, group rides, chat (signed in only; never in the ride's way)
+    const { createSocial } = await import('./web/social.js');
+    social = createSocial({ $, toast, account, units: () => settings.units, workouts: () => allWorkouts(),
+      starts: () => ({ courses: courses.builtIn(), presets: WORLD_PRESETS }), position: ridePos, ride: rideAt, start: () => control('start'),
+      onRiders: list => courses.map.setOthers(placeRiders(list)),
+      detail: async id => (await (await F(`/api/rides/${encodeURIComponent(id)}/detail`)).json()).summary });
   }).catch(e => console.warn('account', e));
 }
 
@@ -1023,7 +1068,7 @@ function show(v) {
   if (v === 'workouts') { if (community?.detail()) community.closeItem(); showTab(wkTab); conn.loadPlanned().catch(() => {}); }
   if (v === 'ride' && V) renderRide();
   if (v === 'history') { closeSummary(); renderHistory(); }
-  if (v === 'settings') { renderSettings(); account?.refresh(); }
+  if (v === 'settings') { renderSettings(); account?.refresh(); social?.renderSettings(); }
 }
 $$('nav button').forEach(b => b.onclick = () => show(b.dataset.v));
 $$('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
@@ -1087,4 +1132,4 @@ connect();
 const setHH = () => { const h = document.querySelector('header'); document.documentElement.style.setProperty('--hh', (h.offsetWidth >= globalThis.innerWidth - 1 ? h.offsetHeight : 0) + 'px'); };
 setHH();
 window.addEventListener('resize', () => { setHH(); if ($('#v-workouts').classList.contains('on')) wkTab === 'workouts' ? renderLib() : courses.render(); if (V) renderRide(); });
-window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE, conn, get account() { return account; }, get community() { return community; } };
+window.__hw = { parseWorkout, toText, fitEncode, compile, summarize, state: () => S, backend: B, mode: MODE, conn, world, courses, get account() { return account; }, get community() { return community; }, get social() { return social; } };

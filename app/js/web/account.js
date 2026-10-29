@@ -39,6 +39,7 @@ export const ICONS = {
 export function createAccount({ $, toast, show, store, local, onUser = () => {}, onRides = () => {}, fetch = (...a) => globalThis.fetch(...a),
   loc = globalThis.location, hist = globalThis.history, download = () => {} }) {
   let providers = null, me = null, step = null, stepData = {}, menuOpen = false, delOpen = false, pwOpen = false, linkOpen = false;
+  let friends = null, friendsN = 0;  // social.js: opens the Friends panel; requests and invites waiting
 
   async function api(method, path, body) {
     let r;
@@ -119,10 +120,10 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     }
     const name = me.user.name || me.user.email?.split('@')[0] || 'Rider', s = syncState.status;
     slot.innerHTML = `<button class="acctme${menuOpen ? ' open' : ''}" data-a="menu" aria-haspopup="menu" aria-expanded="${menuOpen}">
-      <span class="av" aria-hidden="true">${esc(name[0].toUpperCase())}</span>
+      <span class="av" aria-hidden="true">${esc(name[0].toUpperCase())}${friendsN ? '<i class="adot"></i>' : ''}</span>
       <span class="an"><b>${esc(name)}</b><small class="sy ${esc(s)}" title="${esc(syncState.error || '')}"><i></i>${esc(syncLabel())}</small></span>
       <svg class="chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 12l4-4 4 4"/></svg></button>
-      <div class="amenu" role="menu"${menuOpen ? '' : ' hidden'}><button role="menuitem" data-a="settings">Account settings</button><button role="menuitem" data-a="signout">Sign out</button></div>`;
+      <div class="amenu" role="menu"${menuOpen ? '' : ' hidden'}>${friends ? `<button role="menuitem" data-a="friends">Friends${friendsN ? ` <span class="badge num">${friendsN}</span>` : ''}</button>` : ''}<button role="menuitem" data-a="settings">Account settings</button><button role="menuitem" data-a="signout">Sign out</button></div>`;
   }
   function menu(on = !menuOpen) { menuOpen = !!on; renderSlot(); }
   function slotClick(e) {
@@ -130,6 +131,7 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     if (a === 'signin') return open('signin');
     if (a === 'menu') return menu();
     if (a === 'settings') { menu(false); show('settings'); return scrollToAccount(); }
+    if (a === 'friends') { menu(false); return friends?.(); }
     if (a === 'signout') { menu(false); return signOut(); }
   }
   function scrollToAccount() { setTimeout(() => document.getElementById?.('set-account')?.scrollIntoView?.({ block: 'start' }), 0); }
@@ -331,11 +333,12 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     const box = $('#adminSet'); if (!box || !me?.admin) return;
     const r = await api('GET', '/api/admin/hidden');
     if (r.status !== 200) { box.innerHTML = `<div class="srow"><span class="sl"><small>${esc(errText(r.body))}</small></span></div>`; return; }
-    const { items = [], comments = [] } = r.body;
+    const { items = [], comments = [], messages = [] } = r.body;
     const why = rs => rs.filter(Boolean).map(esc).join(', ') || 'no reason given';
-    box.innerHTML = !items.length && !comments.length ? '<div class="srow"><span class="sl"><small>Nothing hidden.</small></span></div>'
+    box.innerHTML = !items.length && !comments.length && !messages.length ? '<div class="srow"><span class="sl"><small>Nothing hidden.</small></span></div>'
       : items.map(i => `<div class="srow"><span class="sl">${esc(i.name)}<small>${esc(i.kind)} by ${esc(i.author)} · ${i.reasons.length} reports: ${why(i.reasons)}</small></span><span class="sc"><button data-adm="items" data-id="${esc(i.id)}" data-act="unhide">Unhide</button><button class="danger" data-adm="items" data-id="${esc(i.id)}" data-act="delete">Delete</button></span></div>`).join('')
-      + comments.map(c => `<div class="srow"><span class="sl">${esc(c.body.slice(0, 140))}<small>Comment by ${esc(c.author)} · ${c.reasons.length} reports: ${why(c.reasons)}</small></span><span class="sc"><button data-adm="comments" data-id="${esc(c.id)}" data-act="unhide">Unhide</button><button class="danger" data-adm="comments" data-id="${esc(c.id)}" data-act="delete">Delete</button></span></div>`).join('');
+      + comments.map(c => `<div class="srow"><span class="sl">${esc(c.body.slice(0, 140))}<small>Comment by ${esc(c.author)} · ${c.reasons.length} reports: ${why(c.reasons)}</small></span><span class="sc"><button data-adm="comments" data-id="${esc(c.id)}" data-act="unhide">Unhide</button><button class="danger" data-adm="comments" data-id="${esc(c.id)}" data-act="delete">Delete</button></span></div>`).join('')
+      + messages.map(m => `<div class="srow"><span class="sl">${esc(m.body.slice(0, 140))}<small>Chat by ${esc(m.author)} · ${m.reasons.length} reports: ${why(m.reasons)}</small></span><span class="sc"><button data-adm="messages" data-id="${esc(m.id)}" data-act="unhide">Unhide</button><button class="danger" data-adm="messages" data-id="${esc(m.id)}" data-act="delete">Delete</button></span></div>`).join('');
   }
   async function adminAct(kind, id, action) {
     const r = await api('POST', `/api/admin/${kind}/${encodeURIComponent(id)}`, { action });
@@ -383,6 +386,7 @@ export function createAccount({ $, toast, show, store, local, onUser = () => {},
     init, open, close, signIn, signUp, signOut, claimEmail, api, sync, submit, firstRun, handleParams,
     me: () => me, signedIn, providers: () => providers, settingsAction, settingsForm, adminAct, renderSettings, slotClick, dialogClick, menu,
     refresh: () => { renderSettings(); renderAdmin(); },
+    setFriends: (fn, n = 0) => { friends = fn; friendsN = n; renderSlot(); },
     state: () => ({ step, menuOpen, sync: syncState }),
   };
 }

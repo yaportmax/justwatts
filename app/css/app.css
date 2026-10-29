@@ -694,3 +694,63 @@ button.armed{color:var(--warn)}
   .cm-cols,#cmList .lrow{grid-template-columns:84px minmax(0,1fr) 120px}
   #cmList .lrow>:nth-child(3),#cmList .lrow>:nth-child(4){display:none}
 }
+
+/* ---------- social (web build): riders on the ride maps, the ride strip, the Friends panel ---------- */
+.rmo{display:flex;align-items:center;gap:5px;pointer-events:none}
+.rmo i{width:11px;height:11px;border-radius:50%;background:var(--ink);border:2px solid var(--bg);flex:none}
+.rmo span{padding:1px 6px;border-radius:5px;background:rgba(11,13,16,.8);color:var(--dim);font-size:11px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rmo.hi i{background:var(--good)}
+.rmo.hi span{color:var(--good)}
+.av{position:relative}
+.adot{position:absolute;top:-1px;right:-1px;width:8px;height:8px;border-radius:50%;background:var(--acc);border:2px solid var(--side)}
+.amenu .badge{margin-left:auto;background:var(--acc-soft);color:var(--acc);padding:0 7px}
+.socride{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;margin-top:10px;font-size:13px;color:var(--dim)}
+.srhere:empty,.srgrp:empty{display:none}
+.srhere{color:var(--ink);font-weight:600}
+.srgrp{display:flex;flex-wrap:wrap;gap:4px 14px;min-width:0}
+.srgrp b{color:var(--ink);font-weight:600}
+.srgrp span{color:var(--faint)}
+.srgrp span.on{color:var(--good)}
+.srgrp i{font-style:normal;color:var(--dim)}
+.srchat{display:flex;align-items:center;gap:6px;flex:1 1 320px;min-width:0;justify-content:flex-end}
+.srmsgs{display:flex;flex-direction:column;align-items:flex-end;min-width:0;flex:1;cursor:pointer}
+.srmsgs .sm{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srmsgs .sm b{color:var(--ink);font-weight:600}
+.srchat input{width:180px;height:30px}
+.srchat button{height:30px}
+.socdlg{width:min(560px,100%);max-height:calc(100vh - 14vh - 16px);overflow:auto}
+#socBody{display:flex;flex-direction:column;gap:4px}
+#socBody .ssub{margin-top:16px}
+.socfind{display:flex;gap:6px}
+.socfind input{flex:1;min-width:0}
+.socrow{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:46px;padding:6px 0;border-bottom:1px solid var(--line)}
+.socrow .sl{display:flex;flex-direction:column;min-width:0;font-weight:500}
+.socrow .sl small{color:var(--dim);font-size:12px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.socrow .sc{display:flex;gap:4px;align-items:center;flex:none}
+.socrow .sc button{height:30px}
+.socrow button.on{color:var(--acc);border-color:rgba(56,189,248,.45);background:var(--acc-soft)}
+.sdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:8px;vertical-align:1px}
+.socempty{padding:10px 0}
+.soclob{display:flex;flex-direction:column;gap:12px}
+.socwhen{display:flex;flex-direction:column;gap:2px}
+.socwhen b{font-size:26px;font-weight:650;letter-spacing:-.01em}
+.socwhen small{color:var(--dim);font-size:13px}
+.socmem{display:flex;flex-wrap:wrap;gap:6px}
+.socmem span{padding:2px 10px;border-radius:999px;background:var(--panel2);font-size:13px}
+.socmem span.inv{color:var(--faint);background:none;border:1px dashed var(--line2)}
+.socacts{gap:6px}
+.socmsgs{display:flex;flex-direction:column;gap:6px;max-height:260px;min-height:60px;overflow:auto;margin-top:8px;padding:10px 0;border-top:1px solid var(--line);font-size:13px}
+.socmsgs .sm{position:relative;color:var(--dim);overflow-wrap:anywhere}
+.socmsgs .sm b{color:var(--ink);font-weight:600;margin-right:4px}
+.socmsgs .sm.mine b{color:var(--acc)}
+.smact{display:none;gap:8px;margin-left:8px}
+.sm:hover .smact,.sm:focus-within .smact{display:inline-flex}
+.smact .lnk{color:var(--faint);font-size:12px}
+.socsay{display:flex;gap:6px}
+.socsay input{flex:1;min-width:0;height:34px}
+.socinv{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13px;color:var(--ink)}
+.socinv>span{width:100%;font-size:12px;color:var(--dim)}
+.socinv label{display:inline-flex;gap:6px;align-items:center}
+.socnew select,.socnew input{height:38px;font-size:14px}
+@media (hover:none){.smact{display:inline-flex}}
+@media (max-width:640px){.srchat{flex-basis:100%}.srchat input{width:auto;flex:1}.socrow{flex-wrap:wrap}.socrow .sc{flex-wrap:wrap}}

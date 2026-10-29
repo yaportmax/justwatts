@@ -27,6 +27,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   let d3 = !!store.get('hw.map3d', false), focus = !!store.get('hw.mapFocus', false);
   let cur = null;  // { ll, n, D, dist, done, open, alts }
   let map = null, rider = null, anim = null, raf = 0, camB = null, ready = false, mapLL = null, mapStyle = null, mapAlts = '', busy = false, size = '', placedOn = false;
+  let others = [], marks = new Map();  // other riders (social.js): [{ id, lat, lon, label, hi }]; their 3D markers by id
   const box = $('#crsMapBox'), cv = $('#crsMap'), v3 = $('#crsMap3d');
   $('#mapStyle').innerHTML = Object.entries(MAP_STYLES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
 
@@ -52,11 +53,25 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   // 2D: the whole course; an open-world ride: about 1.6 km across, centred on the rider (points every 10 m)
   function draw2d() {
     if (!cur || (d3 && ready)) return;
-    if (!cur.open) return drawMap(cv, { ll: cur.ll, dist: cur.dist, done: cur.done, fit, css, redraw: draw2d, style, attr: false });
+    if (!cur.open) return drawMap(cv, { ll: cur.ll, dist: cur.dist, done: cur.done, fit, css, redraw: draw2d, style, attr: false, others });
     const i = Math.floor(cur.done / 10), a = Math.max(0, i - 150), b = Math.min(cur.ll.length, i + 250), w = cur.ll.slice(a, b);
     drawMap(cv, { ll: w, dist: (w.length - 1) * 10, done: cur.done - a * 10, fit, css, redraw: draw2d, style, attr: false, ends: false, alts: cur.alts,
-      view: { at: pointAt(cur.ll, cur.D, cur.done), m: 1600 } });
+      view: { at: pointAt(cur.ll, cur.D, cur.done), m: 1600 }, others });
   }
+  // other riders as 3D markers: a dot and "name watts", friends and group mates highlighted
+  function syncMarks() {
+    if (!map || !ready || !globalThis.maplibregl) return;
+    const keep = new Set();
+    for (const o of others) {
+      keep.add(o.id);
+      let m = marks.get(o.id);
+      if (!m) { const el = document.createElement('div'); el.className = 'rmo'; m = new globalThis.maplibregl.Marker({ element: el, anchor: 'left', offset: [-6, 0] }).setLngLat([o.lon, o.lat]).addTo(map); marks.set(o.id, m); }
+      const el = m.getElement(); el.className = 'rmo' + (o.hi ? ' hi' : ''); if (!el.firstChild) el.innerHTML = '<i></i><span></span>'; el.lastChild.textContent = o.label;
+      m.setLngLat([o.lon, o.lat]);
+    }
+    for (const [id, m] of marks) if (!keep.has(id)) { m.remove(); marks.delete(id); }
+  }
+  function setOthers(list) { others = Array.isArray(list) ? list : []; syncMarks(); }
   function draw() { if (!cur) return; ui(); if (d3) draw3d(); draw2d(); }
 
   function spec() {
@@ -103,7 +118,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
         center: [cur.ll[0][1], cur.ll[0][0]], zoom: 14, pitch: 60, transformRequest: url => ({ url, referrerPolicy: 'strict-origin' }) });  // OSM needs the origin
       const dot = document.createElement('div'); dot.className = 'rmapdot';
       rider = new ml.Marker({ element: dot }).setLngLat([cur.ll[0][1], cur.ll[0][0]]).addTo(map);
-      map.on('load', () => { ready = true; draw(); });
+      map.on('load', () => { ready = true; draw(); syncMarks(); });
       map.on('error', e => console.warn('map:', e?.error?.message || e));
     } catch (e) {
       console.warn(e); d3 = false; store.set('hw.map3d', false); toast('3D map unavailable here'); map = null; draw();
@@ -156,5 +171,5 @@ export function createRideMap({ $, store, fit, css, toast, relayout }) {
   $('#mapStyle').onchange = e => { style = MAP_STYLES[e.target.value] ? e.target.value : 'osm'; store.set('hw.mapStyle', style); draw(); };
   $('#map3d').onclick = () => { d3 = !d3; store.set('hw.map3d', d3); size = ''; anim = null; draw(); };
   $('#mapFocus').onclick = toggleFocus;
-  return { update, toggleFocus, focused: () => placedOn };
+  return { update, toggleFocus, setOthers, focused: () => placedOn };
 }

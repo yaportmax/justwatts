@@ -47,8 +47,9 @@ export function pointAt(ll, D, d) {
 }
 
 // draw the whole route fitted to the canvas; done = metres ridden (null: no rider); ends: start and finish dots;
-// alts: other roads to show dashed (an open-world junction); view: { at: [lat, lon], m } centres on a point, m metres across
-export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = 'osm', attr = true, ends = true, alts = null, view = null }) {
+// alts: other roads to show dashed (an open-world junction); view: { at: [lat, lon], m } centres on a point, m metres across;
+// others: other riders [{ lat, lon, label, hi }] (hi: a friend or group mate)
+export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = 'osm', attr = true, ends = true, alts = null, view = null, others = null }) {
   const st = styleOf(style), filter = filterOf(st);
   const [c, w, h] = fit(cv); if (!ll?.length || w < 10 || h < 10) return;
   const pad = 14, xs = ll.map(p => wx(p[1])), ys = ll.map(p => wy(p[0]));
@@ -83,6 +84,17 @@ export function drawMap(cv, { ll, dist, done = null, fit, css, redraw, style = '
   if (ends) {  // start and finish
     c.fillStyle = css('--good'); c.beginPath(); c.arc(...pts[0], 4, 0, 2 * Math.PI); c.fill();
     c.fillStyle = css('--bad'); c.beginPath(); c.arc(...pts.at(-1), 4, 0, 2 * Math.PI); c.fill();
+  }
+  if (others?.length) {
+    c.font = '600 11px "Inter var", system-ui, sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'left';
+    for (const o of [...others].sort((a, b) => !!a.hi - !!b.hi)) {  // friends on top
+      const [x, y] = P(o.lat, o.lon); if (x < -20 || y < -20 || x > w + 20 || y > h + 20) continue;
+      c.fillStyle = o.hi ? css('--good') : css('--ink'); c.strokeStyle = css('--bg'); c.lineWidth = 2;
+      c.beginPath(); c.arc(x, y, o.hi ? 5 : 4, 0, 2 * Math.PI); c.fill(); c.stroke();
+      const tw = c.measureText(o.label).width;
+      c.fillStyle = 'rgba(11,13,16,.78)'; c.fillRect(x + 8, y - 8, tw + 8, 16);
+      c.fillStyle = o.hi ? css('--good') : css('--dim'); c.fillText(o.label, x + 12, y);
+    }
   }
   if (done != null) {
     const D = lineDist(ll, dist), d = Math.min(done, dist);

@@ -2,7 +2,7 @@
 // easy to 60 min". Rules only: runs in the page, no model, no network. Returns a tree (see core.js parseTree).
 // norm (text) -> lex (tokens) -> clauses (split at , ; . newlines "then", outside brackets) -> each clause is a
 // total, set header, "repeat", fill, warm-up/cool-down or steps -> folded into the tree (a rest-looking step right
-// after a repeat joins it). Ambiguous wording takes the common coach reading; tests/words_cases.json lists them.
+// after a repeat joins it). Ambiguous wording takes the most common reading; tests/words_cases.json lists them.
 
 const HARD = d => d <= 60 ? 1.2 : d <= 300 ? 1.1 : 1.0;
 const ALLOUT = d => d <= 60 ? 1.5 : d <= 120 ? 1.3 : d <= 300 ? 1.2 : d <= 1200 ? 1.05 : 1.0;  // "20 min all out" is a test, not a sprint

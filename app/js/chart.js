@@ -63,11 +63,12 @@ export function drawChart(c, w, h, o, css) {
   const yMax = Math.max(ftp * 1.3, (o.cw ? maxTarget(o.cw, ftp, o.k) : 0) * 1.12, Math.min(mp, ftp * 2.5) * 1.05);
   const X = t => L + t / total * pw, Y = v => T + ph - Math.max(0, v) / yMax * ph;
   c.font = '11px "Inter var", system-ui'; c.fillStyle = css('--faint'); c.textAlign = 'right'; c.textBaseline = 'middle';
+  let lastY = Infinity;  // a short chart: labels that would touch are skipped (the lines stay)
   for (const f of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
     const v = f * ftp; if (v > yMax) break;
     c.strokeStyle = f === 1 ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.06)'; c.setLineDash(f === 1 ? [4, 4] : []);
     c.beginPath(); c.moveTo(L, Y(v)); c.lineTo(w - R, Y(v)); c.stroke(); c.setLineDash([]);
-    c.fillText(Math.round(v), L - 6, Y(v));
+    if (lastY - Y(v) >= 13) { c.fillText(Math.round(v), L - 6, Y(v)); lastY = Y(v); }
   }
   c.textAlign = 'center'; c.textBaseline = 'top';
   const stepT = [60, 300, 600, 900, 1800, 3600].find(s => total / s <= 8) || 3600;
@@ -82,7 +83,8 @@ export function drawChart(c, w, h, o, css) {
   if (pts.hr.some(Boolean)) {
     const HY = v => T + ph - (v - 40) / 170 * ph;
     c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = hexA('#ef4444', 0.8);
-    for (let v = 80; v <= 200; v += 20) c.fillText(v, w - R + 4, HY(v));
+    const hrStep = ph / 170 * 20 >= 13 ? 20 : ph / 170 * 40 >= 13 ? 40 : 60;
+    for (let v = 80; v <= 200; v += hrStep) c.fillText(v, w - R + 4, HY(v));
     c.strokeStyle = hexA('#ef4444', 0.75); c.lineWidth = 1.2; c.beginPath(); let on = false;
     let pt = null;
     for (const p of pts.hr) { if (!p) { on = false; continue; } if (pt != null && p[0] - pt > gapT) on = false; on ? c.lineTo(X(p[0]), HY(p[1])) : c.moveTo(X(p[0]), HY(p[1])); on = true; pt = p[0]; }

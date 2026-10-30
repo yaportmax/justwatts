@@ -8,7 +8,7 @@ import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, rasterBy, gr
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, withSun, WIND, BORES, REDWOOD, LAMPS } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, LAMPS } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS } from './props.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
@@ -59,7 +59,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const sky = createSky(scene, { far: 60000 }); sky.set(time);
   const mats = { terrain: terrainMaterial(), terrainBore: terrainMaterial({ bores: true }), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
-    tunnel: new THREE.MeshLambertMaterial({ color: 0x55524c, emissive: 0x15130f }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }),
+    tunnel: tunnelMaterial(), portal: portalMaterial(),
     furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xb9bdc1, side: THREE.DoubleSide }) };
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
   REDWOODS.forEach(([s, w, n, e], i) => REDWOOD.value[i].set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)));
@@ -569,7 +569,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     }
     if (tun.group) { disposeObj(tun.group); tun.group = null; }
     tun.list = [];
-    const B = builder(), grp = new THREE.Group(), pos = [], idx = [], port = [];
+    const B = builder(), grp = new THREE.Group(), pos = [], idx = [], tl = [], port = [], lamps = [];
     for (const { P: P0, r } of chains) {
       const P = resample(P0, 6); if (P.length < 2) continue;
       const D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
@@ -593,7 +593,9 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       for (let i = 0; i < P.length; i++) if (D[i] >= PORT - 0.5 && D[i] <= L - PORT + 0.5) keep.push(i);
       keep.forEach((i, n) => {
         const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l, y = h0 + (h1 - h0) * D[i] / L;
-        for (const [cx, cy] of ring) pos.push(P[i][0] + nx * cx, y + cy, P[i][1] + nz * cx);
+        for (const [cx, cy] of ring) { pos.push(P[i][0] + nx * cx, y + cy, P[i][1] + nz * cx); tl.push(D[i], Math.max(0, cy) / (H + R * 0.75), cx / R); }
+        // lamps high on both walls every 9 m, and the light they put on the road
+        if (n && Math.floor(D[i] / 9) !== Math.floor(D[keep[n - 1]] / 9)) for (const s of [-1, 1]) { const th = s > 0 ? 0.62 : Math.PI - 0.62; lamps.push([P[i][0] + nx * Math.cos(th) * R * 0.97, y + H + Math.sin(th) * R * 0.75 * 0.97, P[i][1] + nz * Math.cos(th) * R * 0.97, Math.atan2(dx, dz), s]); }
         if (n) for (let k = 0; k < N - 1; k++) { const p0 = base + (n - 1) * N + k, p1 = base + n * N + k; idx.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1); }
         if (n === 0 || n === keep.length - 1) port.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1]);
       });
@@ -603,8 +605,13 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     rg.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); rg.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); rg.setAttribute('rd', new THREE.BufferAttribute(d.code, 4));
     rg.setIndex(new THREE.BufferAttribute(d.idx, 1)); rg.computeVertexNormals(); grp.add(new THREE.Mesh(rg, mats.road));
     if (pos.length) {
-      const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); bg.setIndex(idx); bg.computeVertexNormals();
-      const bore = new THREE.Mesh(bg, mats.tunnel); bore.material.side = THREE.DoubleSide; grp.add(bore);
+      const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); bg.setAttribute('tl', new THREE.Float32BufferAttribute(tl, 3)); bg.setIndex(idx); bg.computeVertexNormals();
+      grp.add(new THREE.Mesh(bg, mats.tunnel));
+    }
+    if (lamps.length) {
+      const lm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.22, 0.14, 1.3), new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4.3, 3.2) }), lamps.length), m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion();
+      lamps.forEach(([x, y, z, yaw, s], i) => lm.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), q4.setFromEuler(new THREE.Euler(0, yaw, s * 0.6, 'YXZ')), new THREE.Vector3(1, 1, 1))));
+      lm.computeBoundingSphere(); grp.add(lm);
     }
     // portals: a headwall with an arched opening at the end of the cut, wider and taller than the bore
     for (const [x, y, z, yaw, R, H, dir] of port) {
@@ -613,7 +620,16 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       for (let k = 1; k <= 12; k++) { const th = Math.PI * k / 12; hole.lineTo(Math.cos(th) * R, H + Math.sin(th) * R * 0.75); }
       hole.lineTo(-R, -0.5); sh.holes.push(hole);
       const pg = new THREE.ExtrudeGeometry(sh, { depth: 0.9, bevelEnabled: false }).translate(0, 0, -0.9), pm = new THREE.Mesh(pg, mats.portal);
-      pm.position.set(x, y, z); pm.rotation.y = yaw + (dir > 0 ? Math.PI : 0); pm.castShadow = true; pm.receiveShadow = true; grp.add(pm);
+      // an arch ring standing a little proud round the opening, a coping along the top, pilasters either side
+      const ar = new THREE.Shape(); ar.moveTo(R + 0.75, -0.5); ar.lineTo(R + 0.75, H);
+      for (let k = 1; k <= 16; k++) { const th = Math.PI * k / 16; ar.lineTo(Math.cos(th) * (R + 0.75), H + Math.sin(th) * (R * 0.75 + 0.75)); }
+      ar.lineTo(-R - 0.75, -0.5); ar.lineTo(-R, -0.5); ar.lineTo(-R, H);
+      for (let k = 15; k >= 1; k--) { const th = Math.PI * k / 16; ar.lineTo(Math.cos(th) * R, H + Math.sin(th) * R * 0.75); }
+      ar.lineTo(R, H); ar.lineTo(R, -0.5);
+      const parts = [pg, new THREE.ExtrudeGeometry(ar, { depth: 0.25, bevelEnabled: false }), new THREE.BoxGeometry(2 * R + 4.6, 0.45, 1.3).translate(0, top + 0.2, -0.45),
+        ...[-1, 1].map(s => new THREE.BoxGeometry(1.1, top - 2.5, 1.2).translate(s * (wing - 0.55), (top - 2.5) / 2 - 1, -0.3))];
+      for (const g of parts) { const pm2 = new THREE.Mesh(g, mats.portal); pm2.position.set(x, y, z); pm2.rotation.y = yaw + (dir > 0 ? Math.PI : 0); pm2.castShadow = true; pm2.receiveShadow = true; grp.add(pm2); }
+      pg.dispose();
     }
     tun.group = grp; scene.add(grp);
   }
@@ -632,6 +648,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   /* ---------- riders ---------- */
   const me = makeRider(THREE, { kit: kit ?? 0xf2c230, kit2: 0x1b1f25 }); scene.add(me.group);
   const others = new Map();  // id -> { r, tag, x, z, yaw, seen }
+  const TUN_LIGHT = new THREE.Color(0.6, 0.5, 0.36), hemiBase = [new THREE.Color(), new THREE.Color()]; let hemiKey = null;
   let grade = 0, dark = 0, camOver = null, sea = 0, seaAt = 0, lifeDt = 0, audioDt = 0;
   const cpu = { js: 0, draw: 0, max: 0 };  // milliseconds a frame on the CPU: the world's own work, issuing the draws
   // milliseconds a frame on the GPU (timer queries, when the dev switch __w3.gpu is on): the last 600 frames
@@ -830,7 +847,10 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       const tk = tunnelAt(camPos.x, camPos.z)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
       // the cars' lamps: on with the sun low (under about 8 degrees) and in tunnels
       { const sy = sky.sunDir.y, k = Math.min(1, Math.max(0, (0.14 - sy) / 0.12)); life.setLamps(Math.max(k * k * (3 - 2 * k), dark), scene.fog.color); LAMPS.value = Math.min(1, Math.max(0, (0.07 - sy) / 0.08)); }
-      sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.85 * dark);
+      sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.6 * dark);
+      // the tunnel's own lamps: warm light all round inside it
+      if (hemiKey !== sky.time) { hemiKey = sky.time; hemiBase[0].copy(sky.hemi.color); hemiBase[1].copy(sky.hemi.groundColor); }
+      sky.hemi.color.copy(hemiBase[0]).lerp(TUN_LIGHT, dark * 0.9); sky.hemi.groundColor.copy(hemiBase[1]).lerp(TUN_LIGHT, dark * 0.7);
       if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }
       renderer.info.reset();

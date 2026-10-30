@@ -252,6 +252,42 @@ export function propMaterial() {
   return m;
 }
 
+// A tunnel's lining: lit by its lamps (rows high on both walls, every 9 m): pools of warm light along the bore,
+// brightest under the lamps. attribute tl = [metres along, height share 0 floor .. 1 crown, side -1 .. 1]
+export function tunnelMaterial() {
+  const m = new THREE.MeshLambertMaterial({ color: 0x5f5c57, side: THREE.DoubleSide });
+  m.onBeforeCompile = sh => {
+    sh.uniforms.tNoise = { value: textures().noise };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 tl; varying vec3 vTl; varying vec3 vTw;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTl = tl; vTw = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tNoise; varying vec3 vTl; varying vec3 vTw;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // concrete in pours 3 m long, stained toward the floor
+        float n = texture2D(tNoise, vTw.xz / 3.0 + vTw.y / 7.0).r, ring = step(0.96, fract(vTl.x / 6.0));
+        diffuseColor.rgb *= (0.82 + 0.3 * n) * (1.0 - 0.15 * ring) * mix(0.7, 1.0, smoothstep(0.0, 0.3, vTl.y));`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        float pool = pow(0.5 + 0.5 * cos(6.2832 * vTl.x / 9.0), 2.0), lamp = exp(-pow((vTl.y - 0.72) * 5.0, 2.0));
+        totalEmissiveRadiance += vec3(1.0, 0.86, 0.66) * diffuseColor.rgb * (0.18 + 1.1 * pool * (0.35 + 0.65 * lamp));`);
+  };
+  m.customProgramCacheKey = () => 'jw-tunnel-1';
+  return m;
+}
+// A portal's headwall: concrete in courses with a coping, an arch ring round the opening (lighter), weathered lower down
+export function portalMaterial() {
+  const m = new THREE.MeshLambertMaterial({ color: 0xb2ab9f });
+  m.onBeforeCompile = sh => {
+    sh.uniforms.tNoise = { value: textures().noise };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vPl;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvPl = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tNoise; varying vec3 vPl;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float row = floor(vPl.y / 0.62), joint = max(step(0.95, fract(vPl.y / 0.62)), step(0.97, fract(vPl.x / 1.9 + row * 0.5)));
+        float n = texture2D(tNoise, vPl.xy / 4.0).g, f = texture2D(tNoise, vPl.xy / 0.8).r;
+        diffuseColor.rgb *= (0.84 + 0.22 * n + 0.08 * f) * (1.0 - 0.22 * joint) * mix(0.72, 1.0, smoothstep(-1.0, 3.0, vPl.y));`);
+  };
+  m.customProgramCacheKey = () => 'jw-portal-1';
+  return m;
+}
+
 // Street furniture: vertex coloured; tag 2 (a street lamp) lights up with LAMPS (0 off .. 1 on, dusk and dark)
 export const LAMPS = { value: 0 };
 export function furnitureMaterial() {

@@ -85,7 +85,7 @@ varying vec2 vP; varying float vD; void main() { vP = position.xz; vec4 w = mode
 uniform float lamps; varying vec2 vP; varying float vD; void main() {
 #include <logdepthbuf_fragment>
 float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * a * lamps * 0.5 * (1.0 - smoothstep(200.0, 500.0, vD)), 1.0); }` });
-  const wireMat = new THREE.LineBasicMaterial({ color: 0x2c2d2e });
+  const wireMat = new THREE.LineBasicMaterial({ color: 0x2c2d2e }), tunLampMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4.3, 3.2) });  // a tunnel's lamps
   const FURN = furnitureGeometries(), trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog);
@@ -863,7 +863,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const wm = new THREE.Mesh(wg, mats.walk); wm.receiveShadow = true; grp.add(wm);
     }
     if (lamps.length) {
-      const lm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.22, 0.14, 1.3), new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4.3, 3.2) }), lamps.length), m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion();
+      const lm = new THREE.InstancedMesh(new THREE.BoxGeometry(0.22, 0.14, 1.3), tunLampMat, lamps.length), m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion();
       lamps.forEach(([x, y, z, yaw, s], i) => lm.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), q4.setFromEuler(new THREE.Euler(0, yaw, s * 0.6, 'YXZ')), new THREE.Vector3(1, 1, 1))));
       lm.computeBoundingSphere(); grp.add(lm);
     }
@@ -1086,14 +1086,23 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   { const g = new THREE.Group(), geo = new THREE.BoxGeometry(1, 1, 1); for (const m of [mats.underpass, mats.tunnel, mats.portal, mats.pillar, mats.walk]) g.add(new THREE.Mesh(geo, m));
     renderer.compileAsync?.(g, camera, scene).catch(() => {}).finally(() => geo.dispose()); }
   // and the instanced ones a tile or the scrub brings in later (the street lamps' pools of light, the scrub and the full
-  // trees with their colours, in the light and in the shadow map, signals): drawn far under the ground in the first
-  // frames, so every variant the passes need is built while the world loads
+  // trees with their colours, in the light and in the shadow map, signals): drawn far under the ground, so every variant
+  // the passes need is built while the world loads; kept (a program nothing uses any more is deleted, and built again,
+  // a quarter of a second, when a part of the world needs it next)
   const warm = new THREE.Group(); warm.userData.frames = 0; scene.add(warm);
   { const geo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-    for (const [m, depth] of [[lampPoolMat], [mats.scrub, mats.scrub.userData.depth], [mats.prop, mats.prop.userData.depth], [mats.furn]]) {
-      const im = new THREE.InstancedMesh(geo, m, 1); im.setMatrixAt(0, new THREE.Matrix4().makeTranslation(0, -900, 0)); if (m !== lampPoolMat) im.setColorAt(0, new THREE.Color(1, 1, 1));
-      im.frustumCulled = false; im.castShadow = !!depth; im.receiveShadow = true; if (depth) im.customDepthMaterial = depth; warm.add(im);
+    const under = new THREE.Matrix4().makeTranslation(0, -900, 0);
+    for (const [m, depth, colour = true] of [[lampPoolMat, null, false], [mats.scrub, mats.scrub.userData.depth], [mats.prop, mats.prop.userData.depth], [mats.furn], [mats.furn, null, false], [mats.pillar, null, false], [tunLampMat, null, false]]) {
+      const im = new THREE.InstancedMesh(geo, m, 1); im.setMatrixAt(0, under); if (colour) im.setColorAt(0, new THREE.Color(1, 1, 1));
+      im.frustumCulled = false; im.castShadow = !!depth || m === mats.pillar; im.receiveShadow = true; if (depth) im.customDepthMaterial = depth; warm.add(im);
     }
+    // the tunnels' parts (a tile with a tunnel may first load mid-ride), roads, buildings, rails as they are drawn
+    for (const [m, cast, receive] of [[mats.underpass, false, true], [mats.tunnel, false, false], [mats.portal, true, true], [mats.walk, false, true], [mats.road, false, false], [mats.road, false, true], [mats.bldg, true, true], [mats.bldg, false, false], [mats.rail, true, true]]) {
+      const o = new THREE.Mesh(geo, m); o.applyMatrix4(under); o.frustumCulled = false; o.castShadow = cast; o.receiveShadow = receive; warm.add(o);
+    }
+    // shadow casters of every kind the world adds later (their shadow map programs): batched, instanced with colours
+    { const bm = new THREE.BatchedMesh(1, 64, 64, mats.furn); bm.setMatrixAt(bm.addInstance(bm.addGeometry(geo)), under); bm.frustumCulled = false; bm.castShadow = bm.receiveShadow = true; warm.add(bm);
+      for (const side of [THREE.FrontSide, THREE.DoubleSide]) { const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ side }), 1); im.setMatrixAt(0, under); im.setColorAt(0, new THREE.Color(1, 1, 1)); im.frustumCulled = false; im.castShadow = im.receiveShadow = true; im.userData.ownMat = true; warm.add(im); } }
     warm.userData.geo = geo; }
   function governor(dt, now) {
     if (document.hidden || dt > 0.25) return;
@@ -1194,7 +1203,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // into view or into the shadow box on the ride (each one held a frame up by a quarter of a second): the scene's
       // materials compiled, and one shadow map drawn over 20 km
       if (ready && warm.userData.frames > 3 && !warm.userData.all) {
-        warm.userData.all = true; renderer.compile(scene, camera);
+        warm.userData.all = warm.userData.frames; renderer.compile(scene, camera);
         { const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType }), prev = renderer.getRenderTarget(); renderer.setRenderTarget(rt); renderer.compile(scene, camera); renderer.setRenderTarget(prev); rt.dispose(); }  // as drawn into post's targets
         for (const p of renderer.info.programs) p.getUniforms();  // linked and checked now (a program's first use waits for that)
         const c = sky.sun.shadow.camera, far = c.far; c.far = 40000; sky.update(camera, me.group.position, 0, 20000, true); c.updateProjectionMatrix(); renderer.shadowMap.needsUpdate = true;
@@ -1207,7 +1216,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (gq || gq0) gpuTime.end(gq || gq0);
       const c2 = performance.now(); if (PF && c2 - c0 > 12) { pm.push(c2); PF.push([Math.round(now), ...pm.slice(1).map((t, i) => +(t - pm[i]).toFixed(1))]); if (PF.length > 400) PF.shift(); }
       cpu.js += (c1 - c0 - cpu.js) * 0.05; cpu.draw += (c2 - c1 - cpu.draw) * 0.05; cpu.max = Math.max(cpu.max * 0.995, c1 - c0);
-      if (warm.parent && ++warm.userData.frames > 12 && warm.userData.all) { scene.remove(warm); warm.traverse(o => o.isInstancedMesh && o.dispose()); warm.userData.geo.dispose(); }
+      warm.userData.frames++;
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
       governor(dt, now);
     } catch (e) { fail(e); return; }
@@ -1239,7 +1248,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setKit(kit, accent) { me.setKit?.(kit, accent); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready: ready && !warm.parent, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow }),
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready: ready && warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 10, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point

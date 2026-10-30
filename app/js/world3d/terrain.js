@@ -250,7 +250,7 @@ function trisOverlap(A, B) {
 // no higher than that road triangle's lowest corner less `below` (else a corner further up a cut slope lifts the
 // triangle over the road's edge between them). Lowers only. Returns how many points came down.
 export function pushUnder(g, tris, opt) { return drain(pushUnderSteps(g, tris, opt)); }
-// the same a slice at a time (a generator yielding every 1500 triangles)
+// the same a slice at a time (a generator yielding every 500 triangles)
 export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.08 } = {}) {
   if (g.hs === g.raw) g.hs = g.raw.slice();
   const s = g.segs, n = s + 1, hs = g.hs, lim = new Float32Array(n * n).fill(Infinity);
@@ -259,7 +259,7 @@ export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.
     return [Math.hypot(px - ax - ex * t, pz - az - ez * t), ay + (by - ay) * t];
   };
   for (let k = 0; k + 8 < tris.length; k += 9) {
-    if (k % 13500 === 13491) yield;
+    if (k % 4500 === 4491) yield;
     const ax = tris[k], ay = tris[k + 1], az = tris[k + 2], bx = tris[k + 3], by = tris[k + 4], bz = tris[k + 5], cx = tris[k + 6], cy = tris[k + 7], cz = tris[k + 8];
     const [i0, j0] = gridIJ(g, Math.min(ax, bx, cx) - margin, Math.min(az, bz, cz) - margin), [i1, j1] = gridIJ(g, Math.max(ax, bx, cx) + margin, Math.max(az, bz, cz) + margin);
     const det = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);

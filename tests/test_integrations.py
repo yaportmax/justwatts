@@ -488,20 +488,21 @@ def test_list_order_metadata_and_tooltips(tmp_path):
 
 def test_garmin_question_then_defaults(tmp_path):
     h, g, tpc, icuc = make_hub(tmp_path, garmin_linked=False)
-    # Garmin not connected: every service uploads directly by default, no warnings
-    assert all(r["auto"] for r in h.list() if r["caps"]["upload"])
+    # manual by default: nothing goes out on its own, no warnings
+    assert not any(r["auto"] for r in h.list() if r["caps"]["upload"])
     g.linked = True
     res = h.connect("garmin", {})
     assert res["question"]["text"] == "Does your Garmin account already send rides to:" and res["syncs_to"] is None
     rows = {r["id"]: r for r in h.list()}
-    assert rows["garmin"]["syncs_question"] and rows["trainingpeaks"]["auto"] and not rows["trainingpeaks"]["duplicate_risk"]
+    assert rows["garmin"]["syncs_question"] and not rows["trainingpeaks"]["auto"] and not rows["trainingpeaks"]["duplicate_risk"]
     # the rider says Garmin already sends rides to TrainingPeaks
     h.set_syncs_to(["trainingpeaks", "bogus"])
     rows = {r["id"]: r for r in h.list()}
     assert rows["garmin"]["syncs_to"] == ["trainingpeaks"] and rows["garmin"]["syncs_question"] is None
     assert rows["garmin"]["recommended_reason"] == "Garmin also sends your rides to TrainingPeaks."
     assert rows["trainingpeaks"]["auto"] is False and rows["trainingpeaks"]["synced_by_garmin"]
-    assert rows["intervals"]["auto"] is True and not rows["intervals"]["synced_by_garmin"]  # not synced: stays on
+    assert rows["intervals"]["auto"] is False and not rows["intervals"]["synced_by_garmin"]  # manual until turned on
+    h.set_auto("garmin", True); h.set_auto("intervals", True)
     assert h.after_ride("r1") == ["garmin", "intervals"]
     # the rider turns TrainingPeaks on anyway: the duplicate warning shows
     h.set_auto("trainingpeaks", True)

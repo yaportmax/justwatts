@@ -102,11 +102,12 @@ const S = {};
 S.providers = async () => {
   await reset();
   let r = await call('GET', '/api/auth/providers');
-  assert.deepEqual(r.body, { accounts: true, email: true, emailVerification: false, passwordReset: false, google: false, strava: false, stravaCapped: true });
+  assert.deepEqual(r.body, { accounts: true, email: true, emailVerification: false, passwordReset: false, google: false, strava: false, stravaCapped: false });
   await reset({ GOOGLE_CLIENT_ID: 'g', GOOGLE_CLIENT_SECRET: 'gs', STRAVA_CLIENT_ID: '1', STRAVA_CLIENT_SECRET: 'ss', RESEND_API_KEY: 'rk', EMAIL_FROM: 'Just Watts <a@b.c>' });
   r = await call('GET', '/api/auth/providers');
-  assert.deepEqual(r.body, { accounts: true, email: true, emailVerification: true, passwordReset: true, google: true, strava: true, stravaCapped: true });
-  process.env.STRAVA_CAPPED = '0'; assert.equal((await call('GET', '/api/auth/providers')).body.stravaCapped, false);
+  assert.deepEqual(r.body, { accounts: true, email: true, emailVerification: true, passwordReset: true, google: true, strava: true, stravaCapped: false });
+  process.env.STRAVA_CAPPED = '1'; assert.equal((await call('GET', '/api/auth/providers')).body.stravaCapped, true);
+  delete process.env.STRAVA_CAPPED;
   await reset({ STRAVA_CLIENT_ID: '1' });  // client id alone (the token relay's env) is not enough for sign-in
   assert.equal((await call('GET', '/api/auth/providers')).body.strava, false);
   // Google / Strava start without env: a clean redirect back, never a crash
@@ -813,7 +814,7 @@ S.integrations = async () => {
     r = await b.get('/api/integrations?op=list', H);
     assert.equal(r.body.integrations.find(x => x.id === 'intervals').status.connected, false);
     // a ride's FIT: queued and uploaded, kept for retries and the manual link
-    r = await call('POST', `/api/integrations?op=upload&ride=r-1&name=Test&start=${NOW}&duration=3600`, { ...H, jar: a.jar, raw: FIT, headers: { origin: ORIGIN, 'x-hw': '1' } });
+    r = await call('POST', `/api/integrations?op=upload&ride=r-1&name=Test&start=${NOW}&duration=3600&services=intervals`, { ...H, jar: a.jar, raw: FIT, headers: { origin: ORIGIN, 'x-hw': '1' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const up = r.body.targets.find(x => x.id === 'intervals').upload;
     assert.deepEqual([up.state, up.activity_id, up.url], ['done', 'i900', 'https://intervals.icu/activities/i900']);

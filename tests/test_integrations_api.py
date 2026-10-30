@@ -53,6 +53,7 @@ def connect_icu(srv):
     srv.server.integrations.conns["intervals"].http = fake
     code, res = srv.req("POST", "/api/integrations/intervals/connect", {"athlete_id": "i123", "api_key": KEY}, headers=srv.page)
     assert code == 200 and res["connected"] and res["account"] == "Test Rider"
+    assert srv.req("POST", "/api/integrations/intervals/auto", {"on": True}, headers=srv.page)[0] == 200  # manual by default
     return fake
 
 

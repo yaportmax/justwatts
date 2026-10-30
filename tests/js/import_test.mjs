@@ -257,7 +257,7 @@ async function garminStore(c) {
   eq([ride.name, ride.description, ride.imported.trainer, ride.imported.device, ride.imported.gear], ['Zwift - Watopia', 'Easy spin', true, 'Zwift', 'Tarmac'], 'activity fields kept');
   const sq = new URL(f.calls.find(x => x.url.includes('/streams')).url).searchParams.get('keys').split(',');
   ok(['time', 'watts', 'heartrate', 'cadence', 'velocity_smooth', 'distance', 'latlng', 'altitude', 'grade_smooth', 'temp'].every(k => sq.includes(k)), 'every stream asked for');
-  eq((await s.status(us)).capped, true, 'capped unless STRAVA_CAPPED=0');
+  eq((await s.status(us)).capped, false, 'not capped unless STRAVA_CAPPED=1');
   // the 10-athlete cap
   const capped = strava({ fetch: fakeFetch([['POST', '/oauth/token', json(403, { message: 'Limit of connected athletes exceeded', errors: [] })]]), now, env, key: KEY32 });
   const st2 = new URL(capped.authorizeUrl('u1')).searchParams.get('state');
@@ -473,7 +473,7 @@ function mem() { const m = new Map(); return { get: (k, d) => (m.has(k) ? struct
 
 /* ---------- Strava capped: the row says so, Connect only on request ---------- */
 {
-  const H = makeHandler({ fetch: fakeFetch([]), store: memoryStore(), key: KEY32, userId: async () => 'u1', env: { STRAVA_CLIENT_ID: '1', STRAVA_CLIENT_SECRET: 's', PUBLIC_ORIGIN: 'https://justwatts.test' } });
+  const H = makeHandler({ fetch: fakeFetch([]), store: memoryStore(), key: KEY32, userId: async () => 'u1', env: { STRAVA_CLIENT_ID: '1', STRAVA_CLIENT_SECRET: 's', PUBLIC_ORIGIN: 'https://justwatts.test', STRAVA_CAPPED: '1' } });
   const row = (await req(H, 'GET', '/api/integrations')).body.integrations.find(r => r.id === 'strava');
   eq([row.status.capped, row.status.connected, !!row.connect, row.manual.url], [true, false, true, 'https://www.strava.com/upload/select'], 'capped row: manual route at hand');
   const { CAP_NOTE } = await import(url('connect.js'));

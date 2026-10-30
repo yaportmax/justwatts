@@ -33,6 +33,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let onSaved = () => {};  // web build with an account: a synced key changed (custom workouts, courses, settings)
 const SYNCED = new Set(['hw.custom', 'hw.courses', 'hw.settingsAt']);
+const simRides = new Set();  // rides on the simulated trainer: never sent to Garmin, Strava and the rest
 let account = null, community = null, social = null, libSrc = 'all';  // web build: accounts, the community library, social; the library Source filter
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -368,6 +369,7 @@ function onLive(msg) {
   if (S.notice && S.notice_id && S.notice_id !== store.get('hw.noticeId', 0)) { toast(S.notice); store.set('hw.noticeId', S.notice_id); }
   beeps();
   testGuide();
+  if (r?.id && S.devices?.trainer === 'sim') simRides.add(r.id);  // ridden on the simulated trainer, even for a moment
   if (prev && S.last_finished && S.last_finished.id !== prev.last_finished?.id) { finishedRide(S.last_finished); social?.finished(S.last_finished); }
   if (prev?.ride && !r && account) { account.sync.applyPending(); account.sync.kick(); }  // ride over: pending settings apply, the ride syncs
   world.update(r?.course, r?.id);
@@ -867,7 +869,7 @@ async function finishedRide(f) {
   beep(660, 0.4); track('ride_finish', { minutes: Math.round((f.samples || 0) / 60) });
   justFinished = f.id;
   show('history'); await renderHistory();
-  await conn.afterRide(f.id).catch(() => {});  // web: send the FIT to connected services; local: the server already queued them
+  if (!simRides.has(f.id)) await conn.afterRide(f.id).catch(() => {});  // web: send the FIT to connected services; local: the server already queued them
   openSummary(f.id);
 }
 let openId = null, openRide = null;

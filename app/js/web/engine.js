@@ -2,7 +2,7 @@
 // Same state shape, controls, mid-ride edits, overtime and persistence semantics;
 // persistence goes to IndexedDB (snapshot every 30 s + a sample journal every 5 s, see backend.js).
 import { parseWorkout, toText, stepAt, stepWatts, fmtT, lineRideStart, lineRideEnd, lineStepStart, lineStepEnd } from '../core.js';
-import { G_MIN, G_MAX, DRAFT_MAX, checkRideCourse, eleAt, gradeAt, massOf, profileOf, ridden, roadExtend, speedStep } from '../course.js';
+import { G_MIN, G_MAX, DRAFT_MAX, checkRideCourse, eleAt, gradeAt, jumpIn, massOf, profileOf, ridden, roadExtend, speedStep } from '../course.js';
 
 const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 const jsr = Math.round;
@@ -19,7 +19,7 @@ export class Ride {
   setCourse(c) { this.course = c; this.prof = c ? profileOf(c) : null; }
   resumeCourse() {  // position from the last recorded sample (the journal is newer than the snapshot's cs)
     const s = this.samples.filter(x => x.length > 8); if (!s.length) return;
-    let up = Math.max(0, s[0][7] - this.course.ele[0]); for (let i = 1; i < s.length; i++) up += Math.max(0, s[i][7] - s[i - 1][7]);
+    let up = Math.max(0, s[0][7] - this.course.ele[0]); for (let i = 1; i < s.length; i++) if (!jumpIn(this.course, s[i - 1][8], s[i][8])) up += Math.max(0, s[i][7] - s[i - 1][7]);
     Object.assign(this.cs, { d: s.at(-1)[8], v: s.at(-1)[5] / 3.6, up, end: !this.course.open && !!(this.cs.end || s.at(-1)[8] >= this.course.dist) });
   }
   get id() { return `r-${this.startTs || 0}`; }
@@ -308,11 +308,11 @@ export class Engine {
   simStep() {
     const h = this.hub, d = h.r, want = h.wantCmd || {};
     this.simT++;
-    const tgt = want.k === 'erg' ? want.w : want.k === 'res' ? 60 + (want.r || 0) * 12 : 150 + (want.g || 0) * 25;
-    d.power = Math.max(0, jsr(d.power + (tgt - d.power) * 0.5 + (Math.random() - 0.5) * 18));
-    d.cadence = jsr(88 + Math.sin(this.simT / 40) * 4 + (Math.random() - 0.5) * 3);
+    const tgt = h.simW != null ? h.simW : want.k === 'erg' ? want.w : want.k === 'res' ? 60 + (want.r || 0) * 12 : 150 + (want.g || 0) * 25;
+    d.power = tgt ? Math.max(0, jsr(d.power + (tgt - d.power) * 0.5 + (Math.random() - 0.5) * 18)) : 0;  // set to 0 W: coast
+    d.cadence = tgt ? jsr(88 + Math.sin(this.simT / 40) * 4 + (Math.random() - 0.5) * 3) : 0;
     d.speed = +(Math.cbrt(d.power / 0.0055) * 0.1 * 3.6 / 1.6).toFixed(1);
-    const ftp = this.ride?.ftp || this.settings().ftp || 200, hrT = 95 + d.power / ftp * 70;
+    const ftp = this.ride?.ftp || this.settings().ftp || 200, hrT = Math.min(188, 95 + d.power / ftp * 70);  // a heart that tops out
     d.hr = jsr((d.hr || 90) + (hrT - (d.hr || 90)) * 0.04); d.hrLast = d.last = this.clock();
   }
   hrNow() { const d = this.hub.r; return d.hr && this.clock() - d.hrLast < 5 ? d.hr : 0; }
@@ -354,9 +354,9 @@ export class Engine {
     const r = this.ride, c = r.course, cs = r.cs; if (!c) return;
     const draft = c.open && this.draft && this.clock() < this.draft.until ? this.draft.k : 0;
     cs.v = speedStep(cs.v, this.hub.r.power, gradeAt(c, cs.d), massOf(+this.settings().weight), dt, draft);
-    const e0 = eleAt(c, cs.d); cs.d += cs.v * dt;
+    const e0 = eleAt(c, cs.d), d0 = cs.d; cs.d += cs.v * dt;
     if (c.open) cs.d = Math.min(cs.d, c.dist);  // open world: wait at the end of the known road until the page adds more
-    cs.up += Math.max(0, eleAt(c, cs.d) - e0);
+    if (!jumpIn(c, d0, cs.d)) cs.up += Math.max(0, eleAt(c, cs.d) - e0);  // a teleport climbs nothing
     if (cs.d >= c.dist && !cs.end && !c.open) {
       cs.end = true; this.log(`COURSE DONE at T+${fmtT(r.el)}, riding on until End`);
       this.notice = 'Course done. Keep riding or press End ride.';

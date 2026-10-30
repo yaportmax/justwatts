@@ -102,7 +102,7 @@ export class WebBackend {
       const kind = body.kind || 'trainer';
       if (body.action === 'choose' || body.action === 'scan') await this.hub.choose(kind);
       else if (body.action === 'disconnect') this.hub.disconnect(kind);
-      else if (body.action === 'sim') this.hub.setSim(body.on ?? this.hub.mode !== 'sim');
+      else if (body.action === 'sim') this.hub.setSim(body.on ?? ('power' in body || this.hub.mode !== 'sim'), body.power);
       else throw new Error('action must be choose, disconnect or sim');
       E.applyTarget(); this.bump();
       return resp(200, { ...this.hub.status(), devices: [] });

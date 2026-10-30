@@ -417,7 +417,7 @@ class Handler(SimpleHTTPRequestHandler):
             elif action == "disconnect":
                 hub.disconnect(kind)
             elif action == "sim":
-                hub.set_sim(bool(body.get("on", hub.mode != "sim")))
+                hub.set_sim(bool(body.get("on", "power" in body or hub.mode != "sim")), body["power"] if "power" in body else ...)
             else:
                 return self.send_json(400, {"error": "action must be scan, connect, disconnect or sim"})
         except (RuntimeError, KeyError, TimeoutError) as e:

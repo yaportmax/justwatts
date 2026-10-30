@@ -104,7 +104,7 @@ def test_web_mode_ride_with_reload(dist, node):
     assert w["after"] == {"button": "Uploaded", "line": True}                # connect with the ride: it went up
     assert w["posts"] == [{"op": "connect", "services": None, "fit": False, "key": True},
                           {"op": "upload", "services": "intervals", "fit": True, "key": False}]
-    assert w["auto"] == [{"op": "upload", "services": None, "fit": True}]     # later rides go up by themselves
+    assert w["auto"] == []                                                   # manual by default: later rides wait for Upload
     assert w["today"] and not w["leak"]
 
 
@@ -182,7 +182,7 @@ def test_web_account_sync_and_community(dist, node):
     assert out["claim"]["step"] == "sent" and out["claim"]["mail"] == ["eddy@example.com"] and 'data-a="connect"' in out["claim"]["html"]
     assert out["claimed"] == {"email": "eddy@example.com", "verified": True, "toast": "Email confirmed"}
     oe = out["oauthError"]
-    assert oe["step"] == "signin" and "Strava sign-in is coming back soon. Use Google or email." in oe["html"] and oe["html"].count("user limit") == 2 and oe["stripped"] == "/"
+    assert oe["step"] == "signin" and "Strava sign-in is coming back soon. Use Google or email." in oe["html"] and oe["html"].count("user limit") == 1 and oe["stripped"] == "/"
 
 
 def test_web_social(dist, node):

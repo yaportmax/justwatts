@@ -28,14 +28,14 @@ export class WebHub {
     this.clock = clock; this.store = store; this.log = log;
     this.r = { power: 0, cadence: 0, speed: 0, hr: 0, last: 0, hrLast: 0, hrSrc: null };
     this.mode = 'none'; this.trainer = null; this.hrDev = null; this.hrConnected = false; this.hrState = null; this.error = null;
-    this.cp = null; this.wantCmd = null; this.sent = null; this.busy = false; this.remembered = { trainer: null, hr: null };
+    this.cp = null; this.simW = null; this.wantCmd = null; this.sent = null; this.busy = false; this.remembered = { trainer: null, hr: null };
   }
   get supported() { return !!globalThis.navigator?.bluetooth; }
   status() {
     const now = this.clock(), hrOn = !!this.r.hrSrc && now - this.r.hrLast < 5;
     return { trainer: this.mode, trainer_name: this.mode === 'sim' ? 'Simulated' : this.trainer?.name || this.remembered.trainer || null,
       hr: hrOn ? this.r.hrSrc : null, hr_name: this.hrDev?.name || null, hr_connected: this.hrConnected, hr_waiting: !!this.r.hrSrc && !hrOn,
-      hr_state: this.hrState, ble: this.supported, error: this.error, web: true,
+      hr_state: this.hrState, sim_w: this.simW, ble: this.supported, error: this.error, web: true,
       reconnect: { trainer: !!this.remembered.trainer && this.mode === 'none', hr: !!this.remembered.hr && !this.hrDev } };
   }
   async init() {  // remembered names + auto reconnect where the browser allows it
@@ -115,8 +115,9 @@ export class WebHub {
     if (kind === 'trainer') { const d = this.trainer; this.trainer = null; this.cp = null; if (this.mode !== 'sim') this.mode = 'none'; try { d?.gatt.disconnect(); } catch {} Object.assign(this.r, { power: 0, cadence: 0, speed: 0 }); this.remember('trainer', null); }
     else { const d = this.hrDev; this.hrDev = null; this.hrConnected = false; this.hrState = null; try { d?.gatt.disconnect(); } catch {} if (!['hub', 'sim'].includes(this.r.hrSrc)) this.r.hrSrc = null; this.remember('hr', null); }
   }
-  setSim(on) {
+  setSim(on, w) {
     const r = this.r;
+    if (w !== undefined) this.simW = w == null ? null : Math.max(0, Math.min(1500, Math.round(+w) || 0));  // null: the rider follows the target
     if (on) { if (this.mode === 'ble' || this.mode === 'wait') this.disconnect('trainer'); this.mode = 'sim'; r.hrSrc = 'sim'; }
     else if (this.mode === 'sim') { this.mode = 'none'; Object.assign(r, { power: 0, cadence: 0, speed: 0 }); if (r.hrSrc === 'sim') { r.hrSrc = null; r.hr = 0; } }
   }

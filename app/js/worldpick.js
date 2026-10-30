@@ -8,12 +8,13 @@ import { PRESETS, DEM, BOUNDS, inWorld } from './world.js';
 // go(start, workoutId) -> Promise (throws with a message to show)
 export function createPicker({ $, store, world, wOptions, go }) {
   const box = $('#owModal'), osm = MAP_STYLES.osm;
-  let map = null, mk = null, at = null, seq = 0, busy = false;
+  let map = null, mk = null, at = null, seq = 0, busy = false, jump = null;  // jump(start) -> Promise<bool>: mid-ride, go there (no workout)
   $('#owPre').innerHTML = PRESETS.map(p => `<button class="chip" data-p="${p.id}">${esc(p.name)}</button>`).join('');
   const hint = (t, err = false) => { $('#owAt').textContent = t; $('#owAt').classList.toggle('err', err); };
   function ui() {
     for (const b of box.querySelectorAll('#owPre button')) b.classList.toggle('on', at?.id === b.dataset.p);
-    $('#owGo').disabled = busy || !at; $('#owGo').textContent = busy ? 'Loading roads' : 'Ride';
+    $('#owGo').disabled = busy || !at; $('#owGo').textContent = busy ? 'Loading roads' : jump ? 'Go' : 'Ride';
+    $('#owWk').style.display = jump ? 'none' : ''; $('#owTitle').textContent = jump ? 'Go to' : 'Open world';
   }
   async function pick(p, fly = false) {
     at = p; store.set('hw.owStart', p); ui();
@@ -43,9 +44,9 @@ export function createPicker({ $, store, world, wOptions, go }) {
     map.fitBounds([[BOUNDS[0][1], BOUNDS[0][0]], [BOUNDS[0][3], BOUNDS[0][2]]], { padding: 16, duration: 0 });  // the whole world, every pin
     map.on('click', e => inWorld(e.lngLat.lat, e.lngLat.lng) ? pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }) : hint('Outside the Headlands world', true));
   }
-  // wid: the workout to ride there ('' free ride)
-  function open(wid = '') {
-    box.classList.add('on'); busy = false;
+  // wid: the workout to ride there ('' free ride); jumpTo(start): mid-ride, go there instead (app.js: world.teleport)
+  function open(wid = '', jumpTo = null) {
+    box.classList.add('on'); busy = false; jump = jumpTo;
     $('#owWk').innerHTML = wOptions(wid, 'Free ride'); $('#owWk').value = wid;
     $('#owAttr').textContent = osm.attr + ' · Terrain © Mapzen, AWS';
     const s = store.get('hw.owStart', null), last = s && inWorld(s.lat, s.lon) ? s : null;  // a start from before the world shrank: the first
@@ -60,7 +61,10 @@ export function createPicker({ $, store, world, wOptions, go }) {
   $('#owGo').onclick = async () => {
     if (!at || busy) return;
     busy = true; ui(); hint('Loading roads');
-    try { if (await go(at, $('#owWk').value)) close(); else hint('A ride is in progress. Ride again to end it and start here.', true); }
+    try {
+      if (jump) { if (await jump(at)) close(); else hint('Could not go there', true); }
+      else if (await go(at, $('#owWk').value)) close(); else hint('A ride is in progress. Ride again to end it and start here.', true);
+    }
     catch (e) { hint(e.message || 'Could not load the roads', true); }
     finally { busy = false; ui(); }
   };

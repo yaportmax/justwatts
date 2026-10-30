@@ -83,8 +83,9 @@ function strava({ fetch, now = () => Date.now() / 1000, sleep = realSleep, env =
     id: 'strava', name: 'Strava', imports: true, connectKind: 'oauth', connectUrl: '/api/integrations?op=strava_start', configured,
     fields: [],
     secrets: s => (s ? [s.access_token, s.refresh_token].filter(Boolean) : []),
-    // capped: the app's 10-athlete limit (STRAVA_CAPPED, as the sign-in's providers flag); connected riders keep working
-    async status(us) { const s = await us.secret('strava'); return { connected: !!(s && s.refresh_token), configured: configured(), capped: env.STRAVA_CAPPED !== '0', account: (s && s.name) || null }; },
+    // capped: only once the app's athlete limit is hit (STRAVA_CAPPED=1); until then anyone can connect, and a refused
+    // connect answers strava_capped on its own. Connected riders keep working either way
+    async status(us) { const s = await us.secret('strava'); return { connected: !!(s && s.refresh_token), configured: configured(), capped: env.STRAVA_CAPPED === '1', account: (s && s.name) || null }; },
     async connect() { throw new IntegrationError(BLOCKED, 'connect Strava from Settings'); },
     async disconnect(us) {
       const s = await us.secret('strava');

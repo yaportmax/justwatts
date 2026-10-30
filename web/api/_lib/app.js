@@ -19,7 +19,7 @@ const providers = () => {
     accounts, email: accounts, emailVerification: accounts && mail, passwordReset: accounts && mail,
     google: accounts && !!(e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET),
     strava: accounts && !!(e.STRAVA_CLIENT_ID && e.STRAVA_CLIENT_SECRET),
-    stravaCapped: e.STRAVA_CAPPED !== '0',  // Strava apps start with a 10-athlete cap; set STRAVA_CAPPED=0 once lifted
+    stravaCapped: e.STRAVA_CAPPED === '1',  // set STRAVA_CAPPED=1 once Strava refuses new athletes (the connect itself says so first)
   };
 };
 

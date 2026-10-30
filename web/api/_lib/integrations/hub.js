@@ -45,8 +45,7 @@ function hub({ fetch, store, now = () => Date.now() / 1000, sleep, log = () => {
   async function auto(svc, s, garminOn) {
     if (conns[svc].uploads === false) return false;
     const v = s[svc] && s[svc].auto;
-    if (v !== undefined && v !== null) return !!v;
-    return !(garminOn && (syncsTo(s) || []).includes(svc));
+    return !!v;  // manual by default: a ride goes out on the Upload button, or after every ride once the rider turns auto on
   }
   const fallback = (svc, rid) => ({ ride_id: rid, fit_url: fitUrl(rid), label: FIT_LABEL, manual: MANUAL[svc] || null });
   function pub(j, rid) {

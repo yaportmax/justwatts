@@ -355,7 +355,7 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
       } else {
         const v = S.view || { done: 0, total: 0 }, fin = S.phase === 'done', pct = fin ? 100 : v.total ? Math.round(v.done / v.total * 100) : 0;
         h = `<div class="improg"><div class="bar"><i style="width:${pct}%"></i></div><div class="hint">${esc(fin ? summary(v) : progressText(v))}</div></div>`;
-        go.textContent = fin ? 'Done' : 'Stop'; go.disabled = false; cancel.textContent = 'Close';
+        go.textContent = fin ? 'Done' : 'Stop'; go.disabled = false; cancel.textContent = fin ? 'Close' : 'Run in background';
       }
       $('#connBody').innerHTML = h;
     }
@@ -372,9 +372,19 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
       if (!v.running && v.paused === 'rate') { S.phase = 'resume'; S.err = ''; scheduleResume(); }
       else if (!v.running && v.paused) { S.phase = 'resume'; S.err = v.paused === 'auth' ? `${short(S.svc)} signed out. Reconnect, then continue.` : `${short(S.svc)} is busy. Continue later.`; }
       else if (!v.running && v.finished) { S.phase = 'done'; markImported(S.svc); }
-      render();
+      render(); pill(v);
       if ((v.imported || 0) !== lastImported) { lastImported = v.imported || 0; onImported(); }
       if (!v.running || v.done % 5 === 0) renderSettings();
+    }
+    // the import runs on with the dialog closed: a small pill shows how far it is and reopens it
+    function pill(v) {
+      const d = globalThis.document; if (!d?.body) return;
+      let el = d.getElementById('impPill');
+      const on = !!v?.running && !$('#connModal').classList.contains('on');
+      if (!on) { if (el) el.hidden = true; if (v && !v.running && v.finished && v.imported && el && !el.dataset.told) { el.dataset.told = '1'; toast(`${short(v.svc)}: ${summary(v)}`); } return; }
+      if (!el) { el = d.createElement('button'); el.id = 'impPill'; el.className = 'imppill'; el.onclick = () => open(S.svc); d.body.appendChild(el); }
+      el.hidden = false; delete el.dataset.told;
+      el.textContent = v.total ? `${short(v.svc)} import ${v.done} of ${v.total}` : `${short(v.svc)} import: finding rides`;
     }
     async function go() {
       if (S.phase === 'done') return closeForm();
@@ -410,7 +420,8 @@ export function createConnect({ $, F, WEB, toast, fitOf, downloadFit, onPlanned 
       offer() {
         const p = imp.pending(); if (!p || imp.running || !row(p.svc)?.status?.connected) return;
         if (p.paused === 'rate') { scheduleResume(); return; }  // resumes by itself, the row shows when
-        if (!$('#connModal').classList.contains('on')) open(p.svc);
+        if (p.paused === 'auth') { if (!$('#connModal').classList.contains('on')) open(p.svc); return; }
+        Object.assign(S, { svc: p.svc, phase: 'running', err: '', view: p }); imp.run(progress).then(scheduleResume);  // unfinished: carries on quietly
       } };
   })();
 

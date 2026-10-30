@@ -86,9 +86,7 @@ class Integrations:
         if svc in self.auto_hooks:
             return bool(self.auto_hooks[svc][0]())
         v = self._state().get(svc, {}).get("auto")
-        if v is not None:
-            return bool(v)
-        return not (svc in (self.syncs_to() or []) and self.connected("garmin"))
+        return bool(v)  # manual by default: the Upload button, or every ride once the rider turns auto on
 
     # ---------- what Garmin Connect forwards rides to ----------
     def syncs_to(self) -> list[str] | None:

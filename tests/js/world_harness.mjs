@@ -97,6 +97,41 @@ out.ll0 = eng.ride.course.ll.slice(0, 5);
 out.ndOk = eng.ride.course.nd.every((x, i, a) => !i || x[0] >= a[i - 1][0]);
 out.spacing = Math.max(...eng.ride.course.ll.slice(1).map((p, i) => dist(eng.ride.course.ll[i], p)));
 
+// U-turn: the rider turns round a few metres on and rides back the way they came; the ride goes on (same distance)
+{
+  const c0 = eng.ride.course, d0 = rc().odo_m, pos0 = track(c0), keep = c0.ll.slice(0, Math.floor(d0 / 10) + 2);
+  const hd = (a, b) => Math.atan2((b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180), b[0] - a[0]) * 180 / Math.PI;
+  const before = hd(pos0(d0 - 30), pos0(d0));
+  const ok = world.key('ArrowDown'); await flush(); await tick();
+  const c1 = eng.ride.course, at = c1.ll.findIndex((p, i) => i > 0 && i < c0.ll.length && (p[0] !== c0.ll[i][0] || p[1] !== c0.ll[i][1])), P = at * 10 - 10;
+  const pos1 = track(c1), after = hd(pos1(P + 10), pos1(P + 40)), turned = Math.abs(((after - before) % 360 + 540) % 360 - 180);
+  for (let s = 0; s < 40; s++) await tick();
+  const d1 = rc().odo_m;
+  out.uturn = { ok, at, pivot: P - d0, turned, d0, d1, back: dist(pos1(P + 120), pos0(P - 120)), samePrefix: JSON.stringify(c1.ll.slice(0, keep.length)) === JSON.stringify(keep),
+    jp: c1.jp, spacing: Math.max(...c1.ll.slice(1).map((p, i) => dist(c1.ll[i], p))), ahead: rc().dist_m - d1, road: world.view().road };
+  // a reload after it: the page rebuilds the turned plan from the engine and the road keeps coming
+  world = mkWorld(); await tick(3); for (let s = 0; s < 60; s++) await tick();
+  const c2 = eng.ride.course;
+  out.uturnReload = { ahead: rc().dist_m - rc().odo_m, n: c2.ll.length, ndOk: c2.nd.every((x, i, a) => !i || x[0] >= a[i - 1][0]), spacing: Math.max(...c2.ll.slice(1).map((p, i) => dist(c2.ll[i], p))) };
+}
+// teleport: to Bunker Road, about 1.5 km away; the same ride goes on there, the screen shows the road from there
+{
+  const id = eng.ride.id, d0 = rc().odo_m, up0 = rc().climbed_m, s0 = eng.ride.samples.length, to = [37.8369708, -122.5011634];
+  const ok = await world.teleport({ lat: to[0], lon: to[1] }); await flush();
+  const c = eng.ride.course, j = c.jp?.[0], v0 = world.view();
+  out.tele = { ok, jp: c.jp, landed: j != null && dist(c.ll[j], to), gap: j != null && dist(c.ll[j - 1], c.ll[j]), lead: j * 10 - d0, gradeJump: j != null && c.ele && (await import('../../app/js/course.js')).gradeAt(c, j * 10 - 5),
+    viewBefore: { n: v0.n, o: v0.o, lastIsOld: JSON.stringify(v0.ll.at(-1)) === JSON.stringify(c.ll[j - 1]) } };
+  for (let s = 0; s < 30; s++) await tick();
+  const v = world.view();
+  out.tele.after = { same: eng.ride.id === id, d: rc().odo_m - d0, samples: eng.ride.samples.length - s0, climbed: rc().climbed_m - up0, o: v.o, vd: v.d, first: JSON.stringify(v.ll[0]) === JSON.stringify(c.ll[j]), near: dist(track(eng.ride.course)(rc().odo_m), to),
+    road: v.road, ahead: rc().dist_m - rc().odo_m };
+  // and a reload after the teleport: the jump stays, the road on from it keeps coming
+  world = mkWorld(); await tick(3); for (let s = 0; s < 60; s++) await tick();
+  const c2 = eng.ride.course, v2 = world.view();
+  out.teleReload = { jp: c2.jp, ahead: rc().dist_m - rc().odo_m, o: v2.o, ndOk: c2.nd.every((x, i, a) => !i || x[0] >= a[i - 1][0]),
+    spacing: Math.max(...c2.ll.slice(1).map((p, i) => i + 1 === c2.jp[0] ? 0 : dist(c2.ll[i], p))) };
+}
+
 // a start on a long bridge: its far end is not loaded yet, so it goes out flat and is sent again, as a straight line
 // from the rider's point to the far end, once the road beyond it is known. The terrain under it is a 40 m deep valley.
 {

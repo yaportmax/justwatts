@@ -186,3 +186,24 @@ def test_ble_off_never_imports_bleak(tmp_path):
         h.scan()
     h.set_sim(True)
     assert h.mode == "sim" and h.status()["ble"] is False
+
+
+def test_sim_power_is_whatever_is_set(tmp_path):
+    from justwatts.config import Config
+    from justwatts.server import make_server
+    srv = make_server(Config(port=0, data=str(tmp_path / "data")), quiet=True, ticker=False, devices=False)
+    hub, eng = srv.hub, srv.engine
+    hub.set_sim(True, 320)
+    assert hub.status()["sim_w"] == 320
+    for _ in range(12):
+        eng.tick(1.0)
+    assert abs(hub.r.power - 320) < 30 and hub.r.cadence > 0
+    hub.set_sim(True, 0)  # coast
+    for _ in range(3):
+        eng.tick(1.0)
+    assert hub.r.power == 0 and hub.r.cadence == 0
+    hub.set_sim(True, 99999)
+    assert hub.sim_w == 1500
+    hub.set_sim(True, None)  # back to following the target
+    assert hub.status()["sim_w"] is None
+    srv.server_close()

@@ -266,3 +266,56 @@ def test_roads_over_tunnels_are_decks(out):
     assert u["bakerBarry"]["cover"] > 50                                          # the Baker-Barry tunnel under its hill
     for name in u:
         assert u[name]["portal"] < 0.4                                            # the ground at each portal carved to the way in
+
+
+def test_rail_pieces(out):
+    b = out["railBasics"]
+    assert b["n"] == 12 and b["idx"] == [0, 8, 11] and b["step"] <= 5                  # split every 5 m or less, its own points kept
+    assert b["pinned"] == 10 and b["ends"] == [10, 10.3]                                 # a junction and the ends keep their height
+    assert b["pack"] == [10, 10.5, 9.99]                                                 # centimetres
+    assert b["at"] == [0.5, 2, 5, -2]                                                    # height, signed offset (+ right), metres along
+    assert b["lanes"]["bunker"] == [4.5, 4.5]                                            # Bunker Road: in the bike lane either way
+    assert b["lanes"]["plain"] == 3 and b["lanes"]["path"] == 0                          # no bike lane: a metre in from the edge; a path: its middle
+    assert b["lanes"]["conzUp"] == 3.45 and b["lanes"]["conzDown"] == 0.55              # lower Conzelman: up in the bike lane against the
+                                                                                         # oneway, down a metre left of the parking lane
+
+
+def test_rails_walked_at_light_speed(out):
+    r = out["rails"]
+    assert r["n"] > 300 and r["km"] > 50 and r["file"] < 60000                         # every road the rides reach, one small file
+    assert r["grade"] < 0.45                                                             # no stretch steeper than 45 % over 10 m (South
+                                                                                         # Sausalito's streets reach 40 %)
+    assert r["bend"] < 0.7                                                               # no step: the grade changes by under 14 % in 5 m
+    assert r["cut"] < 3.0, r["cutAt"]                                                    # never far under the lidar's ground (but in a
+                                                                                         # tunnel, over a deck, down to a portal)
+    assert r["tilePts"] > 500 and r["tileGap"] < 0.02                                    # the tiles' pieces are the area's rails
+    u = out["railUnder"]
+    assert u["eastUnderAlexander"] > 4.5                                                 # East Road's rail well under Alexander's
+    assert u["alexanderUnder101"] > 4.5 and u["bunkerUnder101"] > 4.5                    # under US-101's fill
+    assert u["bakerBarry"] > 50                                                          # the Baker-Barry bore under its hill
+
+
+def test_every_start_rides_its_rails(out):
+    for name, c in out["courses"].items():
+        assert c is not None, name
+        assert c["none"] == 0, name                                                     # on a rail (or the deck) every step
+        assert c["jump"] < 0.2, (name, c)                                                # no step over 0.2 m at 20 m/s and 60 frames
+        assert c["bounce"] < 0.8, (name, c)                                              # no bounce: the height's bend over 5 m small
+        assert c["laneBad"] == 0, (name, c)                                              # in the bike lane, else near the right edge
+
+
+def test_both_ways_on_one_road(out):
+    b = out["bothWays"]
+    assert b["n"] > 100 and b["dh"] <= 0.05 and b["sides"] == b["n"]                    # each way on its own side, the same height
+
+
+def test_bridge_riders_on_the_sidewalks(out):
+    for side, w in out["ggbWalks"].items():
+        assert "Sidewalk" in w["road"] and w["n"] > 1000, side
+        assert w["inRoad"] == 0 and w["off"] == 0, (side, w)                            # outside the curb wall, inside the railing
+
+
+def test_bridges_only_over_a_gap(out):
+    b = out["bridges"]
+    assert b["n"] > 0 and b["through"] == 0, b                                          # no deck through the ground (over a ridge):
+                                                                                         # a bridge only over the lidar's gap (bake)

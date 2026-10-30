@@ -89,7 +89,9 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
 // another way's width (tapers); drape: the edges on the ground however steep it is across (a trail on a hillside).
 // Returns the centre line [[x, y, z, half width, right edge x, y, z, left edge x, y, z], ...] (for pillars, arrows, the
 // road sides: banks.js).
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false }) {
+// rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
+// centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null }) {
   const P = resample(pts, step), n = P.length; if (n < 2) return [];
   let code = [lm, surf, lanes, w, a, b, pL, pR];
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
@@ -108,7 +110,9 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
     }
     const nx = -tz * half * k, nz = tx * half * k;  // to the right of travel (u = 0)
     let hl, hr, hc;
-    if (deck) { hc = deck[0] + (deck[1] - deck[0]) * L[i] / tot; hl = hr = hc; }
+    if (rail && (hc = rail(c[0], c[1])) != null) {
+      if (drape) { hl = hAt(c[0] + nx, c[1] + nz) ?? hc; hr = hAt(c[0] - nx, c[1] - nz) ?? hc; } else hl = hr = hc;
+    } else if (deck) { hc = deck[0] + (deck[1] - deck[0]) * L[i] / tot; hl = hr = hc; }
     else {
       hc = hAt(c[0], c[1]); hl = hAt(c[0] + nx, c[1] + nz); hr = hAt(c[0] - nx, c[1] - nz);
       if (hc == null) hc = last; if (hl == null) hl = hc; if (hr == null) hr = hc;
@@ -181,10 +185,12 @@ export function chainWays(roads, keyOf) {
   roads.forEach((r, i) => {
     if (used.has(i)) return; used.add(i);
     if (keyOf(r) == null) { out.push(r); return; }
-    let pts = r.pts.slice();
-    for (let o; (o = next(i, pts.at(-1), 0));) { used.add(o[0]); const q = roads[o[0]].pts; pts = pts.concat((o[1] ? q.slice().reverse() : q).slice(1)); }
-    for (let o; (o = next(i, pts[0], 1));) { used.add(o[0]); const q = roads[o[0]].pts; pts = (o[1] ? q : q.slice().reverse()).slice(0, -1).concat(pts); }
-    out.push({ ...r, pts });
+    // (their rails, rail.js, joined the same way: a rail's dense points split each segment on its own)
+    let pts = r.pts.slice(), h = r.h ? Array.from(r.h) : null;
+    const rev = (q, o) => o ? q.slice().reverse() : q, hOf = j => roads[j].h ? Array.from(roads[j].h) : null;
+    for (let o; (o = next(i, pts.at(-1), 0));) { used.add(o[0]); const q = roads[o[0]].pts, qh = hOf(o[0]); pts = pts.concat(rev(q, o[1]).slice(1)); h = h && qh ? h.concat(rev(qh, o[1]).slice(1)) : null; }
+    for (let o; (o = next(i, pts[0], 1));) { used.add(o[0]); const q = roads[o[0]].pts, qh = hOf(o[0]); pts = rev(q, !o[1]).slice(0, -1).concat(pts); h = h && qh ? rev(qh, !o[1]).slice(0, -1).concat(h) : null; }
+    out.push({ ...r, pts, h: h && Float32Array.from(h) });
   });
   return out;
 }

@@ -30,9 +30,9 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // grass radius and clumps per square metre, ground detail (bump, close-up noise), the full trees' radius, the scrub's
 // radius and its full models' radius
 export const QUALITY = [
-  { name: 'high', shadow: 1536, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [150, 45] },
-  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [110, 35] },
-  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [60, 20] },
+  { name: 'high', shadow: 1536, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38] },
+  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30] },
+  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18] },
 ];
 const CAP = { 0: 22000, 1: 18000 };  // trees per tile at full share, by detail (a denser tile is thinned evenly)
 // trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
@@ -305,7 +305,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // a tree every 7 m or so, tall (the planted groves are 15 to 40 m)
     if (veg) { const st = 6.8, [s0, w0, n0, e0] = veg.box, bx0 = Math.max(box[0], proj.x(w0)), bx1 = Math.min(box[2], proj.x(e0)), bz0 = Math.max(box[1], proj.z(n0)), bz1 = Math.min(box[3], proj.z(s0));
       for (let x = Math.ceil(bx0 / st) * st; x < bx1; x += st) {
-        if (Math.round(x / st) % 16 === 0) yield;
+        if (Math.round(x / st) % 4 === 0) yield;
         for (let z = Math.ceil(bz0 / st) * st; z < bz1; z += st) {
           const ix = Math.round(x / st), iz = Math.round(z / st), px = x + (hash2(ix, iz + 3) - 0.5) * st * 0.8, pz = z + (hash2(iz + 5, ix) - 0.5) * st * 0.8, k = vcls(px, pz);
           if ((k !== CYPRESS && k !== EUC) || hash2(ix * 3, iz * 7) > 0.85) continue;
@@ -598,7 +598,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // the Headlands' groves (veg.js), a tree every 16 m
     if (veg) { const st = 16, [s0, w0, n0, e0] = veg.box, b = tileBox(c), bx0 = Math.max(b[0], proj.x(w0)), bx1 = Math.min(b[2], proj.x(e0)), bz0 = Math.max(b[1], proj.z(n0)), bz1 = Math.min(b[3], proj.z(s0));
       for (let x = Math.ceil(bx0 / st) * st; x < bx1; x += st) {
-        if (Math.round(x / st) % 24 === 0) yield;
+        if (Math.round(x / st) % 5 === 0) yield;
         for (let z = Math.ceil(bz0 / st) * st; z < bz1; z += st) {
           const k = vcls(x, z); if (k !== CYPRESS && k !== EUC) continue;
           const h = gridHeight(c.grid, x, z); if (h == null || h < 2) continue;
@@ -678,12 +678,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const g = c.grid; if (!T.length || !g) return;
     if (pushUnder(g, T, { margin: Math.max(4, 0.75 * Math.abs(g.xs[1] - g.xs[0])) })) groundMoved(c);
   }
-  // the terrain mesh moved to its grid's heights (after the ground was lowered under roads)
+  // the terrain mesh moved to its grid's heights (after the ground was lowered under roads): a new geometry with new
+  // buffers, the old one dropped (writing into a buffer the GPU may still be drawing from makes the browser wait)
   function groundMoved(c) {
     const g = c.grid; if (!g || !c.tmesh || !c.parts.terrain) return;
-    const P = c.parts.terrain.geometry.attributes.position, { src, nv, skirt } = c.tmesh;
+    const mesh = c.parts.terrain, old = mesh.geometry, geo = old.clone(), P = geo.attributes.position, { src, nv, skirt } = c.tmesh;
     for (let i = 0; i < src.length; i++) P.array[3 * i + 1] = g.hs[src[i]] - (i >= nv ? skirt : 0);
-    P.needsUpdate = true; c.parts.terrain.geometry.computeBoundingSphere(); hz.touch();
+    geo.computeBoundingSphere(); mesh.geometry = geo; old.dispose(); hz.touch();
   }
   // a tile's road tops for the rider: segments [x0, y0, z0, x1, y1, z1, half width] in 10 m cells
   function roadIndex(a) {
@@ -754,7 +755,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     c.tunPieces = (c.tile?.roads || []).filter(r => r.fl & 2 && !/path|footway|steps/.test(r.hw)).map(r => ({ r, P: r.pts.map(([la, lo]) => proj.xz(la, lo)), box }));
     tun.dirty = true;
   }
-  function rebuildTunnels() {
+  // (a slice at a time: a generator; the tunnels in use stay until the new ones are done)
+  function* rebuildTunnels() {
     // the tiles store each road with a margin past their edge: pieces of one tunnel overlap, so grow a piece's ends
     // along any other piece they lie on; a tunnel is whole when both ends sit in loaded tiles with nothing to extend them
     const pieces = [...near.values()].flatMap(c => c.tunPieces || []).sort((a, b) => b.P.length - a.P.length), used = new Set(), chains = [];
@@ -777,10 +779,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const P = q.P.slice(); grow(P, true); grow(P, false);
       if (loaded(P[0]) && loaded(P.at(-1))) chains.push({ P, r: q.r });
     }
-    if (tun.group) { disposeObj(tun.group); tun.group = null; }
-    tun.list = [];
-    const B = builder(), grp = new THREE.Group(), pos = [], idx = [], tl = [], posB = [], idxB = [], tlB = [], ports = [], lamps = [], cuts = [], walk = { pos: [], idx: [], col: [] }, heads = [];
+    const list = [], B = builder(), grp = new THREE.Group(), pos = [], idx = [], tl = [], posB = [], idxB = [], tlB = [], ports = [], lamps = [], cuts = [], walk = { pos: [], idx: [], col: [] }, heads = [];
     for (const { P: P0, r } of chains) {
+      yield;
       const P = resample(P0, 6); if (P.length < 2) continue;
       const D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
       const out = (p, q) => { const dx = p[0] - q[0], dz = p[1] - q[1], l = Math.hypot(dx, dz) || 1, a = groundAt(...p), b = groundAt(p[0] + dx / l * 12, p[1] + dz / l * 12); return a == null ? b : b == null ? a : Math.min(a, b); };
@@ -792,9 +793,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // ground (US-101 over Alexander Avenue and Bunker Road): an underpass, its headwalls right at its ends: a concrete
       // box with a flat roof, or a barrel arch (ARCHED). Deeper and longer: a bored tunnel, arched, lit, its portals at
       // the end of a cut.
-      let cover = 0; for (let i = 0; i < P.length; i++) cover += (groundAt(...P[i]) ?? 0) - (h0 + (h1 - h0) * D[i] / L);
-      cover /= P.length;
-      if (cover < 2.5 || L < 18) { ribbon(B, P, { ...st, hAt: (x, z) => groundAt(x, z), lift: roadLift(r.hw), step: 6 }); continue; }
+      // (the cover: the most ground over its middle half; a short one under a motorway's fill has its ends carved down)
+      let cover = 0; for (let i = 0; i < P.length; i++) if (D[i] > L * 0.25 && D[i] < L * 0.75) cover = Math.max(cover, (groundAt(...P[i]) ?? 0) - (h0 + (h1 - h0) * D[i] / L));
+      if (cover < 3 || L < 18) { ribbon(B, P, { ...st, hAt: (x, z) => groundAt(x, z), lift: roadLift(r.hw), step: 6 }); continue; }
       const box = cover < 8 || L < 3 * PORT, port = box ? 1.5 : one ? 2 : PORT, mid = P[P.length >> 1], arch = box && ARCHED.some(([la, lo]) => Math.hypot(proj.x(lo) - mid[0], proj.z(la) - mid[1]) < 60);
       // half width, the walls' height, the arch's rise over them (0: a flat roof)
       const w = st.w / 2 + (one || arch ? 1 : 2), H = box ? (arch ? 1.4 : 5.2) : one ? 2 : 2.2, rise = box && !arch ? 0 : one || arch ? w : w * 0.75;
@@ -804,7 +805,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         segs.push([P[i0][0], P[i0][1], P[i][0], P[i][1], h0 + (h1 - h0) * D[i0] / L, h0 + (h1 - h0) * D[i] / L, w + 0.3, H + rise + 0.6]); i0 = i;
       }
       let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity; for (const [x, z] of P) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); }
-      tun.list.push({ P, D, h0, h1, w, L, segs, port, box, bb: [bx0 - w - 5, bz0 - w - 5, bx1 + w + 5, bz1 + w + 5] });
+      list.push({ P, D, h0, h1, w, L, segs, port, box, bb: [bx0 - w - 5, bz0 - w - 5, bx1 + w + 5, bz1 + w + 5] });
       const k0 = B.idx.length; ribbon(B, P, { ...st, hAt: () => 0, deck: [h0, h1], lift: 0.05, step: 6 }); cuts.push([k0, B.idx.length, port, L]);
       // a ring: walls up to the arch (or the flat roof), and the floor under the road (closed, so nothing outside shows through)
       const SEG = 12, R = w, ring = [];
@@ -830,7 +831,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (n === 0 || n === keep.length - 1) ports.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1, box, rise, arch, one]);
       });
     }
-    if (!B.n) return;
+    if (!B.n) { if (tun.group) disposeObj(tun.group); tun.group = null; tun.list = list; return; }
+    yield;
     // the open cuts before the portals: the ground there kept under the road (each near tile its own part)
     { const T = [];
       for (const [a, b, port, L] of cuts) for (let k = a; k + 2 < b; k += 3) {
@@ -839,7 +841,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
       if (T.length) for (const c of near.values()) if (c.lod === 0 && c.grid) { const bx = tileBox(c), Tc = [];
         for (let k = 0; k < T.length; k += 9) if (T[k] > bx[0] - 12 && T[k] < bx[2] + 12 && T[k + 2] > bx[1] - 12 && T[k + 2] < bx[3] + 12) Tc.push(...T.slice(k, k + 9));
-        groundUnder(c, Tc); } }
+        groundUnder(c, Tc); yield; } }
     const d = B.done(), rg = new THREE.BufferGeometry();
     rg.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); rg.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); rg.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); rg.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4));
     rg.setIndex(new THREE.BufferAttribute(d.idx, 1)); rg.computeVertexNormals(); grp.add(new THREE.Mesh(rg, mats.road));
@@ -918,7 +920,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       heads.forEach(([x, y, z, yaw], i) => hm.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), q4.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), unit)));
       hm.userData.shared = true; hm.computeBoundingSphere(); grp.add(hm);
     }
-    tun.group = grp; scene.add(grp);
+    if (tun.group) disposeObj(tun.group);
+    tun.group = grp; tun.list = list; scene.add(grp);
   }
   // the tunnel a point is in: { y, k } (k: how far in, 0 at a portal .. 1 from 25 m in), null outside
   function tunnelAt(x, z) {
@@ -1123,7 +1126,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noScrub, noLife, noImp, noHi, noSm, noTerrain, gpu }
       if (dbg.noLife) life.show(false);
       if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain || dbg.noFurn) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.furn) c.parts.furn.visible = !dbg.noFurn; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) if (t.hi && dbg.noHi) t.hi.visible = false; } }
-      mark(); if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2); if (ready && !dbg.noScrub) scrub.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 1.5, QUALITY[q].span); mark();
+      mark(); if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2); if (ready && !dbg.noScrub) scrub.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 1.5, Math.min(40, QUALITY[q].span)); mark();
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
       lifeDt += dt;
@@ -1172,6 +1175,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }
       // the shadow map every other frame (the box only moves when it is drawn, so the old one stays true until then)
       if (frames % (globalThis.__w3?.smEvery ?? 2) === 0) { sky.update(camera, me.group.position, 0, QUALITY[q].span, true); renderer.shadowMap.needsUpdate = true; }
+      // once the world round the start is built: every program it needs built now, not when a part of it first comes
+      // into view or into the shadow box on the ride (each one held a frame up by a quarter of a second): the scene's
+      // materials compiled, and one shadow map drawn over 20 km
+      if (ready && warm.userData.frames > 3 && !warm.userData.all) {
+        warm.userData.all = true; renderer.compile(scene, camera);
+        { const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType }), prev = renderer.getRenderTarget(); renderer.setRenderTarget(rt); renderer.compile(scene, camera); renderer.setRenderTarget(prev); rt.dispose(); }  // as drawn into post's targets
+        for (const p of renderer.info.programs) p.getUniforms();  // linked and checked now (a program's first use waits for that)
+        const c = sky.sun.shadow.camera, far = c.far; c.far = 40000; sky.update(camera, me.group.position, 0, 20000, true); c.updateProjectionMatrix(); renderer.shadowMap.needsUpdate = true;
+        warm.userData.restore = () => { c.far = far; c.updateProjectionMatrix(); };
+      } else if (warm.userData.restore) { warm.userData.restore(); warm.userData.restore = null; }
       renderer.info.reset(); mark();
       const c1 = performance.now();
       const gq = dbg.gpu && !gq0 ? gpuTime.begin() : null;
@@ -1179,7 +1192,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (gq || gq0) gpuTime.end(gq || gq0);
       const c2 = performance.now(); if (PF && c2 - c0 > 12) { pm.push(c2); PF.push([Math.round(now), ...pm.slice(1).map((t, i) => +(t - pm[i]).toFixed(1))]); if (PF.length > 400) PF.shift(); }
       cpu.js += (c1 - c0 - cpu.js) * 0.05; cpu.draw += (c2 - c1 - cpu.draw) * 0.05; cpu.max = Math.max(cpu.max * 0.995, c1 - c0);
-      if (warm.parent && ++warm.userData.frames > 40 && ready) { scene.remove(warm); warm.traverse(o => o.isInstancedMesh && o.dispose()); warm.userData.geo.dispose(); }
+      if (warm.parent && ++warm.userData.frames > 12 && warm.userData.all) { scene.remove(warm); warm.traverse(o => o.isInstancedMesh && o.dispose()); warm.userData.geo.dispose(); }
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
       governor(dt, now);
     } catch (e) { fail(e); return; }
@@ -1211,7 +1224,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setKit(kit, accent) { me.setKit?.(kit, accent); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow }),
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready: ready && !warm.parent, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point

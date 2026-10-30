@@ -205,16 +205,16 @@ export function treeGeometries() {
 export function scrubGeometries() {
   const brush = col(0x4f6639, 1.3), sage = col(0x76835f, 1.3);
   return {
-    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.36), M(0, 0.58, 0, 0.95, 0.5, 0.86), { soft: [0, 0.58, 0], shade: [0.08, 1.08] }], ...lumps(0, 0.72, 0, 1.4, 0.78, 1.28, 6, 16, 0.8, LEAF.scrub, 21, { lift: 0.5, lump: 0.6, out: 0.7 }).map(g => leaves(g, brush))]),
-    brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.25, 23), brush.map(v => v * 0.62), M(0, 0.62, 0, 1.3, 0.72, 1.18), { soft: [0, 0.62, 0], shade: [0, 1.3] }],
+    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.36), M(0, 0.58, 0, 0.95, 0.5, 0.86), { soft: [0, 0.58, 0], shade: [0.08, 1.08] }], ...lumps(0, 0.72, 0, 1.4, 0.78, 1.28, 5, 13, 0.85, LEAF.scrub, 21, { lift: 0.5, lump: 0.6, out: 0.7 }).map(g => leaves(g, brush))]),
+    brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.25, 23), brush.map(v => v * 0.62), M(0, 0.62, 0, 1.3, 0.72, 1.18), { soft: [0, 0.62, 0], shade: [0, 1.3] }],
       ...lumps(0, 0.75, 0, 1.4, 0.75, 1.28, 3, 6, 1.35, LEAF.scrub, 21, { lift: 0.5, lump: 0.65 }).map(g => leaves(g, brush))]),
-    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.4), M(0, 0.42, 0, 0.78, 0.36, 0.72), { soft: [0, 0.42, 0], shade: [0.06, 0.78] }], ...lumps(0, 0.5, 0, 1.2, 0.55, 1.1, 5, 14, 0.75, LEAF.scrub, 25, { lift: 0.7, lump: 0.6, out: 0.7 }).map(g => leaves(g, sage))]),
-    sageLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.2, 27), sage.map(v => v * 0.62), M(0, 0.45, 0, 1.1, 0.52, 1.0), { soft: [0, 0.45, 0], shade: [0, 0.95] }],
+    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.4), M(0, 0.42, 0, 0.78, 0.36, 0.72), { soft: [0, 0.42, 0], shade: [0.06, 0.78] }], ...lumps(0, 0.5, 0, 1.2, 0.55, 1.1, 4, 13, 0.8, LEAF.scrub, 25, { lift: 0.7, lump: 0.6, out: 0.7 }).map(g => leaves(g, sage))]),
+    sageLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.2, 27), sage.map(v => v * 0.62), M(0, 0.45, 0, 1.1, 0.52, 1.0), { soft: [0, 0.45, 0], shade: [0, 0.95] }],
       ...lumps(0, 0.5, 0, 1.2, 0.55, 1.1, 3, 5, 1.2, LEAF.scrub, 25, { lift: 0.7, lump: 0.65 }).map(g => leaves(g, sage))]),
   };
 }
 
-// Street furniture at its typical size (metres), instanced along the roads: a guardrail post, a street lamp (its arm
+// Street furniture at its typical size (metres), instanced along the roads: a guardrail's timber post, a street lamp (its arm
 // along +x over the road, the lamp's underside tag 2: lit at dusk), stop and speed limit signs (facing +z), a ranch
 // fence and a picket fence section (3 m along +x), a traffic signal on its pole (facing +z, its green lamp tag 4 lit,
 // the red and amber dark). Vertex coloured.
@@ -223,7 +223,7 @@ export function furnitureGeometries() {
   const grey = col(0x8c8f92), steel = col(0x9da3a6), dark = col(0x3b3d40), wood = col(0x6f5a44), pole = col(0x6a5e50), white = col(0xeeeeea), red = col(0xb3241c), lampC = col(0xfff1d0);
   const octagon = new THREE.CylinderGeometry(0.38, 0.38, 0.03, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.03);
   return {
-    post: merge([[B(0.1, 0.78, 0.15, 0, 0.39, 0), steel], [B(0.07, 0.3, 0.15, 0.06, 0.66, 0), steel]]),
+    post: merge([[B(0.15, 0.82, 0.2, 0, 0.41, 0), col(0x76695a)], [B(0.15, 0.36, 0.15, 0.08, 0.64, 0), col(0x6c5f51)]]),  // weathered timber, a timber block under the rail (Street View)
     pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),
     lamp: merge([[C(0.1, 0.07, 6.6), dark], [B(1.9, 0.08, 0.1, 0.95, 6.5, 0), dark], [B(0.6, 0.14, 0.26, 1.85, 6.42, 0), dark], [B(0.5, 0.03, 0.2, 1.85, 6.34, 0), lampC, null, { tag: 2 }]]),
     stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [octagon, red], [new THREE.CylinderGeometry(0.33, 0.33, 0.035, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.04), white], [B(0.5, 0.12, 0.04, 0, 2.2, 0.06), red]]),

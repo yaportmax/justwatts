@@ -34,7 +34,7 @@ export function createScrub({ THREE, scene, geos, mat, fade, cls, ground }) {
     const m = new THREE.InstancedMesh(geos[k], mat, n); m.count = 0; m.frustumCulled = false; m.receiveShadow = true;
     m.castShadow = k === 'brush' || k === 'sage'; m.customDepthMaterial = mat.userData.depth; m.userData.shared = true;
     m.onBeforeShadow = () => { m.userData.all = m.count; m.count = Math.min(m.count, m.userData.cast ?? 0); }; m.onAfterShadow = () => { m.count = m.userData.all; };
-    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); return m;
+    scene.add(m); return m;
   }
   for (const k of kinds) mesh[k] = make(k, 64);
   // a cell's bushes on the ground: per bush [x, y, z, scale, turn, sage, tint]; a generator (a slice at a time)

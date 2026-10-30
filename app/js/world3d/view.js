@@ -455,7 +455,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   /* ---------- riders ---------- */
   const me = makeRider(THREE, { kit: kit ?? 0xf2c230, kit2: 0x1b1f25 }); scene.add(me.group);
   const others = new Map();  // id -> { r, tag, x, z, yaw, seen }
-  let grade = 0, dark = 0, camOver = null, sea = 0, seaAt = 0;
+  let grade = 0, dark = 0, camOver = null, sea = 0, seaAt = 0, lifeDt = 0, audioDt = 0;
   const cpu = { js: 0, draw: 0, max: 0 };  // milliseconds a frame on the CPU: the world's own work, issuing the draws
   // how much of the ground round a point is sea (for the sound of the waves): 16 points at 250 and 700 m
   function seaShare(x, z) {
@@ -567,6 +567,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   applyQuality();
   function governor(dt, now) {
     if (document.hidden || dt > 0.25) return;
+    if (jobs.size > 3) { ft = []; lastGov = now; return; }  // still building tiles: judge the steady ride, not the loading
     ft.push(dt); if (now - lastGov < 2500) return; lastGov = now;
     ft.sort((a, b) => a - b); const med = ft[ft.length >> 1] || 0; ft = [];
     if (med > 1 / 42) { slow++; fast = 0; } else { slow = 0; if (med < 1 / 75) fast++; }
@@ -607,9 +608,10 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2);
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
-      if (!dbg.noLife) life.update(dt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt, roads: () => {
+      lifeDt += dt;
+      if (!dbg.noLife && (q < 2 || frames % 2 === 0)) life.update(lifeDt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt, roads: () => {
         const out = []; for (const c of near.values()) if (c.lod === 0 && c.drive) for (const r of c.drive) if (Math.hypot(r.P[0][0] - p[0], r.P[0][2] - p[1]) < 900 || Math.hypot(r.P.at(-1)[0] - p[0], r.P.at(-1)[2] - p[1]) < 900) out.push(r);
-        return out; } });
+        return out; } }), lifeDt = 0;
       // camera: behind and above, looking down the road; first person: at the eyes
       const ahead = at(d + 14), hd = yAt(ahead[0], ahead[1], d + 14);
       const look = Math.atan2(ahead[0] - pa[0], -(ahead[1] - pa[1]));
@@ -640,7 +642,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       const tk = tunnelAt(camPos.x, camPos.z)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
       sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.85 * dark);
       if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
-      audio.update({ dt, v, cad: st.cad || 0, sea, inside: dark });
+      audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }
       renderer.info.reset();
       const c1 = performance.now();
       if (dbg.noPost) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = sky.exposure; renderer.render(scene, camera); } else post.render(sky.exposure * (1 + dark * 0.6));

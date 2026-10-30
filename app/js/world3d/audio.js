@@ -65,7 +65,7 @@ export function createAudio({ on = true } = {}) {
         const rate = tickRate(v, s.cad || 0);
         if (rate > 0) {
           if (nextTick < now) nextTick = now + 0.02;
-          while (nextTick < now + 0.12) {
+          while (nextTick < now + 0.22) {
             const src = ctx.createBufferSource(); src.buffer = n.click; src.playbackRate.value = 0.9 + 0.2 * Math.random();
             src.connect(n.kf); src.start(nextTick); nextTick += 1 / rate;
           }

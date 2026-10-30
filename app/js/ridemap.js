@@ -23,7 +23,7 @@ const bearing = (a, b) => Math.atan2(Math.sin((b[1] - a[1]) * R) * Math.cos(b[0]
 const NONE = { type: 'FeatureCollection', features: [] };
 const lineGeo = pts => pts.length > 1 ? { type: 'Feature', geometry: { type: 'LineString', coordinates: pts.map(p => [p[1], p[0]]) } } : NONE;
 const linesGeo = ls => ({ type: 'FeatureCollection', features: ls.filter(l => l.length > 1).map(lineGeo) });
-const OSM_ROADS = 'Roads © OpenStreetMap contributors';
+const OSM_ROADS = 'Roads © OpenStreetMap contributors · Imagery USDA NAIP';
 
 // Others move every poll (about 2 s): each marker glides from where it is drawn to its new spot over one poll;
 // a jump of a km or more snaps. at(list, now): the list at its drawn positions; done(now): the glide is over.

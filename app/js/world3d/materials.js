@@ -77,12 +77,13 @@ export function terrainMaterial({ detail = true } = {}) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <color_fragment>', /* glsl */`
+        bool inBore = false;
         for (int i = 0; i < 12; i++) {
-          if (i >= boreN) break;
           vec2 e = boreA[i].zw - boreA[i].xy; float t = clamp(dot(vW.xz - boreA[i].xy, e) / max(dot(e, e), 1e-3), 0.0, 1.0);
           float fy = mix(boreB[i].x, boreB[i].y, t);
-          if (distance(vW.xz, boreA[i].xy + e * t) < boreB[i].z && vW.y > fy - 2.0 && vW.y < fy + boreB[i].w) discard;
+          inBore = inBore || (i < boreN && distance(vW.xz, boreA[i].xy + e * t) < boreB[i].z && vW.y > fy - 2.0 && vW.y < fy + boreB[i].w);
         }
+        if (inBore) discard;
         vec3 nW = normalize(vNw); float rk;
         vec3 c = jwGround(vW.xz, nW, vMk, vMk2, vCv, vW.y, rk);
         float dist = length(vViewPosition);

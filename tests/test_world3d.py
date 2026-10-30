@@ -157,10 +157,22 @@ def test_world_sound_gain_curves(out):
     assert a["seaNone"] == 0 and a["seaHalf"] == 0.1 and a["seaSome"]
 
 
-def test_cars_pass_a_rider_in_their_lane(out):
+def test_cars_pass_a_rider_only_with_room(out):
     p = out["pass"]
-    assert p["clear"] == {"v": 20, "pull": 0} and p["beside"] == {"v": 20, "pull": 0} and p["behind"] == {"v": 20, "pull": 0}
-    assert p["closing"] == {"v": 11, "pull": 1}                               # close behind: rider speed + 3, pulled out
+    assert p["clear"] == {"v": 20, "target": 1.9} and p["across"] == {"v": 20, "target": 1.9}  # far ahead, or the other side
+    assert p["moving"] == {"v": 11.6, "target": 0.3}                          # moving over: slows while it closes in
+    assert p["beside"] == {"v": 14, "target": 0.3}                            # over: passes at rider speed + 6
+    assert p["blocked"] == {"v": 9.5, "target": 1.9}                          # oncoming traffic: follows, 12 m back
+    assert p["behind"]["target"] == 1.9                                       # past: back to its lane
+
+
+def test_cars_never_pass_through_riders(out):
+    c = out["cars"]
+    for k in ("pass", "slow", "group"):
+        assert c[k]["past"] and c[k]["room"] >= 1.3, k                          # passes, more than a metre clear
+    assert c["group"]["back"] > 0.4
+    for k in ("blocked", "groupBlocked"):
+        assert not c[k]["past"] and c[k]["back"] > 5 and c[k]["v"] == 8, k      # no room: waits behind at their speed
 
 
 def test_rider_stands_on_steep_climbs_and_tucks_descending(out):

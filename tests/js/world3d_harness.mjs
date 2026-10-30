@@ -6,7 +6,7 @@ import { cellPoints, cellsAround, clumpGeometry } from '../../app/js/world3d/gra
 import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
-import { passPlan } from '../../app/js/world3d/life.js';
+import { passPlan, carStep } from '../../app/js/world3d/life.js';
 import { builder, ribbon, resample, roadStyle, clipLine, deckSides } from '../../app/js/world3d/ribbon.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
@@ -211,7 +211,23 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   const vs = [0, 0.5, 2, 5, 10, 15, 20, 30], mono = f => vs.every((v, i) => !i || f(v) >= f(vs[i - 1]));
   out.audio = { windStill: windGain(0), wind10: r3(windGain(10)), windCap: windGain(60), windUp: mono(windGain), tireStill: tireGain(0.3), tire10: r3(tireGain(10)), tireGravel: r3(tireGain(10, 1)), tireUp: mono(v => tireGain(v)),
     hz: [tireHz(0), tireHz(10)], tickPedal: tickRate(10, 85), tickStill: tickRate(0.5, 0), tick5: r3(tickRate(5, 0)), tickCap: tickRate(40, 0), seaNone: oceanGain(0), seaHalf: r3(oceanGain(0.5)), seaSome: oceanGain(0.2) > 0 && oceanGain(0.2) < oceanGain(0.5) };
-  out.pass = { clear: passPlan(80, 0, 20, 8), beside: passPlan(10, 5, 20, 8), closing: passPlan(10, 0.8, 20, 8), behind: passPlan(-10, 0, 20, 8) };
+  // a two-lane road 7.6 m wide: the car's lane 1.9 m right of the centre line, a rider 2.7 m right (keeping right)
+  const pp = (gap, rl, off, left) => { const p = passPlan(gap, rl, off, 1.9, left, 20, 8); return { v: r3(p.v), target: r3(p.target) }; };
+  out.pass = { clear: pp(80, 2.7, 1.9, -2.65), moving: pp(15, 2.7, 1.9, -2.65), beside: pp(0, 2.7, 0.3, -2.65), blocked: pp(15, 2.7, 1.9, 1.1), behind: pp(-10, 2.7, 0.3, -2.65), across: pp(10, -2.7, 1.9, -2.65) };
+  // a car at 20 to 25 m/s comes up behind riders at 60 Hz: the least room across while it is beside one (car side to
+  // the rider's middle), the least room along while it is in the rider's line, where it ends
+  const drive = ({ riders, left, v0 = 20, secs = 40 }) => {
+    const c = { v: v0, v0, off: 1.9 }; let s = -120, room = Infinity, back = Infinity;
+    for (let i = 0; i < secs * 60; i++) {
+      const rs = riders.map(r => ({ gap: r.s + r.v * i / 60 - s, rl: r.rl, v: r.v }));
+      for (const r of rs) { if (Math.abs(r.gap) < 2.35 + 0.3) room = Math.min(room, Math.abs(r.rl - c.off) - 0.91); if (Math.abs(r.rl - c.off) < 0.91 + 0.3) back = Math.min(back, Math.abs(r.gap) - 2.35); }
+      const st = carStep(c, rs, { laneOff: 1.9, leftmost: left, L: 4.7, W: 1.82 }, 1 / 60); c.v = st.v; c.off = st.off; s += st.move;
+    }
+    return { room: r3(room), back: r3(back), past: s > riders[0].s + riders[0].v * secs + 10, v: r3(c.v), off: r3(c.off) };
+  };
+  out.cars = { pass: drive({ riders: [{ s: 0, rl: 2.7, v: 8 }], left: -2.65 }), blocked: drive({ riders: [{ s: 0, rl: 2.7, v: 8 }], left: 1.1 }),
+    slow: drive({ riders: [{ s: 0, rl: 2.7, v: 2 }], left: -2.65, v0: 25 }), group: drive({ riders: [{ s: 0, rl: 2.7, v: 8 }, { s: 3, rl: 1.6, v: 8 }, { s: -2, rl: 0.7, v: 8 }], left: -2.65 }),
+    groupBlocked: drive({ riders: [{ s: 0, rl: 2.7, v: 8 }, { s: 3, rl: 1.6, v: 8 }], left: 1.1 }) };
 }
 
 {

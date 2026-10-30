@@ -12,9 +12,9 @@ const col = (hex, f = 1) => { const c = new THREE.Color(hex); return [c.r * f, c
 // toward the bottom of [y0, y1] (the inside of a crown, the foot of a trunk); opts.cell: the geometry's own uv goes
 // into that leaf atlas cell (else the plain cell); opts.card: the part's normals and uv are kept as they are (leaf
 // cards), its `ao` attribute darkens it, its `sk` one (0 or 1) says which cards cast a shadow (the rest, the solid
-// parts always)
+// parts always); opts.tag: a number in the `tag` attribute (what a part is, for a material)
 export function merge(parts) {
-  const pos = [], nor = [], cl = [], uvs = [], sks = [], plain = leafCell(LEAF.plain), pu = (plain[0] + plain[2]) / 2, pv = (plain[1] + plain[3]) / 2;
+  const pos = [], nor = [], cl = [], uvs = [], sks = [], tags = [], plain = leafCell(LEAF.plain), pu = (plain[0] + plain[2]) / 2, pv = (plain[1] + plain[3]) / 2;
   for (const [g0, c, mtx, o = {}] of parts) {
     const g = (g0.index ? g0.toNonIndexed() : g0.clone()); if (mtx) g.applyMatrix4(mtx); if (!o.card) g.computeVertexNormals();
     const p = g.attributes.position.array, n = g.attributes.normal.array, uv = g.attributes.uv?.array, ao = g.attributes.ao?.array, sk = g.attributes.sk?.array, cell = o.cell != null ? leafCell(o.cell) : null;
@@ -25,7 +25,7 @@ export function merge(parts) {
         sx /= l; sy /= l; sz /= l; nx = nx * 0.3 + sx * 0.7; ny = ny * 0.3 + sy * 0.7 + 0.15; nz = nz * 0.3 + sz * 0.7;
         const m = Math.hypot(nx, ny, nz) || 1; nx /= m; ny /= m; nz /= m;
       }
-      pos.push(p[i], p[i + 1], p[i + 2]); nor.push(nx, ny, nz); sks.push(sk ? sk[v] : 1);
+      pos.push(p[i], p[i + 1], p[i + 2]); nor.push(nx, ny, nz); sks.push(sk ? sk[v] : 1); tags.push(o.tag || 0);
       if (o.card) uvs.push(uv[2 * v], uv[2 * v + 1]);
       else if (cell && uv) uvs.push(cell[0] + (cell[2] - cell[0]) * uv[2 * v], cell[1] + (cell[3] - cell[1]) * (1 - uv[2 * v + 1]));
       else uvs.push(pu, pv);
@@ -41,6 +41,7 @@ export function merge(parts) {
   out.setAttribute('color', new THREE.Float32BufferAttribute(cl, 3));
   out.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   out.setAttribute('sk', new THREE.Float32BufferAttribute(sks, 1));
+  out.setAttribute('tag', new THREE.Float32BufferAttribute(tags, 1));
   out.computeBoundingSphere(); out.computeBoundingBox();
   return out;
 }

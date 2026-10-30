@@ -666,7 +666,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
       lifeDt += dt;
-      if (!dbg.noLife && (q < 2 || frames % 2 === 0)) life.update(lifeDt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt, roads: () => {
+      if (!dbg.noLife && (q < 2 || frames % 2 === 0)) life.update(lifeDt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt,
+        riders: [{ x: p[0], z: p[1], v }, ...[...others.values()].map(e => ({ x: e.r.group.position.x, z: e.r.group.position.z, v: e.v || 0 }))], roads: () => {
         const out = []; for (const c of near.values()) if (c.lod === 0 && c.drive) for (const r of c.drive) if (Math.hypot(r.P[0][0] - p[0], r.P[0][2] - p[1]) < 900 || Math.hypot(r.P.at(-1)[0] - p[0], r.P.at(-1)[2] - p[1]) < 900) out.push(r);
         return out; } }), lifeDt = 0;
       // camera: behind and above, looking down the road; first person: at the eyes
@@ -697,6 +698,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         BORES.n.value = n; }
       // inside a tunnel: the daylight fades out
       const tk = tunnelAt(camPos.x, camPos.z)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
+      // the cars' lamps: on with the sun low (under about 8 degrees) and in tunnels
+      { const sy = sky.sunDir.y, k = Math.min(1, Math.max(0, (0.14 - sy) / 0.12)); life.setLamps(Math.max(k * k * (3 - 2 * k), dark), scene.fog.color); }
       sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.85 * dark);
       if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }

@@ -1,6 +1,7 @@
 // World 3D life, kept cheap (a handful of instanced draws, updated each frame on the CPU): cars on the Golden Gate
-// Bridge's six lanes and on the bigger roads round the rider (they pull out to pass a rider in their lane), people
-// standing about at the vista points, gulls wheeling over the coast and turkey vultures soaring over the hills.
+// Bridge's six lanes and on the bigger roads round the rider (they wait behind a rider until they can pass with room,
+// and never touch one; lamps and light on the road at dusk), people standing about at the vista points, gulls
+// wheeling over the coast and turkey vultures soaring over the hills.
 import { merge } from './props.js';
 import { hash2 } from './landuse.js';
 
@@ -10,11 +11,34 @@ const VISTAS = [[37.8277, -122.4836, 7], [37.8326, -122.4808, 9], [37.8259, -122
 const CAR_COLOURS = [0xf2f2f0, 0x1c1d20, 0x8d9196, 0xb9bcc0, 0x2c3e66, 0x7b1f1f, 0x355e3b, 0xd8d2c4, 0x4b4f55, 0xa33a2a, 0x2f5f86, 0xe0c060];
 const SHIRTS = [0xd94b3d, 0x3d7bd9, 0xf2f2ee, 0x2b2f36, 0x6a8f4e, 0xe8a33a, 0x7a4fd1, 0x9fb3c8, 0xc9c0ae];
 
-// speed (m/s) a car keeps behind a rider it cannot pass yet, and the side offset it moves to while passing: pure
-export function passPlan(gap, lateral, carV, riderV) {
-  if (gap < -6 || gap > 40 || Math.abs(lateral) > 3.2) return { v: carV, pull: 0 };   // not in the way
-  const pull = Math.min(1, Math.max(0, (40 - gap) / 22));                             // pull out as it closes in
-  return { v: Math.max(riderV + 3, carV * (0.55 + 0.45 * (1 - pull))), pull };
+// A car near riders on its road: the speed (m/s) it may go and the offset it steers for (metres right of the road's
+// centre line). gap: the rider's distance ahead of the car's middle along the road; rl: the rider's offset; laneOff:
+// the car's lane; leftmost: as far left as it may go (the oncoming lane when that is clear); off: where it is now.
+// It passes only with room (CLEAR centre to centre across: half a car, a shoulder and well over a metre between),
+// slowing behind until it has moved over; with no room it follows at the rider's speed. Pure: tests/test_world3d.py.
+export const CLEAR = 2.4;
+export function passPlan(gap, rl, off, laneOff, leftmost, carV, riderV) {
+  if (gap < -7 || gap > 70) return { v: carV, target: laneOff };                    // past it, or far ahead
+  const room = rl - CLEAR;                                                           // the offset that leaves room
+  if (laneOff <= room || rl - laneOff > CLEAR + 1.5) return { v: carV, target: laneOff };  // its lane clears the rider
+  if (rl + CLEAR < laneOff && gap > 0) return { v: carV, target: laneOff };          // a rider well left of the lane
+  if (room >= leftmost) {
+    const short = off - room;                                                        // metres still to move over
+    const v = short < 0.2 ? Math.max(Math.min(carV, riderV + 6), carV * 0.6) : Math.min(carV, riderV + Math.max(0, gap - 9) * 0.6);
+    return { v: Math.max(0, v), target: room };
+  }
+  return { v: Math.max(0, Math.min(carV, riderV + (gap - 12) * 0.5)), target: laneOff };  // no room: follow 12 m back
+}
+// One step of a car on its road, in road terms: the car's middle at 0 along and `off` across, riders [{ gap, rl, v }];
+// it eases toward the plan's speed and offset (ahead: a speed the car in front allows) and moves on, unless moving
+// would bring it within half a metre of a rider: then it waits. -> { v, off, move } (metres along). Pure:
+// tests/test_world3d.py drives a car up behind riders with it.
+export function carStep(c, riders, { laneOff, leftmost, L, W, ahead = Infinity }, dt) {
+  let vT = Math.min(c.v0, ahead), target = laneOff;
+  for (const o of riders) { const p = passPlan(o.gap, o.rl, c.off, laneOff, leftmost, c.v0, o.v); vT = Math.min(vT, p.v); target = Math.min(target, p.target); }
+  const off = c.off + Math.max(-1.7 * dt, Math.min(1.7 * dt, target - c.off)), v = Math.max(0, c.v + Math.max(-7 * dt, Math.min(2.5 * dt, vT - c.v))), move = v * dt;
+  if (riders.some(o => Math.abs(o.gap - move) < L / 2 + 0.5 && Math.abs(o.rl - off) < W / 2 + 0.5)) return { v: 0, off, move: 0 };
+  return { v, off, move };
 }
 
 export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
@@ -23,24 +47,66 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
   const M4 = new THREE.Matrix4(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), S = new THREE.Vector3(), E = new THREE.Euler(), C = new THREE.Color();
   const lam = o => new THREE.MeshLambertMaterial({ vertexColors: true, ...o });
 
-  /* cars: body (tinted per car), glass, wheels; faces -z */
-  const white = col(0xffffff), glass = col(0x22282f), tyre = col(0x141414), lamp = col(0xfff2d8), red = col(0x9e1b1b);
-  const wheel = (x, z) => [new THREE.CylinderGeometry(0.33, 0.33, 0.24, 10).rotateZ(Math.PI / 2).translate(x, 0.33, z), tyre];
-  // a body with a sloping bonnet and boot, a glasshouse narrower than the body with raked screens, a roof, lights
-  const hull = (w, z0, z1, ys, yt, inset = 0) => {  // a box whose top edge runs from ys (front) to yt (back) heights, sides pulled in by inset at the top
-    const g = new THREE.BoxGeometry(w, 1, z1 - z0, 1, 1, 1), p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) { const top = p.getY(i) > 0, front = p.getZ(i) < 0; p.setXYZ(i, p.getX(i) * (top ? 1 - inset : 1), top ? (front ? ys[1] : yt[1]) : (front ? ys[0] : yt[0]), p.getZ(i) + (z0 + z1) / 2); }
-    g.computeVertexNormals(); return g;
+  /* cars: five bodies (saloon, hatchback, SUV, pickup, van) from side profiles, extruded with rounded edges; paint
+     tinted per car, glass with a sheen of the sky, tyres and hubs, lamps that light at dusk and in tunnels (tag: 1
+     paint, 2 head lamp, 3 tail lamp); each faces -z */
+  const glass = col(0x1b2128), tyre = col(0x131313), hub = col(0x8a8d90), trim = col(0x2a2c30), white = col(0xffffff), lamp = col(0xfff4e0), red = col(0xb01a14);
+  const side = (pts, w, bevel = 0.05) => {
+    const g = new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y))), { depth: w - 2 * bevel, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 2 });
+    return g.translate(0, 0, -(w - 2 * bevel) / 2).rotateY(-Math.PI / 2);
   };
-  const carGeo = merge([[hull(1.8, -2.25, -1.0, [0.3, 0.86], [0.3, 0.98]), white], [hull(1.82, -1.0, 1.4, [0.28, 0.98], [0.28, 1.0]), white], [hull(1.8, 1.4, 2.25, [0.3, 0.98], [0.32, 0.9]), white],
-    [hull(1.7, -1.0, 1.25, [0.98, 1.0], [0.98, 1.0]), glass], [hull(1.62, -0.75, 1.0, [1.0, 1.46], [1.0, 1.48], 0.06), glass], [hull(1.54, -0.45, 0.75, [1.46, 1.52], [1.48, 1.52], 0.02), white],
-    [B(0.42, 0.12, 0.04, -0.6, 0.74, -2.25), lamp], [B(0.42, 0.12, 0.04, 0.6, 0.74, -2.25), lamp], [B(0.4, 0.12, 0.04, -0.62, 0.8, 2.25), red], [B(0.4, 0.12, 0.04, 0.62, 0.8, 2.25), red],
-    [B(1.84, 0.2, 4.5, 0, 0.36, 0), col(0x2a2c30)], wheel(-0.86, -1.35), wheel(0.86, -1.35), wheel(-0.86, 1.38), wheel(0.86, 1.38)]);
+  // L, W, wheel radius, ride (wheel centre height), lamp height; profiles [z, y] front (-z) to back: body, glass, roof
+  const BODIES = {
+    saloon: [4.7, 1.82, 0.33, 0.33, 0.74, [[-2.35, 0.36], [-2.35, 0.7], [-2.18, 0.82], [-1.3, 0.94], [-0.78, 0.98], [1.3, 0.98], [2.2, 0.93], [2.35, 0.8], [2.35, 0.36]],
+      [[-0.82, 0.96], [-0.08, 1.38], [0.95, 1.4], [1.6, 0.96]], [[-0.1, 1.36], [0.97, 1.38], [0.92, 1.44], [-0.03, 1.43]]],
+    hatch: [4.1, 1.76, 0.32, 0.32, 0.76, [[-2.05, 0.35], [-2.05, 0.7], [-1.9, 0.83], [-1.15, 0.95], [-0.75, 0.99], [1.86, 0.99], [2.05, 0.9], [2.05, 0.35]],
+      [[-0.8, 0.97], [-0.06, 1.42], [1.52, 1.43], [1.98, 0.98]], [[-0.07, 1.4], [1.5, 1.41], [1.45, 1.48], [-0.02, 1.47]]],
+    suv: [4.8, 1.94, 0.39, 0.39, 0.92, [[-2.4, 0.44], [-2.4, 0.86], [-2.25, 0.99], [-1.5, 1.08], [-1.0, 1.12], [2.3, 1.12], [2.4, 1.0], [2.4, 0.44]],
+      [[-1.05, 1.1], [-0.36, 1.62], [2.0, 1.64], [2.32, 1.12]], [[-0.36, 1.6], [2.0, 1.62], [1.95, 1.72], [-0.3, 1.7]]],
+    pickup: [5.6, 2.0, 0.41, 0.41, 0.96, [[-2.8, 0.47], [-2.8, 0.92], [-2.65, 1.05], [-1.8, 1.14], [-1.3, 1.16], [2.8, 1.16], [2.8, 0.47]],
+      [[-1.35, 1.14], [-0.74, 1.74], [0.36, 1.76], [0.55, 1.14]], [[-0.74, 1.71], [0.36, 1.73], [0.33, 1.81], [-0.7, 1.79]]],
+    van: [5.1, 1.98, 0.36, 0.36, 0.86, [[-2.55, 0.4], [-2.55, 0.84], [-2.4, 0.99], [-1.7, 1.1], [-1.4, 1.13], [2.5, 1.13], [2.55, 1.0], [2.55, 0.4]],
+      [[-1.45, 1.11], [-0.6, 1.78], [2.36, 1.8], [2.5, 1.12]], [[-0.6, 1.75], [2.36, 1.77], [2.3, 1.85], [-0.55, 1.83]]],
+  };
+  const carGeos = Object.entries(BODIES).map(([name, [L, W, wr, wy, ly, body, gl, roof]]) => {
+    const wheel = (x, z) => [[new THREE.CylinderGeometry(wr, wr, 0.26, 14).rotateZ(Math.PI / 2).translate(x, wy, z), tyre], [new THREE.CylinderGeometry(wr * 0.58, wr * 0.58, 0.27, 10).rotateZ(Math.PI / 2).translate(x * 1.005, wy, z), hub]];
+    const fz = -L / 2 + 0.88, rz = L / 2 - 0.95, wx = W / 2 - 0.08;
+    const parts = [[side(body, W), white, null, { tag: 1 }], [side(gl, W * 0.88, 0.04), glass], [side(roof, W * 0.84, 0.03), white, null, { tag: 1 }],
+      [B(W * 0.94, 0.24, L * 0.9, 0, wy * 0.95, 0), trim], [B(W * 0.99, 0.17, 0.14, 0, ly - 0.3, -L / 2), trim], [B(W * 0.99, 0.17, 0.14, 0, ly - 0.24, L / 2), trim],
+      ...[-1, 1].flatMap(s => [[B(0.38, 0.13, 0.06, s * (W / 2 - 0.3), ly, -L / 2 - 0.02), lamp, null, { tag: 2 }], [B(0.34, 0.12, 0.06, s * (W / 2 - 0.27), ly + 0.06, L / 2 + 0.02), red, null, { tag: 3 }]]),
+      ...[[-wx, fz], [wx, fz], [-wx, rz], [wx, rz]].flatMap(([x, z]) => wheel(x, z))];
+    if (name === 'pickup') parts.push([B(W * 0.86, 0.05, 2.1, 0, 1.17, 1.65), trim]);  // the bed
+    return { name, L, W, g: merge(parts) };
+  });
+  const carMat = lam(), lamps = { value: 0 }, sheen = { value: new THREE.Color(0.5, 0.6, 0.7) };
+  carMat.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, { lamps, sheen });
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float tag; varying float vTag;')
+      .replace("#include <color_vertex>", `vColor = color;
+        #ifdef USE_INSTANCING_COLOR
+        if (tag > 0.5 && tag < 1.5) vColor.rgb *= instanceColor.rgb;
+        #endif
+        vTag = tag;`);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float lamps; uniform vec3 sheen; varying float vTag;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        if (vTag > 1.5 && vTag < 2.5) totalEmissiveRadiance += vec3(1.0, 0.92, 0.78) * (0.15 + lamps * 12.0);
+        else if (vTag > 2.5) totalEmissiveRadiance += vec3(1.0, 0.06, 0.03) * (0.25 + lamps * 4.0);`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        // paint and glass catch the sky at a glancing angle
+        float jwFr = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 3.0) * step(vTag, 1.5);
+        reflectedLight.indirectDiffuse += sheen * (0.02 + 0.28 * jwFr);`);
+  };
+  carMat.customProgramCacheKey = () => 'jw-car-1';
   const counts = [[44, 1, 1], [26, 1, 1], [10, 0.6, 0]][quality] ?? [26, 1, 1];
-  const cars = new THREE.InstancedMesh(carGeo, lam(), counts[0]); cars.castShadow = quality === 0; cars.frustumCulled = false; scene.add(cars);
-  for (let i = 0; i < counts[0]; i++) cars.setColorAt(i, C.set(CAR_COLOURS[i % CAR_COLOURS.length]));
+  const nT = carGeos.length, perType = Math.ceil(counts[0] / nT) + 2;
+  const carSets = carGeos.map(({ g }) => { const m = new THREE.InstancedMesh(g, carMat, perType); m.castShadow = quality === 0; m.frustumCulled = false; m.count = 0; scene.add(m); return m; });
+  // headlight pools on the road ahead, added light at dusk (one instanced draw, flat quads)
+  const poolMat = new THREE.ShaderMaterial({ uniforms: { lamps }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: 'varying vec2 vP; varying float vD; void main() { vP = position.xz; vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0); vD = distance(w.xyz, cameraPosition); gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: 'uniform float lamps; varying vec2 vP; varying float vD; void main() { float a = max(0.0, 1.0 - length(vP / vec2(2.2, 7.0))); a = a * a * smoothstep(0.0, 0.6, vP.y + 7.0) * lamps * (1.0 - smoothstep(150.0, 400.0, vD)); gl_FragColor = vec4(vec3(1.0, 0.85, 0.62) * a * 0.55, 1.0); }' });
+  const pools = new THREE.InstancedMesh(new THREE.PlaneGeometry(4.4, 14, 1, 1).rotateX(-Math.PI / 2), poolMat, counts[0]); pools.frustumCulled = false; pools.count = 0; pools.renderOrder = 2; scene.add(pools);
   const fleet = [];
-  for (let i = 0; i < counts[0]; i++) fleet.push({ i, kind: i < Math.round(counts[0] * 0.4) ? 'bridge' : 'road', live: false, s: 0, v: 0, pull: 0 });
+  for (let i = 0; i < counts[0]; i++) fleet.push({ i, kind: i < Math.round(counts[0] * 0.4) ? 'bridge' : 'road', type: Math.floor(hash2(i, 29) * nT) % nT, col: CAR_COLOURS[i % CAR_COLOURS.length], live: false, s: 0, v: 0, off: 0 });
 
   /* people: a shirt (tinted) and the rest (head, arms, legs) */
   const skin = col(0xd8a984), trousers = col(0x2e3440);
@@ -84,12 +150,19 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
   const flocks = [];
 
   let t = 0;
-  // ctx: { rider: { x, y, z, v, yaw }, roads: () => [{ P: [[x, y, z]], w, lanes, one, big }], ground: (x, z) -> h | null }
+  // ctx: { rider: { x, y, z, v, yaw }, riders: [{ x, z, v }] (all on the roads), roads: () => [{ P: [[x, y, z]], w, lanes, one, big }],
+  // ground: (x, z) -> h | null }
   function update(dt, ctx) {
     t += dt; bt.value = t;
     const R = ctx.rider;
     /* cars */
-    let roads = null;
+    let roads = null, pn = 0;
+    const riders = ctx.riders || [R], fill = carSets.map(() => 0);
+    const put = (c, x, y, z, yaw, pitch = 0) => {
+      const m = carSets[c.type], i = fill[c.type]++; if (i >= perType) return;
+      M4.compose(V.set(x, y, z), Q.setFromEuler(E.set(pitch, yaw, 0, 'YXZ')), S.set(1, 1, 1)); m.setMatrixAt(i, M4); m.setColorAt(i, C.set(c.col));
+      if (lamps.value > 0.05 && pn < counts[0]) { V.set(0, 0, -9.5).applyQuaternion(Q); M4.compose(V.set(x + V.x, y + 0.08, z + V.z), Q.setFromEuler(E.set(0, yaw, 0)), S.set(1, 1, 1)); pools.setMatrixAt(pn++, M4); }
+    };
     const [bx, bz] = marks.lane ? [marks.lane(0, 0).x, marks.lane(0, 0).z] : [0, 0], nearBridge = marks.lane && Math.hypot(R.x - bx, R.z - bz) < 6000;
     for (const c of fleet) {
       if (c.kind === 'bridge') {
@@ -97,41 +170,48 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
         if (!c.live) { const k = c.i; c.lane = (k % 3) + 1; c.dir = k % 2 ? 1 : -1; c.s = marks.span[0] + hash2(k, 11) * (marks.span[1] - marks.span[0]); c.v = 19 + 5 * hash2(k, 13); c.live = true; }
         c.s += c.dir * c.v * dt;
         if (c.s > marks.span[1] + 60) c.s = marks.span[0] - 60; if (c.s < marks.span[0] - 60) c.s = marks.span[1] + 60;
-        const p = marks.lane(Math.max(marks.span[0], Math.min(marks.span[1], c.s)), c.dir * (c.lane * 3.33 - 1.66));
-        const inside = c.s > marks.span[0] && c.s < marks.span[1];
-        M4.compose(V.set(p.x, inside ? p.y : -50, p.z), Q.setFromEuler(E.set(0, p.yaw + (c.dir > 0 ? Math.PI : 0), 0)), S.set(1, 1, 1));
-        cars.setMatrixAt(c.i, M4); continue;
+        if (c.s <= marks.span[0] || c.s >= marks.span[1]) continue;
+        const p = marks.lane(c.s, c.dir * (c.lane * 3.33 - 1.66));
+        put(c, p.x, p.y, p.z, p.yaw + (c.dir > 0 ? Math.PI : 0)); continue;
       }
       // a car on a road near the rider
       if (!c.live || Math.hypot(c.x - R.x, c.z - R.z) > 900) {
         roads ??= ctx.roads();
         const cand = roads.filter(r => r.P.length > 4); c.live = false;
-        if (!cand.length) { cars.setMatrixAt(c.i, M4.makeTranslation(0, -100, 0)); continue; }
+        if (!cand.length) continue;
         const r = cand[Math.floor(hash2(c.i, Math.floor(t * 3)) * cand.length) % cand.length], P = r.P;
         const k = Math.floor(hash2(Math.floor(t * 7), c.i) * (P.length - 2));
-        if (Math.hypot(P[k][0] - R.x, P[k][2] - R.z) < 60) { cars.setMatrixAt(c.i, M4.makeTranslation(0, -100, 0)); continue; }  // never pop in next to the rider
-        Object.assign(c, { r, k, f: 0, dir: r.one || hash2(c.i, k) < 0.5 ? 1 : -1, v0: (r.big ? 20 : 12) + 4 * hash2(k, c.i), live: true, x: P[k][0], z: P[k][2], pull: 0 });
-        if (c.dir < 0) c.k = Math.max(1, k);
+        if (riders.some(o => Math.hypot(P[k][0] - o.x, P[k][2] - o.z) < 70)) continue;  // never pop in next to a rider
+        const dir = r.one || hash2(c.i, k) < 0.5 ? 1 : -1;
+        Object.assign(c, { r, k: dir < 0 ? Math.max(1, k) : k, f: 0, dir, v0: (r.big ? 20 : 12) + 4 * hash2(k, c.i), live: true, x: P[k][0], z: P[k][2], off: null });
+        c.v = c.v0;
       }
       const P = c.r.P; let a = P[c.k], b = P[c.k + c.dir];
       if (!b) { c.live = false; continue; }
       let L = Math.hypot(b[0] - a[0], b[2] - a[2]) || 0.01;
-      // the rider ahead in this lane: slow and pull out to pass
-      const dx = (b[0] - a[0]) / L, dz = (b[2] - a[2]) / L, rx = -dz, rz = dx;
-      const half = c.r.w / 2, laneOff = c.r.one ? half - 1.9 : Math.min(half - 1.6, c.r.w / (2 * c.r.lanes) * (c.r.lanes > 2 ? 3 : 1));
-      const gx = R.x - c.x, gz = R.z - c.z, gap = gx * dx + gz * dz, lat = gx * rx + gz * rz, plan = passPlan(gap, lat, c.v0, R.v);
-      c.pull += (plan.pull - c.pull) * Math.min(1, dt * 1.5);
-      c.f += plan.v * dt / L;
+      const dx = (b[0] - a[0]) / L, dz = (b[2] - a[2]) / L, rx = -dz, rz = dx, half = c.r.w / 2, body = carGeos[c.type];
+      const laneOff = c.r.one ? half - 1.9 : Math.min(half - 1.6, c.r.w / (2 * c.r.lanes) * (c.r.lanes > 2 ? 3 : 1));
+      c.off ??= laneOff;
+      // as far left as it may go: the next lane of a oneway, the oncoming lane of a two-way road while nothing comes
+      const cx = a[0] + (b[0] - a[0]) * c.f, cz = a[2] + (b[2] - a[2]) * c.f;
+      const oncoming = !c.r.one && fleet.some(d => d !== c && d.live && d.r === c.r && d.dir !== c.dir && (() => { const g = (d.x - cx) * dx + (d.z - cz) * dz; return g > -10 && g < 170; })());
+      const leftmost = c.r.one || !oncoming ? -half + 1.15 : 1.1;
+      // the riders in road terms, and the car ahead in its lane
+      const near = riders.map(o => { const gx = o.x - cx, gz = o.z - cz; return { gap: gx * dx + gz * dz, rl: gx * rx + gz * rz, v: o.v }; }).filter(o => o.gap > -20 && o.gap < 90 && Math.abs(o.rl) < 12);
+      let ahead = Infinity;
+      for (const d of fleet) if (d !== c && d.live && d.kind === 'road' && d.r === c.r && d.dir === c.dir) {
+        const g = (d.x - c.x) * dx + (d.z - c.z) * dz; if (g > 0 && g < 35 && Math.abs((d.x - c.x) * rx + (d.z - c.z) * rz) < 2.3) ahead = Math.min(ahead, Math.max(0, d.v + (g - 10) * 0.6));
+      }
+      const st = carStep(c, near, { laneOff, leftmost, L: body.L, W: body.W, ahead }, dt);
+      c.v = st.v; c.off = st.off; c.f += st.move / L;
       while (c.f >= 1) { c.f -= 1; c.k += c.dir; a = P[c.k]; b = P[c.k + c.dir]; if (!b) break; const L2 = Math.hypot(b[0] - a[0], b[2] - a[2]) || 0.01; c.f *= L / L2; L = L2; }
       if (!b) { c.live = false; continue; }
-      const off = laneOff - c.pull * (laneOff + (c.r.one ? -1.2 : 1.0));
       const ex = (b[0] - a[0]) / L, ez = (b[2] - a[2]) / L;
-      c.x = a[0] + (b[0] - a[0]) * c.f - ez * off; c.z = a[2] + (b[2] - a[2]) * c.f + ex * off;
-      const y = a[1] + (b[1] - a[1]) * c.f - 0.2;
-      M4.compose(V.set(c.x, y, c.z), Q.setFromEuler(E.set(Math.atan2(b[1] - a[1], L), Math.atan2(-ex, -ez), 0, 'YXZ')), S.set(1, 1, 1));
-      cars.setMatrixAt(c.i, M4);
+      c.x = a[0] + (b[0] - a[0]) * c.f - ez * c.off; c.z = a[2] + (b[2] - a[2]) * c.f + ex * c.off;
+      put(c, c.x, a[1] + (b[1] - a[1]) * c.f - 0.2, c.z, Math.atan2(-ex, -ez), Math.atan2(b[1] - a[1], L));
     }
-    cars.instanceMatrix.needsUpdate = true;
+    carSets.forEach((m, k) => { m.count = Math.min(perType, fill[k]); m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
+    pools.count = pn; pools.instanceMatrix.needsUpdate = true;
     /* people: standing about near the rider, a few walking slowly to and fro */
     let n = 0;
     for (const p of folk) {
@@ -166,6 +246,9 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
   return {
     update,
     get counts() { return { cars: fleet.filter(c => c.live).length, people: bodies.count, birds: birds.count }; },
-    dispose() { for (const m of [cars, bodies, rests, birds]) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); m.dispose(); } },
+    // the car bodies (for checks), the cars' lamps: 0 off .. 1 full (dusk, tunnels); the sky's colour on their paint
+    models: carGeos, carMaterial: carMat,
+    setLamps(k, sky) { lamps.value = k; if (sky) sheen.value.copy(sky); },
+    dispose() { for (const m of [...carSets, pools, bodies, rests, birds]) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); m.dispose(); } },
   };
 }

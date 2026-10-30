@@ -3,7 +3,9 @@
 // DOM. Taps, arrow keys, the default way, a reload in the middle. stdout: JSON report for tests/test_world.py.
 import { readFileSync, existsSync } from 'node:fs';
 import { Engine } from '../../app/js/web/engine.js';
-import { createWorld } from '../../app/js/world.js';
+import { createWorld, createRoadLoader, createTerrain, PRESETS } from '../../app/js/world.js';
+import { createBaked } from '../../app/js/world3d/baked.js';
+import { onDeck } from '../../app/js/ggb.js';
 import { createCourses } from '../../app/js/courses.js';
 import { parseWays, dist } from '../../app/js/roads.js';
 import { track } from '../../app/js/course.js';
@@ -119,5 +121,30 @@ out.spacing = Math.max(...eng.ride.course.ll.slice(1).map((p, i) => dist(eng.rid
   const e = eng2.ride.course.ele, d = eng2.ride.cs.d;
   out.bridge = { started, first: [first.length, Math.min(...first), Math.max(...first)], n: e.length, d,
     jump: Math.max(...e.slice(1).map((x, i) => Math.abs(x - e[i]))), mid: e[100], end: e[200], beyond: e[250] };
+}
+
+// the Golden Gate Bridge ridden end to end on the baked roads and terrain (app/roads, app/world): from Vista Point south
+// across the deck. Every course point on the deck must be at the deck's own height (ggb.js), which the 3D world draws
+// and stands the rider on: never the sea floor under it, never the ground of the anchorage's cliff.
+{
+  const app = new URL('../../app/', import.meta.url);
+  const file = async u => { const f = new URL(String(u).replace(/^\//, ''), app); if (!existsSync(f)) return new Response(null, { status: 404 }); return new Response(readFileSync(f)); };
+  const eng3 = new Engine({ hub, logEvent: l => eng3.note(l), settings: () => settings, save: () => {}, archive: () => {}, clock: () => t, wall: () => wall });
+  const w3 = createWorld({ control: async (a, b) => eng3.control(a, b), course: async () => ({ course: eng3.ride.course, d: eng3.ride.cs.d }),
+    loader: createRoadLoader({ fetch: async u => { const r = await file(u); return { ok: r.ok, json: () => r.json() }; }, caches: null }),
+    terrain: createTerrain({ baked: createBaked({ fetch: file }) }) });
+  const p = PRESETS.find(x => x.id === 'ggb');
+  await w3.start({ name: p.name, lat: p.lat, lon: p.lon, heading: p.heading });
+  eng3.control('start', {});
+  hub.r.power = 400;
+  for (let i = 0; i < 400 && eng3.ride.cs.d < 2900; i++) { t += 1; wall += 1000; hub.r.last = t; eng3.tick(1); w3.update(eng3.state({}).ride.course, eng3.ride.id); await flush(); await new Promise(r => setTimeout(r, 2)); }
+  hub.r.power = 230;
+  // the first crossing: from the first point on the deck to the last before it leaves it (the ride turns at the
+  // world's edge past the south end and comes back)
+  const c = eng3.ride.course, all = c.ll.map((q, i) => ({ i, k: onDeck(...q), e: c.ele[i] })), i0 = all.findIndex(o => o.k);
+  let i1 = i0; while (i1 + 1 < all.length && all[i1 + 1].k) i1++;
+  const on = all.slice(i0, i1 + 1);
+  out.ggb = { d: eng3.ride.cs.d, deck: on.length, worst: Math.max(...on.map(o => Math.abs(o.e - o.k.h))),
+    sMin: Math.min(...on.map(o => o.k.s)), sMax: Math.max(...on.map(o => o.k.s)), mid: on.find(o => Math.abs(o.k.s) < 20)?.e ?? null };
 }
 process.stdout.write(JSON.stringify(out), () => process.exit(0));  // loaders still polling for cells never answered

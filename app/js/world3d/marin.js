@@ -4,11 +4,8 @@
 import { hash2 } from './landuse.js';
 import * as roadLib from './ribbon.js';
 
-// the bridge's axis: the two tower centres (where the OpenStreetMap sidewalks step round the towers); along the axis
-// from mid span: the straight deck (the approaches curve, the road renderer draws those), the anchorages, the deck's
-// height (the same straight line the ride's road takes between the abutments)
-export const GGB = { south: [37.814, -122.47788], north: [37.82547, -122.47923], ends: [-1005, 985], anchor: 981, deckW: 27.4, walk: 29.5,
-  towerTop: 227, deck: [[-1127, 54.5], [985, 60.8]] };
+import { GGB, deckH, centreT, fromST, toST, onDeck } from '../ggb.js';
+export { GGB };
 
 export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const root = new THREE.Group(); scene.add(root);
@@ -18,41 +15,60 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   /* ---------- the Golden Gate Bridge ---------- */
   const A = proj.xz(...GGB.south), B = proj.xz(...GGB.north);
   const L = Math.hypot(B[0] - A[0], B[1] - A[1]), ux = (B[0] - A[0]) / L, uz = (B[1] - A[1]) / L;   // along, south to north
-  const vx = -uz, vz = ux;                                                                         // across
+  const vx = -uz, vz = ux;                                                                         // across (east +)
   const mid = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2], half = L / 2;
   const W = (s, t, y) => new THREE.Vector3(mid[0] + ux * s + vx * t, y, mid[1] + uz * s + vz * t);
-  const deckH = s => { const d = GGB.deck; if (s <= d[0][0]) return d[0][1]; for (let i = 1; i < d.length; i++) if (s <= d[i][0]) return d[i - 1][1] + (d[i][1] - d[i - 1][1]) * (s - d[i - 1][0]) / (d[i][0] - d[i - 1][0]); return d.at(-1)[1]; };
   const bridge = new THREE.Group(); root.add(bridge);
   const yaw = Math.atan2(ux, uz);
   const box = (sx, sy, sz, m, s, t, y, rot = 0) => { const o = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m); o.position.copy(W(s, t, y)); o.rotation.y = yaw + rot; o.castShadow = true; o.receiveShadow = true; bridge.add(o); return o; };
-  // deck: a truss box in segments that follow the deck's rise; on top six lanes with their lines and a sidewalk each
-  // side (the road shader), thin railings at the edges
-  const seg = 40, rail = [];
-  for (let s = GGB.ends[0]; s < GGB.ends[1]; s += seg) {
-    const s1 = Math.min(GGB.ends[1], s + seg), h0 = deckH(s), h1 = deckH(s1), len = s1 - s, q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.atan2(h1 - h0, len), yaw, 0, 'YXZ'));
-    box(GGB.deckW, 7.6, len + 0.4, orange, (s + s1) / 2, 0, (h0 + h1) / 2 - 3.95).quaternion.copy(q);
-    for (const t of [-1, 1]) for (const [y, th] of [[1.15, 0.09], [0.55, 0.05]]) box(0.07, th, len + 0.1, orange, (s + s1) / 2, t * (GGB.deckW / 2 - 0.15), (h0 + h1) / 2 + y).quaternion.copy(q);
-    for (let k = s; k < s1; k += 4) for (const t of [-1, 1]) rail.push(W(k, t * (GGB.deckW / 2 - 0.15), deckH(k) + 0.6));
+  // the deck follows its own centre line (ggb.js: straight over the water, curving at both ends): a point s along it,
+  // d across from the centre line (east +), at height y; the way it runs there
+  const cl = s => proj.xz(...fromST(s, centreT(s)));
+  function D(s, d, y) {
+    const p = cl(s), a = cl(s - 1), b = cl(s + 1), tx = b[0] - a[0], tz = b[1] - a[1], l = Math.hypot(tx, tz) || 1;
+    return { x: p[0] - tz / l * d, y, z: p[1] + tx / l * d, yaw: Math.atan2(tx, tz) };
+  }
+  // the deck's stations: 40 m apart over the straight, 10 m on the curves
+  const S0 = GGB.span[0], S1 = GGB.span[1], st = [];
+  for (let s = S0; s < S1; s += s < -1150 || s > 1210 ? 10 : 40) st.push(s);
+  st.push(S1);
+  const segBox = (sx, sy, m, s0, s1, d, y0, y1) => {
+    const a = D(s0, d, y0), b = D(s1, d, y1), len = Math.hypot(b.x - a.x, b.z - a.z), o = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, len + 0.4), m);
+    o.position.set((a.x + b.x) / 2, (y0 + y1) / 2, (a.z + b.z) / 2); o.quaternion.setFromEuler(new THREE.Euler(-Math.atan2(y1 - y0, len), Math.atan2(b.x - a.x, b.z - a.z), 0, 'YXZ'));
+    o.castShadow = true; o.receiveShadow = true; bridge.add(o); return o;
+  };
+  // deck: a truss box in segments that follow the deck's rise and its curves; on top six lanes with their lines and a
+  // sidewalk each side (the road shader), thin railings at the edges; at the towers the sidewalks step out round the legs
+  const rail = [], legT = 14.6;
+  for (let i = 1; i < st.length; i++) {
+    const s0 = st[i - 1], s1 = st[i], h0 = deckH(s0), h1 = deckH(s1);
+    const dp = s0 >= -1000 && s1 <= 1100 ? 7.6 : 2.4;  // the stiffening truss over the suspended spans, girders on the approaches
+    segBox(GGB.deckW, dp, orange, s0, s1, 0, h0 - 0.15 - dp / 2, h1 - 0.15 - dp / 2);
+    for (const t of [-1, 1]) for (const [y, th] of [[1.15, 0.09], [0.55, 0.05]]) segBox(0.07, th, orange, s0, s1, t * (GGB.deckW / 2 - 0.15), h0 + y, h1 + y);
+    for (let k = s0; k < s1; k += 4) if (Math.abs(Math.abs(k) - GGB.towers) > 12) for (const t of [-1, 1]) { const p = D(k, t * (GGB.deckW / 2 - 0.15), deckH(k) + 0.6); rail.push(new THREE.Vector3(p.x, p.y, p.z)); }
+  }
+  for (const s of [-GGB.towers, GGB.towers]) for (const t of [-1, 1]) {  // the walkways round the tower legs
+    box(4.2, 1.2, 30, concrete, s, t * (legT + 6.9), deckH(s) - 0.62);
+    box(0.08, 1.15, 30, orange, s, t * (legT + 8.95), deckH(s) + 0.6);
   }
   if (mats?.road) {
-    const { builder, ribbon } = roadLib, B = builder(), axis = [[0, GGB.ends[0]], [0, GGB.ends[1]]].map(([t, s]) => { const p = W(s, t, 0); return [p.x, p.z]; });
-    const off = (pts, t) => pts.map(([x, z]) => [x + vx * t, z + vz * t]), dk = [deckH(GGB.ends[0]), deckH(GGB.ends[1])];
-    ribbon(B, axis, { w: 20, lm: 2, lanes: 6, hAt: () => 0, deck: dk, lift: 0.02, step: 40 });
-    for (const t of [-1, 1]) {
-      ribbon(B, off(axis, t * 11.8), { w: 3.2, surf: 1, hAt: () => 0, deck: dk, lift: 0.06, step: 40 });
-    }
-    const d = B.done(), g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); g.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); g.setAttribute('rd', new THREE.BufferAttribute(d.code, 4));
+    const { builder, ribbon } = roadLib, Bd = builder(), axis = [], H = (x, z) => deckH(toST(proj.lat(z), proj.lon(x))[0]);
+    for (let s = S0; s <= S1; s += 5) axis.push(s);
+    const line = d => axis.map(s => { const p = D(s, d, 0); return [p.x, p.z]; });
+    ribbon(Bd, line(0), { w: 20, lm: 2, lanes: 6, hAt: H, lift: 0.02, step: 10 });
+    for (const t of [-1, 1]) ribbon(Bd, line(t * 11.8), { w: 3.2, surf: 1, hAt: H, lift: 0.06, step: 10 });
+    const d = Bd.done(), g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); g.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); g.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); g.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4));
     g.setIndex(new THREE.BufferAttribute(d.idx, 1)); g.computeVertexNormals(); g.computeBoundingSphere();
     const top = new THREE.Mesh(g, mats.road); top.receiveShadow = true; bridge.add(top);
   }
   { const post = new THREE.InstancedMesh(new THREE.BoxGeometry(0.06, 1.2, 0.06), orange, rail.length), m4 = new THREE.Matrix4();
     rail.forEach((p, i) => post.setMatrixAt(i, m4.makeTranslation(p.x, p.y, p.z))); post.computeBoundingSphere(); bridge.add(post); }
-  // towers: two legs each, portal struts above the deck, a pier at the water
-  const legT = 15.2;
+  // towers: two legs each (their inner faces at the roadway's edge, the sidewalks going round them), portal struts above
+  // the deck, a pier at the water
   for (const s of [-half, half]) {
     for (const t of [-legT, legT]) {
-      for (const [y0, y1, w] of [[0, 70, 10.5], [70, 150, 9], [150, GGB.towerTop, 7.6]]) box(w, y1 - y0, w * 1.6, orange, s, t, (y0 + y1) / 2);
+      for (const [y0, y1, w] of [[0, 70, 9.6], [70, 150, 8.6], [150, GGB.towerTop, 7.4]]) box(w, y1 - y0, w * 1.6, orange, s, t, (y0 + y1) / 2);
       box(3.2, 4, 3.2, orangeDark, s, t, GGB.towerTop + 2);
     }
     for (const y of [deckH(s) - 12, deckH(s) + 40, deckH(s) + 85, deckH(s) + 125, GGB.towerTop - 6]) box(2 * legT, y === GGB.towerTop - 6 ? 9 : 6, 6, orange, s, 0, y);
@@ -76,9 +92,15 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   }
   const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(susp, 3));
   bridge.add(new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0xa83a2e })));
-  // anchorages
-  // anchorages: massive blocks from the ground (or the sea floor) up under the deck
-  for (const s of [-GGB.anchor, GGB.anchor]) { const top = deckH(s) - 8.2; box(42, top + 8, 56, concrete, s, 0, (top - 8) / 2); }
+  // anchorages: massive blocks from the ground (or the sea floor) up under the deck; the north one carries the roadway
+  // from the side span to the north approach (OpenStreetMap's road on it runs s 984 to 1092)
+  box(42, deckH(-GGB.anchor) - 8.2 + 8, 56, concrete, -GGB.anchor, 0, (deckH(-GGB.anchor) - 8.2 - 8) / 2);
+  { const s = 1038, top = deckH(s) - 8.2; box(44, top + 8, 120, concrete, s, 0, (top - 8) / 2); }
+  // the approaches' piers (concrete, to well below the ground) every 45 m where the deck curves off the axis
+  for (let s = S0 + 12; s < S1; s += 45) if (s < -1140 || s > 1100) {
+    const p = D(s, 0, 0), h = deckH(s) - 2.6, o = new THREE.Mesh(new THREE.BoxGeometry(18, h + 40, 3.2), concrete);
+    o.position.set(p.x, (h - 40) / 2, p.z); o.rotation.y = p.yaw; o.castShadow = true; o.receiveShadow = true; bridge.add(o);
+  }
   // one draw per material for the boxes (towers, struts, deck truss, rails, piers): hundreds of meshes otherwise
   {
     bridge.updateMatrixWorld(true);
@@ -95,11 +117,8 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     }
   }
 
-  // the rider's deck: inside the deck's width and span, the deck top
-  function deckAt(x, z) {
-    const dx = x - mid[0], dz = z - mid[1], s = dx * ux + dz * uz, t = dx * vx + dz * vz;
-    return s >= GGB.ends[0] && s <= GGB.ends[1] && Math.abs(t) <= GGB.walk / 2 ? deckH(s) + 0.05 : null;
-  }
+  // the rider's deck (ggb.js, the same deck the course's heights come from): the roadway's height, null off the deck
+  function deckAt(x, z) { const k = onDeck(proj.lat(z), proj.lon(x)); return k ? k.h + 0.05 : null; }
 
   /* ---------- San Francisco: the skyline across the strait (outside the baked world) ---------- */
   const city = new THREE.Group(); root.add(city);
@@ -186,9 +205,9 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   }
   sky.placeBanks(banks);
 
-  // the deck's height line, also past its ends (the curved approaches the road renderer draws)
-  const deckLine = (x, z) => deckH((x - mid[0]) * ux + (z - mid[1]) * uz);
+  // the deck's height line, also past its ends (any OpenStreetMap piece of the bridge the deck does not cover)
+  const deckLine = (x, z) => deckH(toST(proj.lat(z), proj.lon(x))[0]);
   // a point on the bridge's road deck: s metres along from mid span (south to north), t across (east +), its heading
-  const lane = (s, t) => { const p = W(s, t, deckH(s) + 0.05); return { x: p.x, y: p.y, z: p.z, yaw: yaw }; };
-  return { ggb: true, deckAt, deckLine, lane, span: GGB.ends, update() {}, dispose() { root.traverse(o => o.geometry?.dispose()); scene.remove(root); } };
+  const lane = (s, t) => { const p = D(s, t, deckH(s) + 0.05); return { x: p.x, y: p.y, z: p.z, yaw: p.yaw }; };
+  return { ggb: true, deckAt, deckLine, lane, span: GGB.span, update() {}, dispose() { root.traverse(o => o.geometry?.dispose()); scene.remove(root); } };
 }

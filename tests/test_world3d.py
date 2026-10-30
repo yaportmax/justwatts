@@ -44,9 +44,14 @@ def test_road_ribbon_geometry(out):
     assert r["code"] == [2, 0, 2, 6] and r["v"] == [20, 20]                                 # markings, lanes, width; metres along
     assert r["deck"] == [40, 60, 50] and r["pillars"] == 3                                  # a bridge: straight between its ends
     s = out["styles"]
-    assert s["tertiary/0/0"] == {"w": 7.6, "lm": 2, "surf": 0, "lanes": 2}                  # two lanes, double yellow line
+    assert s["tertiary/0/0"] == {"w": 7.6, "lm": 2, "surf": 0, "lanes": 2, "a": 0, "b": 0, "pL": 0, "pR": 0}  # two lanes, double yellow line
     assert s["primary/4/0"]["w"] == pytest.approx(15.2) and s["primary/4/0"]["lanes"] == 4
-    assert s["trunk/2/8"]["lm"] == 3 and s["motorway/4/8"]["lanes"] == 4                    # oneways: lane lines, no yellow
+    assert s["trunk/2/8"]["lm"] == 3 and s["motorway/4/8"]["lanes"] == 4                    # oneways: lane lines, a yellow left edge
+    c = s["unclassified/1/4392"]                                                            # lower Conzelman: one lane down, parking on
+    assert c["lm"] == 4 and c["w"] == pytest.approx(7.4) and c["a"] == pytest.approx(2.4) and c["b"] == pytest.approx(1.6)  # the right, a bike lane up on the left
+    b = s["unclassified/2/96"]                                                              # Bunker Road: a bike lane each side
+    assert b["lm"] == 2 and b["w"] == pytest.approx(10.0) and b["a"] == b["b"] == pytest.approx(1.6)
+    assert s["tertiary/0/0/9"]["w"] == 9                                                    # a tagged width wins
     assert s["residential/0/0"]["lm"] == 0 and s["path/0/0"]["surf"] == 2 and s["tertiary/0/4"]["surf"] == 2
     assert out["clip"] == [[[0, 5], [5, 5], [5, 10]]]
 
@@ -65,7 +70,8 @@ def test_landuse_parse_and_compact_forms(out):
     assert lu["holeIn"] is False                                               # the inner ring is a hole
     assert lu["solidIn"] is True and lu["heights"] == [25, 8, 3]
     assert out["clipRing"] == [[1, 4], [3, 4], [3, 1], [1, 1], [1, 4]]
-    assert out["roadsRT"] == [{"hw": "tertiary", "fl": 9, "ln": 2, "pts": [[37.9, -122.6], [37.90012, -122.60034]], "dk": [61.3, 70.5]}]
+    assert out["roadsRT"] == [{"hw": "tertiary", "fl": 9, "ln": 2, "wd": 0, "pts": [[37.9, -122.6], [37.90012, -122.60034]], "dk": [61.3, 70.5]},
+                              {"hw": "unclassified", "fl": 4392, "ln": 1, "wd": 8.4, "pts": [[37.9, -122.6], [37.9001, -122.6]]}]  # sides and width kept
     assert out["scatter"]["same"] and out["scatter"]["inside"] and out["scatter"]["n"] == 100 and 30 < out["scatter"]["half"] < 70
 
 

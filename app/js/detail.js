@@ -4,6 +4,7 @@
 // drawn when a row first scrolls into view (tiles are cached by map.js; a course without GPS shows its profile).
 import { esc, fmtT, distText, stepWatts } from './core.js';
 import { drawMap } from './map.js';
+import { inWorld } from './world.js';
 
 const X = '<button class="x" data-d="close" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button>';
 const GLOBE = '<svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg>';
@@ -27,7 +28,7 @@ export function createDetail({ $, store, fit, css, units, ftp, compile, estimate
   const box = $('#detModal'), dlg = $('#detDlg');
   let cur = null;  // { kind: 'workout', w, cw, pick } | { kind: 'course', c, wid, q }
   const lastPick = () => { const v = store.get('hw.wkCourse', ''); return v === 'ow' || courses.byId(v) ? v : ''; };
-  const owStart = () => store.get('hw.owStart', null) || presets[0];
+  const owStart = () => { const s = store.get('hw.owStart', null); return s && inWorld(s.lat, s.lon) ? s : presets[0]; };  // a start from before the world shrank: the first
   const up = m => units() === 'metric' ? `${Math.round(m)} m` : `${Math.round(m * 3.28084)} ft`;
   const close = () => { box.classList.remove('on'); cur = null; };
   const stats = list => `<div class="bstats num">${list.map(([v, k]) => `<span><b>${esc(v)}</b><small>${esc(k)}</small></span>`).join('')}</div>`;

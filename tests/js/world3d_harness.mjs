@@ -74,8 +74,9 @@ const B2 = builder(), deck = ribbon(B2, [[0, 0], [100, 0]], { w: 8, hAt: () => 0
 out.ribbon = { verts: d.pos.length / 3, tris: d.idx.length / 3, faceUp, xs: [...new Set(xs)].sort((a, b) => a - b), edgeY: [ys[0], ys[1]], centre: centre.map(p => r3(p[1])),
   code: [...d.code.slice(0, 4)], v: [...d.uv].filter((_, i) => i % 2).slice(-2), deck: [r3(deck[0][1]), r3(deck.at(-1)[1]), r3(deck[Math.floor(deck.length / 2)][1])], pillars: pil.length,
   resample: resample([[0, 0], [0, 23]], 5).length };
-out.styles = Object.fromEntries([['tertiary', 0, 0], ['primary', 4, 0], ['trunk', 2, 8], ['motorway', 4, 8], ['residential', 0, 0], ['path', 0, 0], ['tertiary', 0, 4]]
-  .map(([hw, ln, fl]) => [`${hw}/${ln}/${fl}`, roadStyle(hw, ln, fl)]));
+out.styles = Object.fromEntries([['tertiary', 0, 0], ['primary', 4, 0], ['trunk', 2, 8], ['motorway', 4, 8], ['residential', 0, 0], ['path', 0, 0], ['tertiary', 0, 4],
+  ['unclassified', 1, 8 | 32 | 256 | 4096], ['unclassified', 2, 32 | 64], ['tertiary', 0, 0, 9]]
+  .map(([hw, ln, fl, wd = 0]) => [`${hw}/${ln}/${fl}${wd ? '/' + wd : ''}`, roadStyle(hw, ln, fl, wd)]));
 out.clip = clipLine([[-10, 5], [5, 5], [5, 20], [20, 20], [20, 5], [30, 5]], [0, 0, 10, 10]).map(r => r.map(p => p.map(r3)));
 
 /* ---------- landuse ---------- */
@@ -95,7 +96,8 @@ out.landuse = { kinds: f.map(x => x.k), ids: f.map(x => x.id), lt: f[0].lt, h: f
   roundTrip: rt.map(x => [x.k, x.rings[0].length, x.h ?? null, x.lt ?? null]), holeIn: inRings(f[2].rings, 0.6, 0.8), solidIn: inRings(f[2].rings, 1.5, 0.3),
   heights: [buildingHeight({ height: '25 m' }), buildingHeight({ 'building:levels': '2' }), buildingHeight({ building: 'garage' })] };
 out.clipRing = clipRing([[0, 0], [0, 4], [4, 4], [4, 0], [0, 0]], [1, 1, 3, 5]);
-out.roadsRT = decodeRoads(encodeRoads([{ hw: 'tertiary', fl: 9, ln: 2, dk: [61.25, 70.5], pts: [[37.9, -122.6], [37.90012, -122.60034]] }]));
+out.roadsRT = decodeRoads(encodeRoads([{ hw: 'tertiary', fl: 9, ln: 2, dk: [61.25, 70.5], pts: [[37.9, -122.6], [37.90012, -122.60034]] },
+  { hw: 'unclassified', fl: 8 | 32 | 256 | 4096, ln: 1, wd: 8.4, pts: [[37.9, -122.6], [37.9001, -122.6]] }]));
 const sc = scatter([[[0, 0], [100, 0], [100, 100], [0, 100], [0, 0]]], 10, 1), sc2 = scatter([[[0, 0], [100, 0], [100, 100], [0, 100], [0, 0]]], 10, 1);
 out.scatter = { n: sc.length, same: JSON.stringify(sc) === JSON.stringify(sc2), inside: sc.every(([x, z]) => x >= 0 && x <= 100 && z >= 0 && z <= 100),
   half: scatter([[[0, 0], [100, 0], [100, 100], [0, 100], [0, 0]]], 10, 0.5).length };
@@ -136,11 +138,11 @@ out.pick = {
 /* ---------- the open world's edge ---------- */
 // a road along the north edge of the world: a junction with one way leading out of it and one along the edge
 const N = BOUNDS[0][2], edge = N - 0.0005, mk = (id, nodes, pts, hw = 'tertiary') => ({ id, hw, name: '', ref: '', ow: 0, br: 0, rb: 0, nodes, pts });
-const ways = [mk(1, [1, 2], [[edge, -122.70], [edge, -122.699]]), mk(2, [2, 3], [[edge, -122.699], [N + 0.002, -122.699]], 'primary'), mk(3, [2, 4], [[edge, -122.699], [edge - 0.0004, -122.698]], 'residential')];
+const ways = [mk(1, [1, 2], [[edge, -122.50], [edge, -122.499]]), mk(2, [2, 3], [[edge, -122.499], [N + 0.002, -122.499]], 'primary'), mk(3, [2, 4], [[edge, -122.499], [edge - 0.0004, -122.498]], 'residential')];
 const g0 = new RoadGraph(), gIn = new RoadGraph({ inside: inWorld });
 for (const gg of [g0, gIn]) gg.addCell('x', ways), gg.complete = () => true;
-const pl = gr => { const p = Plan.at(gr, gr.snap(edge, -122.6995, 90)); p.extend(300, 6); return p.seq.map(s => s.id); };
-out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).map(e => e.to), plan: pl(g0), planIn: pl(gIn), inside: inWorld(37.9, -122.6), outside: inWorld(38.2, -122.6), bridge: inWorld(37.79, -122.476) };
+const pl = gr => { const p = Plan.at(gr, gr.snap(edge, -122.4995, 90)); p.extend(300, 6); return p.seq.map(s => s.id); };
+out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).map(e => e.to), plan: pl(g0), planIn: pl(gIn), inside: inWorld(37.83, -122.5), outside: inWorld(37.9, -122.6), bridge: inWorld(37.815, -122.478) };
 
 /* ---------- drafting ---------- */
 const me = { lat: 37.9, lon: -122.6, h: 0 }, ahead = m => ({ lat: 37.9 + m / 111195, lon: -122.6 });

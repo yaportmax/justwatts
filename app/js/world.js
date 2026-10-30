@@ -4,33 +4,27 @@
 // the plan from the engine's course. Junction choices: choose(), or key() with the arrow keys.
 import { RoadGraph, Plan, OVERPASS, overpassQuery, parseWays, cellKey, cellBox, cellsAround, tileAt, tileEle, bridges, smoothFrom, label } from './roads.js';
 import { STEP_M } from './course.js';
+import { onDeck } from './ggb.js';
 import { gridAt, sharedBaked } from './world3d/baked.js';
 
 export const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
-// The open world is Marin: the Golden Gate Bridge and a strip of San Francisco, the Headlands, Mt Tam, West Marin to
-// Point Reyes Station. Routes never leave BOUNDS (a way out is no option: the default turns away or turns around).
-export const BOUNDS = [[37.80, -122.83, 38.08, -122.47], [37.775, -122.53, 37.81, -122.43]];
+// The open world is the Marin Headlands for now (one small area at a time, each dialled in against Street View before
+// the next opens): the Golden Gate Bridge from its south end, Vista Point, Conzelman, Field, Bunker (the Baker-Barry
+// tunnel), Mitchell, McCullough and Alexander, Fort Baker. Routes never leave BOUNDS (a way out is no option: the
+// default turns away or turns around); the land beyond stays as scenery.
+export const BOUNDS = [[37.806, -122.545, 37.848, -122.465]];
 export const inWorld = (lat, lon) => BOUNDS.some(([s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e);
 export const PRESETS = [
-  { id: 'ggb', name: 'Golden Gate Bridge', lat: 37.80817, lon: -122.47641, heading: 340 },
-  { id: 'hawk', name: 'Hawk Hill', lat: 37.82955, lon: -122.48372, heading: 230 },
+  { id: 'ggb', name: 'Golden Gate Bridge', lat: 37.83234, lon: -122.48061, heading: 160 },
+  { id: 'conzelman', name: 'Conzelman Road', lat: 37.83300, lon: -122.48341, heading: 190 },
+  { id: 'hawk', name: 'Hawk Hill', lat: 37.82625, lon: -122.49900, heading: 250 },
   { id: 'rodeo', name: 'Rodeo Beach', lat: 37.83406, lon: -122.53338, heading: 122 },
-  { id: 'sausalito', name: 'Sausalito', lat: 37.85874, lon: -122.48394, heading: 300 },
-  { id: 'millvalley', name: 'Mill Valley', lat: 37.88404, lon: -122.55409, heading: 245 },
-  { id: 'muirbeach', name: 'Muir Beach', lat: 37.8635, lon: -122.57791, heading: 326 },
-  { id: 'stinson', name: 'Stinson Beach', lat: 37.89982, lon: -122.6433, heading: 300 },
-  { id: 'pantoll', name: 'Pantoll', lat: 37.90415, lon: -122.6044, heading: 41 },
-  { id: 'eastpeak', name: 'East Peak', lat: 37.92746, lon: -122.58194, heading: 280 },
-  { id: 'sisters', name: 'Seven Sisters', lat: 37.91627, lon: -122.62746, heading: 329 },
-  { id: 'fairfax', name: 'Fairfax', lat: 37.98734, lon: -122.58867, heading: 277 },
-  { id: 'whites', name: 'Whites Hill', lat: 38.00682, lon: -122.61571, heading: 300 },
-  { id: 'taylor', name: 'Samuel P. Taylor', lat: 38.0194, lon: -122.73028, heading: 250 },
-  { id: 'reyes', name: 'Point Reyes Station', lat: 38.06736, lon: -122.80484, heading: 170 },
+  { id: 'fortbaker', name: 'Fort Baker', lat: 37.83658, lon: -122.47779, heading: 330 },
 ];
 // roads baked into the app (tools/bake_roads.mjs) in blocks of 5 x 5 cells, app/roads/<id>/<i>_<j>.json: the open
 // world never waits on Overpass
 export const SEEDS = [
-  { id: 'marin', box: [37.76, -122.86, 38.1, -122.42], block: 5 },
+  { id: 'marin', box: [37.79, -122.56, 37.86, -122.45], block: 5 },  // the Headlands (BOUNDS) and a cell or two round them
 ];
 export const seedOf = key => {
   const [cs, cw, cn, ce] = cellBox(key);
@@ -171,9 +165,13 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
     return [...out];
   }
   const planned = at => plan.points(at, Math.floor(plan.end() / STEP_M) + 1);
+  // on the Golden Gate Bridge the deck's own heights (ggb.js: what the 3D world draws), elsewhere the terrain
   async function elevation(pts, at) {
     const e = await terrain.ele(pts.map(p => p.ll)), R = raw.slice(0, at), B = br.slice(0, at);
-    for (let i = 0; i < pts.length; i++) { R.push(e[i] ?? (R.length ? R.at(-1) : 0)); B.push(pts[i].br); }
+    for (let i = 0; i < pts.length; i++) {
+      const dk = /^Golden Gate Bridge/.test(pts[i].nm || '') ? onDeck(...pts[i].ll) : null;
+      if (dk) { R.push(dk.h); B.push(0); } else { R.push(e[i] ?? (R.length ? R.at(-1) : 0)); B.push(pts[i].br); }
+    }
     return [R, B];
   }
   // smoothed heights from point at on; a bridge already partly sent goes on in a straight line from the last point kept

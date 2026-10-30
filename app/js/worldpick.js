@@ -1,4 +1,4 @@
-// Open world start (Marin): a named start (a chip or its pin on the map) or a tap inside the world (the nearest road),
+// Open world start (the Marin Headlands): a named start (a chip or its pin on the map) or a tap inside the world (the nearest road),
 // a workout to run on top or none, Ride.
 import { esc } from './core.js';
 import { loadML } from './ridemap.js';
@@ -17,7 +17,7 @@ export function createPicker({ $, store, world, wOptions, go }) {
   }
   async function pick(p, fly = false) {
     at = p; store.set('hw.owStart', p); ui();
-    if (map) { mk?.setLngLat([p.lon, p.lat]); if (fly) map.jumpTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 11) }); }
+    if (map) { mk?.setLngLat([p.lon, p.lat]); if (fly) map.jumpTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 13) }); }
     hint(p.id ? p.name : 'Finding the nearest road');
     const my = ++seq, r = await world.preview(p.lat, p.lon, p.heading).catch(() => null);
     if (my !== seq) return;
@@ -27,7 +27,7 @@ export function createPicker({ $, store, world, wOptions, go }) {
   }
   async function initMap() {
     const ml = await loadML(), c = at || PRESETS[0];
-    map = new ml.Map({ container: $('#owMap'), attributionControl: false, center: [c.lon, c.lat], zoom: 11, minZoom: 9.5, maxBounds: [[-123.0, 37.70], [-122.30, 38.16]], maxPitch: 0, dragRotate: false,
+    map = new ml.Map({ container: $('#owMap'), attributionControl: false, center: [c.lon, c.lat], zoom: 13, minZoom: 11.5, maxBounds: [[-122.62, 37.77], [-122.39, 37.88]], maxPitch: 0, dragRotate: false,
       transformRequest: url => ({ url, referrerPolicy: 'strict-origin' }),
       style: { version: 8, sources: { base: { type: 'raster', tiles: [osm.tiles], tileSize: 256, maxzoom: osm.max },
         dem: { type: 'raster-dem', tiles: [DEM], tileSize: 256, maxzoom: 15, encoding: 'terrarium' } },
@@ -41,14 +41,14 @@ export function createPicker({ $, store, world, wOptions, go }) {
     const dot = document.createElement('div'); dot.className = 'rmapdot';
     mk = new ml.Marker({ element: dot }).setLngLat([c.lon, c.lat]).addTo(map);
     map.fitBounds([[BOUNDS[0][1], BOUNDS[0][0]], [BOUNDS[0][3], BOUNDS[0][2]]], { padding: 16, duration: 0 });  // the whole world, every pin
-    map.on('click', e => inWorld(e.lngLat.lat, e.lngLat.lng) ? pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }) : hint('Outside the Marin world', true));
+    map.on('click', e => inWorld(e.lngLat.lat, e.lngLat.lng) ? pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }) : hint('Outside the Headlands world', true));
   }
   // wid: the workout to ride there ('' free ride)
   function open(wid = '') {
     box.classList.add('on'); busy = false;
     $('#owWk').innerHTML = wOptions(wid, 'Free ride'); $('#owWk').value = wid;
     $('#owAttr').textContent = osm.attr + ' · Terrain © Mapzen, AWS';
-    const last = store.get('hw.owStart', null);
+    const s = store.get('hw.owStart', null), last = s && inWorld(s.lat, s.lon) ? s : null;  // a start from before the world shrank: the first
     if (!map) initMap().then(() => pick(last || PRESETS[0])).catch(() => hint('Map unavailable here', true));
     else { map.resize(); pick(at || last || PRESETS[0], true); }
     ui();

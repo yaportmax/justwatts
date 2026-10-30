@@ -1,4 +1,4 @@
-// World 3D grass: clumps of blades in square cells round the camera, built a few cells a frame, each cell the same
+// World 3D grass: clumps of blades in square cells round the camera, built within a time budget each frame, each cell the same
 // every time (placement hashed from the cell). The blades take the ground's colour and sway in the vertex shader
 // (materials.js grassMaterial). cellPoints and cellsAround are pure: tests/test_world3d.py.
 import { hash2 } from './landuse.js';
@@ -41,27 +41,32 @@ export function clumpGeometry(blades = 9) {
 
 // THREE, scene, mat: grassMaterial(); sample(x, z) -> { h, nx, ny, nz, cv, m: [wood, green, sand, town], skip } | null
 export function createGrass({ THREE, scene, mat, sample }) {
-  const SIZE = 24, cells = new Map(), g0 = clumpGeometry(), geo = new THREE.BufferGeometry();
+  const SIZE = 24, cells = new Map(), pend = new Map(), g0 = clumpGeometry(), geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(g0.pos, 3)); geo.setIndex(new THREE.BufferAttribute(g0.idx, 1));
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(g0.pos.length).map((_, i) => i % 3 === 1 ? 1 : 0), 3));
   let R = 60, density = 3, gen = 0;
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
   // a cell: two sets, the sparse third of the clumps (drawn out to the edge) and the dense rest (drawn near only)
   const DENSE = 0.33;
-  function build(ci, cj) {
+  // a cell's clumps, a slice at a time (a generator: the caller runs it within its time budget, over several frames
+  // when it must, so a cell never stalls a frame); returns its two meshes
+  function* build(ci, cj) {
     const pts = cellPoints(ci, cj, SIZE, Math.round(SIZE * SIZE * density)), sets = [[[], [], []], [[], [], []]];
-    for (const [x, z, r] of pts) {
-      const g = sample(x, z); if (!g || g.skip) continue;
+    for (let n = 0; n < pts.length; n++) {
+      if ((n & 127) === 127) yield;
+      const [x, z, r] = pts[n], g = sample(x, z); if (!g || g.skip) continue;
       const m = g.m, keep = 1 - m[0] * 0.5 - m[2] * 0.75 - m[3] * 0.35 - Math.max(0, 0.86 - g.ny) * 6;
       if (r > keep) continue;
       const sc = 0.7 + 0.6 * hash2(Math.round(x * 10), Math.round(z * 10)), w = hash2(Math.round(z * 10), Math.round(x * 10)), [M, A, B] = sets[w < DENSE ? 0 : 1];
-      M.push(m4.compose(v.set(x, g.h - 0.04, z), q.setFromAxisAngle(up, r * 40), s.set(sc, sc * (0.75 + 0.5 * ((r * 7.3) % 1)) * (1 - m[2] * 0.4), sc)).clone());
+      m4.compose(v.set(x, g.h - 0.04, z), q.setFromAxisAngle(up, r * 40), s.set(sc, sc * (0.75 + 0.5 * ((r * 7.3) % 1)) * (1 - m[2] * 0.4), sc));
+      for (let k = 0; k < 16; k++) M.push(m4.elements[k]);
       A.push(g.nx, g.nz, g.cv, w); B.push(m[0], m[1], m[2], m[3]);
     }
+    yield;
     const mk = ([M, A, B]) => {
       if (!M.length) return null;
-      const im = new THREE.InstancedMesh(geo, mat, M.length);
-      M.forEach((mm, i) => im.setMatrixAt(i, mm));
+      const im = new THREE.InstancedMesh(geo, mat, M.length / 16);
+      im.instanceMatrix.array.set(M);
       im.geometry = geo.clone(); im.geometry.setAttribute('gA', new THREE.InstancedBufferAttribute(new Float32Array(A), 4)); im.geometry.setAttribute('gB', new THREE.InstancedBufferAttribute(new Float32Array(B), 4));
       im.computeBoundingSphere(); im.receiveShadow = true; im.frustumCulled = true; im.matrixAutoUpdate = false; scene.add(im);
       return im;
@@ -70,25 +75,33 @@ export function createGrass({ THREE, scene, mat, sample }) {
   }
   function drop(k) { const c = cells.get(k); for (const m of [c?.mesh?.sparse, c?.mesh?.dense]) if (m) { scene.remove(m); m.geometry.dispose(); m.dispose(); } cells.delete(k); }
   return {
-    // keep the cells round (x, z) built; build at most `budget` ms of new ones (nearest first)
+    // keep the cells round (x, z) built; build at most `budget` ms of new ones a frame (nearest first, a cell over as
+    // many frames as it takes; the old clumps of a cell being built again stay until the new ones are done)
     update(x, z, budget = 2) {
       mat.userData.u.centre.value.set(x, z); mat.userData.u.radius.value = R;
       const want = cellsAround(x, z, R, SIZE), keep = new Set(), t0 = performance.now();
       for (const [i, j] of want) {
         const k = i + ',' + j; keep.add(k);
-        if (cells.has(k) && cells.get(k).gen === gen) continue;
-        if (performance.now() - t0 > budget) continue;
-        drop(k); cells.set(k, { mesh: build(i, j), gen, i, j });
+        if (cells.get(k)?.gen === gen || performance.now() - t0 > budget) continue;
+        let p = pend.get(k); if (!p || p.gen !== gen) pend.set(k, p = { it: build(i, j), gen });
+        let r; do r = p.it.next(); while (!r.done && performance.now() - t0 < budget);
+        if (r.done) { pend.delete(k); drop(k); cells.set(k, { mesh: r.value, gen, i, j }); }
       }
+      for (const k of [...pend.keys()]) if (!keep.has(k)) pend.delete(k);
       // the dense sets only near the camera (the shader thins them out from a quarter of the radius anyway)
       for (const c of cells.values()) if (c.mesh?.dense) { const dx = Math.max(c.i * SIZE - x, 0, x - (c.i + 1) * SIZE), dz = Math.max(c.j * SIZE - z, 0, z - (c.j + 1) * SIZE); c.mesh.dense.visible = Math.hypot(dx, dz) < R * 0.5; }
       for (const k of [...cells.keys()]) if (!keep.has(k)) { const [i, j] = k.split(',').map(Number), dx = Math.max(i * SIZE - x, 0, x - (i + 1) * SIZE), dz = Math.max(j * SIZE - z, 0, z - (j + 1) * SIZE); if (Math.hypot(dx, dz) > R + SIZE) drop(k); }
     },
     // radius and clumps per square metre; rebuilds every cell
     set(r, d) { if (r === R && d === density) return; R = r; density = d; gen++; },
-    // the ground under some cells changed (a tile was rebuilt): build them again
-    invalidate() { gen++; },
+    // the ground under some cells changed (a tile was rebuilt): build again the cells over box [x0, z0, x1, z1] (all
+    // without one)
+    invalidate(box) {
+      if (!box) { gen++; return; }
+      for (const c of cells.values()) if ((c.i + 1) * SIZE > box[0] && c.i * SIZE < box[2] && (c.j + 1) * SIZE > box[1] && c.j * SIZE < box[3]) c.gen = -1;
+      for (const [k, p] of pend) { const [i, j] = k.split(',').map(Number); if ((i + 1) * SIZE > box[0] && i * SIZE < box[2] && (j + 1) * SIZE > box[1] && j * SIZE < box[3]) p.gen = -1; }
+    },
     get count() { let n = 0; for (const c of cells.values()) n += (c.mesh?.sparse?.count || 0) + (c.mesh?.dense?.visible ? c.mesh.dense.count : 0); return n; },
-    dispose() { for (const k of [...cells.keys()]) drop(k); geo.dispose(); },
+    dispose() { pend.clear(); for (const k of [...cells.keys()]) drop(k); geo.dispose(); },
   };
 }

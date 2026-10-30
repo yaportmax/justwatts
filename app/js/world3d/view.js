@@ -4,7 +4,7 @@
 // frame rate that stays bad calls onFail and the ride map falls back to the other views.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { makeProj, tileX, tileY, lonOf, latOf, key, unkey, headingOf, angDiff } from './geo.js';
-import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks } from './terrain.js';
+import { gridFromHeights, gridHeight, gridIJ, carveSteps, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks } from './terrain.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
@@ -20,6 +20,7 @@ import { createLife } from './life.js';
 import { createAudio } from './audio.js';
 import { makeRider } from './rider.js';
 import { createLandmarks } from './marin.js';
+import { GGB, onDeck } from '../ggb.js';
 
 const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordinate stays within about 25 km
 // quality tiers: shadow map size (0: none) and span, pixel ratio cap, tree share, near rings, far ring, terrain grid
@@ -83,6 +84,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
 
   /* ---------- streaming ---------- */
   const near = new Map(), far = new Map(), jobs = jobQueue();
+  if (globalThis.__w3?.prof) globalThis.__w3.slowJobs = jobs.slow;  // profiling: the jobs that took over 6 ms
   const tileOf = (x, z) => { const lat = proj.lat(z), lon = proj.lon(x); return [Math.floor(tileX(lon, NEAR_Z)), Math.floor(tileY(lat, NEAR_Z))]; };
   function disposeObj(o) {
     o.traverse(m => { if (m.isInstancedMesh || m.isBatchedMesh) m.dispose(); else if (m.geometry && !m.userData.shared) m.geometry.dispose(); if (m.userData.ownMat) m.material.dispose(); });
@@ -104,48 +106,59 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const ii = i < 0 ? n - 1 + i : i >= n ? i - (n - 1) : i, jj = j < 0 ? n - 1 + j : j >= n ? j - (n - 1) : j;
     return ii >= 0 && jj >= 0 && ii < n && jj < n ? t.hs[jj * n + ii] : null;
   };
-  function buildTerrain(c) {
+  function* buildTerrain(c) {
     const t = c.tile, Q = QUALITY[q];
     if (!t) { c.grid = null; setPart(c, 'terrain', null); c.built = true; c.ver = (c.ver || 0) + 1; farDirty = true; return; }
     const fine = c.z === NEAR_Z && c.lod === 0, up = fine ? Q.up : 1;
     const step = c.z === FAR_Z ? 1 : c.lod === 0 ? (Q.segs === 128 ? 1 : 2) : 4, gk = up > 1 ? 'u' + up : 's' + step;
-    if (!c.grid || c.grid.key !== gk) {
-      if (up > 1) c.grid = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: upsample(t.hs, t.n, up, extOf(c)), n: (t.n - 1) * up + 1, step: 1, proj });
-      else c.grid = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: t.hs, n: t.n, step, proj });
-      c.grid.key = gk; c.grid.m = up > 1 ? 1 / up : step;  // source steps (about 15 m) per grid step
-    }
-    c.grid.cut = null; c.grid.hs = c.grid.raw;
-    const ms = c.grid.m;
+    // built aside (G) and swapped in at the end: the ground in use stays as it is while this runs over several frames
+    let G = c.grid;
+    if (!G || G.key !== gk) {
+      if (up > 1) G = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: upsample(t.hs, t.n, up, extOf(c)), n: (t.n - 1) * up + 1, step: 1, proj });
+      else G = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: t.hs, n: t.n, step, proj });
+      G.key = gk; G.m = up > 1 ? 1 / up : step;  // source steps (about 15 m) per grid step
+      yield;
+    } else G = { ...G };
+    G.cut = null; G.hs = G.raw;
+    const ms = G.m;
     if (fine) {
       // every road level across its width (heights along it from the ground, eased), cut and fill banks either side
       const under = [];
       for (const r of t.roads) {
         if (r.fl & 3 || /path|footway|track|bridleway|steps/.test(r.hw)) continue;
         const pts = resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 8), P = [];
-        for (let i = 0; i < pts.length; i++) { const h = gridHeight(c.grid, pts[i][0], pts[i][1], c.grid.raw); if (h != null) P.push([pts[i][0], pts[i][1], h]); }
+        for (let i = 0; i < pts.length; i++) { const h = gridHeight(G, pts[i][0], pts[i][1], G.raw); if (h != null) P.push([pts[i][0], pts[i][1], h]); }
         for (let k = 0; k < 4; k++) for (let i = 1; i + 1 < P.length; i++) P[i][2] = (P[i - 1][2] + 2 * P[i][2] + P[i + 1][2]) / 4;
-        const w = roadStyle(r.hw, r.ln, r.fl).w;
+        const w = roadStyle(r.hw, r.ln, r.fl, r.wd).w;
         if (P.length > 1) under.push({ pts: P, r0: w / 2 + Math.max(2.5, 8 * ms), r1: w / 2 + Math.max(9, 22 * ms) });
+        if (under.length % 12 === 0) yield;
+      }
+      // the Golden Gate Bridge's ends: the ground meets the deck (just under it) where the land comes up to it
+      if (marks.ggb) for (const [a, b] of [[GGB.span[0], GGB.span[0] + 24], [GGB.span[1] - 24, GGB.span[1]]]) {
+        const P = []; for (let s = a; s <= b; s += 4) { const p = marks.lane(s, 0), h = gridHeight(G, p.x, p.z, G.raw); if (h != null && Math.abs(h - p.y) < 4) P.push([p.x, p.z, p.y - 0.4]); }
+        if (P.length > 1) under.push({ pts: P, r0: 15, r1: 24 });
       }
       // the ridden road is one of them: the rider sits on the same ground (the engine's grade comes from these heights too)
       for (const r of t.roads) {
         if (!(r.fl & 2) || /path|footway|steps/.test(r.hw)) continue;
         const P = resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 4); if (P.length < 3) continue;
-        const w = roadStyle(r.hw, r.ln, r.fl).w, D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+        const w = roadStyle(r.hw, r.ln, r.fl, r.wd).w, D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
         const L = D.at(-1); if (L < 3 * PORT) continue;
-        const box = [Math.min(c.grid.xs[0], c.grid.xs[c.grid.segs]), Math.min(c.grid.zs[0], c.grid.zs[c.grid.segs]), Math.max(c.grid.xs[0], c.grid.xs[c.grid.segs]), Math.max(c.grid.zs[0], c.grid.zs[c.grid.segs])];
+        const box = [Math.min(G.xs[0], G.xs[G.segs]), Math.min(G.zs[0], G.zs[G.segs]), Math.max(G.xs[0], G.xs[G.segs]), Math.max(G.zs[0], G.zs[G.segs])];
         for (const [a, dir] of [[0, 1], [P.length - 1, -1]]) {
           if (!(P[a][0] > box[0] + 1 && P[a][0] < box[2] - 1 && P[a][1] > box[1] + 1 && P[a][1] < box[3] - 1)) continue;  // past the tile's edge: the neighbour's piece, not a portal
-          const out = [P[a][0] * 2 - P[a + dir][0], P[a][1] * 2 - P[a + dir][1]], h = Math.min(gridHeight(c.grid, ...P[a], c.grid.raw) ?? 1e9, gridHeight(c.grid, ...out, c.grid.raw) ?? 1e9);
+          const out = [P[a][0] * 2 - P[a + dir][0], P[a][1] * 2 - P[a + dir][1]], h = Math.min(gridHeight(G, ...P[a], G.raw) ?? 1e9, gridHeight(G, ...out, G.raw) ?? 1e9);
           if (h > 1e8) continue;
           const pts = []; for (let i = a; i >= 0 && i < P.length && Math.abs(D[i] - D[a]) <= PORT + 1; i += dir) pts.push([P[i][0], P[i][1], h]);
           if (pts.length > 1) under.push({ pts, r0: w / 2 + 2.5, r1: w / 2 + 9 });
         }
       }
-      carve(c.grid, [], 0, 1, under);
+      yield; yield* carveSteps(G, [], 0, 1, under); yield;
     }
-    const lu = rasterClasses(c.grid, withGardens(t)), m = gridMesh(c.grid, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: c.z === FAR_Z ? farSkip(c) : null });
-    const nor = gridNormals(c.grid), mask = classMasks(lu, c.grid.cut), cv = gridCurvature(c.grid, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6);
+    const lu = rasterClasses(G, withGardens(t)); yield;
+    const m = gridMesh(G, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: c.z === FAR_Z ? farSkip(c, G) : null }); yield;
+    const nor = gridNormals(G), mask = classMasks(lu, G.cut); yield;
+    const cv = gridCurvature(G, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6); yield;
     const nv = m.src.length, N = new Float32Array(nv * 3), A = new Uint8Array(nv * 4), B = new Uint8Array(nv * 4), CV = new Float32Array(nv);
     for (let i = 0; i < nv; i++) {
       const v = m.src[i]; N[3 * i] = nor[3 * v]; N[3 * i + 1] = nor[3 * v + 1]; N[3 * i + 2] = nor[3 * v + 2]; CV[i] = cv[v];
@@ -156,12 +169,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
     g.setIndex(new THREE.BufferAttribute(m.idx, 1)); g.computeBoundingSphere();
     const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
-    if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(); } else { c.nor = c.mask = c.cv = null; }
+    c.grid = G;
+    if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(tileBox(c)); } else { c.nor = c.mask = c.cv = null; }
     setPart(c, 'terrain', mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
   }
   // far tiles leave out the quads a built near tile covers
-  function farSkip(c) {
-    const s = 2 ** (NEAR_Z - FAR_Z), per = c.grid.segs / s;
+  function farSkip(c, g = c.grid) {
+    const s = 2 ** (NEAR_Z - FAR_Z), per = g.segs / s;
     return (i, j) => { const n = near.get(key(NEAR_Z, c.x * s + Math.floor(i / per), c.y * s + Math.floor(j / per))); return !!n?.built; };
   }
   const hOf = c => (x, z) => c.grid ? gridHeight(c.grid, x, z) : null;
@@ -170,19 +184,21 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const r = f.rings[0], n = r.length - 1; let la = 0, lo = 0; for (let i = 0; i < n; i++) { la += r[i][0]; lo += r[i][1]; } la /= n; lo /= n;
     return { k: 'urban', rings: [r.map(([a, b]) => { const dy = (a - la) * 111195, dx = (b - lo) * 87800, d = Math.hypot(dx, dy) || 1, k = (d + 6) / d; return [la + (a - la) * k, lo + (b - lo) * k]; })] };
   }));
-  function buildRoads(c) {
-    const t = c.tile; c.decks = []; c.occ = null;
+  function* buildRoads(c) {
+    const t = c.tile, decks = [];
     if (!t || !c.grid) return setPart(c, 'roads', null);
     const B = builder(), pillars = [], hAt = hOf(c), g = c.grid, occ = new Uint8Array(OCC * OCC), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     const mark = (x, z, r) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = 1; };
     const minor = c.lod > 0, lanes = [], drive = [], lines = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     // ways that go on as one road drawn as one ribbon (no seam where OpenStreetMap splits a road), corners rounded
-    t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}`);
+    t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`);
+    let nr = 0;
     for (const r of t.chained) {
+      if (++nr % 6 === 0) yield;
       if (r.fl & 2) continue;                          // tunnels: under the hill
       if (minor && /path|footway|track|bridleway|service/.test(r.hw)) continue;
-      const st = roadStyle(r.hw, r.ln, r.fl);
+      const st = roadStyle(r.hw, r.ln, r.fl, r.wd);
       const all = (r.fl & 1 ? (p => p) : roundCorners)(r.pts.map(([la, lo]) => proj.xz(la, lo))), runs = [[]];
       for (const p of all) { if (r.fl & 16 && marks.deckAt(p[0], p[1]) != null) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(p); }  // the bridge's own deck
       for (const pts of runs.flatMap(run => run.length > 1 ? clipLine(run, tbox) : [])) {  // exactly this tile: the next one draws on from its edge
@@ -193,7 +209,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (!minor && st.lm && st.lanes >= 2 && !st.surf && centre.length > 3) drive.push({ P: centre, w: st.w, lanes: st.lanes, one: !!(r.fl & 8), big: /motorway|trunk|primary/.test(r.hw) });
       if (dk) {
         pillars.push(...deckSides(B, centre, st.w, 1.4, hAt));
-        for (let i = 1; i < centre.length; i++) c.decks.push([centre[i - 1], centre[i], st.w / 2 + 0.6]);
+        for (let i = 1; i < centre.length; i++) decks.push([centre[i - 1], centre[i], st.w / 2 + 0.6]);
       }
       if (!minor) centre.forEach((q, i) => { mark(q[0], q[2], st.w / 2 + 1.2); lanes.push(q[0], q[2], st.w / 2); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, st.w / 2 + 1.2); } });
       }
@@ -204,11 +220,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if ((x1 - x0) * (z1 - z0) > 4000) continue;
       for (let x = x0; x <= x1; x += ow) for (let z = z0; z <= z1; z += oh) mark(x, z, 1.5);
     }
-    c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines;
+    yield;
+    c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; if (c.lod === 0) grass.invalidate(tileBox(c));  // no grass on the roads
     if (!B.n) return setPart(c, 'roads', null);
     const d = B.done(), geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); geo.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2));
-    geo.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); geo.setIndex(new THREE.BufferAttribute(d.idx, 1)); geo.computeVertexNormals(); geo.computeBoundingSphere();
+    geo.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); geo.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4)); geo.setIndex(new THREE.BufferAttribute(d.idx, 1)); geo.computeVertexNormals(); geo.computeBoundingSphere();
     const grp = new THREE.Group(), mesh = new THREE.Mesh(geo, mats.road); mesh.receiveShadow = c.lod === 0; grp.add(mesh);
     if (pillars.length) {
       const im = new THREE.InstancedMesh(pillarGeo, mats.pillar, pillars.length), m4 = new THREE.Matrix4();
@@ -218,7 +235,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setPart(c, 'roads', grp);
   }
   const occAt = (o, x, z) => { if (!o) return false; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < OCC && b < OCC && o.occ[b * OCC + a] === 1; };
-  function buildTrees(c) {
+  function* buildTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
     const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c), fine = c.lod === 0, box = tileBox(c);
     const out = {}; let n = 0, ferns = 0;
@@ -232,7 +249,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const dens = k => { const T = TREE[k]; if (!T) return 0; const st = T[1] * (c.lod ? 1.2 : 1) / Math.sqrt(Math.max(0.15, share)); return thin * T[2] / (st * st); };
     // a tile with more trees than its cap keeps the same share of them everywhere (not the first rows only)
     { let all = 0; for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) all += dens(ras[j * (R + 1) + i]) * Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])); thin = Math.min(1, cap / Math.max(1, all * 1.1)); }
+    yield;
     for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
+      if (i === 0 && j % 8 === 7) yield;
       const v = j * (R + 1) + i, most = Math.max(dens(ras[v]), dens(ras[v + 1]), dens(ras[v + R + 1]), dens(ras[v + R + 2])); if (!most) continue;
       const area = Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])), N = most * area, cnt = Math.floor(N) + (hash2(i * 7 + c.x, j * 13 + c.y) < N % 1 ? 1 : 0);
       for (let m = 0; m < cnt; m++) {
@@ -248,6 +267,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (fine && ferns < 8000) for (let e = 0; e < 4; e++) { const a = hash2(e, Math.round(x * 7)) * 6.283, rr = 2 + 5 * hash2(Math.round(z * 7), e); add('fern', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.9 + 0.7 * hash2(e, Math.round(z)), hash2(e, Math.round(x))); ferns++; }
       }
     }
+    yield;
     // lone oaks on the open hills, in loose clumps
     { const step = 26 * (c.lod ? 1.4 : 1) / Math.sqrt(Math.max(0.15, share));
       for (let x = Math.ceil(box[0] / step) * step; x < box[2]; x += step) for (let z = Math.ceil(box[1] / step) * step; z < box[3]; z += step) {
@@ -258,6 +278,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (h == null || h < 6) continue;
         add('oak', px, pz, 0.6 + 0.6 * hash2(ix, iz + 3), hash2(ix + 1, iz));
       } }
+    yield;
     if (fine) {
       // coyote brush and toyon in patches on the open hills: thickest on the shaded north slopes and in the gullies
       const ss = 7 / Math.sqrt(Math.max(0.2, share)), nn = g.segs + 1;
@@ -274,7 +295,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (hash2(ix * 3, iz * 5) > p) continue;
         const r = hash2(ix, iz * 3);
         add(r < 0.78 ? 'bush' : 'shrub', px, pz, 0.7 + 0.8 * hash2(iz, ix + 1), r); shrubs++;
+        if (shrubs % 600 === 0) yield;
       }
+      yield;
       // stones in the grass, more on the steep
       for (let k = 0; k < 1400 * share; k++) {
         const px = box[0] + hash2(k, c.x) * (box[2] - box[0]), pz = box[1] + hash2(c.y, k) * (box[3] - box[1]);
@@ -286,7 +309,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     // per species the full models near the rider (fine tiles; partTrees fills them), and every tree of the tile as an
     // impostor in one draw (the full models' circle left out)
-    const grp = new THREE.Group(), imp = []; c.treeSets = []; c.imp = null;
+    yield;
+    const grp = new THREE.Group(), imp = [], sets = [];
     let y0 = Infinity, y1 = -Infinity;
     for (const [sp, list] of Object.entries(out)) {
       const ci = SPECIES.indexOf(sp);
@@ -300,15 +324,19 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         y0 = Math.min(y0, y); y1 = Math.max(y1, y + 50 * s);
       }
       list.sort((u, w) => u[0] - w[0]);  // by x: a split looks at the strip round the rider only
-      c.treeSets.push({ sp, list, fine, grp, low: sp === 'stone' || sp === 'fern', near: NEAR[sp] ?? 1, hi: null });
+      sets.push({ sp, list, fine, grp, low: sp === 'stone' || sp === 'fern', near: NEAR[sp] ?? 1, hi: null });
+      yield;
     }
+    let newImp = null;
     if (imp.length) {
       const cx = (box[0] + box[2]) / 2, cz = (box[1] + box[3]) / 2, sphere = new THREE.Sphere(new THREE.Vector3(cx, (y0 + y1) / 2, cz), Math.hypot(box[2] - box[0], box[3] - box[1], y1 - y0) / 2 + 30);
       // nearest the rider first (the GPU then skips much of what is hidden)
       const rx = me.group.position.x, rz = me.group.position.z; imp.sort((u, w) => (u[0] - rx) ** 2 + (u[2] - rz) ** 2 - (w[0] - rx) ** 2 - (w[2] - rz) ** 2);
-      c.imp = impostorMesh(IMP, imp, sphere); c.imp.userData.ownMat = true; grp.add(c.imp);
+      newImp = impostorMesh(IMP, imp, sphere); newImp.userData.ownMat = true; grp.add(newImp);
+      yield;
     }
-    c.partAt = null; partTrees(c, me.group.position.x, me.group.position.z);
+    // swap in at once (the old sets stay drawn until now)
+    c.treeSets = sets; c.imp = newImp; c.partAt = null; partTrees(c, me.group.position.x, me.group.position.z);
     setPart(c, 'trees', grp);
   }
   // split a tile's trees: within `treeNear` metres of (x, z) (a share of it per species, NEAR) the full models, the
@@ -351,7 +379,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
 /* ---------- street furniture: guardrails where the ground falls away beside a road, lamps along town streets, stop
      signs where a small road meets another, a speed limit now and then, ranch fences along farm roads, picket fences
      in front of houses. Fine tiles only; one draw per kind. ---------- */
-  function buildFurniture(c) {
+  function* buildFurniture(c) {
     const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
@@ -371,7 +399,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
       return ends >= 2;  // three ways meet (one road going on is only a joint)
     };
-    c.lines.forEach((L, li) => {
+    for (const [li, L] of c.lines.entries()) {
+      if (li % 4 === 3) yield;
       const P = L.P, n = P.length, half = L.w / 2, big = /motorway|trunk|primary|secondary|tertiary/.test(L.hw), small = /residential|unclassified|living|road|service/.test(L.hw);
       const dir = i => { const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dz = b[2] - a[2], l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
       let run = 0;
@@ -395,7 +424,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         put('stop', x - fx * (half + 4) + nx * (half + 0.8), y - 0.25, z - fz * (half + 4) + nz * (half + 0.8), Math.atan2(-fx, -fz));
       }
       // guardrails where the ground falls away beside the road (not bridges, not in town), in runs of 12 m or more
-      if (L.br || L.hw === 'service') return;
+      if (L.br || L.hw === 'service') continue;
       for (const s of [1, -1]) {
         const steep = P.map(([x, y, z], i) => {
           // the ground as it was before the road was cut in: a drop of 4 m within 9 m of the edge
@@ -419,7 +448,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           i = j + 1;
         }
       }
-    });
+    }
+    yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
     // every kind in one batched draw
     const kinds = Object.keys(items).filter(k => items[k].length), count = kinds.reduce((n, k) => n + items[k].length, 0);
@@ -447,11 +477,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     setPart(c, 'furn', grp.children.length ? grp : null);
   }
-  function buildBuildings(c) {
+  function* buildBuildings(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'bldg', null);
     const list = [], hAt = hOf(c);
+    let nb = 0;
     for (const f of t.features) {
       if (f.k !== 'building') continue;
+      if (++nb % 40 === 0) yield;
       let ring = f.rings[0].map(([la, lo]) => proj.xz(la, lo));
       { let cx = 0, cz = 0; for (const p of ring) { cx += p[0]; cz += p[1]; } cx /= ring.length; cz /= ring.length;
         const k = 0.04 + 0.12 * hash2(Math.round(cx), Math.round(cz)); ring = ring.map(([x, z]) => { const d = Math.hypot(x - cx, z - cz) || 1; return [x - (x - cx) / d * k, z - (z - cz) / d * k]; }); }
@@ -461,17 +493,23 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       list.push({ ring, base, h: (f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7) });
     }
     if (!list.length) return setPart(c, 'bldg', null);
-    const mesh = new THREE.Mesh(buildingGeometry(list), mats.bldg); mesh.castShadow = c.lod === 0 && QUALITY[q].shadow > 0; mesh.receiveShadow = c.lod === 0;
-    setPart(c, 'bldg', mesh);
+    const grp = new THREE.Group();
+    for (let i = 0; i < list.length; i += 60) {
+      yield;
+      const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60)), mats.bldg); mesh.castShadow = c.lod === 0 && QUALITY[q].shadow > 0; mesh.receiveShadow = c.lod === 0; grp.add(mesh);
+    }
+    setPart(c, 'bldg', grp);
   }
   // a far tile's woods (beyond the near tiles, out to where trees vanish): impostors on a coarse raster of its polygons
   const farReach = (c, lat, lon) => { const b = tileBox(c), x = proj.x(lon), z = proj.z(lat); return !!b && Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3])) < 14000; };
-  function buildFarTrees(c) {
+  function* buildFarTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
     const R = 256, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode), xs = [], zs = [], list = [], step = 42 / Math.sqrt(Math.max(0.3, QUALITY[q].trees));
     for (let i = 0; i <= R; i++) { xs.push(proj.x(lonOf(c.x + i / R, c.z))); zs.push(proj.z(latOf(c.y + i / R, c.z))); }
     let y0 = Infinity, y1 = -Infinity;
+    yield;
     for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
+      if (i === 0 && j % 16 === 15) yield;
       const k = ras[j * (R + 1) + i]; if (k < 5 || k > 8) continue;  // scrub and woods
       const area = Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])), N = area / (step * step) * (k === 5 ? 0.4 : 1);
       for (let m = 0, cnt = Math.floor(N) + (hash2(i, j + c.y) < N % 1 ? 1 : 0); m < cnt; m++) {
@@ -605,40 +643,45 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     if (tun.group) { disposeObj(tun.group); tun.group = null; }
     tun.list = [];
-    const B = builder(), grp = new THREE.Group(), pos = [], idx = [], tl = [], port = [], lamps = [];
+    const B = builder(), grp = new THREE.Group(), pos = [], idx = [], tl = [], ports = [], lamps = [];
     for (const { P: P0, r } of chains) {
       const P = resample(P0, 6); if (P.length < 2) continue;
       const D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
       const out = (p, q) => { const dx = p[0] - q[0], dz = p[1] - q[1], l = Math.hypot(dx, dz) || 1, a = groundAt(...p), b = groundAt(p[0] + dx / l * 12, p[1] + dz / l * 12); return a == null ? b : b == null ? a : Math.min(a, b); };
-      const h0 = out(P[0], P[1]) ?? 0, h1 = out(P.at(-1), P.at(-2)) ?? h0, st = roadStyle(r.hw, r.ln, r.fl), w = st.w / 2 + 2, L = D.at(-1) || 1;
-      // under little cover (cut and cover under flat ground) or too short for portals: ride it on the surface, no bore
+      const h0 = out(P[0], P[1]) ?? 0, h1 = out(P.at(-1), P.at(-2)) ?? h0, st = roadStyle(r.hw, r.ln, r.fl, r.wd), w = st.w / 2 + 2, L = D.at(-1) || 1;
+      // at grade (hardly any ground over it) or very short: ride it on the surface, no bore. Under a road or a little
+      // ground (US-101 over Alexander Avenue and Bunker Road): an underpass, a concrete box with a flat roof and square
+      // headwalls right at its ends. Deeper and longer: a bored tunnel, arched, lit, its portals at the end of a cut.
       let cover = 0; for (let i = 0; i < P.length; i++) cover += (groundAt(...P[i]) ?? 0) - (h0 + (h1 - h0) * D[i] / L);
-      if (cover / P.length < 8 || L < 3 * PORT) { ribbon(B, P, { ...st, hAt: (x, z) => groundAt(x, z), lift: roadLift(r.hw), step: 6 }); continue; }
+      cover /= P.length;
+      if (cover < 2.5 || L < 18) { ribbon(B, P, { ...st, hAt: (x, z) => groundAt(x, z), lift: roadLift(r.hw), step: 6 }); continue; }
+      const box = cover < 8 || L < 3 * PORT, port = box ? 1.5 : PORT, H = box ? 5.2 : 2.2;
       // the bore as straight pieces of up to 40 m (for the ground to leave out): [x0, z0, x1, z1, floor0, floor1, half width, height]
-      const segs = []; let i0 = P.findIndex((_, i) => D[i] >= PORT - 1);
-      for (let i = i0 + 1; i0 >= 0 && i < P.length && D[i0] < L - PORT + 1; i++) if (D[i] - D[i0] >= 40 || i === P.length - 1 || D[i] >= L - PORT + 1) {
-        segs.push([P[i0][0], P[i0][1], P[i][0], P[i][1], h0 + (h1 - h0) * D[i0] / L, h0 + (h1 - h0) * D[i] / L, w + 0.3, 2.2 + w * 0.75 + 0.6]); i0 = i;
+      const segs = []; let i0 = P.findIndex((_, i) => D[i] >= port - 1);
+      for (let i = i0 + 1; i0 >= 0 && i < P.length && D[i0] < L - port + 1; i++) if (D[i] - D[i0] >= 40 || i === P.length - 1 || D[i] >= L - port + 1) {
+        segs.push([P[i0][0], P[i0][1], P[i][0], P[i][1], h0 + (h1 - h0) * D[i0] / L, h0 + (h1 - h0) * D[i] / L, w + 0.3, box ? H + 0.6 : 2.2 + w * 0.75 + 0.6]); i0 = i;
       }
-      tun.list.push({ P, D, h0, h1, w, L, segs });
+      tun.list.push({ P, D, h0, h1, w, L, segs, port, box });
       ribbon(B, P, { ...st, hAt: () => 0, deck: [h0, h1], lift: 0.05, step: 6 });
-      // a ring: walls up to the arch, the arch, and the floor under the road (closed, so nothing outside shows through)
-      const SEG = 12, R = w, H = 2.2, ring = [];
-      for (let k = 0; k <= SEG; k++) { const th = Math.PI * k / SEG; ring.push([Math.cos(th) * R, Math.sin(th) * (R * 0.75) + H]); }
+      // a ring: walls up to the arch (or the flat roof), and the floor under the road (closed, so nothing outside shows through)
+      const SEG = 12, R = w, ring = [];
+      if (box) ring.push([R, H], [-R, H]);
+      else for (let k = 0; k <= SEG; k++) { const th = Math.PI * k / SEG; ring.push([Math.cos(th) * R, Math.sin(th) * (R * 0.75) + H]); }
       ring.unshift([R, -0.15]); ring.push([-R, -0.15], [R, -0.15]);
       const keep = [], N = ring.length, base = pos.length / 3;
-      for (let i = 0; i < P.length; i++) if (D[i] >= PORT - 0.5 && D[i] <= L - PORT + 0.5) keep.push(i);
+      for (let i = 0; i < P.length; i++) if (D[i] >= port - 0.5 && D[i] <= L - port + 0.5) keep.push(i);
       keep.forEach((i, n) => {
         const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l, y = h0 + (h1 - h0) * D[i] / L;
         for (const [cx, cy] of ring) { pos.push(P[i][0] + nx * cx, y + cy, P[i][1] + nz * cx); tl.push(D[i], Math.max(0, cy) / (H + R * 0.75), cx / R); }
         // lamps high on both walls every 9 m, and the light they put on the road
-        if (n && Math.floor(D[i] / 9) !== Math.floor(D[keep[n - 1]] / 9)) for (const s of [-1, 1]) { const th = s > 0 ? 0.62 : Math.PI - 0.62; lamps.push([P[i][0] + nx * Math.cos(th) * R * 0.97, y + H + Math.sin(th) * R * 0.75 * 0.97, P[i][1] + nz * Math.cos(th) * R * 0.97, Math.atan2(dx, dz), s]); }
+        if (!box && n && Math.floor(D[i] / 9) !== Math.floor(D[keep[n - 1]] / 9)) for (const s of [-1, 1]) { const th = s > 0 ? 0.62 : Math.PI - 0.62; lamps.push([P[i][0] + nx * Math.cos(th) * R * 0.97, y + H + Math.sin(th) * R * 0.75 * 0.97, P[i][1] + nz * Math.cos(th) * R * 0.97, Math.atan2(dx, dz), s]); }
         if (n) for (let k = 0; k < N - 1; k++) { const p0 = base + (n - 1) * N + k, p1 = base + n * N + k; idx.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1); }
-        if (n === 0 || n === keep.length - 1) port.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1]);
+        if (n === 0 || n === keep.length - 1) ports.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1, box]);
       });
     }
     if (!B.n) return;
     const d = B.done(), rg = new THREE.BufferGeometry();
-    rg.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); rg.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); rg.setAttribute('rd', new THREE.BufferAttribute(d.code, 4));
+    rg.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); rg.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); rg.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); rg.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4));
     rg.setIndex(new THREE.BufferAttribute(d.idx, 1)); rg.computeVertexNormals(); grp.add(new THREE.Mesh(rg, mats.road));
     if (pos.length) {
       const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); bg.setAttribute('tl', new THREE.Float32BufferAttribute(tl, 3)); bg.setIndex(idx); bg.computeVertexNormals();
@@ -658,7 +701,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (let i = 0; i < p.count; i++) { pl.push(p.getX(i), p.getY(i), p.getZ(i)); v.fromBufferAttribute(p, i).applyMatrix4(m4); pp.push(v.x, v.y, v.z); v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize(); pn.push(v.x, v.y, v.z); }
       if (ng !== g) ng.dispose(); g.dispose();
     };
-    for (const [x, y, z, yaw, R, H, dir] of port) {
+    for (const [x, y, z, yaw, R, H, dir, box] of ports) {
+      if (box) {  // an underpass: a square headwall the depth of the road over it, a coping, wing walls
+        const top = H + 1.6, wing = R + 3.5, sh = new THREE.Shape(); sh.moveTo(-wing, -1); sh.lineTo(wing, -1); sh.lineTo(wing, top); sh.lineTo(-wing, top); sh.lineTo(-wing, -1);
+        const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H); hole.lineTo(-R, H); hole.lineTo(-R, -0.5); sh.holes.push(hole);
+        for (const g of [new THREE.ExtrudeGeometry(sh, { depth: 0.8, bevelEnabled: false }).translate(0, 0, -0.8), new THREE.BoxGeometry(2 * wing + 0.6, 0.35, 1.1).translate(0, top + 0.15, -0.4)]) add(g, x, y, z, yaw + (dir > 0 ? Math.PI : 0));
+        continue;
+      }
       const top = H + R * 0.75 + 5, wing = R + 5, sh = new THREE.Shape(); sh.moveTo(-wing, -1); sh.lineTo(wing, -1); sh.lineTo(wing, top - 3); sh.lineTo(R + 2, top); sh.lineTo(-R - 2, top); sh.lineTo(-wing, top - 3); sh.lineTo(-wing, -1);
       const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H);
       for (let k = 1; k <= 12; k++) { const th = Math.PI * k / 12; hole.lineTo(Math.cos(th) * R, H + Math.sin(th) * R * 0.75); }
@@ -686,7 +735,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const { P, D } = T;
       for (let i = 1; i < P.length; i++) {
         const a = P[i - 1], b = P[i], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2)) : 0;
-        if (Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t) < T.w + 5) { const d = D[i - 1] + (D[i] - D[i - 1]) * t; if (d < PORT - 1 || d > T.L - PORT + 1) return null; return { y: T.h0 + (T.h1 - T.h0) * d / T.L, k: Math.max(0, Math.min(1, Math.min(d - PORT, T.L - PORT - d) / 25)), x: a[0] + ex * t, z: a[1] + ez * t }; }
+        if (Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t) < T.w + 5) { const d = D[i - 1] + (D[i] - D[i - 1]) * t; if (d < T.port - 1 || d > T.L - T.port + 1) return null; return { y: T.h0 + (T.h1 - T.h0) * d / T.L, k: Math.max(0, Math.min(T.box ? 0.35 : 1, Math.min(d - T.port, T.L - T.port - d) / 25)), x: a[0] + ex * t, z: a[1] + ez * t }; }
       }
     }
     return null;
@@ -702,7 +751,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const gpuTime = (() => {
     const gl = renderer.getContext(), ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'), wait = [], ms = [];
     return { ms,
-      begin() { if (!ext) return null; for (let i = wait.length - 1; i >= 0; i--) if (gl.getQueryParameter(wait[i], gl.QUERY_RESULT_AVAILABLE)) { if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) ms.push(gl.getQueryParameter(wait[i], gl.QUERY_RESULT) / 1e6); gl.deleteQuery(wait[i]); wait.splice(i, 1); } if (ms.length > 600) ms.splice(0, ms.length - 600); const q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); return q; },
+      begin() { if (!ext) return null; for (let i = wait.length - 1; i >= 0; i--) if (gl.getQueryParameter(wait[i], gl.QUERY_RESULT_AVAILABLE)) { if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) { const v = gl.getQueryParameter(wait[i], gl.QUERY_RESULT) / 1e6; ms.push(v); const PF = globalThis.__w3?.prof; if (PF && v > 12) PF.push(['gpu', wait[i].t, +v.toFixed(1)]); } gl.deleteQuery(wait[i]); wait.splice(i, 1); } if (ms.length > 600) ms.splice(0, ms.length - 600); const q = gl.createQuery(); q.t = Math.round(performance.now()); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); return q; },
       end(q) { gl.endQuery(ext.TIME_ELAPSED_EXT); wait.push(q); },
       get stat() { if (!ms.length) return null; const a = ms.slice().sort((x, y) => x - y); return { med: +a[a.length >> 1].toFixed(2), p95: +a[Math.floor(a.length * 0.95)].toFixed(2), n: a.length }; } };
   })();
@@ -732,11 +781,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const f = D[b] > D[a] ? (d - D[a]) / (D[b] - D[a]) : 0; return [P[a][0] + (P[b][0] - P[a][0]) * f, P[a][1] + (P[b][1] - P[a][1]) * f];
   }
   const eleAt = d => { if (!st.ele?.length) return null; const i = d / 10, a = Math.max(0, Math.min(st.ele.length - 1, Math.floor(i))), b = Math.min(st.ele.length - 1, a + 1); return st.ele[a] + (st.ele[b] - st.ele[a]) * (i - a); };
-  // the surface the rider is on: a bridge deck, else the ground (carved to the road), else the course's own height
+  // the surface the rider is on: of what is drawn there (a deck, a bore, the ground) the one nearest the course's own
+  // height, so a road under a bridge stays under it and the bridge's course stays on the deck; never under the ground
+  // (but in a bore), and floating on the course's height rather than sunk when nothing drawn is near it (a deck not
+  // built yet). Others (no course height): a deck, else a bore, else the ground.
   function yAt(x, z, d) {
-    const k = deckAt(x, z); if (k != null && (d == null || Math.abs(k - (eleAt(d) ?? k)) < 15)) return k;
-    const tn = tunnelAt(x, z); if (tn) return tn.y + 0.05;
-    return groundAt(x, z) ?? (d != null ? eleAt(d) : null) ?? 0;
+    const k = deckAt(x, z), tn = tunnelAt(x, z), g = groundAt(x, z), e = d == null ? null : eleAt(d), b = tn ? tn.y + 0.05 : null;
+    if (e == null) return k ?? b ?? g ?? 0;
+    let best = null; for (const h of [k, b, g]) if (h != null && (best == null || Math.abs(h - e) < Math.abs(best - e))) best = h;
+    if (best == null) return e;
+    if (best < e - 6 && best === g) return e;
+    if (best === k && g != null && g > k && g - k < 2) return g;  // where a deck meets the land a little under it
+    return best;
   }
 
   function syncOthers(dt, now) {
@@ -835,6 +891,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const d = Math.max(0, dShown), p0 = at(d), pa = at(d - 2), pb = at(d + 3);
       { const hx = pb[0] - pa[0], hz = pb[1] - pa[1], L = Math.hypot(hx, hz) || 1; side += (keepRight(p0[0], p0[1]) - side) * Math.min(1, dt * 1.5); rx = -hz / L; rz = hx / L; }
       let p = [p0[0] + rx * side, p0[1] + rz * side];
+      // on the Golden Gate Bridge's sidewalks: round the outside of the tower legs (OpenStreetMap's way cuts their corners)
+      if (marks.ggb) { const k = onDeck(proj.lat(p[1]), proj.lon(p[0])), ds = k ? Math.abs(Math.abs(k.s) - GGB.towers) : 99;
+        if (ds < 16 && Math.abs(k.t) > 7 && Math.abs(k.t) < 21.2) { const f = Math.min(1, (16 - ds) / 6), q = marks.lane(k.s, k.t + (Math.sign(k.t) * 21.2 - k.t) * f); p = [q.x, q.z]; } }
       // in a tunnel: on the bore's own line (the course can run a few metres off it), eased in from the portal
       { const tn = tunnelAt(p[0], p[1]); if (tn) { const k = tn.k * tn.k * (3 - 2 * tn.k), sx = tn.x + rx * 1.4, sz = tn.z + rz * 1.4; p = [p[0] + (sx - p[0]) * k, p[1] + (sz - p[1]) * k]; } }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
@@ -845,7 +904,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       me.update(dt, st.cad || 0, v, grade);
       const lat = proj.lat(p[1]), lon = proj.lon(p[0]);
       stream(lat, lon, now);
-      jobs.run(q === 2 ? 2.5 : 4);
+      const PF = globalThis.__w3?.prof, pm = PF ? [c0] : null, mark = PF ? () => pm.push(performance.now()) : () => {}, gq0 = PF && globalThis.__w3.gpu ? gpuTime.begin() : null;
+      jobs.run(q === 2 ? 2.5 : 4); mark();
       marks.update(camera, dt);
       // the full trees follow the rider: split a tile again after 60 m, unless it is all far away and already all simple
       for (const c of near.values()) if (c.treeSets && c.lod === 0 && (!c.partAt || Math.hypot(c.partAt[0] - p[0], c.partAt[1] - p[1]) > 60)) {
@@ -856,7 +916,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noLife, noImp, noHi, noSm, noTerrain, gpu }
       if (dbg.noLife) life.show(false);
       if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain || dbg.noFurn) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.furn) c.parts.furn.visible = !dbg.noFurn; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) if (t.hi && dbg.noHi) t.hi.visible = false; } }
-      if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2);
+      mark(); if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2); mark();
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
       lifeDt += dt;
@@ -864,6 +924,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         riders: [{ x: p[0], z: p[1], v }, ...[...others.values()].map(e => ({ x: e.r.group.position.x, z: e.r.group.position.z, v: e.v || 0 }))], roads: () => {
         const out = []; for (const c of near.values()) if (c.lod === 0 && c.drive) for (const r of c.drive) if (Math.hypot(r.P[0][0] - p[0], r.P[0][2] - p[1]) < 900 || Math.hypot(r.P.at(-1)[0] - p[0], r.P.at(-1)[2] - p[1]) < 900) out.push(r);
         return out; } }), lifeDt = 0;
+      mark();
       // camera: behind and above, looking down the road; first person: at the eyes
       const ahead = at(d + 14), hd = yAt(ahead[0], ahead[1], d + 14);
       const look = Math.atan2(ahead[0] - pa[0], -(ahead[1] - pa[1]));
@@ -884,7 +945,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       camera.position.copy(camPos); camera.lookAt(camLook);
       if (camOver) { const [la, lo, h, hd, pitch] = camOver, [x, z] = proj.xz(la, lo), r = hd * Math.PI / 180; camera.position.set(x, h, z); camera.lookAt(x + Math.sin(r) * 100, h + Math.tan(pitch * Math.PI / 180) * 100, z - Math.cos(r) * 100); }
       sky.update(camera, me.group.position, dt, QUALITY[q].span);
-      if (ready) hz.update(p[0], p[1], now);
+      mark(); if (ready) hz.update(p[0], p[1], now); mark();
       // the bores nearest the camera, for the ground to leave out
       { const segs = [];
         for (const T of tun.list) for (const g of T.segs) segs.push([Math.hypot((g[0] + g[2]) / 2 - camPos.x, (g[1] + g[3]) / 2 - camPos.z), g]);
@@ -904,12 +965,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }
       // the shadow map every other frame (the box only moves when it is drawn, so the old one stays true until then)
       if (frames % (globalThis.__w3?.smEvery ?? 2) === 0) { sky.update(camera, me.group.position, 0, QUALITY[q].span, true); renderer.shadowMap.needsUpdate = true; }
-      renderer.info.reset();
+      renderer.info.reset(); mark();
       const c1 = performance.now();
-      const gq = dbg.gpu ? gpuTime.begin() : null;
+      const gq = dbg.gpu && !gq0 ? gpuTime.begin() : null;
       if (dbg.noPost) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = sky.exposure; renderer.render(scene, camera); } else post.render(sky.exposure * (1 + dark * 0.6));
-      if (gq) gpuTime.end(gq);
-      const c2 = performance.now(); cpu.js += (c1 - c0 - cpu.js) * 0.05; cpu.draw += (c2 - c1 - cpu.draw) * 0.05; cpu.max = Math.max(cpu.max * 0.995, c1 - c0);
+      if (gq || gq0) gpuTime.end(gq || gq0);
+      const c2 = performance.now(); if (PF && c2 - c0 > 12) { pm.push(c2); PF.push([Math.round(now), ...pm.slice(1).map((t, i) => +(t - pm[i]).toFixed(1))]); if (PF.length > 400) PF.shift(); }
+      cpu.js += (c1 - c0 - cpu.js) * 0.05; cpu.draw += (c2 - c1 - cpu.draw) * 0.05; cpu.max = Math.max(cpu.max * 0.995, c1 - c0);
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
       governor(dt, now);
     } catch (e) { fail(e); return; }
@@ -941,7 +1003,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setKit(kit, accent) { me.setKit?.(kit, accent); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat }),
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point

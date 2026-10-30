@@ -10,16 +10,25 @@ const STYLE = {
   unclassified: [6.5, 2, 0], residential: [6.5, 0, 0], road: [6, 0, 0], living_street: [5, 0, 0], service: [3.8, 0, 0],
   cycleway: [3, 0, 1], path: [1.6, 0, 2], footway: [1.8, 0, 2], pedestrian: [3, 0, 1], bridleway: [1.8, 0, 2], track: [2.8, 0, 2],
 };
-const LANE_W = 3.4;
-// style of a way { hw, ln: lanes, fl: flags (4 unpaved, 8 oneway) }: { w, lm, surf, lanes }
-export function roadStyle(hw, ln = 0, fl = 0) {
+const LANE_W = 3.4, BIKE_W = 1.6, PARK_W = 2.4;
+// Style of a way { hw, ln: lanes, fl: flags (landuse.js: 4 unpaved, 8 oneway, 32/64 a bike lane left/right, 128/256 a
+// parking lane left/right, 512 no lane markings, 4096 the left bike lane against the oneway), wd: its tagged width (m) }:
+// { w, lm, surf, lanes, a, b, pL, pR }. Across the road from its right edge (as the way runs): parking, bike lane, the
+// travel lanes, bike lane, parking; a and b how far in from the right and the left edge the travel lanes start, pR and
+// pL the parking lanes' widths (0: none). lm: 0 none, 1 edge lines, 2 two-way (double yellow centre line), 3 oneway
+// (yellow left edge, dashed lane lines), 4 oneway with a bike lane against it on the left (double yellow beside it).
+export function roadStyle(hw, ln = 0, fl = 0, wd = 0) {
   const s = STYLE[hw] || STYLE.road, one = !!(fl & 8), surf = fl & 4 && s[2] === 0 ? 2 : s[2];
-  let lm = surf ? 0 : s[1];
-  if (one && lm) lm = 3; else if (lm === 3) lm = 2;
+  let lm = surf || fl & 512 ? (surf ? 0 : 1) : s[1];
+  if (one && lm >= 2) lm = 3; else if (lm === 3) lm = 2;
   let lanes = ln || (lm === 2 ? 2 : lm === 3 ? (s[0] > 9 ? 2 : 1) : 0);
   if (lm === 2 && lanes < 2) lanes = 2;
-  const w = lanes && lm ? lanes * LANE_W + (s[0] >= 8.5 ? 1.6 : 0.8) : s[0];
-  return { w, lm, surf, lanes };
+  if (lm === 3 && fl & 4096 && fl & 32) lm = 4;
+  const sh = s[0] >= 8.5 ? 0.8 : 0.4, pR = fl & 256 ? PARK_W : 0, pL = fl & 128 ? PARK_W : 0, bR = fl & 64 ? BIKE_W : 0, bL = fl & 32 ? BIKE_W : 0;
+  let w = lanes && lm ? lanes * LANE_W + 2 * sh : s[0], a = 0, b = 0;
+  if (lm && (pR || pL || bR || bL)) { a = pR + bR + (pR || bR ? 0 : sh); b = pL + bL + (pL || bL ? 0 : sh); w = lanes * LANE_W + a + b; }
+  if (wd >= 3 && wd < 30 && lm) { const k = wd / w; w = wd; a *= k; b *= k; }  // the tagged width wins, the parts in proportion
+  return { w, lm, surf, lanes, a, b, pL, pR };
 }
 // the order roads draw in where they overlap (bigger roads on top)
 export const roadLift = hw => 0.22 + 0.02 * Math.min(4, ['service', 'residential', 'unclassified', 'tertiary', 'secondary'].indexOf(hw) + 1 || (STYLE[hw]?.[0] > 9 ? 5 : 0));
@@ -35,25 +44,26 @@ export function resample(pts, step) {
   return out;
 }
 
-// A growing geometry: positions, uvs (u across 0..1, v metres along), per vertex the road [marking, surface, lanes,
-// width] the shader draws (marking -1: a bridge's side)
+// A growing geometry: positions, uvs (u across 0..1 from the right edge, v metres along), per vertex the road
+// [marking, surface, lanes, width] and its parts across [a, b, pL, pR] (roadStyle) the shader draws (marking -1: a
+// bridge's side)
 export function builder() {
-  const pos = [], uv = [], code = [], idx = [];
+  const pos = [], uv = [], code = [], code2 = [], idx = [];
   return {
     pos, uv, code, idx,
     get n() { return pos.length / 3; },
-    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u, w); code.push(c[0], c[1], c[2], c[3]); return pos.length / 3 - 1; },
+    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u, w); code.push(c[0], c[1], c[2], c[3]); code2.push(c[4] || 0, c[5] || 0, c[6] || 0, c[7] || 0); return pos.length / 3 - 1; },
     tri(a, b, c) { idx.push(a, b, c); },
-    done() { return { pos: new Float32Array(pos), uv: new Float32Array(uv), code: new Float32Array(code), idx: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) }; },
+    done() { return { pos: new Float32Array(pos), uv: new Float32Array(uv), code: new Float32Array(code), code2: new Float32Array(code2), idx: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) }; },
   };
 }
 
 // Add one ribbon to builder B. pts: [[x, z], ...]; hAt(x, z): ground height (null: unknown, the last known is kept);
 // deck: [h0, h1] the heights at the two ends (a bridge), else the ground under each edge. Returns the centre line
 // [[x, y, z], ...] (for pillars, arrows).
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0 }) {
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0 }) {
   const P = resample(pts, step), n = P.length; if (n < 2) return [];
-  const code = [lm, surf, lanes, w];
+  const code = [lm, surf, lanes, w, a, b, pL, pR];
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
   const tot = L[n - 1] || 1, half = w / 2, centre = [];
   let last = 0, base = B.n;
@@ -135,13 +145,15 @@ export function clipLine(pts, [x0, z0, x1, z1]) {
 export function chainWays(roads, keyOf) {
   const k = p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`, ends = new Map(), used = new Set(), out = [];
   roads.forEach((r, i) => { if (keyOf(r) == null || r.pts.length < 2) return; for (const e of [0, 1]) { const q = k(e ? r.pts.at(-1) : r.pts[0]); (ends.get(q) ?? ends.set(q, []).get(q)).push([i, e]); } });
-  const next = (i, p) => { const at = ends.get(k(p)); if (!at || at.length !== 2) return null; const o = at.find(([j]) => j !== i); return o && !used.has(o[0]) && keyOf(roads[o[0]]) === keyOf(roads[i]) ? o : null; };
+  // a way that would join back to front (its left and right, its oneway, swapped) does not join one with sides
+  const sided = r => (r.fl | 0) & (8 | 32 | 64 | 128 | 256 | 4096);
+  const next = (i, p, e) => { const at = ends.get(k(p)); if (!at || at.length !== 2) return null; const o = at.find(([j]) => j !== i); return o && !used.has(o[0]) && keyOf(roads[o[0]]) === keyOf(roads[i]) && (o[1] === e || !sided(roads[i])) ? o : null; };
   roads.forEach((r, i) => {
     if (used.has(i)) return; used.add(i);
     if (keyOf(r) == null) { out.push(r); return; }
     let pts = r.pts.slice();
-    for (let o; (o = next(i, pts.at(-1)));) { used.add(o[0]); const q = roads[o[0]].pts; pts = pts.concat((o[1] ? q.slice().reverse() : q).slice(1)); }
-    for (let o; (o = next(i, pts[0]));) { used.add(o[0]); const q = roads[o[0]].pts; pts = (o[1] ? q : q.slice().reverse()).slice(0, -1).concat(pts); }
+    for (let o; (o = next(i, pts.at(-1), 0));) { used.add(o[0]); const q = roads[o[0]].pts; pts = pts.concat((o[1] ? q.slice().reverse() : q).slice(1)); }
+    for (let o; (o = next(i, pts[0], 1));) { used.add(o[0]); const q = roads[o[0]].pts; pts = (o[1] ? q : q.slice().reverse()).slice(0, -1).concat(pts); }
     out.push({ ...r, pts });
   });
   return out;

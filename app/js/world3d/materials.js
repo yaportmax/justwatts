@@ -162,17 +162,18 @@ export function grassMaterial() {
   return m;
 }
 
-// road attribute rd = [marking, surface, lanes, width]; uv: across 0..1, metres along
+// road attributes rd = [marking, surface, lanes, width], rd2 = [a, b, pL, pR] (ribbon.js roadStyle); uv: across 0..1
+// from the right edge, metres along
 export function roadMaterial() {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   const T = textures();
   m.onBeforeCompile = sh => {
     sh.uniforms.tNoise = { value: T.noise };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec2 vRuv;\nvarying vec3 vW;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec4 rd2;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON)
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON)
       .replace('#include <color_fragment>', /* glsl */`
         float lm = floor(vRd.x + 0.5), surf = floor(vRd.y + 0.5), lanes = floor(vRd.z + 0.5), W = vRd.w;
         float along = vRuv.y, x = (vRuv.x - 0.5) * W, ax = abs(x);
@@ -191,25 +192,37 @@ export function roadMaterial() {
           c = mix(c, srgb(vec3(0.62, 0.56, 0.38)), smoothstep(0.55, 0.95, edge) * 0.7);
         }
         if (lm < 0.0) c = srgb(vec3(0.62, 0.61, 0.58));
-        float aa = max(fwidth(x) * 0.8, 0.02), line = 0.0, wear = 0.75 + 0.25 * smoothstep(0.2, 0.6, n2);
-        vec3 lc = srgb(vec3(0.92, 0.92, 0.88));
-        if (lm >= 1.0) line = max(line, 1.0 - smoothstep(0.06, 0.06 + aa, abs(ax - (W * 0.5 - 0.3))));
+        // the markings across the road, r metres from its right edge: the travel lanes from a to W - b, bike lanes and
+        // parking outside them (their lines solid white), 12 cm lines; yellow: the double centre line, a oneway's left edge
+        float aa = max(fwidth(x) * 0.8, 0.02), line = 0.0, yel = 0.0, wear = 0.75 + 0.25 * smoothstep(0.2, 0.6, n2);
+        float r = x + W * 0.5, ta = vRd2.x, tb = W - vRd2.y, ln1 = 0.0;
+        #define LN(at, hw) (1.0 - smoothstep(hw, hw + aa, abs(r - (at))))
+        if (lm >= 1.0) {
+          float rr = ta > 0.5 ? ta : 0.3, ll = W - (vRd2.y > 0.5 ? vRd2.y : 0.3);
+          line = max(line, LN(rr, 0.06));
+          if (vRd2.w > 0.5 && ta - vRd2.w > 0.5) line = max(line, LN(vRd2.w, 0.06));                 // parking, then a bike lane
+          if (vRd2.z > 0.5 && vRd2.y - vRd2.z > 0.5) line = max(line, LN(W - vRd2.z, 0.06));
+          if (lm == 4.0) yel = max(yel, max(LN(ll - 0.11, 0.05), LN(ll + 0.11, 0.05)));              // against a contraflow bike lane
+          else if (lm == 3.0) yel = max(yel, LN(ll, 0.06));                                          // a oneway's left edge
+          else line = max(line, LN(ll, 0.06));
+        }
         if (lm == 2.0) {
-          float y = 1.0 - smoothstep(0.05, 0.05 + aa, abs(ax - 0.11));
-          float per = max(1.0, floor(lanes * 0.5)), lw = (W * 0.5 - 0.4) / per, dash = step(fract(along / 12.0), 0.3);
-          float ln = 0.0; for (int i = 1; i < 4; i++) { if (float(i) >= per) break; ln = max(ln, 1.0 - smoothstep(0.06, 0.06 + aa, abs(ax - lw * float(i)))); }
-          line = max(line, ln * dash);
-          if (y > 0.0) { c = mix(c, srgb(vec3(0.90, 0.70, 0.20)), y * 0.95 * wear); }
+          float mid = (ta + tb) * 0.5, per = max(1.0, floor(lanes * 0.5)), lw = (tb - ta) * 0.5 / per, dash = step(fract(along / 12.0), 0.3);
+          yel = max(yel, max(LN(mid - 0.11, 0.05), LN(mid + 0.11, 0.05)));
+          for (int i = 1; i < 4; i++) { if (float(i) >= per) break; ln1 = max(ln1, max(LN(mid - lw * float(i), 0.06), LN(mid + lw * float(i), 0.06))); }
+          line = max(line, ln1 * dash);
         }
-        if (lm == 3.0 && lanes >= 2.0) {
-          float lw = (W - 0.8) / lanes, dash = step(fract(along / 12.0), 0.3), ln = 0.0;
-          for (int i = 1; i < 6; i++) { if (float(i) >= lanes) break; ln = max(ln, 1.0 - smoothstep(0.06, 0.06 + aa, abs(x + W * 0.5 - 0.4 - lw * float(i)))); }
-          line = max(line, ln * dash);
+        if (lm >= 3.0 && lanes >= 2.0) {
+          float lw = (tb - ta) / lanes, dash = step(fract(along / 12.0), 0.3);
+          for (int i = 1; i < 6; i++) { if (float(i) >= lanes) break; ln1 = max(ln1, LN(ta + lw * float(i), 0.06)); }
+          line = max(line, ln1 * dash);
         }
-        c = mix(c, lc, line * wear * (1.0 - smoothstep(0.25, 0.6, aa)));  // lines fade where they would shimmer
+        float fade = wear * (1.0 - smoothstep(0.25, 0.6, aa));  // lines fade where they would shimmer
+        c = mix(c, srgb(vec3(0.90, 0.70, 0.20)), yel * 0.95 * fade);
+        c = mix(c, srgb(vec3(0.92, 0.92, 0.88)), line * fade);
         diffuseColor.rgb *= c;`);
   };
-  m.customProgramCacheKey = () => 'jw-road-2';
+  m.customProgramCacheKey = () => 'jw-road-3';
   return m;
 }
 

@@ -125,18 +125,24 @@ export function gridHeight(g, px, pz, hs = g.hs) {
 // segment), fading back to the ground by r1. Points far off the ground (a bridge, a tunnel) leave it alone.
 // pts: [[x, z, h], ...] in order along the road. under: other roads [{ pts, r0, r1 }] flattened first (each road
 // level across, so no hump of ground shows through it); the ridden road wins where they meet.
-export function carve(g, pts, r0, r1, under = null) {
-  const base = under?.length ? blend(g, g.raw, under, false).hs : g.raw;
-  const r = blend(g, base, [{ pts, r0, r1 }], true);
+export function carve(g, pts, r0, r1, under = null) { return drain(carveSteps(g, pts, r0, r1, under)); }
+// the same a slice at a time (a generator yielding every few dozen roads; returns what carve returns)
+export function* carveSteps(g, pts, r0, r1, under = null) {
+  const base = under?.length ? (yield* blend(g, g.raw, under, false)).hs : g.raw;
+  const r = yield* blend(g, base, [{ pts, r0, r1 }], true);
   if (under?.length) for (let v = 0; v < r.cut.length; v++) if (Math.abs(r.hs[v] - g.raw[v]) > 0.8) r.cut[v] = 1;
   g.hs = r.hs; g.cut = r.cut;
   return r.touched;
 }
-function blend(g, from, lines, check) {
+// run a generator to its end, its return value
+export function drain(it) { let r; do r = it.next(); while (!r.done); return r.value; }
+function* blend(g, from, lines, check) {
   const s = g.segs, n = s + 1, best = new Float32Array(n * n).fill(Infinity), bh = new Float32Array(n * n), raw = g.raw, fade = new Float32Array(n * n);
   const x0 = g.xs[0], dx = (g.xs[s] - g.xs[0]) / s, z0 = g.zs[0], dz = (g.zs[s] - g.zs[0]) / s;
   let touched = false;
+  let nl = 0;
   for (const { pts, r0, r1 } of lines) {
+    if (++nl % 24 === 0) yield;
     const lo = Math.min(g.xs[0], g.xs[s]) - r1, hi = Math.max(g.xs[0], g.xs[s]) + r1, zlo = Math.min(g.zs[0], g.zs[s]) - r1, zhi = Math.max(g.zs[0], g.zs[s]) + r1;
     for (let k = 0; k + 1 < pts.length; k++) {
       const p = pts[k], q = pts[k + 1];
@@ -198,18 +204,24 @@ export function rasterBy(g, features, value) {
 // Skirts face out (front faces seen from outside the tile). Returns src: for every vertex the grid vertex it copies.
 export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
   const s = g.segs, n = s + 1, nv = n * n;
-  const pos = [], cls = [], idx = [], src = [];
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { pos.push(g.xs[i], g.hs[j * n + i], g.zs[j]); cls.push(lu ? lu[j * n + i] : 0); src.push(j * n + i); }
   const keep = (i, j) => i >= 0 && j >= 0 && i < s && j < s && !(skip && skip(i, j));
-  let nx = nv;
+  // count first (quads kept, skirt walls), then fill typed arrays: no growing arrays for the 66 000 vertices of a fine tile
+  let quads = 0, walls = 0;
+  for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
+    if (!keep(i, j)) continue;
+    quads++; if (skirt > 0) walls += !keep(i, j - 1) + !keep(i, j + 1) + !keep(i - 1, j) + !keep(i + 1, j);
+  }
+  const NV = nv + 2 * walls, pos = new Float32Array(NV * 3), cls = new Uint8Array(NV), src = new Uint32Array(NV), idx = NV > 65535 ? new Uint32Array(6 * (quads + walls)) : new Uint16Array(6 * (quads + walls));
+  for (let j = 0, v = 0; j < n; j++) for (let i = 0; i < n; i++, v++) { pos[3 * v] = g.xs[i]; pos[3 * v + 1] = g.hs[v]; pos[3 * v + 2] = g.zs[j]; cls[v] = lu ? lu[v] : 0; src[v] = v; }
+  let nx = nv, k = 0;
   const wall = (va, vb) => {
-    for (const v of [va, vb]) { pos.push(pos[3 * v], pos[3 * v + 1] - skirt, pos[3 * v + 2]); cls.push(cls[v]); src.push(v); }
-    idx.push(va, vb, nx, vb, nx + 1, nx); nx += 2;
+    for (const v of [va, vb]) { pos[3 * nx] = pos[3 * v]; pos[3 * nx + 1] = pos[3 * v + 1] - skirt; pos[3 * nx + 2] = pos[3 * v + 2]; cls[nx] = cls[v]; src[nx] = v; nx++; }
+    idx[k++] = va; idx[k++] = vb; idx[k++] = nx - 2; idx[k++] = vb; idx[k++] = nx - 1; idx[k++] = nx - 2;
   };
   for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
     if (!keep(i, j)) continue;
     const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
-    idx.push(a, c, b, b, c, d);
+    idx[k++] = a; idx[k++] = c; idx[k++] = b; idx[k++] = b; idx[k++] = c; idx[k++] = d;
     if (skirt > 0) {
       if (!keep(i, j - 1)) wall(a, b);
       if (!keep(i, j + 1)) wall(d, c);
@@ -217,5 +229,5 @@ export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
       if (!keep(i + 1, j)) wall(b, d);
     }
   }
-  return { pos: new Float32Array(pos), cls: new Uint8Array(cls), src: Uint32Array.from(src), idx: nx > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) };
+  return { pos, cls, src, idx };
 }

@@ -180,10 +180,13 @@ export function clipRing(ring, [s, w, n, e]) {
 /* ---------- roads for the 3D view (every way with a highway tag, also those no route takes) ---------- */
 export const HW = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link',
   'tertiary_link', 'unclassified', 'residential', 'road', 'living_street', 'service', 'cycleway', 'path', 'footway', 'pedestrian', 'bridleway', 'track'];
-// flags: 1 bridge, 2 tunnel, 4 unpaved, 8 oneway, 16 the Golden Gate Bridge (drawn by its own model)
+// flags: 1 bridge, 2 tunnel, 4 unpaved, 8 oneway, 16 the Golden Gate Bridge (drawn by its own model), 32/64 a bike lane
+// on the left/right (as the way runs), 128/256 a parking lane left/right, 512 no lane markings, 1024/2048 a sidewalk
+// left/right, 4096 the left bike lane runs against the oneway. ln: lanes (0..15) and the tagged width in decimetres
+// (wd, x 16)
 export function encodeRoads(roads) {
   return roads.map(r => {
-    const o = [HW.indexOf(r.hw), r.fl | 0, r.ln | 0, r.dk ? Math.round(r.dk[0] * 10) : 0, r.dk ? Math.round(r.dk[1] * 10) : 0];
+    const o = [HW.indexOf(r.hw), r.fl | 0, (r.ln | 0) + 16 * Math.round((r.wd || 0) * 10), r.dk ? Math.round(r.dk[0] * 10) : 0, r.dk ? Math.round(r.dk[1] * 10) : 0];
     let a = 0, b = 0; for (const [la, lo] of r.pts) { const x = Math.round(la * Q), y = Math.round(lo * Q); o.push(x - a, y - b); a = x; b = y; }
     return o;
   });
@@ -191,7 +194,7 @@ export function encodeRoads(roads) {
 export function decodeRoads(rows) {
   return rows.map(o => {
     const pts = []; let a = 0, b = 0; for (let j = 5; j + 1 < o.length; j += 2) { a += o[j]; b += o[j + 1]; pts.push([a / Q, b / Q]); }
-    const r = { hw: HW[o[0]] || 'road', fl: o[1], ln: o[2], pts };
+    const r = { hw: HW[o[0]] || 'road', fl: o[1], ln: o[2] & 15, wd: (o[2] >> 4) / 10, pts };
     if (o[1] & 1) r.dk = [o[3] / 10, o[4] / 10];
     return r;
   });

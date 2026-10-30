@@ -41,17 +41,29 @@ export function childrenOf(k, z = NEAR_Z) {
 export function parentOf(k, z = FAR_Z) { const [nz, x, y] = unkey(k), s = 2 ** (nz - z); return key(z, Math.floor(x / s), Math.floor(y / s)); }
 
 // A time-sliced job queue: run(budget ms) runs jobs until the budget is spent; a job with the same id replaces the
-// queued one. Jobs are ordered by priority (lower first) when added.
+// queued one (and drops one half done). Jobs are ordered by priority (lower first) when added. A job may return an
+// iterator (a generator: the build yields between its slices): it then runs a slice at a time within the budget, over
+// as many frames as it takes, so no build holds up a frame for long.
 export function jobQueue(now = () => performance.now()) {
   let q = [];
+  const slow = [];  // the last jobs that took over 6 ms in all: [id, ms in all, started at, longest slice ms] (for checks)
   return {
     add(id, pri, fn) { q = q.filter(j => j.id !== id); q.push({ id, pri, fn }); q.sort((a, b) => a.pri - b.pri); },
     drop(pred) { q = q.filter(j => !pred(j.id)); },
     run(budget) {
       const t0 = now(); let n = 0;
-      while (q.length && (n === 0 || now() - t0 < budget)) { const j = q.shift(); j.fn(); n++; }
+      while (q.length && (n === 0 || now() - t0 < budget)) {
+        const j = q[0], a = now(); let done = true;
+        if (!j.it) { j.at = a; j.ms = j.max = 0; const r = j.fn(); if (r && typeof r.next === 'function') { j.it = r; done = false; } }
+        if (j.it) { let r; do { const b = now(); r = j.it.next(); j.max = Math.max(j.max, now() - b); } while (!r.done && now() - t0 < budget); done = !!r.done; }
+        j.ms += now() - a; n++;
+        if (!done) break;  // the budget is spent in the middle of it: on with it next frame
+        q.shift();
+        if (j.ms > 6) { slow.push([j.id, Math.round(j.ms * 10) / 10, Math.round(j.at), Math.round(j.max * 10) / 10]); if (slow.length > 200) slow.shift(); }
+      }
       return n;
     },
+    slow,
     get size() { return q.length; },
     has: id => q.some(j => j.id === id),
   };

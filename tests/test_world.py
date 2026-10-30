@@ -55,3 +55,11 @@ def test_a_start_on_a_long_bridge_rides_at_once_and_spans_it_later(out):
     assert b["n"] > 250 and b["d"] > 300                           # then the road beyond loads and comes
     assert 55 < b["mid"] < 75 and b["end"] == pytest.approx(90.2, abs=1)  # a straight line over the valley to the far end
     assert b["jump"] < 1                                           # no step where the line meets what was sent flat
+
+
+def test_the_golden_gate_bridge_course_rides_on_its_deck(out):
+    g = out["ggb"]
+    assert g["d"] > 2800 and g["deck"] > 260                      # Vista Point to the south end: 2.7 km on the deck, unbroken
+    assert g["sMin"] < -1250 and g["sMax"] > 1350                  # from the south abutment to Vista Point
+    assert g["worst"] < 0.6                                        # every point at the deck's own height (ggb.js)
+    assert 66 < g["mid"] < 70                                      # mid span about 68 m up, not the sea floor

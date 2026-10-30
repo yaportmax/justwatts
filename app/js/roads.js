@@ -31,17 +31,20 @@ export function overpassQuery(key, box = cellBox(key)) {
 }
 // Overpass JSON -> compact ways { id, hw, name, ref, ow: 1 | -1 | 0, br: bridge or tunnel, rb: roundabout, nodes, pts },
 // and for the 3D world: tn: 1 on a tunnel, ln: lanes when tagged, up: 1 when unpaved
+const UNPAVED = /^(unpaved|gravel|fine_gravel|dirt|ground|compacted|earth|grass|sand|mud)$/;
 export function parseWays(j) {
   const out = [];
   for (const e of j?.elements || []) {
     const t = e.tags || {};
     if (e.type !== 'way' || !RANK[t.highway] || !Array.isArray(e.nodes) || !Array.isArray(e.geometry) || e.nodes.length < 2 || e.nodes.length !== e.geometry.length) continue;
     if (!e.geometry.every(g => Number.isFinite(g?.lat) && Number.isFinite(g?.lon))) continue;
+    // trails are mountain-bike country, not for a road ride: no unpaved or named trail paths
+    if (/^(path|footway|bridleway|pedestrian)$/.test(t.highway) && (UNPAVED.test(t.surface || '') || /Trail/.test(t.name || ''))) continue;
     const rb = t.junction === 'roundabout' || t.junction === 'circular';
     const ow = t['oneway:bicycle'] === 'no' || /^opposite/.test(t.cycleway || '') ? 0 : t.oneway === '-1' ? -1 : /^(yes|1|true)$/.test(t.oneway || '') || (rb && t.oneway !== 'no') ? 1 : 0;
     out.push({ id: e.id, hw: t.highway, name: (t.name || '').slice(0, 60), ref: (t.ref || '').slice(0, 20), ow,
       br: (t.bridge && t.bridge !== 'no') || (t.tunnel && t.tunnel !== 'no') ? 1 : 0, rb: rb ? 1 : 0, ...(t.tunnel && t.tunnel !== 'no' ? { tn: 1 } : {}),
-      ...(+t.lanes >= 1 && +t.lanes <= 8 ? { ln: Math.round(+t.lanes) } : {}), ...(/^(unpaved|gravel|fine_gravel|dirt|ground|compacted|earth|grass|sand|mud)$/.test(t.surface || '') ? { up: 1 } : {}),
+      ...(+t.lanes >= 1 && +t.lanes <= 8 ? { ln: Math.round(+t.lanes) } : {}), ...(UNPAVED.test(t.surface || '') ? { up: 1 } : {}),
       nodes: e.nodes, pts: e.geometry.map(g => [g.lat, g.lon]) });
   }
   return out;
@@ -176,7 +179,8 @@ export class Plan {
     p.choose(k, to); p.extend(this.seq[k].d + m, 40);
     return p.seq.slice(k).map((_, i) => p.pos(k + i)).filter(Boolean);
   }
-  // course points i0 .. i1 - 1 (or as far as the plan and the loaded nodes go): [{ ll, br }], br: on a bridge or in a tunnel
+  // course points i0 .. i1 - 1 (or as far as the plan and the loaded nodes go): [{ ll, br, nm }], br: on a bridge or in a
+  // tunnel, nm: the way's name
   points(i0, i1) {
     const out = [], seq = this.seq;
     for (let i = i0, k = this.kAt(i0 * STEP_M); i < i1; i++) {
@@ -184,7 +188,7 @@ export class Plan {
       while (k < seq.length - 1 && seq[k].d < x) k++;
       const a = this.pos(k - 1), b = this.pos(k); if (!a || !b) break;
       const f = seq[k].d > seq[k - 1].d ? (x - seq[k - 1].d) / (seq[k].d - seq[k - 1].d) : 0;
-      out.push({ ll: [f6(a[0] + (b[0] - a[0]) * f), f6(a[1] + (b[1] - a[1]) * f)], br: this.wayAt(k)?.br || 0 });
+      const w = this.wayAt(k); out.push({ ll: [f6(a[0] + (b[0] - a[0]) * f), f6(a[1] + (b[1] - a[1]) * f)], br: w?.br || 0, nm: w?.name || '' });
     }
     return out;
   }

@@ -89,11 +89,17 @@ def test_the_main_road_wins_over_a_smaller_straight_one(js):
 
 
 def test_dead_end_turns_around(js):
-    r = plan(js, osm(way(1, "residential", [(1, 0, -300), (2, 0, 0), (3, 0, 100)], "Elm Street"), way(2, "residential", [(2, 0, 0), (4, -300, 0)], "Oak Street")), to=800)
+    r = plan(js, osm(way(1, "residential", [(1, 0, -300), (2, 0, 0), (3, 0, 300)], "Elm Street"), way(2, "residential", [(2, 0, 0), (4, -300, 0)], "Oak Street")), to=1200)
     ids = [s[0] for s in r["seq"]]
     assert ids[:5] == [1, 2, 3, 2, 1]  # up Elm to its end and back down Elm (the same road), past Oak
     dead = [j for j in r["junctions"] if not j["opts"]]
-    assert dead and dead[0]["sel"] == 2 and dead[0]["d"] == pytest.approx(380, abs=2)
+    assert dead and dead[0]["sel"] == 2 and dead[0]["d"] == pytest.approx(580, abs=2)
+
+
+def test_a_short_dead_end_is_no_option(js):
+    # Elm ends 100 m on: no way to offer at the junction (it would only turn the rider round), Oak is the one way on
+    r = plan(js, osm(way(1, "residential", [(1, 0, -300), (2, 0, 0), (3, 0, 100)], "Elm Street"), way(2, "residential", [(2, 0, 0), (4, -300, 0), (5, -300, 400)], "Oak Street")), to=800)
+    assert [s[0] for s in r["seq"]][:3] == [1, 2, 4] and all(j["opts"] is None or len(j["opts"]) <= 1 for j in r["junctions"] if j["k"] == 1)
 
 
 def test_oneway_the_wrong_way_is_not_the_default(js):
@@ -104,7 +110,7 @@ def test_oneway_the_wrong_way_is_not_the_default(js):
 def test_roundabout_exits_straight_on(js):
     rb = way(9, "tertiary", [(2, 0, 0), (6, 30, 30), (7, 0, 60), (8, -30, 30), (2, 0, 0)], junction="roundabout")
     r = plan(js, osm(ELM, rb, way(3, "residential", [(6, 30, 30), (10, 300, 30)], "East Street"),
-                     way(4, "residential", [(7, 0, 60), (11, 0, 300)], "North Street"), way(5, "residential", [(8, -30, 30), (12, -300, 30)], "West Street")))
+                     way(4, "residential", [(7, 0, 60), (11, 0, 400)], "North Street"), way(5, "residential", [(8, -30, 30), (12, -300, 30)], "West Street")))
     assert r["names"][:3] == ["Elm Street", "Road", "North Street"]  # round to the exit straight ahead, the right way round
 
 

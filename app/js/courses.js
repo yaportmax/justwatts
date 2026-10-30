@@ -4,6 +4,7 @@ import { esc, distText, isMetric } from './core.js';
 import { parseTrack, parseFit, buildCourse, SAMPLE_COURSES } from './course.js';
 import { ROUTE_COURSES } from './course-routes.js';
 import { createRideMap } from './ridemap.js';
+import { drawMinimap } from './minimap.js';
 import { createThumbs } from './detail.js';
 import { createListSort } from './listsort.js';
 import { track } from './analytics.js';
@@ -150,7 +151,12 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     // the map: the ride state has no line, so take it from the course list (gone if the course was deleted); open world: from the page's road plan
     const ow = rc?.open ? world?.view() : null, src = srcOf(rc);
     box.style.display = rc ? '' : 'none';
-    map.update(rc?.open ? ow?.ll : src?.ll, rc, ow?.alts, ow); turnPrompt(ow); if (!rc) return;
+    // open world: the stretch since the last teleport (ow.d counts from its start)
+    map.update(rc?.open ? ow?.ll : src?.ll, ow ? { ...rc, done_m: ow.d } : rc, ow?.alts, ow); turnPrompt(ow); if (!rc) return;
+    if (ow && $('#rideOn')?.classList?.contains('hud')) {
+      const p = ow.ll[Math.min(ow.ll.length - 1, Math.floor(ow.d / 10))];
+      if (p) drawMinimap($('#hMap'), { fit, css, ll: ow.ll, d: ow.d, alts: ow.alts, roads: world?.roads?.(p[0], p[1], 900) || [] });
+    }
     const u = units(), spd = isMetric(u) ? `${Math.round(rc.speed_kmh)} km/h` : `${Math.round(rc.speed_kmh * 0.621371)} mph`;
     if (ow) {  // open world: about 1 km behind and 2.5 km ahead
       const i = Math.floor(ow.d / 10), a = Math.max(0, i - 100), b = Math.min(ow.ele.length, i + 250);
@@ -170,11 +176,12 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     if (k !== turnKey) {
       turnKey = k; el.classList.toggle('on', !!k);
       el.innerHTML = !k ? '' : !t ? '<span class="owm">Loading roads</span>' : `<span class="owm num" id="owDist"></span>` + (t.dead ? '<span class="owd">Dead end</span>'
-        : t.opts.map(o => `<button data-to="${o.to}" class="${o.on ? 'on' : ''}" aria-pressed="${o.on}"><svg class="owa" viewBox="0 0 20 20" aria-hidden="true" style="transform:rotate(${o.a}deg)"><path d="M10 17V4M5 9l5-5 5 5"/></svg>${esc(o.name)}</button>`).join(''));
+        : t.opts.map(o => `<button data-to="${o.to}" class="${o.on ? 'on' : ''}" aria-pressed="${o.on}"><svg class="owa" viewBox="0 0 20 20" aria-hidden="true" style="transform:rotate(${o.a}deg)"><path d="M10 17V4M5 9l5-5 5 5"/></svg>${esc(o.name)}</button>`).join(''))
+        + '<button data-u="1" class="owu" title="U-turn (↓)"><svg class="owa" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 17V8a3 3 0 0 1 6 0v9M10 14l3 3 3-3"/></svg>U-turn</button>';
     }
     if (t) { const m = t.m, ft = m * 3.28084; $('#owDist').textContent = isMetric(units()) ? `${Math.round(m / 10) * 10} m` : `${Math.round(ft / 50) * 50} ft`; }
   }
-  if ($('#owTurn')) $('#owTurn').onclick = e => { const b = e?.target?.closest?.('[data-to]'); if (b) world?.choose(+b.dataset.to); };
+  if ($('#owTurn')) $('#owTurn').onclick = e => { const b = e?.target?.closest?.('[data-to],[data-u]'); if (b) b.dataset.u ? world?.uturn?.() : world?.choose(+b.dataset.to); };
 
   render();
   // a copy of a course (community "Save to mine"): imported like a file

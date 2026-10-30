@@ -38,12 +38,19 @@ def track(c):
     ll = c.get("ll") if isinstance(c, dict) and isinstance(c.get("ll"), list) else []
     if len(ll) < 2:
         return None
+    r6 = lambda x: math.floor(x * 1e6 + 0.5) / 1e6  # noqa: E731
+    if c.get("open") and len(ll) == len(c.get("ele") or ()):  # open world: a point every STEP_M (a teleport is one 10 m step)
+        def at_open(d):
+            x = _clamp(d, 0, (len(ll) - 1) * STEP_M)
+            i = min(len(ll) - 2, math.floor(x / STEP_M))
+            f, a, b = (x - i * STEP_M) / STEP_M, ll[i], ll[i + 1]
+            return [r6(a[0] + (b[0] - a[0]) * f), r6(a[1] + (b[1] - a[1]) * f)]
+        return at_open
     D = [0.0]
     for i in range(1, len(ll)):
         D.append(D[-1] + haversine({"lat": ll[i - 1][0], "lon": ll[i - 1][1]}, {"lat": ll[i][0], "lon": ll[i][1]}))
     k = c["dist"] / D[-1] if D[-1] > 0 else 0
     D = [x * k for x in D]
-    r6 = lambda x: math.floor(x * 1e6 + 0.5) / 1e6  # noqa: E731
     st = {"j": 1}
 
     def at(d):
@@ -127,12 +134,17 @@ def smooth_ele(raw: list[float]) -> list[float]:
     return [_r1(x) for x in _moving_avg(_median(raw, 2), 4)]
 
 
-def gain_of(ele: list[float]) -> int:
+def gain_of(ele: list[float], jp=()) -> int:
     g = 0.0
     for i in range(1, len(ele)):
-        if ele[i] > ele[i - 1]:
+        if ele[i] > ele[i - 1] and i not in jp:
             g += ele[i] - ele[i - 1]
     return math.floor(g + 0.5)
+
+
+def jump_in(c, d0: float, d1: float) -> bool:
+    """Open world: is any teleport segment between d0 and d1 metres."""
+    return any((i - 1) * STEP_M < d1 and i * STEP_M > d0 for i in (c or {}).get("jp") or [])
 
 
 def build_course(name: str, pts: list[dict]) -> dict:
@@ -192,6 +204,8 @@ def grade_at(c: dict, d: float) -> float:
     """Grade (%) of the 10 m segment under position d, clamped, 0.1 resolution. Past the end: the last one."""
     e = c["ele"]
     i = _clamp(math.floor(max(0, d) / STEP_M), 0, len(e) - 2)
+    if i + 1 in (c.get("jp") or ()):
+        return 0
     return _r1(_clamp((e[i + 1] - e[i]) / STEP_M * 100, G_MIN, G_MAX))
 
 
@@ -249,10 +263,21 @@ def check_ride_course(c) -> dict:
     return check_open(c) if isinstance(c, dict) and c.get("open") is True else check_course(c)
 
 
+def _check_jp(jp, n: int) -> list[int]:
+    """Teleports: ascending point indices 1 .. n - 1."""
+    if jp is None:
+        return []
+    if (not isinstance(jp, list) or len(jp) > 1000
+            or not all(isinstance(x, int) and not isinstance(x, bool) and 1 <= x < n and (i == 0 or x > jp[i - 1]) for i, x in enumerate(jp))):
+        raise ValueError("course.jp must be ascending point indices")
+    return list(jp)
+
+
 def check_open(c: dict) -> dict:
     ele, ll, nd = _open_parts(c.get("ele"), c.get("ll"), c.get("nd", []), math.ceil(MIN_M / STEP_M) + 1)
-    return {"name": str(c.get("name") or "Open world")[:80], "dist": (len(ele) - 1) * STEP_M, "gain": gain_of(ele),
-            "ele": ele, "ll": ll, "open": True, "nd": nd}
+    jp = _check_jp(c.get("jp"), len(ele))
+    return {"name": str(c.get("name") or "Open world")[:80], "dist": (len(ele) - 1) * STEP_M, "gain": gain_of(ele, jp),
+            "ele": ele, "ll": ll, "open": True, "nd": nd, "jp": jp}
 
 
 def check_course(c) -> dict:
@@ -272,8 +297,9 @@ def check_course(c) -> dict:
 
 
 def road_extend(c, b, d: float) -> dict:
-    """Open world: replace the points from index at on ({at, ele, ll, nd}); d = metres ridden. Never touches the
-    segment under the rider (a plain append always fits). nd entries from the first new one on are replaced."""
+    """Open world: replace the points from index at on ({at, ele, ll, nd, jump}); d = metres ridden. Never touches the
+    segment under the rider (a plain append always fits). nd entries from the first new one on are replaced.
+    jump: True: point at is a teleport away from point at - 1."""
     if not isinstance(c, dict) or not c.get("open"):
         raise ValueError("not an open-world ride")
     n, at = len(c["ele"]), b.get("at") if isinstance(b, dict) else None
@@ -285,8 +311,9 @@ def road_extend(c, b, d: float) -> dict:
     if at + len(ele) > MAX_N:
         raise ValueError("course too long")
     cut, E = nd[0][0] if nd else math.inf, c["ele"][:at] + ele
-    return {**c, "dist": (len(E) - 1) * STEP_M, "gain": gain_of(E), "ele": E, "ll": c["ll"][:at] + ll,
-            "nd": [x for x in c["nd"] if x[0] < cut] + nd}
+    jp = [x for x in c.get("jp") or [] if x < at] + ([at] if b.get("jump") is True else [])
+    return {**c, "dist": (len(E) - 1) * STEP_M, "gain": gain_of(E, jp), "ele": E, "ll": c["ll"][:at] + ll,
+            "nd": [x for x in c["nd"] if x[0] < cut] + nd, "jp": jp}
 
 
 def ridden(c, d: float):
@@ -294,6 +321,6 @@ def ridden(c, d: float):
     if not isinstance(c, dict) or not c.get("open"):
         return c
     n = max(2, min(len(c["ele"]), math.floor(max(0, d) / STEP_M) + 2))
-    ele = c["ele"][:n]
-    return {**c, "dist": (n - 1) * STEP_M, "gain": gain_of(ele), "ele": ele, "ll": c["ll"][:n],
-            "nd": [x for x in c["nd"] if x[0] <= (n - 1) * STEP_M]}
+    ele, jp = c["ele"][:n], [x for x in c.get("jp") or [] if x < n]
+    return {**c, "dist": (n - 1) * STEP_M, "gain": gain_of(ele, jp), "ele": ele, "ll": c["ll"][:n],
+            "nd": [x for x in c["nd"] if x[0] <= (n - 1) * STEP_M], "jp": jp}

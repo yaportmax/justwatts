@@ -147,6 +147,9 @@
     </div>
   </div>
   <div id="rideOn" style="display:none">
+    <div class="hudp" id="hudPow"><div class="hpw"><b class="num" id="hP">0</b><span>W</span></div><div class="hps num"><span id="hPk"></span><span id="hC"></span><span id="hH"></span></div></div>
+    <div class="hudt" id="hudTop"><div class="hts num"><span><b id="hS">0</b><i id="hSu">mph</i></span><span><b id="hD">0.0</b><i id="hDu">mi</i></span><span><b id="hU">0</b><i id="hUu">ft</i></span><span><b id="hE">0:00</b></span></div><div class="htr"><b class="num" id="hG">0.0%</b><span id="hR"></span></div></div>
+    <div class="hudm" id="hudMap"><canvas id="hMap"></canvas></div>
     <div class="rtop">
       <div class="row"><b id="rName"></b><span class="badge" id="rState"></span></div>
       <span class="num" id="rClock"></span>
@@ -182,7 +185,9 @@
         <button id="cUndo" style="display:none">Undo</button>
       </div>
       <div class="cgrp end">
+        <span class="grp owonly"><button id="cUturn" title="U-turn (↓)">U-turn</button><button id="cTele" title="Go to another spot (P)">Spots</button></span>
         <button id="cMore" title="A">Adjust</button>
+        <button id="cFull" title="Full screen (Shift F)" aria-label="Full screen"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/></svg></button>
         <button id="cKeys" title="Keys (?)" aria-label="Keyboard shortcuts">?</button>
         <button id="cEnd" class="danger big" title="Saves to History and uploads">End ride</button>
       </div>
@@ -402,7 +407,10 @@
       <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></td><td>ERG, grade, level</td></tr>
       <tr><td><kbd>A</kbd></td><td>Adjust</td></tr>
       <tr><td><kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd></td><td>Open world: the way at the junction ahead</td></tr>
+      <tr><td><kbd>↓</kbd></td><td>Open world: U-turn</td></tr>
+      <tr><td><kbd>P</kbd></td><td>Open world: go to another spot</td></tr>
       <tr><td><kbd>F</kbd></td><td>Map or chart focus (courses with a map)</td></tr>
+      <tr><td><kbd>Shift</kbd> <kbd>F</kbd></td><td>Full screen</td></tr>
       <tr><td><kbd>V</kbd> <kbd>T</kbd> <kbd>G</kbd> <kbd>M</kbd> <kbd>K</kbd></td><td>Open world 3D: camera, time of day, fog, sound, kit colour</td></tr>
       <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>Simulated trainer: power −10, +10 W</td></tr>
       <tr><td><kbd>Z</kbd></td><td>Undo</td></tr>

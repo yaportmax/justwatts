@@ -553,6 +553,49 @@ def test_open_world_ride_ends_with_the_road_ridden_and_exports_gps(js, tmp_path)
     assert len(lat) == 60 and lat[-1] == pytest.approx(37.8 + d / 111195, abs=2e-5)  # GPS where the rider got to
 
 
+
+def far(i0, n, e=lambda i: 250.0):
+    """Points of a road 5 km away, 200 m higher: where a teleport lands."""
+    return {"ele": [e(i) for i in range(i0, i0 + n)], "ll": [[round(37.85 + i * 10 / 111195, 6), -122.5] for i in range(i0, i0 + n)],
+            "nd": [[i * 10.0 - 4, 2000 + i] for i in range(i0, i0 + n) if i % 5 == 0]}
+
+
+def test_a_teleport_is_a_jump_in_the_course_like_js(js):
+    c = C.check_ride_course(OPEN)
+    b = {"at": 26, **far(26, 20), "jump": True}
+    out = js([{"op": "extend", "course": c, "body": b, "d": 100}, {"op": "checkRide", "course": {**OPEN, "jp": [40]}},
+              {"op": "checkRide", "course": {**OPEN, "jp": [5, 5]}}])
+    x = C.road_extend(c, b, 100)
+    close(out[0], x)
+    assert x["jp"] == [26] and x["gain"] == C.gain_of(x["ele"][:26])           # the 200 m step up is no climb
+    assert C.grade_at(x, 255) == 0 and C.grade_at(x, 245) == C.grade_at(c, 245)   # flat across the jump only
+    assert js([{"op": "lookup", "course": x, "at": [245, 255, 265]}])[0] == [[C.grade_at(x, d), C.ele_at(x, d)] for d in (245, 255, 265)]
+    y = C.road_extend(x, {"at": 40, **far(40, 10)}, 300)                     # the road on from there keeps the jump
+    assert y["jp"] == [26] and C.ridden(y, 200)["jp"] == [] and C.ridden(y, 300)["jp"] == [26]
+    assert C.road_extend(x, {"at": 26, **road(26, 10)}, 100)["jp"] == []     # replaced before the rider got there: gone
+    for o in out[1:]:
+        assert "error" in o
+    with pytest.raises(ValueError):
+        C.check_ride_course({**OPEN, "jp": [5, 5]})
+    pos = C.track(x)                                                          # GPS: one 10 m step from here to there
+    assert pos(250) == x["ll"][25] and pos(260) == x["ll"][26] and abs(pos(270)[0] - x["ll"][27][0]) < 1e-6
+
+
+TELE_SCRIPT = [["power", 250], ["load", {"workout": None, "course": OPEN}], ["start", {}], ["tick", 20],
+               ["road", {"at": 31, **far(31, 60), "jump": True}], ["tick", 40]]
+
+
+def test_js_engine_rides_across_a_teleport_like_python(js, tmp_path):
+    py, eng = run_python(tmp_path, TELE_SCRIPT)
+    jr = js([{"op": "ride", "settings": {}, "script": TELE_SCRIPT}])[0]
+    for i, (a, b) in enumerate(zip(py["out"], jr["out"])):
+        close(a, {**b, "last": b["last"] and [a["last"][0], *b["last"][1:]]}, path=f"step {i} {TELE_SCRIPT[i][0]}")
+    close(py["samples"], jr["samples"], path="samples")
+    o = py["out"][-1]["course"]
+    assert o["odo_m"] > 400 and o["climbed_m"] < 5                           # past the jump: 200 m higher, nothing climbed
+    assert [c["g"] for c in py["sent"] if c["k"] == "sim"] == [c["g"] for c in jr["sent"] if c["k"] == "sim"] == [0]  # the trainer never sees the step
+
+
 def test_open_world_ride_resumes_after_restart(tmp_path):
     res, eng = run_python(tmp_path, [["power", 250], ["load", {"workout": None, "course": OPEN}], ["start", {}], ["tick", 10],
                                      ["road", {"at": 31, **road(31, 60)}], ["tick", 37]])

@@ -77,10 +77,10 @@ def test_web_mode_ride_with_reload(dist, node):
     assert sr["authors"] == ["Just Watts", "You", "Just Watts", "You"]          # the Author column, workouts and courses
     assert sr["mine"] == ["Backup test"] and sr["jw"] is False
     so = out["sort"]                                                          # sortable headers, in step with the Sort select
-    assert so["asc"] and so["desc"] and so["st1"] == {"sort": "short", "aria": "ascending", "up": True} and so["st2"] == {"sort": "long", "aria": "descending"}
+    assert so["asc"] and so["desc"] and so["st1"] == {"sort": "short", "aria": "ascending", "up": True} and so["st2"] == {"sort": "long", "aria": "descending"} and so["st3"] == {"sort": "", "aria": "none"}
     assert so["author"] == {"sort": "h:author:asc", "extra": True, "first": "Just Watts", "aria": "ascending", "timeAria": "none"} and so["stored"] == "h:author:asc"
     assert so["preset"] == {"level": "descending", "extra": False} and so["featured"] is False
-    assert so["courses"] == {"asc": True, "desc": True, "select": "long", "stored": "long"}
+    assert so["courses"] == {"asc": True, "desc": True, "select": "long", "stored": "long", "third": ""}
     k = out["picks"]                                                          # per-ride course picks
     assert out["oldCourse"] is False                                         # the old global course is dropped
     assert k["flatWorkout"] == {"name": "Sweet spot 2x12", "course": None, "plan": True}

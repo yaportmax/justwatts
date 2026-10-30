@@ -17,7 +17,7 @@ export const oceanGain = sea => 0.1 * smooth(0.04, 0.5, sea);
 
 export function createAudio({ on = true } = {}) {
   const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
-  if (!AC) return { update() {}, set() { return false; }, get on() { return false; }, dispose() {} };
+  if (!AC) return { update() {}, hush() {}, set() { return false; }, get on() { return false; }, dispose() {} };
   let ctx = null, nodes = null, enabled = on, nextTick = 0, dead = false;
   function build() {
     ctx = new AC();
@@ -72,6 +72,8 @@ export function createAudio({ on = true } = {}) {
         } else nextTick = 0;
       } catch { dead = true; }
     },
+    // quiet until the next update (the world not drawn: the ride ended, the view or the tab hidden)
+    hush() { if (ctx?.state === 'running') ctx.suspend().catch(() => {}); },
     set(on) { enabled = !!on; if (ctx) { if (enabled) resume(); else ctx.suspend().catch(() => {}); } return enabled; },
     get on() { return enabled; },
     dispose() { dead = true; for (const ev of ['pointerdown', 'keydown']) globalThis.removeEventListener?.(ev, resume); ctx?.close().catch(() => {}); ctx = null; },

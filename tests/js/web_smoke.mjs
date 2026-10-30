@@ -145,8 +145,9 @@ const load = async (go, what) => { go(); await until(() => hw.state().ride && wh
   const aria = k => (new RegExp(`data-sort="${k}" aria-sort="([a-z]+)"`).exec(String($('#libHead').innerHTML)) || [])[1];
   const asc = rowsAfter(() => head('time')), st1 = { sort: $('#libSort').value, aria: aria('time'), up: String($('#libHead').innerHTML).includes('↑') };
   const desc = rowsAfter(() => head('time')), st2 = { sort: $('#libSort').value, aria: aria('time') };
+  head('time'); const st3 = { sort: $('#libSort').value, aria: aria('time') };  // a third click: unsorted again
   const byAuthor = rowsAfter(() => head('author'));
-  out.sort = { asc: sorted(times(asc), 1), desc: sorted(times(desc), -1), st1, st2, author: { sort: $('#libSort').value, extra: String($('#libSort').innerHTML).includes('<option value="h:author:asc">Author ↑</option>'),
+  out.sort = { asc: sorted(times(asc), 1), desc: sorted(times(desc), -1), st1, st2, st3, author: { sort: $('#libSort').value, extra: String($('#libSort').innerHTML).includes('<option value="h:author:asc">Author ↑</option>'),
     first: au(byAuthor[0]), aria: aria('author'), timeAria: aria('time') }, stored: JSON.parse(mem.get('hw.libFilter')).sort };
   $('#libSort').onchange({ target: { value: 'hard' } }); out.sort.preset = { level: aria('level'), extra: String($('#libSort').innerHTML).includes('h:author') };
   $('#libSort').onchange({ target: { value: '' } }); out.sort.featured = String($('#libHead').innerHTML).includes('aria-sort="ascending"') || String($('#libHead').innerHTML).includes('aria-sort="descending"');
@@ -155,7 +156,7 @@ const load = async (go, what) => { go(); await until(() => hw.state().ride && wh
   const dists = rows => rows.filter(n => n !== 'Open world: Marin').map(n => parseFloat(/<div class="m num r">([\d.]+) /.exec(String(rowOf(n).innerHTML))[1]));
   const cAsc = rowsAfter(() => chead('dist')), cDesc = rowsAfter(() => chead('dist'));
   out.sort.courses = { asc: sorted(dists(cAsc), 1), desc: sorted(dists(cDesc), -1), select: $('#crsSort').value, stored: JSON.parse(mem.get('hw.crsFilter')).sort };
-  chead('dist'); $('#crsSort').onchange({ target: { value: '' } });
+  chead('dist'); out.sort.courses.third = $('#crsSort').value; $('#crsSort').onchange({ target: { value: '' } });
 }
 out.picks = {};
 // a workout row: Ride alone rides the last course pick (flat at first); the row opens its dialog with the course choice

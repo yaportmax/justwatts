@@ -6,8 +6,8 @@ import { esc } from './core.js';
 export function createListSort(presets, select) {
   const of = v => presets[v] || ((m => m ? [m[1], m[2]] : null)(/^h:(\w+):(asc|desc)$/.exec(v || '')));
   const to = (k, d) => Object.keys(presets).find(p => presets[p][0] === k && presets[p][1] === d) || `h:${k}:${d}`;
-  // a header click: the same column flips, another column starts ascending
-  const click = (v, k) => { const c = of(v); return to(k, c && c[0] === k && c[1] === 'asc' ? 'desc' : 'asc'); };
+  // a header click: another column starts ascending, the same one flips to descending, then back to unsorted ('')
+  const click = (v, k) => { const c = of(v); if (c && c[0] === k && c[1] === 'desc') return ''; return to(k, c && c[0] === k ? 'desc' : 'asc'); };
   // header cells: cols [[column|'', label, extra class]]
   const head = (v, cols) => {
     const c = of(v);

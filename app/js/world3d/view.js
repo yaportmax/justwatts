@@ -50,11 +50,16 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   let q = Math.max(0, Math.min(2, quality)), dead = false, raf = 0;
   const canvas = document.createElement('canvas'); canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block'; container.appendChild(canvas);
   const tags = document.createElement('div'); tags.className = 'w3tags'; container.appendChild(tags);
+  // a cover over the world until the tiles round the rider are built (at the start and after a jump to another place):
+  // never the rider on the bare ground with the road drawn in over them a moment later
+  const veil = document.createElement('div'); veil.className = 'w3veil'; veil.textContent = 'Loading';
+  veil.style.cssText = 'position:absolute;inset:0;display:grid;place-items:center;background:var(--bg,#0f1115);color:var(--mut,#8a93a0);font-size:13px;letter-spacing:.04em;pointer-events:none;transition:opacity .5s';
+  container.appendChild(veil); let veilAt = performance.now(), veilP = null;
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true, failIfMajorPerformanceCaveat: false });
-  } catch (e) { canvas.remove(); tags.remove(); throw e; }
-  if (!renderer.capabilities.isWebGL2) { renderer.dispose(); canvas.remove(); tags.remove(); throw new Error('no WebGL2'); }
+  } catch (e) { canvas.remove(); tags.remove(); veil.remove(); throw e; }
+  if (!renderer.capabilities.isWebGL2) { renderer.dispose(); canvas.remove(); tags.remove(); veil.remove(); throw new Error('no WebGL2'); }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.shadowMap.autoUpdate = false;
@@ -91,6 +96,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog);
   const life = createLife({ THREE, scene, proj, marks, quality: q }), audio = createAudio({ on: sound });
+  const onHide = () => { if (document.hidden) audio.hush(); }; document.addEventListener('visibilitychange', onHide);  // no frames come in a hidden tab
   sky.setBanks(fog);
   // the Headlands' ground cover (veg.js): the ground shader's texture, the scrub, the groves; tiles built before it
   // came are built again
@@ -780,13 +786,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (let k = 0; k < S.length; k += 7) { const key = at((S[k] + S[k + 3]) / 2, (S[k + 2] + S[k + 5]) / 2); (cells.get(key) ?? cells.set(key, []).get(key)).push(k); }
     return { S, cells };
   }
-  // the drawn road's top at a point (its centre line's height across it), null off the roads
-  function roadAt(x, z) {
+  // the drawn road's top at a point (its centre line's height across it), null off the roads; where roads cross (one
+  // over the other), the one nearest the height e if given, else the one whose centre is nearest
+  function roadAt(x, z, e = null) {
     const [tx, ty] = tileOf(x, z), R = near.get(key(NEAR_Z, tx, ty))?.surf; if (!R) return null;
     const cx = Math.floor(x / 10), cz = Math.floor(z / 10), S = R.S; let best = null, bd = Infinity;
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of R.cells.get(`${cx + a},${cz + b}`) || []) {
       const ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2)) : 0;
-      const d = Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t); if (d < S[k + 6] + 0.3 && d < bd) { bd = d; best = S[k + 1] + (S[k + 4] - S[k + 1]) * t; }
+      const d = Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t); if (d >= S[k + 6] + 0.3) continue;
+      const h = S[k + 1] + (S[k + 4] - S[k + 1]) * t, m = e == null ? d : Math.abs(h - e) + d * 0.01; if (m < bd) { bd = m; best = h; }
     }
     return best;
   }
@@ -1091,13 +1099,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // built yet). Others (no course height): a deck, else a bore, else the ground.
   function yAt(x, z, d) {
     const e = d == null ? null : eleAt(d), k = deckAt(x, z), tn = tunnelAt(x, z, e), b = tn ? tn.y + 0.05 : null;
-    let g = groundAt(x, z); const rd = g == null ? null : roadAt(x, z); if (rd != null && Math.abs(rd - g) < 1.5) g = rd;  // on a road: its top
+    // on a drawn road: its top, never the ground under it (the ground is lowered under every road, by up to a couple of
+    // metres on a steep one, and a road over an underpass stands well above the ground cut down for the way under it)
+    const g0 = groundAt(x, z), rd = g0 == null ? null : roadAt(x, z, e), g = rd ?? g0;
     if (e == null) return k ?? b ?? g ?? 0;
-    // the drawn road's top too, wherever the ground is (a road over an underpass stands well above the ground cut down
-    // for the way under it: Alexander Avenue over East Road)
-    let best = null; for (const h of [k, b, g, rd]) if (h != null && (best == null || Math.abs(h - e) < Math.abs(best - e))) best = h;
+    let best = null; for (const h of [k, b, g]) if (h != null && (best == null || Math.abs(h - e) < Math.abs(best - e))) best = h;
     if (best == null) return e;
-    if (best < e - 6 && best === g) return e;
+    if (best < e - 6 && best === g && rd == null) return e;  // the ground well under the course with nothing drawn near it
     if (best === k && g != null && g > k && g - k < 2) return g;  // where a deck meets the land a little under it
     return best;
   }
@@ -1214,7 +1222,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     raf = 0; if (dead) return;
     try {
       const dt = Math.min(0.1, (now - last) / 1000); last = now; const c0 = performance.now();
-      if (!resize() || !st?.P) { raf = requestAnimationFrame(frame); return; }
+      if (!resize() || !st?.P || document.hidden) { audio.hush(); raf = requestAnimationFrame(frame); return; }  // not drawn: no sound
       // the rider: where the engine said plus speed since, eased so updates never jump
       const v = st.v || 0, target = Math.min(dAt + v * Math.min(2, (now - tAt) / 1000), st.D.at(-1));
       dShown += (target - dShown) * Math.min(1, dt * 2.5) + (Math.abs(target - dShown) < 30 ? v * dt * 0.0 : 0);
@@ -1227,6 +1235,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (ds < 16 && Math.abs(k.t) > 7 && Math.abs(k.t) < 21.2) { const f = Math.min(1, (16 - ds) / 6), q = marks.lane(k.s, k.t + (Math.sign(k.t) * 21.2 - k.t) * f); p = [q.x, q.z]; } }
       // in a tunnel: on the bore's own line (the course can run a few metres off it), eased in from the portal
       { const tn = tunnelAt(p[0], p[1], eleAt(d)); if (tn) { const k = tn.k * tn.k * (3 - 2 * tn.k), sx = tn.x + rx * 1.4, sz = tn.z + rz * 1.4; p = [p[0] + (sx - p[0]) * k, p[1] + (sz - p[1]) * k]; } }
+      if (veilP && Math.hypot(p[0] - veilP[0], p[1] - veilP[1]) > 150) { veilAt = now; veil.style.transition = 'none'; veil.style.opacity = '1'; }  // a jump: cover it again
+      veilP = p;
+      if (veilAt && ((ready && now - veilAt > 600) || now - veilAt > 30000)) { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);
@@ -1327,8 +1338,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (dead) return; dead = true; cancelAnimationFrame(raf);
     for (const m of [near, far]) for (const k of [...m.keys()]) dropChunk(m, k);
     me.dispose(); for (const e of others.values()) e.r.dispose();
-    grass.dispose(); scrub.dispose(); post.dispose(); life.dispose(); audio.dispose(); hz.dispose(); if (tun.group) disposeObj(tun.group);
-    renderer.dispose(); renderer.forceContextLoss?.(); canvas.remove(); tags.remove();
+    grass.dispose(); scrub.dispose(); post.dispose(); life.dispose(); audio.dispose(); document.removeEventListener('visibilitychange', onHide); hz.dispose(); if (tun.group) disposeObj(tun.group);
+    renderer.dispose(); renderer.forceContextLoss?.(); canvas.remove(); tags.remove(); veil.remove();
   }
   raf = requestAnimationFrame(frame);
   return {

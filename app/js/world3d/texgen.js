@@ -96,3 +96,22 @@ export function coverageMips(px, w, h, cols, rows, cut = 128) {
   }
   return out;
 }
+// size^3 bytes: tileable 3D noise for the fog banks' billows, puffy (inverted cell noise over value noise), 0..255
+export function noise3Pixels(size = 32) {
+  const out = new Uint8Array(size * size * size), cells = 4, pts = [];
+  const h3 = (a, b, c, s) => hash2(hash2(a * 73 + s, b * 151) * 1e6 | 0, c * 89 + s * 7);
+  for (let k = 0; k < cells; k++) for (let j = 0; j < cells; j++) for (let i = 0; i < cells; i++) pts.push([(i + h3(i, j, k, 1)) / cells, (j + h3(i, j, k, 2)) / cells, (k + h3(i, j, k, 3)) / cells]);
+  const v3 = (x, y, z, per, s) => {  // tileable value noise
+    const i = Math.floor(x), j = Math.floor(y), k = Math.floor(z), fx = x - i, fy = y - j, fz = z - k, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = fz * fz * (3 - 2 * fz);
+    const g = (a, b, c) => h3(((a % per) + per) % per, ((b % per) + per) % per, ((c % per) + per) % per, s);
+    const l = (b, c) => g(i, b, c) * (1 - u) + g(i + 1, b, c) * u;
+    return (l(j, k) * (1 - v) + l(j + 1, k) * v) * (1 - w) + (l(j, k + 1) * (1 - v) + l(j + 1, k + 1) * v) * w;
+  };
+  for (let z = 0; z < size; z++) for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const p = [x / size, y / size, z / size]; let d = 9;
+    for (const q of pts) { let dd = 0; for (let a = 0; a < 3; a++) { let e = Math.abs(p[a] - q[a]); e = Math.min(e, 1 - e); dd += e * e; } d = Math.min(d, dd); }
+    const cell = 1 - Math.min(1, Math.sqrt(d) * cells * 0.9), val = 0.6 * v3(x / size * 6, y / size * 6, z / size * 6, 6, 1) + 0.4 * v3(x / size * 12, y / size * 12, z / size * 12, 12, 2);
+    out[(z * size + y) * size + x] = Math.round(255 * Math.max(0, Math.min(1, cell * 0.6 + val * 0.55 - 0.05)));
+  }
+  return out;
+}

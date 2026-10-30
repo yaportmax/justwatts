@@ -22,11 +22,11 @@ import { createLandmarks } from './marin.js';
 
 const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordinate stays within about 25 km
 // quality tiers: shadow map size (0: none) and span, pixel ratio cap, tree share, near rings, far ring, terrain grid
-// (segs) and upsampling near the rider (up), draw distance, post-processing (bloom, MSAA samples), grass radius and
-// clumps per square metre, ground detail (bump, close-up noise)
+// (segs) and upsampling near the rider (up), draw distance, post-processing (bloom, MSAA samples, fog volume steps),
+// grass radius and clumps per square metre, ground detail (bump, close-up noise), the full trees' radius
 export const QUALITY = [
-  { name: 'high', shadow: 2048, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, grass: [64, 4], detail: true, treeNear: 300 },
-  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, grass: [44, 2.6], detail: true, treeNear: 200 },
+  { name: 'high', shadow: 2048, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 28, grass: [64, 4], detail: true, treeNear: 300 },
+  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200 },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120 },
 ];
 const CAP = { 0: 42000, 1: 26000 };  // trees per tile at full share, by detail
@@ -61,7 +61,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     tunnel: new THREE.MeshLambertMaterial({ color: 0x55524c, emissive: 0x15130f }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }) };
   const trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
-  const post = createPost(renderer, scene, camera);
+  const post = createPost(renderer, scene, camera, sky.fog.u);
   const life = createLife({ THREE, scene, proj, marks, quality: q }), audio = createAudio({ on: sound });
   sky.setBanks(fog);
 
@@ -617,7 +617,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     renderer.shadowMap.enabled = Q.shadow > 0; sky.sun.castShadow = Q.shadow > 0;
     if (Q.shadow) { sky.sun.shadow.mapSize.set(Q.shadow, Q.shadow); sky.sun.shadow.map?.dispose(); sky.sun.shadow.map = null; }
     camera.far = Q.view; camera.updateProjectionMatrix();
-    sky.set(sky.time); post.build({ ...Q, ...(globalThis.__w3?.post || {}) }); grass.set(...Q.grass);
+    sky.set(sky.time); post.build({ ...Q, ...(globalThis.__w3?.post || {}) }); sky.setVolume(post.fog); grass.set(...Q.grass);
     size = ''; poke();
     scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   }

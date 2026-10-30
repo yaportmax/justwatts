@@ -1,21 +1,25 @@
-// World 3D atmosphere: a scattering sky with the sun disk (three's Sky), sun and sky light, height fog and aerial
-// haze in the colour of the sky's own horizon (every material, through three's fog chunks), the sea (wave normals,
-// fresnel, sun glint) and banks of Karl the fog off the coast that can be turned off. Times of day are presets of the
-// sun's position; every colour follows from the sun, so any time in between works too.
+// World 3D atmosphere: a scattering sky with the sun disk (three's Sky) under two drifting cloud layers (puffy cumulus
+// and thin cirrus, lit from the sun's side), sun and sky light, height fog and aerial haze in the colour of the sky's
+// own horizon (every material, through three's fog chunks), the sea (wave normals, fresnel, sun glint) and banks of
+// Karl the fog off the coast that can be turned off: a volume ray marched in post (post.js) from a map of how high the
+// fog stands, or soft billboards where there is no post-processing. Times of day are presets of the sun's position;
+// every colour follows from the sun, so any time in between works too.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { Sky } from '../../vendor/three-0.180.0/addons/objects/Sky.js';
 import { textures } from './tex.js';
+import { noise3Pixels } from './texgen.js';
 import { skyRadiance, sunTint } from './skymath.js';
 
 // az: compass degrees, el: degrees above the horizon; turb/mie: haze in the sky; haze, low: aerial haze and the low
-// marine layer (per million per metre); banks: fog bank amount; si: sun intensity; exp: exposure
+// marine layer (per million per metre); banks: fog bank amount; cl: cumulus cover, ci: cirrus; si: sun intensity;
+// exp: exposure
 export const TIMES = {
-  dawn: { az: 78, el: 4, turb: 3.2, ray: 2.2, mie: 0.006, si: 2.0, haze: 22, low: 120, banks: 1, exp: 1.05 },
-  morning: { az: 100, el: 15, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.6, haze: 18, low: 110, banks: 1, exp: 0.92 },
-  day: { az: 185, el: 58, turb: 2.0, ray: 1.2, mie: 0.004, si: 3.1, haze: 10, low: 16, banks: 0.5, exp: 0.82 },
-  afternoon: { az: 228, el: 36, turb: 2.2, ray: 1.3, mie: 0.004, si: 3.0, haze: 12, low: 22, banks: 0.6, exp: 0.84 },
-  golden: { az: 248, el: 13, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.9, haze: 14, low: 30, banks: 0.75, exp: 0.88 },
-  sunset: { az: 258, el: 3.5, turb: 3.4, ray: 2.4, mie: 0.006, si: 2.3, haze: 20, low: 50, banks: 0.8, exp: 1.02 },
+  dawn: { az: 78, el: 4, turb: 3.2, ray: 2.2, mie: 0.006, si: 2.0, haze: 22, low: 120, banks: 1, cl: 0.3, ci: 0.6, exp: 1.05 },
+  morning: { az: 100, el: 15, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.6, haze: 18, low: 110, banks: 1, cl: 0.22, ci: 0.4, exp: 0.92 },
+  day: { az: 185, el: 58, turb: 2.0, ray: 1.2, mie: 0.004, si: 3.1, haze: 10, low: 16, banks: 0.5, cl: 0.34, ci: 0.3, exp: 0.82 },
+  afternoon: { az: 228, el: 36, turb: 2.2, ray: 1.3, mie: 0.004, si: 3.0, haze: 12, low: 22, banks: 0.6, cl: 0.4, ci: 0.45, exp: 0.84 },
+  golden: { az: 248, el: 13, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.9, haze: 14, low: 30, banks: 0.75, cl: 0.3, ci: 0.55, exp: 0.88 },
+  sunset: { az: 258, el: 3.5, turb: 3.4, ray: 2.4, mie: 0.006, si: 2.3, haze: 20, low: 50, banks: 0.8, cl: 0.36, ci: 0.7, exp: 1.02 },
 };
 export const TIME_ORDER = ['golden', 'sunset', 'dawn', 'morning', 'day', 'afternoon'];
 
@@ -68,10 +72,36 @@ export function createSky(scene, { far, quality = 0 }) {
   const T = textures(), sunDir = new THREE.Vector3(0, 1, 0);
   /* the sky */
   const sky = new Sky(), su = sky.material.uniforms;
-  sky.material.uniforms.skyGain = { value: 1 };
+  const cu = { skyGain: { value: 1 }, tNoise: { value: T.noise }, cTime: { value: 0 }, cCover: { value: 0.3 }, cCirrus: { value: 0.5 }, cLit: { value: new THREE.Color() },
+    cShade: { value: new THREE.Color() }, cHaze: { value: new THREE.Color() } };
+  Object.assign(sky.material.uniforms, cu);
   sky.material.fragmentShader = sky.material.fragmentShader
-    .replace('uniform vec3 up;', 'uniform vec3 up;\nuniform float skyGain;')
-    .replace('gl_FragColor = vec4( retColor, 1.0 );', 'gl_FragColor = vec4( retColor * skyGain, 1.0 );');
+    .replace('uniform vec3 up;', `uniform vec3 up;
+      uniform float skyGain, cTime, cCover, cCirrus; uniform vec3 cLit, cShade, cHaze; uniform sampler2D tNoise;
+      // cloud density on a layer at a point (metres): four octaves of the noise, cut at the cover
+      float jwCl(vec2 p) { return texture2D(tNoise, p / 11000.0).a * 0.5 + texture2D(tNoise, p / 3900.0 + 0.37).b * 0.28 + texture2D(tNoise, p / 1300.0 + 0.71).g * 0.14 + texture2D(tNoise, p / 420.0 + 0.13).r * 0.08; }`)
+    .replace('gl_FragColor = vec4( retColor, 1.0 );', /* glsl */`
+      vec3 col = retColor * skyGain;
+      if (direction.y > 0.0) {
+        // cumulus 1700 m up, drifting east with the sea breeze; lit on the side toward the sun, grey beneath where it is
+        // thick, a silver edge against the sun; far ones melt into the haze
+        float h = max(1700.0 - cameraPosition.y, 200.0), t = h / max(direction.y, 0.012);
+        vec2 p = cameraPosition.xz + direction.xz * t + cTime * vec2(5.0, 1.5);
+        float n = jwCl(p), cut = 0.72 - cCover * 0.5, c = smoothstep(cut - 0.03, cut + 0.13, n);
+        float ns = jwCl(p + vSunDirection.xz / max(length(vSunDirection.xz), 0.2) * 220.0), thick = smoothstep(cut, cut + 0.25, ns);
+        float sa = max(dot(direction, vSunDirection), 0.0);
+        vec3 cc = mix(cLit, cShade, clamp(thick * 0.85 + c * 0.25 - 0.15, 0.0, 1.0)) + cLit * pow(sa, 6.0) * (1.0 - c) * 1.6;
+        float far = 1.0 - exp(-t / 26000.0);
+        cc = mix(cc, cHaze, far * 0.85);
+        col = mix(col, cc, c * smoothstep(0.0, 0.06, direction.y) * (1.0 - far * 0.6) * 0.96);
+        // cirrus 7 km up: long thin streaks
+        vec2 q = cameraPosition.xz + direction.xz * (7000.0 / max(direction.y, 0.02)) + cTime * vec2(12.0, 4.0);
+        q = mat2(0.94, 0.34, -0.34, 0.94) * q;
+        float s = texture2D(tNoise, q * vec2(1.0 / 24000.0, 1.0 / 5200.0)).g * 0.7 + texture2D(tNoise, q * vec2(1.0 / 6000.0, 1.0 / 1500.0)).r * 0.3;
+        float pm = smoothstep(0.42, 0.62, texture2D(tNoise, q / 70000.0 + 0.5).a);
+        col = mix(col, cLit * 1.05 + cHaze * 0.2, smoothstep(0.56, 0.86, s) * pm * cCirrus * 0.55 * smoothstep(0.0, 0.12, direction.y) * (1.0 - c));
+      }
+      gl_FragColor = vec4( col, 1.0 );`);
   sky.scale.setScalar(far * 0.85); sky.frustumCulled = false; sky.renderOrder = -10; scene.add(sky);
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1); scene.add(hemi);
@@ -121,8 +151,30 @@ export function createSky(scene, { far, quality = 0 }) {
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), seaMat);
   sea.scale.setScalar(far * 2.2); sea.frustumCulled = false; scene.add(sea);
 
-  /* Karl the fog: soft puffs low over the sea, one instanced draw, facing the camera */
+  /* Karl the fog: a map of how high it stands (a smooth top over every bank) and billows of 3D noise in it, for the
+     volume in post (post.js uses fog.u); without post, soft puffs low over the sea, one instanced draw facing the camera */
   const banks = { mesh: null, amount: 1, on: true };
+  const n3 = new THREE.Data3DTexture(noise3Pixels(32), 32, 32, 32);
+  n3.format = THREE.RedFormat; n3.wrapS = n3.wrapT = n3.wrapR = THREE.RepeatWrapping; n3.magFilter = n3.minFilter = THREE.LinearFilter; n3.unpackAlignment = 1; n3.needsUpdate = true;
+  const fog = { vol: false, u: { fogMap: { value: null }, fogNoise: { value: n3 }, fogBox: { value: new THREE.Vector4() }, fogTop: { value: 400 }, fogAmount: { value: 0 },
+    fogTime: { value: 0 }, sunD: { value: sunDir }, sunC: { value: new THREE.Color() }, ambC: { value: new THREE.Color() }, baseC: { value: new THREE.Color() } } };
+  function bankMap(list) {
+    // the top of the fog (metres, up to fogTop) on a 256 x 256 grid over the banks: each puff a smooth dome
+    const S = 256; let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z, s] of list) { x0 = Math.min(x0, x - s); x1 = Math.max(x1, x + s); z0 = Math.min(z0, z - s); z1 = Math.max(z1, z + s); }
+    const w = (x1 - x0) / S, h = (z1 - z0) / S, top = new Float32Array(S * S), M = fog.u.fogTop.value;
+    for (const [x, z, s, y] of list) {
+      const r = s * 0.7, t = Math.min(M * 0.8, 40 + y * 0.55 + s * 0.1);
+      for (let j = Math.max(0, Math.floor((z - r - z0) / h)); j <= Math.min(S - 1, Math.ceil((z + r - z0) / h)); j++)
+        for (let i = Math.max(0, Math.floor((x - r - x0) / w)); i <= Math.min(S - 1, Math.ceil((x + r - x0) / w)); i++) {
+          const d = Math.hypot(x0 + (i + 0.5) * w - x, z0 + (j + 0.5) * h - z) / r; if (d >= 1) continue;
+          const k = j * S + i, v = t * Math.sqrt(1 - d * d); top[k] = Math.max(top[k], v) + Math.min(top[k], v) * 0.15;
+        }
+    }
+    const px = new Uint16Array(S * S); for (let k = 0; k < S * S; k++) px[k] = THREE.DataUtils.toHalfFloat(Math.min(1, top[k] / M));
+    const tex = new THREE.DataTexture(px, S, S, THREE.RedFormat, THREE.HalfFloatType); tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
+    fog.u.fogMap.value?.dispose(); fog.u.fogMap.value = tex; fog.u.fogBox.value.set(x0, z0, 1 / (x1 - x0), 1 / (z1 - z0));
+  }
   const bankMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: true, defines: { JW_FOG_SCALE: 0.3 },
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: T.puff }, op: { value: 0.6 }, lit: { value: new THREE.Color() }, shade: { value: new THREE.Color() }, sunD: { value: new THREE.Vector3() } }]),
@@ -158,9 +210,12 @@ export function createSky(scene, { far, quality = 0 }) {
     list.forEach(([x, z, s, y], i) => at.set([x, y, z, s], i * 4));
     g.setAttribute('at', new THREE.InstancedBufferAttribute(at, 4)); g.instanceCount = list.length;
     banks.mesh = new THREE.Mesh(g, bankMat); banks.mesh.frustumCulled = false; banks.mesh.renderOrder = 5; scene.add(banks.mesh);
-    showBanks();
+    bankMap(list); showBanks();
   }
-  const showBanks = () => { if (banks.mesh) banks.mesh.visible = banks.on && banks.amount > 0.05; bankMat.uniforms.op.value = 0.95 * banks.amount; };
+  const showBanks = () => {
+    if (banks.mesh) banks.mesh.visible = banks.on && banks.amount > 0.05 && !fog.vol;
+    bankMat.uniforms.op.value = 0.95 * banks.amount; fog.u.fogAmount.value = banks.on ? banks.amount : 0;
+  };
 
   /* the time of day */
   let t = 'golden', exposure = 1, sunI = 3, hemiI = 1;
@@ -192,16 +247,27 @@ export function createSky(scene, { far, quality = 0 }) {
     bu.lit.value.setRGB(0.35 + 0.65 * tint[0], 0.35 + 0.62 * tint[1], 0.37 + 0.56 * tint[2], THREE.LinearSRGBColorSpace).multiplyScalar(1.05 * (0.6 + 0.4 * Math.min(1, P.el / 20)));
     bu.shade.value.setRGB(zen[0] * 0.7 + 0.25, zen[1] * 0.7 + 0.27, zen[2] * 0.6 + 0.32, THREE.LinearSRGBColorSpace);
     banks.amount = P.banks; showBanks();
+    // clouds: lit by the sun's colour, shaded with the zenith's blue; the far ones take the haze
+    cu.skyGain.value = gain; cu.cCover.value = P.cl; cu.cCirrus.value = P.ci;
+    cu.cLit.value.setRGB(tint[0], tint[1], tint[2], THREE.LinearSRGBColorSpace).multiplyScalar(0.34 * P.si * Math.min(1, 0.3 + P.el / 10)).add(new THREE.Color().setRGB(zen[0] * 0.5, zen[1] * 0.5, zen[2] * 0.5, THREE.LinearSRGBColorSpace));
+    cu.cShade.value.setRGB(zen[0] * 0.75 + hz[0] * 0.35, zen[1] * 0.75 + hz[1] * 0.35, zen[2] * 0.7 + hz[2] * 0.35, THREE.LinearSRGBColorSpace);
+    cu.cHaze.value.setRGB(hz[0], hz[1], hz[2], THREE.LinearSRGBColorSpace);
+    // the fog volume: the sun on its top, the sky's light in it
+    fog.u.sunC.value.copy(sun.color).multiplyScalar(sun.intensity * 0.22);
+    fog.u.ambC.value.setRGB(zen[0] * 0.9 + hz[0] * 0.5, zen[1] * 0.9 + hz[1] * 0.5, zen[2] * 0.8 + hz[2] * 0.5, THREE.LinearSRGBColorSpace);
+    fog.u.baseC.value.copy(scene.fog.color);
     exposure = P.exp; sunI = sun.intensity; hemiI = hemi.intensity;
   }
   return {
-    sunDir, sun, hemi, set, placeBanks, get time() { return t; }, get exposure() { return exposure; }, get sunI() { return sunI; }, get hemiI() { return hemiI; },
+    sunDir, sun, hemi, set, placeBanks, fog, get time() { return t; },
+    // the fog banks as a volume (post draws them) or as billboards
+    setVolume(on) { fog.vol = !!on; showBanks(); }, get exposure() { return exposure; }, get sunI() { return sunI; }, get hemiI() { return hemiI; },
     setBanks(on) { banks.on = !!on; showBanks(); return banks.on; }, get banksOn() { return banks.on; },
     // follow the camera (sky, sea), the shadow box around the rider (snapped to its texels so shadows do not swim)
     update(cam, rider, dt, shadowSpan) {
       sky.position.copy(cam.position);
       sea.position.set(cam.position.x, 0, cam.position.z);
-      wu.time.value += dt;
+      wu.time.value += dt; cu.cTime.value += dt; fog.u.fogTime.value += dt;
       const c = sun.shadow.camera, span = shadowSpan;
       if (span && c.right !== span) { c.left = c.bottom = -span; c.right = c.top = span; c.updateProjectionMatrix(); }
       const texel = (2 * (span || 50)) / (sun.shadow.mapSize.x || 1024);

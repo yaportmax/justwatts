@@ -50,6 +50,8 @@ export function jobQueue(now = () => performance.now()) {
   return {
     add(id, pri, fn) { q = q.filter(j => j.id !== id); q.push({ id, pri, fn }); q.sort((a, b) => a.pri - b.pri); },
     drop(pred) { q = q.filter(j => !pred(j.id)); },
+    // a queued job's priority changed (the route turned round): kept, a half done one too, in its new place
+    reprio(id, pri) { const j = q.find(j => j.id === id); if (j && j.pri !== pri) { j.pri = pri; q.sort((a, b) => (a.it ? -1e9 : a.pri) - (b.it ? -1e9 : b.pri)); } },
     run(budget) {
       const t0 = now(); let n = 0;
       while (q.length && (n === 0 || now() - t0 < budget)) {

@@ -361,6 +361,14 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   }
 }
 
+/* ---------- streaming along the route: a queued job moves when the route turns round, a half done one kept ---------- */
+{
+  const J = jobQueue(() => 0), ran = [];
+  function* slow() { ran.push('a1'); yield; ran.push('a2'); }
+  J.add('a', 1, slow); J.add('b', 2, () => ran.push('b')); J.add('c', 3, () => ran.push('c'));
+  J.run(0); J.reprio('a', 9); J.reprio('c', 0.5); J.run(0); J.run(0); J.run(0);
+  out.reprio = ran;
+}
 /* ---------- rails (rail.js): the baked rails walked at light speed, every road and every open world start ---------- */
 {
   // the format and the pure pieces

@@ -776,17 +776,23 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (const k of pf.drop) dropChunk(far, k);
     for (const [k, lod] of pf.add) far.set(k, newChunk(k, lod));
     // what each chunk needs (re)built
-    const rx = tileX(lon, NEAR_Z), ry = tileY(lat, NEAR_Z);
+    // along the route, not in rings: a tile the course runs through first, sooner the sooner the rider gets there (a
+    // tile 1.5 km on counts as one tile away), the rest by distance after them; in each the ground and the road before
+    // anything else, the trees, buildings and furniture after every tile's ground and roads
+    const rx = tileX(lon, NEAR_Z), ry = tileY(lat, NEAR_Z), route = routeTiles(), d0 = dShown;
     for (const c of near.values()) {
       if (c.tile === undefined) continue;
-      const pri = Math.hypot(c.x + 0.5 - rx, c.y + 0.5 - ry) + c.lod * 3;
+      const along = route?.get(c.k)?.find(D => D >= d0 - 60), dist = Math.hypot(c.x + 0.5 - rx, c.y + 0.5 - ry);
+      const pri = (along != null ? Math.min(dist, Math.max(0, along - d0) / 1500) : dist + 1.5) + c.lod * 3;
+      // (a new route, a U-turn: what is queued moves to its new place, nothing built or half built is dropped)
+      if (route !== c.route) { c.route = route; for (const [s, o] of [['t', 0], ['r', 0.1], ['u', 0.15], ['b', 6.2 + c.lod], ['v', 6.3 + c.lod], ['f', 6.4 + c.lod]]) jobs.reprio(c.k + '|' + s, pri + o); }
       const ts = `${c.lod}|${q}`;
       if (c.sig.terrain !== ts) { c.sig.terrain = ts; jobs.add(c.k + '|t', pri, () => buildTerrain(c)); }
       const ds = `${ts}|${c.ver}`;
       if (c.ver != null && c.sig.roads !== ds) { c.sig.roads = ds; jobs.add(c.k + '|r', pri + 0.1, () => buildRoads(c)); }
-      if (c.ver != null && c.sig.trees !== ds) { c.sig.trees = ds; jobs.add(c.k + '|v', pri + 0.3 + c.lod, () => buildTrees(c)); }
-      if (c.ver != null && c.sig.bldg !== ds) { c.sig.bldg = ds; jobs.add(c.k + '|b', pri + 0.2 + c.lod, () => buildBuildings(c)); }
-      if (c.ver != null && c.sig.furn !== ds) { c.sig.furn = ds; jobs.add(c.k + '|f', pri + 0.4 + c.lod, () => buildFurniture(c)); }
+      if (c.ver != null && c.sig.trees !== ds) { c.sig.trees = ds; jobs.add(c.k + '|v', pri + 6.3 + c.lod, () => buildTrees(c)); }
+      if (c.ver != null && c.sig.bldg !== ds) { c.sig.bldg = ds; jobs.add(c.k + '|b', pri + 6.2 + c.lod, () => buildBuildings(c)); }
+      if (c.ver != null && c.sig.furn !== ds) { c.sig.furn = ds; jobs.add(c.k + '|f', pri + 6.4 + c.lod, () => buildFurniture(c)); }
       if (c.ver != null && c.sig.tun !== ds) { c.sig.tun = ds; jobs.add(c.k + '|u', pri + 0.15, () => buildTunnels(c)); }
     }
     for (const c of far.values()) {
@@ -809,6 +815,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     ready = [...near.values()].filter(c => c.lod === 0).every(c => c.built);
   }
 
+  // the near tiles the course runs through: key -> the distances along it it is there (every 10 m), once per course
+  function routeTiles() {
+    if (!st?.P) return null; if (st.tiles) return st.tiles;
+    const m = new Map(); st.P.forEach((p, i) => { const [tx, ty] = tileOf(p[0], p[1]), k = key(NEAR_Z, tx, ty); (m.get(k) ?? m.set(k, []).get(k)).push(st.D[i]); });
+    return st.tiles = m;
+  }
   // the ground (or a deck) under a local point: the finest built tile there
   function groundAt(x, z) {
     const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty));
@@ -1164,11 +1176,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const pts = s.ll.map(([la, lo]) => proj.xz(la, lo)), D = [0];
       for (let i = 1; i < pts.length; i++) D.push(D[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
       const k = s.dist && D.at(-1) ? s.dist / D.at(-1) : 1;
-      s.P = pts; s.D = D.map(d => d * k); s.ri = null;
+      s.P = pts; s.D = D.map(d => d * k); s.ri = null; s.tiles = null;
       // (the points it shares with the course before it keep their rails: re-matched from a few before the change)
       if (st?.ri && st.ll) { let j = 0; const m = Math.min(st.ll.length, s.ll.length); while (j < m && st.ll[j] === s.ll[j]) j++; s.old = j > 3 ? [st.ri, j - 3] : null; }
       poke();
-    } else { s.P = st.P; s.D = st.D; s.ri = st.ri; }
+    } else { s.P = st.P; s.D = st.D; s.ri = st.ri; s.tiles = st.tiles; }
     if (reset) { dShown = s.d; camYaw = null; camInit = false; }
     st = s; dAt = s.d; tAt = performance.now();
   }
@@ -1344,7 +1356,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       { const tn = tunnelAt(p[0], p[1], eleAt(d)); if (tn) { const k = tn.k * tn.k * (3 - 2 * tn.k), sx = tn.x + rx * 1.4, sz = tn.z + rz * 1.4; p = [p[0] + (sx - p[0]) * k, p[1] + (sz - p[1]) * k]; } }
       if (veilP && Math.hypot(p[0] - veilP[0], p[1] - veilP[1]) > 150) { veilAt = now; veil.style.transition = 'none'; veil.style.opacity = '1'; }  // a jump: cover it again
       veilP = p;
-      if (veilAt && ((ready && now - veilAt > 600) || now - veilAt > 30000)) { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
+      const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
+      if (veilAt && (((onRail ? spawn : ready) && now - veilAt > 600) || now - veilAt > 30000)) { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);
@@ -1467,7 +1481,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
-    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, gpuMs: gpuTime.ms, me: me.group.position.toArray(), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown), lane: laneAt(dShown) } : null,
+    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, gpuMs: gpuTime.ms, me: me.group.position.toArray(), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown), lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z),
       // the drawn road's top under a point (a ray down onto the roads' and the bores' road surfaces), the nearest under y + 1
       drawn: (x, z, y) => { const rc = new THREE.Raycaster(new THREE.Vector3(x, y + 1, z), new THREE.Vector3(0, -1, 0), 0, 4), obj = [...near.values()].map(c => c.parts.roads?.children[0]).filter(Boolean); if (tun.group) obj.push(tun.group); const h = rc.intersectObjects(obj, true).find(h => h.object.material === mats.road); return h ? h.point.y : null; }, lat: z => proj.lat(z), lon: x => proj.lon(x), xz: (la, lo) => proj.xz(la, lo), near: nearLines, decks: () => [...near.values()].filter(c => c.decks?.length).map(c => [c.k, c.decks.length]), tunnels: tun.list.map(T => ({ h0: T.h0, h1: T.h1, L: T.L, box: T.box, port: T.port, a: [proj.lat(T.P[0][1]), proj.lon(T.P[0][0])], b: [proj.lat(T.P.at(-1)[1]), proj.lon(T.P.at(-1)[0])] })) }),
     // a fixed camera for screenshots and checks: [lat, lon, height m, heading deg, pitch deg], null to follow the rider

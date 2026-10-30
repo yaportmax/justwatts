@@ -319,3 +319,8 @@ def test_bridges_only_over_a_gap(out):
     b = out["bridges"]
     assert b["n"] > 0 and b["through"] == 0, b                                          # no deck through the ground (over a ridge):
                                                                                          # a bridge only over the lidar's gap (bake)
+
+
+def test_queue_follows_the_route(out):
+    assert out["reprio"] == ["a1", "a2", "c", "b"]                                       # the half done job finishes first; then the
+                                                                                         # one moved up the route

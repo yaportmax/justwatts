@@ -61,13 +61,13 @@ const bumpy = (g, amt, seed) => {  // shift the vertices a little so crowns are 
 // A geometry of quads: each [centre, along (image right), up (image up), half length, half height, atlas cell, flip,
 // soft centre, r, the image's rows used ([top, bottom] shares, default all)];
 // normals soft round an axis point (the crown's middle at that height) with a little of the card's own facing, ao
-// darker toward the inside of the crown (r: 0 at the middle .. 1 at its edge); one card in three casts a shadow.
+// darker toward the inside of the crown (r: 0 at the middle .. 1 at its edge); about one card in five casts a shadow.
 function quads(list, soft) {
   const P = [], N = [], U = [], A = [], K = [];
   for (const [c, t, b, hl, hh, k, flip, sc, r, rows = [0, 1]] of list) {
     const [u0, c0, u1, c1] = leafCell(k), v0 = c0 + (c1 - c0) * rows[0], v1 = c0 + (c1 - c0) * rows[1], fn = new THREE.Vector3().crossVectors(t, b).normalize(), s = soft(c, sc);
     const n = s.multiplyScalar(0.78).addScaledVector(fn, 0.22 * (fn.dot(s) < 0 ? -1 : 1)).add(new THREE.Vector3(0, 0.12, 0)).normalize();
-    const ao = 0.62 + 0.38 * Math.min(1, r), a = flip ? [u1, u0] : [u0, u1], sk = hash2(Math.round(c.x * 97), Math.round(c.y * 89 + c.z * 83)) < 0.36 ? 1 : 0;
+    const ao = 0.62 + 0.38 * Math.min(1, r), a = flip ? [u1, u0] : [u0, u1], sk = hash2(Math.round(c.x * 97), Math.round(c.y * 89 + c.z * 83)) < 0.22 ? 1 : 0;
     const corner = (x, y) => P.push(c.x + t.x * hl * x + b.x * hh * y, c.y + t.y * hl * x + b.y * hh * y, c.z + t.z * hl * x + b.z * hh * y);
     for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) {
       corner(x, y); N.push(n.x, n.y, n.z); U.push(x < 0 ? a[0] : a[1], y < 0 ? v1 : v0); A.push(ao); K.push(sk);
@@ -154,7 +154,7 @@ const cone = (y0, y1, r, c, seed) => [bumpy(new THREE.ConeGeometry(r, y1 - y0, 8
 // bush, shrub (low), fern, stone (near the rider only)
 export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub'];
 // the share of the full models' radius each is drawn in full (the tall dense ones cost the most; impostors past it)
-export const NEAR = { oak: 1, bay: 1, fir: 0.55, redwood: 0.35, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, stone: 0.45, fern: 0.4 };
+export const NEAR = { oak: 1, bay: 1, fir: 0.5, redwood: 0.28, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, stone: 0.45, fern: 0.4 };
 export function treeGeometries() {
   const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15);
   // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
@@ -196,12 +196,12 @@ export function treeGeometries() {
     shrub: merge([limb(0, 0, 0, 0.3, 1.2, 0.1, 0.08, col(0x7a3e2c, 1.4)), limb(0, 0, 0, -0.4, 1.1, 0.2, 0.07, col(0x7a3e2c, 1.4)),
       core(0, 1.7, 0, 1.05, 0.85, 1.0, F.shrub, 16), ...lumps(0, 1.7, 0, 1.5, 1.2, 1.4, 4, 10, 1.15, LEAF.scrub, 15).map(g => leaves(g, F.shrub))]),
     // sword fern under the redwoods
-    fern: merge([leaves(fronds(11, 1.4, 5), F.fern)]),
+    fern: merge([leaves(fronds(12, 1.7, 5), F.fern)]),
   };
 }
 
 // which tree grows here: k ground class, lt leaf type, h height, lat/lon, r a random 0..1
-const REDWOODS = [[37.885, -122.59, 37.905, -122.565], [38.0, -122.76, 38.035, -122.69], [37.89, -122.555, 37.915, -122.53], [37.96, -122.67, 37.99, -122.62]];
+export const REDWOODS = [[37.885, -122.59, 37.905, -122.565], [38.0, -122.76, 38.035, -122.69], [37.89, -122.555, 37.915, -122.53], [37.96, -122.67, 37.99, -122.62]];
 export function species(k, lt, h, lat, lon, r) {
   if (k === 'scrub') return r < 0.75 ? 'bush' : r < 0.94 ? 'shrub' : 'cypress';
   if (k === 'wood') {

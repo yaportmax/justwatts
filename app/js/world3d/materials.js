@@ -10,6 +10,8 @@ import { textures } from './tex.js';
 export const WIND = { time: { value: 0 }, gust: { value: 0.6 } };
 // tunnel bores near the rider: the ground inside one is not drawn (seen through a portal it would fill the bore).
 // a: [x0, z0, x1, z1] a straight piece of bore, b: [floor y at 0, at 1, half width, height]
+// the redwood groves (props.js REDWOODS) in local metres [x0, z0, x1, z1]: needle litter on the ground under them
+export const REDWOOD = { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, -1, -1)) };
 export const BORES = { a: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, b: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, n: { value: 0 } };
 
 const GLSL_COMMON = /* glsl */`
@@ -21,7 +23,7 @@ float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 *
 // p: world xz; n: world normal; m: [wood, green, sand, town]; m2: [cut bank, rock, lake, farm]; cv: hollow (+) or
 // ridge (-); h: height. Returns the albedo; rk: how much of it is rock or bare earth (no grass grows there).
 const GLSL_GROUND = /* glsl */`
-uniform sampler2D tNoise;
+uniform sampler2D tNoise; uniform vec4 rwBox[4];
 vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
@@ -57,6 +59,12 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(0.2, 0.5, slope + (small - 0.5) * 0.2) * 0.65;
   c = mix(c, srgb(vec3(0.55, 0.45, 0.33)) * (0.85 + 0.3 * fine), bare);
   rk = max(rk, bare);
+  // under the redwoods: red-brown needle litter, patches of sorrel
+  float rw = 0.0;
+  for (int i = 0; i < 4; i++) rw = max(rw, step(rwBox[i].x, p.x) * step(p.x, rwBox[i].z) * step(rwBox[i].y, p.y) * step(p.y, rwBox[i].w));
+  rw *= smoothstep(0.3, 0.65, wood);
+  vec3 duff = mix(srgb(vec3(0.38, 0.27, 0.19)), srgb(vec3(0.33, 0.42, 0.18)), smoothstep(0.52, 0.68, small) * 0.85) * (0.85 + 0.3 * fine);
+  c = mix(c, duff, rw * 0.9);
   // the shore and the sea floor
   if (lake < 0.5) c = mix(c, srgb(vec3(0.80, 0.74, 0.58)), smoothstep(3.0, 0.8, h) * (1.0 - smoothstep(0.3, 0.5, slope)));
   c = mix(c, srgb(vec3(0.20, 0.34, 0.38)), lake);
@@ -65,12 +73,13 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
 }
 `;
 
-// attributes: normal (smooth), mk / mk2 (class weights, normalised bytes), cv (hollow / ridge)
-export function terrainMaterial({ detail = true } = {}) {
+// attributes: normal (smooth), mk / mk2 (class weights, normalised bytes), cv (hollow / ridge). bores: the tunnel test
+// (only tiles with a tunnel use it: a discard anywhere in the shader costs the GPU its early depth test)
+export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
@@ -78,12 +87,13 @@ export function terrainMaterial({ detail = true } = {}) {
       .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <color_fragment>', /* glsl */`
         bool inBore = false;
+        ${bores ? `
         for (int i = 0; i < 12; i++) {
           vec2 e = boreA[i].zw - boreA[i].xy; float t = clamp(dot(vW.xz - boreA[i].xy, e) / max(dot(e, e), 1e-3), 0.0, 1.0);
           float fy = mix(boreB[i].x, boreB[i].y, t);
           inBore = inBore || (i < boreN && distance(vW.xz, boreA[i].xy + e * t) < boreB[i].z && vW.y > fy - 2.0 && vW.y < fy + boreB[i].w);
         }
-        if (inBore) discard;
+        if (inBore) discard;` : ''}
         vec3 nW = normalize(vNw); float rk;
         vec3 c = jwGround(vW.xz, nW, vMk, vMk2, vCv, vW.y, rk);
         float dist = length(vViewPosition);
@@ -102,7 +112,7 @@ export function terrainMaterial({ detail = true } = {}) {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-3' + (detail ? 'd' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-3' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 
@@ -114,7 +124,7 @@ export function grassMaterial() {
   const T = textures(), U = { radius: { value: 60 }, centre: { value: new THREE.Vector2() } };
   m.userData.u = U;
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 gA; attribute vec4 gB; uniform float wTime, wGust, radius; uniform vec2 centre; varying vec3 vGc;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <begin_vertex>', /* glsl */`

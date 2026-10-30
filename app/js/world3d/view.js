@@ -8,9 +8,9 @@ import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, rasterBy, gr
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, withSun, WIND, BORES } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, withSun, WIND, BORES, REDWOOD } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, species, buildingGeometry, SPECIES, NEAR } from './props.js';
+import { treeGeometries, species, buildingGeometry, SPECIES, NEAR, REDWOODS } from './props.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
 import { createSky } from './sky.js';
@@ -57,10 +57,11 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const scene = new THREE.Scene(), proj = makeProj(...ORIGIN);
   const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 60000);
   const sky = createSky(scene, { far: 60000 }); sky.set(time);
-  const mats = { terrain: terrainMaterial(), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
+  const mats = { terrain: terrainMaterial(), terrainBore: terrainMaterial({ bores: true }), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
     tunnel: new THREE.MeshLambertMaterial({ color: 0x55524c, emissive: 0x15130f }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }) };
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
+  REDWOODS.forEach(([s, w, n, e], i) => REDWOOD.value[i].set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)));
   const hz = createHorizon(renderer, scene, sky.sunDir);
   const trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
@@ -142,7 +143,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
     g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
     g.setIndex(new THREE.BufferAttribute(m.idx, 1)); g.computeBoundingSphere();
-    const mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? mats.terrain : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
+    const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(); } else { c.nor = c.mask = c.cv = null; }
     setPart(c, 'terrain', mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
   }
@@ -212,8 +213,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         add(sp, x, z, 0.75 + 0.5 * hash2(Math.round(x), Math.round(z)), r);
         if (sp !== 'redwood') continue;
         // redwoods stand in rings round where an old one was; sword ferns under them (full models near the rider only)
-        if (r < 0.3) for (let e = 0; e < 3; e++) { const a = r * 40 + e * 2.1, rr = 3 + 1.5 * hash2(e, Math.round(x)); add('redwood', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.55 + 0.4 * hash2(e, Math.round(z)), hash2(Math.round(z), e)); }
-        if (fine && ferns < 14000) for (let e = 0; e < 5; e++) { const a = hash2(e, Math.round(x * 7)) * 6.283, rr = 2 + 5 * hash2(Math.round(z * 7), e); add('fern', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.7 + 0.6 * hash2(e, 3), hash2(e, Math.round(x))); ferns++; }
+        if (r < 0.25) for (let e = 0; e < 2; e++) { const a = r * 40 + e * 2.6, rr = 3 + 1.5 * hash2(e, Math.round(x)); add('redwood', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.55 + 0.4 * hash2(e, Math.round(z)), hash2(Math.round(z), e)); }
+        if (fine && ferns < 14000) for (let e = 0; e < 5; e++) { const a = hash2(e, Math.round(x * 7)) * 6.283, rr = 2 + 5 * hash2(Math.round(z * 7), e); add('fern', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.9 + 0.7 * hash2(e, Math.round(z)), hash2(e, Math.round(x))); ferns++; }
       }
     }
     // lone oaks on the open hills, in loose clumps
@@ -252,44 +253,59 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         add('stone', px, pz, 0.6 + 1.4 * hash2(k, 3) ** 2, hash2(k, 5));
       }
     }
-    // per species an instanced set of full models near the rider (fine tiles; partTrees fills it), and every tree of
-    // the tile as an impostor in one draw (the full models' circle left out)
+    // per species the full models near the rider (fine tiles; partTrees fills them), and every tree of the tile as an
+    // impostor in one draw (the full models' circle left out)
     const grp = new THREE.Group(), imp = []; c.treeSets = []; c.imp = null;
     let y0 = Infinity, y1 = -Infinity;
     for (const [sp, list] of Object.entries(out)) {
-      const ci = SPECIES.indexOf(sp), low = sp === 'stone' || sp === 'fern', hi = fine ? new THREE.InstancedMesh(trees[sp], mats.prop, list.length) : null;
-      if (hi) { hi.count = 0; hi.userData.shared = true; hi.castShadow = !low && QUALITY[q].shadow > 0; hi.receiveShadow = true; hi.customDepthMaterial = mats.prop.userData.depth; grp.add(hi); }
+      const ci = SPECIES.indexOf(sp);
       if (ci >= 0) for (const [x, y, z, s, r] of list) {
         imp.push([x, y, z, s, ci, 0.85 + 0.3 * r, 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
         y0 = Math.min(y0, y); y1 = Math.max(y1, y + 50 * s);
       }
-      c.treeSets.push({ sp, list, hi, near: NEAR[sp] ?? 1 });
+      c.treeSets.push({ sp, list, fine, grp, low: sp === 'stone' || sp === 'fern', near: NEAR[sp] ?? 1, hi: null, mid: null });
     }
     if (imp.length) {
       const cx = (box[0] + box[2]) / 2, cz = (box[1] + box[3]) / 2, sphere = new THREE.Sphere(new THREE.Vector3(cx, (y0 + y1) / 2, cz), Math.hypot(box[2] - box[0], box[3] - box[1], y1 - y0) / 2 + 30);
+      // nearest the rider first (the GPU then skips much of what is hidden)
+      const rx = me.group.position.x, rz = me.group.position.z; imp.sort((u, w) => (u[0] - rx) ** 2 + (u[2] - rz) ** 2 - (w[0] - rx) ** 2 - (w[2] - rz) ** 2);
       c.imp = impostorMesh(IMP, imp, sphere); c.imp.userData.ownMat = true; grp.add(c.imp);
     }
     c.partAt = null; partTrees(c, me.group.position.x, me.group.position.z);
     setPart(c, 'trees', grp);
   }
   // split a tile's trees: within `treeNear` metres of (x, z) (a share of it per species, NEAR) the full models, the
-  // rest impostors (stones and ferns: nothing past it)
+  // rest impostors (stones and ferns: nothing past it). Of the full models only those near enough for the shadow map
+  // cast shadows (two sets: `hi` casts, `mid` does not); each set grows when it needs more room.
   function partTrees(c, x, z) {
     const R = QUALITY[q].treeNear, m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(), tint = new THREE.Color();
+    const Rs2 = QUALITY[q].shadow > 0 ? (QUALITY[q].span + 25) ** 2 : -1;
     c.partAt = [x, z]; c.hiCount = 0;
-    for (const { sp, list, hi, near: k } of c.treeSets || []) {
-      if (!hi) continue;
-      let a = 0; const sm = sp === 'stone', R2 = (R * k) ** 2;
-      // nearest first: the GPU skips what is hidden behind them (the cards are alpha tested, so this matters)
-      const pick = []; for (const t of list) { const d = (t[0] - x) ** 2 + (t[2] - z) ** 2; if (d < R2) pick.push([d, t]); }
-      pick.sort((u, w) => u[0] - w[0]);
-      for (const [, [px, y, pz, sc, r]] of pick) {
-        e.set((r - 0.5) * 0.08, r * 6.283, 0); hi.setMatrixAt(a, m4.compose(v.set(px, sm ? y + 0.25 : y, pz), qt.setFromEuler(e), s.set(sc, sc * (0.85 + 0.3 * r), sc)));
-        const kk = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
-        hi.setColorAt(a++, tint.setRGB(kk * (1 + w), kk, kk * (1 - w)));
+    const fill = (set, key, items, cast) => {
+      let m = set[key];
+      if (items.length > (m?.instanceMatrix.count ?? 0)) {
+        if (m) { set.grp.remove(m); m.dispose(); }
+        m = set[key] = new THREE.InstancedMesh(trees[set.sp], mats.prop, Math.ceil(items.length * 1.3) + 16);
+        m.userData.shared = true; m.castShadow = cast; m.receiveShadow = true; m.customDepthMaterial = mats.prop.userData.depth; set.grp.add(m);
       }
-      c.hiCount += a; hi.count = a; hi.visible = a > 0; hi.instanceMatrix.needsUpdate = true; if (hi.instanceColor) hi.instanceColor.needsUpdate = true;
-      if (a) hi.computeBoundingSphere();
+      if (!m) return;
+      let a = 0; const sm = set.sp === 'stone';
+      for (const [, [px, y, pz, sc, r]] of items) {
+        e.set((r - 0.5) * 0.08, r * 6.283, 0); m.setMatrixAt(a, m4.compose(v.set(px, sm ? y + 0.25 : y, pz), qt.setFromEuler(e), s.set(sc, sc * (0.85 + 0.3 * r), sc)));
+        const kk = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
+        m.setColorAt(a++, tint.setRGB(kk * (1 + w), kk, kk * (1 - w)));
+      }
+      c.hiCount += a; m.count = a; m.visible = a > 0; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      if (a) m.computeBoundingSphere();
+    };
+    for (const set of c.treeSets || []) {
+      if (!set.fine) continue;
+      // nearest first: the GPU skips what is hidden behind them (the cards are alpha tested, so this matters)
+      const R2 = (R * set.near) ** 2, pick = [];
+      for (const t of set.list) { const d = (t[0] - x) ** 2 + (t[2] - z) ** 2; if (d < R2) pick.push([d, t]); }
+      pick.sort((u, w) => u[0] - w[0]);
+      let n = 0; if (!set.low) while (n < pick.length && pick[n][0] < Rs2) n++;
+      fill(set, 'hi', pick.slice(0, n), true); fill(set, 'mid', pick.slice(n), false);
     }
     if (c.imp) { const u = c.imp.material.userData.u; u.nearC.value.set(x, z); u.nearR.value = c.lod === 0 ? R : 0; }
   }
@@ -404,6 +420,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     if (i < 0 || j < 0 || i >= n || j >= n) return null;
     const v = j * n + i, h = gridHeight(g, x, z), mk = c.mask, N = c.nor; if (h == null || h < 1.2) return null;
     if ((mk[8 * v + 4] > 100 && N[3 * v + 1] < 0.8) || mk[8 * v + 5] > 128 || mk[8 * v + 6] > 100) return { skip: true };
+    if (mk[8 * v] > 120 && REDWOOD.value.some(b => x > b.x && x < b.z && z > b.y && z < b.w)) return { skip: true };  // no grass under the redwoods
     return { h, nx: N[3 * v], ny: N[3 * v + 1], nz: N[3 * v + 2], cv: c.cv[v], m: [mk[8 * v] / 255, mk[8 * v + 1] / 255, mk[8 * v + 2] / 255, mk[8 * v + 3] / 255] };
   }
   const grass = createGrass({ THREE, scene, mat: mats.grass, sample: groundSample });
@@ -664,7 +681,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         c.partAt = [p[0], p[1]]; if (far2 && !c.hiCount) continue;
         jobs.add(c.k + '|p', 0.5, () => partTrees(c, p[0], p[1]));
       }
-      const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noLife, noShadow }
+      const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noLife, noImp, noHi, noSm, noTerrain, gpu }
+      if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) for (const m of [t.hi, t.mid]) if (m && dbg.noHi) m.visible = false; } }
       if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2);
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();

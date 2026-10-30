@@ -4,7 +4,7 @@
 import { heightsOf, makeSampler, makeGrid, gridHeight, carve, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks } from '../../app/js/world3d/terrain.js';
 import { cellPoints, cellsAround, clumpGeometry } from '../../app/js/world3d/grass.js';
 import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
-import { noisePixels, wavePixels } from '../../app/js/world3d/texgen.js';
+import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan } from '../../app/js/world3d/life.js';
 import { builder, ribbon, resample, roadStyle, clipLine, deckSides } from '../../app/js/world3d/ribbon.js';
@@ -197,6 +197,14 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   for (let y = 0; y < S; y++) { wrap = Math.max(wrap, Math.abs(np[(y * S + S - 1) * 4] - np[(y * S) * 4])); for (let x = 1; x < S; x++) step = Math.max(step, Math.abs(np[(y * S + x) * 4 + 3] - np[(y * S + x - 1) * 4 + 3])); }
   for (let i = 0; i < S * S; i++) mean += wp[i * 4] / (S * S);
   out.tex = { n: np.length, wrap, smooth: step, waveFlat: Math.round(mean), same: noisePixels(S).every((v, i) => v === np[i]) };
+}
+{
+  // a leaf atlas of two 32 px cells: a disc in the left one, nothing in the right; the mipmaps keep the disc's share
+  // of texels over the alpha test, clear texels take the cell's colour
+  const W = 64, H = 32, px = new Uint8Array(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < 32; x++) if (Math.hypot(x - 15.5, y - 15.5) < 10) px.set([200, 120, 40, 255], (y * W + x) * 4);
+  const m = coverageMips(px, W, H, 2, 1), cover = l => { const c = l.width / 2; let n = 0; for (let y = 0; y < l.height; y++) for (let x = 0; x < c; x++) if (l.data[(y * l.width + x) * 4 + 3] >= 128) n++; return n / (c * l.height); };
+  out.mips = { levels: m.length, last: [m.at(-1).width, m.at(-1).height], cover: m.slice(0, 4).map(l => r3(cover(l))), fill: [...px.slice(0, 3)], empty: m[1].data[(0 * 32 + 20) * 4 + 3] };
 }
 
 {

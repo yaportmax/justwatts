@@ -168,10 +168,13 @@ function blend(g, from, lines, check) {
 }
 
 // Ground classes per vertex (0: none, else KINDS index + 1; the higher class wins) from features { k, rings: [[lat, lon]] }
-export function rasterClasses(g, features) {
+export function rasterClasses(g, features) { return rasterBy(g, features, f => f.k === 'building' ? 0 : KINDS.indexOf(f.k) + 1); }
+// Any value per vertex of a tile grid ({ z, x, y, segs }: no heights needed) from polygons: value(f) 1..255, the
+// higher wins, 0 leaves the feature out. A scanline fill, fast at any resolution.
+export function rasterBy(g, features, value) {
   const s = g.segs, n = s + 1, lu = new Uint8Array(n * n);
   for (const f of features) {
-    const c = KINDS.indexOf(f.k) + 1; if (c <= 0 || f.k === 'building') continue;
+    const c = value(f); if (!(c > 0)) continue;
     const rings = f.rings.map(r => r.map(([la, lo]) => [(tileX(lo, g.z) - g.x) * s, (tileY(la, g.z) - g.y) * s]));
     let jmin = Infinity, jmax = -Infinity;
     for (const r of rings) for (const p of r) { jmin = Math.min(jmin, p[1]); jmax = Math.max(jmax, p[1]); }

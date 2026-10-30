@@ -139,6 +139,15 @@ def test_procedural_textures(out):
     assert t["n"] == 64 * 64 * 4 and t["same"] and t["smooth"] < 40 and t["waveFlat"] in range(118, 138)
 
 
+def test_leaf_atlas_mipmaps_keep_their_coverage(out):
+    m = out["mips"]
+    assert m["levels"] == 7 and m["last"] == [1, 1]                            # 64 x 32 down to 1 x 1
+    base = m["cover"][0]
+    assert 0.29 < base < 0.32 and abs(m["cover"][1] - base) < 0.02 and abs(m["cover"][2] - base) < 0.07  # leaves do not thin
+    assert m["cover"][3] >= base                                             # out far away (4 x 4 texels: never fewer)
+    assert m["fill"] == [200, 120, 40] and m["empty"] == 0                   # clear texels take the leaves' colour
+
+
 def test_world_sound_gain_curves(out):
     a = out["audio"]
     assert a["windStill"] == 0 and a["wind10"] == 0.067 and a["windCap"] == 0.22 and a["windUp"]      # wind grows with speed, capped

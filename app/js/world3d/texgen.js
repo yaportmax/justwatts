@@ -50,3 +50,49 @@ export function wavePixels(size = 256, waves = 28) {
   return out;
 }
 
+// Mipmaps for an alpha-tested atlas of cols x rows cells (RGBA bytes, w x h). Each level halves the one above, the
+// colour weighted by alpha (leaves keep their colour to the edge); then alpha is scaled per cell so the share of
+// texels that pass the alpha test (cut) stays what it is at full size: leaf cards do not thin out with distance. Clear
+// texels first take their cell's mean colour (no dark fringe where filtering meets an edge). -> [{ data, width, height }]
+export function coverageMips(px, w, h, cols, rows, cut = 128) {
+  const cw = w / cols, ch = h / rows;
+  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+    let r = 0, g = 0, b = 0, s = 0;
+    for (let y = cy * ch; y < (cy + 1) * ch; y++) for (let x = cx * cw; x < (cx + 1) * cw; x++) { const o = (y * w + x) * 4, a = px[o + 3]; r += px[o] * a; g += px[o + 1] * a; b += px[o + 2] * a; s += a; }
+    if (!s) continue;
+    for (let y = cy * ch; y < (cy + 1) * ch; y++) for (let x = cx * cw; x < (cx + 1) * cw; x++) { const o = (y * w + x) * 4; if (!px[o + 3]) { px[o] = r / s; px[o + 1] = g / s; px[o + 2] = b / s; } }
+  }
+  const cover = (d, W, H, cx, cy, k) => {
+    const x0 = Math.floor(cx * W / cols), x1 = Math.floor((cx + 1) * W / cols), y0 = Math.floor(cy * H / rows), y1 = Math.floor((cy + 1) * H / rows); let n = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (Math.min(255, d[(y * W + x) * 4 + 3] * k) >= cut) n++;
+    return n / Math.max(1, (x1 - x0) * (y1 - y0));
+  };
+  const base = []; for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) base.push(cover(px, w, h, cx, cy, 1));
+  const out = [{ data: px, width: w, height: h }];
+  let src = px, W = w, H = h;
+  while (W > 1 || H > 1) {
+    const W2 = Math.max(1, W >> 1), H2 = Math.max(1, H >> 1), d = new Uint8Array(W2 * H2 * 4);
+    for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) {
+      let r = 0, g = 0, b = 0, a = 0, m = [0, 0, 0];
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const o = (Math.min(H - 1, y * 2 + dy) * W + Math.min(W - 1, x * 2 + dx)) * 4, q = src[o + 3];
+        r += src[o] * q; g += src[o + 1] * q; b += src[o + 2] * q; a += q; m[0] += src[o]; m[1] += src[o + 1]; m[2] += src[o + 2];
+      }
+      const o = (y * W2 + x) * 4;
+      if (a) { d[o] = r / a; d[o + 1] = g / a; d[o + 2] = b / a; } else { d[o] = m[0] / 4; d[o + 1] = m[1] / 4; d[o + 2] = m[2] / 4; }
+      d[o + 3] = Math.round(a / 4);
+    }
+    // the next level halves this one unscaled; the copy kept is scaled per cell
+    const keep = d.slice();
+    if (W2 >= cols && H2 >= rows) for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+      const want = base[cy * cols + cx]; if (!want) continue;
+      let lo = 1, hi = 12; for (let i = 0; i < 14; i++) { const k = (lo + hi) / 2; if (cover(d, W2, H2, cx, cy, k) < want) lo = k; else hi = k; }
+      if (Math.abs(cover(d, W2, H2, cx, cy, lo) - want) < Math.abs(cover(d, W2, H2, cx, cy, hi) - want)) hi = lo;  // the nearer of the two
+      const x0 = Math.floor(cx * W2 / cols), x1 = Math.floor((cx + 1) * W2 / cols), y0 = Math.floor(cy * H2 / rows), y1 = Math.floor((cy + 1) * H2 / rows);
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const o = (y * W2 + x) * 4 + 3; keep[o] = Math.min(255, Math.round(d[o] * hi)); }
+    }
+    out.push({ data: keep, width: W2, height: H2 });
+    src = d; W = W2; H = H2;
+  }
+  return out;
+}

@@ -1,27 +1,35 @@
-// World 3D props: low-poly trees and shrubs (one merged, vertex-coloured geometry per species, drawn instanced) with
-// soft crown normals and the shade inside a crown baked into the colours, what grows where, and buildings from
-// footprints (windows by the atlas, gable and hip roofs, parapets).
+// World 3D props: trees and shrubs (one merged, vertex-coloured geometry per species, drawn instanced): bark on trunks
+// and limbs, crowns of leaf cards (alpha-tested quads with the leaf atlas, tex.js) lit with soft normals from the
+// crown's middle and darker inside, what grows where, and buildings from footprints (windows by the atlas, gable,
+// hip, gambrel and shed roofs, porches, chimneys, parapets and roof boxes).
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { hash2 } from './landuse.js';
+import { LEAF, leafCell } from './tex.js';
 
 const col = (hex, f = 1) => { const c = new THREE.Color(hex); return [c.r * f, c.g * f, c.b * f]; };
-// merge parts [geometry, colour, matrix, opts] into one non-indexed geometry with a colour attribute. opts.soft:
+// merge parts [geometry, colour, matrix, opts] into one non-indexed geometry with colour and uv attributes. opts.soft:
 // a crown centre [x, y, z]: normals lean out from it (foliage reads as a soft mass, not facets); opts.shade: darker
-// toward the bottom of [y0, y1] (the inside of a crown, the foot of a trunk)
+// toward the bottom of [y0, y1] (the inside of a crown, the foot of a trunk); opts.cell: the geometry's own uv goes
+// into that leaf atlas cell (else the plain cell); opts.card: the part's normals and uv are kept as they are (leaf
+// cards), its `ao` attribute darkens it, its `sk` one (0 or 1) says which cards cast a shadow (the rest, the solid
+// parts always)
 export function merge(parts) {
-  const pos = [], nor = [], cl = [];
+  const pos = [], nor = [], cl = [], uvs = [], sks = [], plain = leafCell(LEAF.plain), pu = (plain[0] + plain[2]) / 2, pv = (plain[1] + plain[3]) / 2;
   for (const [g0, c, mtx, o = {}] of parts) {
-    const g = (g0.index ? g0.toNonIndexed() : g0.clone()); if (mtx) g.applyMatrix4(mtx); g.computeVertexNormals();
-    const p = g.attributes.position.array, n = g.attributes.normal.array;
-    for (let i = 0; i < p.length; i += 3) {
+    const g = (g0.index ? g0.toNonIndexed() : g0.clone()); if (mtx) g.applyMatrix4(mtx); if (!o.card) g.computeVertexNormals();
+    const p = g.attributes.position.array, n = g.attributes.normal.array, uv = g.attributes.uv?.array, ao = g.attributes.ao?.array, sk = g.attributes.sk?.array, cell = o.cell != null ? leafCell(o.cell) : null;
+    for (let i = 0, v = 0; i < p.length; i += 3, v++) {
       let nx = n[i], ny = n[i + 1], nz = n[i + 2];
       if (o.soft) {
         let sx = p[i] - o.soft[0], sy = (p[i + 1] - o.soft[1]) * 0.8, sz = p[i + 2] - o.soft[2]; const l = Math.hypot(sx, sy, sz) || 1;
         sx /= l; sy /= l; sz /= l; nx = nx * 0.3 + sx * 0.7; ny = ny * 0.3 + sy * 0.7 + 0.15; nz = nz * 0.3 + sz * 0.7;
         const m = Math.hypot(nx, ny, nz) || 1; nx /= m; ny /= m; nz /= m;
       }
-      pos.push(p[i], p[i + 1], p[i + 2]); nor.push(nx, ny, nz);
-      let k = 0.9 + 0.2 * hash2(Math.round(p[i] * 31), Math.round(p[i + 2] * 17 + p[i + 1] * 7));
+      pos.push(p[i], p[i + 1], p[i + 2]); nor.push(nx, ny, nz); sks.push(sk ? sk[v] : 1);
+      if (o.card) uvs.push(uv[2 * v], uv[2 * v + 1]);
+      else if (cell && uv) uvs.push(cell[0] + (cell[2] - cell[0]) * uv[2 * v], cell[1] + (cell[3] - cell[1]) * (1 - uv[2 * v + 1]));
+      else uvs.push(pu, pv);
+      let k = (o.card ? 1 : 0.9 + 0.2 * hash2(Math.round(p[i] * 31), Math.round(p[i + 2] * 17 + p[i + 1] * 7))) * (ao ? ao[v] : 1);
       if (o.shade) k *= 0.7 + 0.42 * Math.max(0, Math.min(1, (p[i + 1] - o.shade[0]) / (o.shade[1] - o.shade[0])));
       cl.push(c[0] * k, c[1] * k, c[2] * k);
     }
@@ -31,7 +39,9 @@ export function merge(parts) {
   out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   out.setAttribute('color', new THREE.Float32BufferAttribute(cl, 3));
-  out.computeBoundingSphere();
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  out.setAttribute('sk', new THREE.Float32BufferAttribute(sks, 1));
+  out.computeBoundingSphere(); out.computeBoundingBox();
   return out;
 }
 const M = (x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1, ry = 0, rz = 0, rx = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z),
@@ -45,78 +55,147 @@ const bumpy = (g, amt, seed) => {  // shift the vertices a little so crowns are 
   }
   return g;
 };
-// a branchy crown: lumps round a centre, each a bumpy icosahedron, normals soft about the centre
-function crown(cx, cy, cz, rx, ry, rz, n, seed, c, lump = 0.55, detail = 1, c2 = null) {
-  const parts = [];
-  for (let k = 0; k < n; k++) {
-    const a = hash2(seed, k) * 6.283, e = (hash2(k, seed) - 0.35) * 1.2, r = k ? 0.55 + 0.35 * hash2(k + 9, seed) : 0;
-    const x = cx + Math.cos(a) * Math.cos(e) * rx * r, y = cy + Math.sin(e) * ry * r, z = cz + Math.sin(a) * Math.cos(e) * rz * r;
-    const s = (k ? lump : 0.75) * (0.85 + 0.3 * hash2(seed + 3, k));
-    parts.push([bumpy(new THREE.IcosahedronGeometry(1, detail), 0.28, seed * 13 + k), k % 3 === 2 && c2 ? c2 : c, M(x, y, z, rx * s, ry * s, rz * s, a),
-      { soft: [cx, cy, cz], shade: [cy - ry, cy + ry * 0.8] }]);
+
+/* ---------- leaf cards ---------- */
+// A geometry of quads: each [centre, along (image right), up (image up), half length, half height, atlas cell, flip,
+// soft centre, r, the image's rows used ([top, bottom] shares, default all)];
+// normals soft round an axis point (the crown's middle at that height) with a little of the card's own facing, ao
+// darker toward the inside of the crown (r: 0 at the middle .. 1 at its edge); one card in three casts a shadow.
+function quads(list, soft) {
+  const P = [], N = [], U = [], A = [], K = [];
+  for (const [c, t, b, hl, hh, k, flip, sc, r, rows = [0, 1]] of list) {
+    const [u0, c0, u1, c1] = leafCell(k), v0 = c0 + (c1 - c0) * rows[0], v1 = c0 + (c1 - c0) * rows[1], fn = new THREE.Vector3().crossVectors(t, b).normalize(), s = soft(c, sc);
+    const n = s.multiplyScalar(0.78).addScaledVector(fn, 0.22 * (fn.dot(s) < 0 ? -1 : 1)).add(new THREE.Vector3(0, 0.12, 0)).normalize();
+    const ao = 0.62 + 0.38 * Math.min(1, r), a = flip ? [u1, u0] : [u0, u1], sk = hash2(Math.round(c.x * 97), Math.round(c.y * 89 + c.z * 83)) < 0.36 ? 1 : 0;
+    const corner = (x, y) => P.push(c.x + t.x * hl * x + b.x * hh * y, c.y + t.y * hl * x + b.y * hh * y, c.z + t.z * hl * x + b.z * hh * y);
+    for (const [x, y] of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) {
+      corner(x, y); N.push(n.x, n.y, n.z); U.push(x < 0 ? a[0] : a[1], y < 0 ? v1 : v0); A.push(ao); K.push(sk);
+    }
   }
-  return parts;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); g.setAttribute('ao', new THREE.Float32BufferAttribute(A, 1)); g.setAttribute('sk', new THREE.Float32BufferAttribute(K, 1));
+  return g;
 }
-const trunkG = (r0, r1, h, s = 6) => new THREE.CylinderGeometry(r1, r0, h, s, 1).translate(0, h / 2, 0);
+const V = (x, y, z) => new THREE.Vector3(x, y, z), UP = V(0, 1, 0);
+// the card's image-up: world up across the card plane, or any line in it when it lies flat
+const upIn = n => { const b = UP.clone().addScaledVector(n, -n.y); return b.lengthSq() > 0.02 ? b.normalize() : V(1, 0, 0).addScaledVector(n, -n.x).normalize(); };
+// cards in an ellipsoid crown round (cx, cy, cz), radii rx, ry, rz: `size` metres across, facing mostly outward (out),
+// tilted up (lift) or left hanging (hang: their image-up stays near vertical)
+function crownCards(cx, cy, cz, rx, ry, rz, n, size, k, seed, { out = 0.55, lift = 0, hang = 0, k2 = null, centre = null } = {}) {
+  const list = [], C = centre || [cx, cy, cz];
+  for (let i = 0; i < n; i++) {
+    const a = hash2(seed, i) * 6.283, e = Math.asin(hash2(i, seed) * 2 - 1) * 0.85 + lift * 0.4, r = 0.4 + 0.6 * Math.sqrt(hash2(i + 7, seed + 3));
+    const d = V(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)), c = V(cx + d.x * rx * r, cy + d.y * ry * r, cz + d.z * rz * r);
+    const ra = hash2(seed + 11, i) * 6.283, re = (hash2(i, seed + 13) - 0.5) * 2.6;
+    const nrm = d.clone().multiplyScalar(out).add(V(Math.cos(ra) * Math.cos(re), Math.sin(re) + lift, Math.sin(ra) * Math.cos(re)).multiplyScalar(1 - out)).normalize();
+    let b = upIn(nrm); const roll = (hash2(seed + 17, i) - 0.5) * 2.4 * (1 - hang); b.applyAxisAngle(nrm, roll);
+    const t = new THREE.Vector3().crossVectors(b, nrm).normalize(), s = size * (0.75 + 0.5 * hash2(i, seed + 5));
+    const rr = Math.hypot((c.x - C[0]) / (rx * 1.6), (c.y - C[1]) / (ry * 1.6), (c.z - C[2]) / (rz * 1.6));
+    list.push([c, t, b, s / 2, s / 2 * (hang ? 1.3 : 1), k2 != null && i % 3 === 2 ? k2 : k, hash2(i, seed + 19) < 0.5, C, rr * 1.4]);
+  }
+  return quads(list, (c, C) => c.clone().sub(V(C[0], C[1], C[2])).multiply(V(1 / Math.max(rx, 0.1), 1.25 / Math.max(ry, 0.1), 1 / Math.max(rz, 0.1))).normalize());
+}
+// a crown of lumps (a broadleaf): cards round each lump, soft about the whole crown
+function lumps(cx, cy, cz, rx, ry, rz, nl, per, size, k, seed, o = {}) {
+  const gs = [];
+  for (let j = 0; j < nl; j++) {
+    const a = hash2(seed, j) * 6.283, e = (hash2(j, seed) - 0.35) * 1.2, r = j ? 0.55 + 0.35 * hash2(j + 9, seed) : 0, s = (j ? o.lump ?? 0.55 : 0.75) * (0.85 + 0.3 * hash2(seed + 3, j));
+    gs.push(crownCards(cx + Math.cos(a) * Math.cos(e) * rx * r, cy + Math.sin(e) * ry * r, cz + Math.sin(a) * Math.cos(e) * rz * r, rx * s, ry * s, rz * s, per, size, k, seed * 31 + j, { ...o, centre: [cx, cy, cz] }));
+  }
+  return gs;
+}
+// conifer boughs: `tiers` rings from y0 to y1 of `per` boughs round the trunk, from r0 long at the bottom to r1 at the
+// top, drooping; each a spray card along the bough (flat) and one across it (a bough has depth)
+function boughs(y0, y1, tiers, per, r0, r1, wid, droop, k, seed, k2 = null) {
+  const list = [];
+  for (let i = 0; i < tiers; i++) {
+    const f = i / Math.max(1, tiers - 1), y = y0 + (y1 - y0) * f + (hash2(i, seed) - 0.5) * (y1 - y0) / tiers * 0.6;
+    for (let j = 0; j < per; j++) {
+      const a = (j + hash2(seed, i * 7 + j) * 0.7) / per * 6.283 + i * 2.4, len = (r0 + (r1 - r0) * f) * (0.75 + 0.45 * hash2(i, j + seed));
+      const d = V(Math.cos(a), -droop * (0.7 + 0.6 * hash2(j, i + seed)), Math.sin(a)).normalize(), s = V(Math.cos(a) * 0.25, y, Math.sin(a) * 0.25);
+      const c = s.clone().addScaledVector(d, len / 2), h = V(-Math.sin(a), 0, Math.cos(a)), roll = (hash2(seed + 3, i * 13 + j) - 0.5) * 0.8;
+      const across = h.clone().applyAxisAngle(d, roll), upc = new THREE.Vector3().crossVectors(d, across).normalize();
+      const kk = k2 != null && (i + j) % 2 ? k2 : k, r = 0.55 + 0.45 * (len / (r0 + 0.01));
+      list.push([c, d, across, len / 2 + 0.3, len * wid / 2 + 0.25, kk, (i + j) % 2 === 0, [0, y, 0], r]);
+      list.push([c.clone().addScaledVector(upc, 0.05), d, upc.clone().negate(), len / 2, len * wid * 0.32 + 0.2, kk, (i + j) % 2 === 1, [0, y, 0], r]);
+    }
+  }
+  return quads(list, (c, C) => V(c.x - C[0], (c.y - C[1]) * 0.6 + 0.35, c.z - C[2]).normalize());
+}
+// fern fronds rising from the ground and arching out
+function fronds(n, len, seed) {
+  const list = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i + hash2(seed, i) * 0.6) / n * 6.283, d = V(Math.cos(a), 0, Math.sin(a)), h = V(-Math.sin(a), 0, Math.cos(a)), L = len * (0.8 + 0.4 * hash2(i, seed));
+    // two pieces: up and out, then arching over; one image along both (the frond's base at the bottom)
+    const p0 = V(0, 0, 0), p1 = d.clone().multiplyScalar(L * 0.3).add(V(0, L * 0.42, 0)), p2 = d.clone().multiplyScalar(L * 0.85).add(V(0, L * 0.3, 0)), w = L * 0.2;
+    for (const [a0, a1, rows] of [[p0, p1, [0.5, 1]], [p1, p2, [0, 0.5]]]) {
+      const ax = a1.clone().sub(a0), c = a0.clone().add(a1).multiplyScalar(0.5), up = ax.clone().normalize();
+      list.push([c, h, up, w, ax.length() / 2, LEAF.fern, i % 2 === 0, [0, 0.2, 0], 0.9, rows]);
+    }
+  }
+  return quads(list, c => V(c.x, 1.2, c.z).normalize());
+}
+const trunkG = (r0, r1, h, s = 6) => new THREE.CylinderGeometry(r1, r0, h, s, 3).translate(0, h / 2, 0);
 const limb = (x0, y0, z0, x1, y1, z1, r, c) => {
   const d = new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0), L = d.length(), q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
-  return [new THREE.CylinderGeometry(r * 0.6, r, L, 5, 1).translate(0, L / 2, 0), c, new THREE.Matrix4().compose(new THREE.Vector3(x0, y0, z0), q, new THREE.Vector3(1, 1, 1)), { shade: [0, y1] }];
+  return [new THREE.CylinderGeometry(r * 0.6, r, L, 5, 1).translate(0, L / 2, 0), c, new THREE.Matrix4().compose(new THREE.Vector3(x0, y0, z0), q, new THREE.Vector3(1, 1, 1)), { shade: [0, y1], cell: LEAF.bark }];
 };
-// conifer tiers: drooping skirts from y0 to y1, radius r0 at the bottom to r1 at the top
-function tiers(y0, y1, r0, r1, n, c, seed, segs = 8) {
-  const out = [];
-  for (let k = 0; k < n; k++) {
-    const f = k / (n - 1), y = y0 + (y1 - y0) * f, r = r0 + (r1 - r0) * f, h = (y1 - y0) / n * 1.9;
-    const g = bumpy(new THREE.ConeGeometry(r, h, segs, 2, true), r * 0.12, seed + k);
-    out.push([g, c, M(0, y + h / 2, 0, 1, 1, 1, hash2(seed, k) * 3), { soft: [0, y + h * 0.2, 0], shade: [y - h * 0.4, y + h] }]);
-  }
-  return out;
-}
+const bark = (g, c, m = null, shade = null) => [g, c, m, { cell: LEAF.bark, shade }];
+const leaves = (g, c, soft = null) => [g, c, null, { card: true, soft }];
+// the dense heart of a crown: an opaque lumpy blob under the cards (a cone round a conifer's trunk), darker, so a crown
+// never shows the sky through its middle
+const core = (cx, cy, cz, rx, ry, rz, c, seed) => [bumpy(new THREE.IcosahedronGeometry(1, 1), 0.3, seed), c.map(v => v * 0.5), M(cx, cy, cz, rx, ry, rz, seed), { soft: [cx, cy, cz], shade: [cy - ry, cy + ry] }];
+const cone = (y0, y1, r, c, seed) => [bumpy(new THREE.ConeGeometry(r, y1 - y0, 8, 6), r * 0.3, seed), c.map(v => v * 0.45), M(0, (y0 + y1) / 2, 0), { soft: [0, (y0 + y1) / 2, 0], shade: [y0, y1] }];
 
-// trees at a typical size in metres (scaled per instance)
-export function treeGeometries(lo = false) {
-  const bark = col(0x5a4632), barkD = col(0x463728), red = col(0x7e4630), pale = col(0xcfc4b0);
+// trees at a typical size in metres (scaled per instance). Names: oak, bay, fir, redwood, euc, cypress, pine (trees),
+// bush, shrub (low), fern, stone (near the rider only)
+export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub'];
+// the share of the full models' radius each is drawn in full (the tall dense ones cost the most; impostors past it)
+export const NEAR = { oak: 1, bay: 1, fir: 0.55, redwood: 0.35, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, stone: 0.45, fern: 0.4 };
+export function treeGeometries() {
+  const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15);
+  // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
+  const F = { oak: col(0x5a7436, 1.3), bay: col(0x43603a, 1.2), fir: col(0x34552f, 1.35), red: col(0x264a32, 1.2),
+    euc: col(0x7c9a7a, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), fern: col(0x4f7a2c, 1.4) };
   const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
-  if (lo) return {  // further away: a few shapes each, the same silhouettes
-    oak: merge([[trunkG(0.4, 0.3, 3, 4), bark, null], [bumpy(ico(1, 1), 0.2, 1), col(0x4a6230), M(0, 5.2, 0, 4.6, 2.9, 4.2), { soft: [0, 5, 0], shade: [2.5, 7] }]]),
-    bay: merge([[trunkG(0.35, 0.25, 3, 4), bark, null], [bumpy(ico(1, 1), 0.2, 4), col(0x3d5a2d), M(0, 6.8, 0, 3.4, 4.2, 3.3), { soft: [0, 6.5, 0], shade: [3, 10] }]]),
-    fir: merge([[new THREE.ConeGeometry(3.4, 17, 6), col(0x2b4729), M(0, 9.5, 0), { soft: [0, 7, 0], shade: [1, 17] }]]),
-    redwood: merge([[trunkG(0.9, 0.5, 14, 5), red, null], [new THREE.ConeGeometry(3.4, 26, 6), col(0x26412b), M(0, 21, 0), { soft: [0, 18, 0], shade: [8, 34] }]]),
-    euc: merge([[trunkG(0.45, 0.25, 14, 4), pale, null], [bumpy(ico(1, 1), 0.3, 6), col(0x6c8768), M(0.4, 16, 0, 4, 5.5, 3.6), { soft: [0, 16, 0], shade: [11, 21] }]]),
-    cypress: merge([[trunkG(0.6, 0.4, 3.5, 4), barkD, M(0, 0, 0, 1, 1, 1, 0, 0.15)], [bumpy(ico(1, 1), 0.2, 9), col(0x2c452a), M(0.6, 5.4, 0, 6, 2.2, 4.5), { soft: [0, 5, 0], shade: [3.5, 7] }]]),
-    pine: merge([[trunkG(0.45, 0.3, 8, 4), barkD, null], [bumpy(ico(1, 1), 0.25, 14), col(0x2f4a2b), M(0, 11, 0, 4.2, 3.6, 4), { soft: [0, 11, 0], shade: [7.5, 14] }]]),
-    bush: merge([[bumpy(ico(1, 1), 0.25, 11), col(0x5c6b3c), M(0, 0.5, 0, 1.6, 0.7, 1.4), { soft: [0, 0.3, 0], shade: [0, 1.2] }]]),
-  };
   return {
     stone: merge([[bumpy(ico(0.45, 1), 0.12, 21), col(0x8d867a), M(0, 0.12, 0, 1, 0.6, 1)]]),
-    // coast live oak: a short leaning trunk forking into limbs, a broad lumpy dome
-    oak: merge([[trunkG(0.42, 0.3, 2.4, 6), bark, M(0, 0, 0, 1, 1, 1, 0, 0.08)],
-      limb(0.15, 2.2, 0, 2.2, 4.4, 0.6, 0.26, bark), limb(0.1, 2.2, 0, -1.8, 4.6, -0.8, 0.24, bark), limb(0.1, 2.3, 0, 0.2, 5.2, 1.6, 0.2, bark),
-      ...crown(0.2, 5.4, 0, 3.5, 1.9, 3.2, 7, 1, col(0x4a6230), 0.55, 1, col(0x55703a))]),
+    // coast live oak: a short leaning trunk forking into limbs, a broad dome of leafy lumps
+    oak: merge([bark(trunkG(0.42, 0.3, 2.4, 7), brown, M(0, 0, 0, 1, 1, 1, 0, 0.08)),
+      limb(0.15, 2.2, 0, 2.2, 4.4, 0.6, 0.26, brown), limb(0.1, 2.2, 0, -1.8, 4.6, -0.8, 0.24, brown), limb(0.1, 2.3, 0, 0.2, 5.2, 1.6, 0.2, brown),
+      core(0.2, 5.5, 0, 2.9, 1.5, 2.6, F.oak, 2), ...lumps(0.2, 5.4, 0, 3.7, 2.1, 3.4, 7, 17, 2.5, LEAF.oak, 1).map(g => leaves(g, F.oak))]),
     // California bay laurel: dense, taller than wide, glossy dark
-    bay: merge([[trunkG(0.36, 0.26, 3.5, 6), barkD, null], limb(0, 3, 0, 1.2, 6, 0.4, 0.2, barkD), limb(0, 3, 0, -1, 6.4, -0.3, 0.18, barkD),
-      ...crown(0, 7, 0, 2.7, 3.4, 2.6, 7, 4, col(0x3d5a2d), 0.6, 1, col(0x48633a))]),
-    // Douglas fir: drooping tiers to a spire
-    fir: merge([[trunkG(0.42, 0.2, 4, 6), barkD, null], ...tiers(3.2, 16.5, 3.6, 0.7, 6, col(0x2b4729), 30), [new THREE.ConeGeometry(0.6, 2.4, 5), col(0x355a31), M(0, 18.4, 0)]]),
-    // coast redwood: a tall fluted red trunk, short branches high up, a narrow spire
-    redwood: merge([[trunkG(1.0, 0.45, 22, 7), red, null], ...tiers(10, 31, 3.6, 0.8, 8, col(0x26412b), 40), [new THREE.ConeGeometry(0.7, 3, 5), col(0x2f5032), M(0, 33, 0)]]),
-    // blue gum eucalyptus: a tall pale trunk leaning a little, loose blue-grey clumps hanging off high limbs
-    euc: merge([[trunkG(0.5, 0.22, 17, 6), pale, M(0, 0, 0, 1, 1, 1, 0, 0.05)],
+    bay: merge([bark(trunkG(0.36, 0.26, 3.5, 6), brownD), limb(0, 3, 0, 1.2, 6, 0.4, 0.2, brownD), limb(0, 3, 0, -1, 6.4, -0.3, 0.18, brownD),
+      core(0, 7.2, 0, 2.1, 2.8, 2.0, F.bay, 5), ...lumps(0, 7, 0, 2.8, 3.6, 2.7, 7, 15, 2.2, LEAF.bay, 4, { lump: 0.6 }).map(g => leaves(g, F.bay))]),
+    // Douglas fir: a straight trunk, drooping boughs in tiers to a spire
+    fir: merge([bark(trunkG(0.5, 0.12, 25, 7), brownD), cone(4, 25.5, 1.8, F.fir, 31), leaves(boughs(3.5, 24.2, 14, 8, 4.6, 0.8, 1.35, 0.3, LEAF.fir, 30), F.fir),
+      leaves(crownCards(0, 25, 0, 0.6, 1.4, 0.6, 6, 1.5, LEAF.fir, 33, { out: 0.2, hang: 1 }), F.fir)]),
+    // coast redwood: a tall fluted red trunk flaring at the foot, bare to near half its height, short drooping boughs of
+    // flat feathery sprays in a narrow, ragged spire
+    redwood: merge([bark(trunkG(1.25, 0.32, 46, 10), red), bark(new THREE.CylinderGeometry(1.2, 1.9, 3, 10, 1).translate(0, 1.5, 0), red),
+      ...[[13, 0.5], [15, 2.6], [17.5, 4.4], [19, 1.2]].map(([y, a]) => limb(Math.cos(a) * 0.6, y, Math.sin(a) * 0.6, Math.cos(a) * 2.6, y - 0.8, Math.sin(a) * 2.6, 0.09, brownD)),
+      cone(20, 47, 1.6, F.red, 41), leaves(boughs(18.5, 45.5, 16, 6, 4.8, 1.1, 1.45, 0.36, LEAF.redwood, 40, LEAF.redwood2), F.red),
+      leaves(crownCards(0, 46.5, 0, 0.9, 2, 0.9, 8, 1.8, LEAF.redwood, 44, { out: 0.2, hang: 1 }), F.red)]),
+    // blue gum eucalyptus: a tall pale trunk leaning a little, loose blue-grey clumps of hanging leaves off high limbs
+    euc: merge([bark(trunkG(0.5, 0.22, 17, 7), pale, M(0, 0, 0, 1, 1, 1, 0, 0.05)),
       limb(0.5, 11, 0, 2.6, 15.5, 0.8, 0.2, pale), limb(0.4, 12, 0, -2.2, 16.2, -0.6, 0.18, pale), limb(0.7, 14, 0, 0.6, 18.5, 1.6, 0.16, pale),
-      ...crown(2.8, 15.6, 0.8, 2.2, 2.2, 2.0, 3, 6, col(0x6c8768), 0.6), ...crown(-2.3, 16.4, -0.6, 2.0, 2.4, 1.9, 3, 7, col(0x7a9473), 0.6),
-      ...crown(0.6, 18.8, 1.4, 2.0, 2.0, 1.8, 3, 8, col(0x67825f), 0.6)]),
+      ...[[2.8, 15.4, 0.8, 6], [-2.3, 16.2, -0.6, 7], [0.6, 18.6, 1.4, 8], [0.2, 13.5, -1.2, 9]].map(([x, y, z, s]) => leaves(crownCards(x, y, z, 2.4, 2.5, 2.2, 16, 2.8, LEAF.euc, s, { out: 0.35, hang: 1, centre: [0.5, 16, 0] }), F.euc))]),
     // Monterey cypress: wind-flattened tables on a crooked trunk, wide and dark
-    cypress: merge([[trunkG(0.6, 0.4, 3.2, 6), barkD, M(0, 0, 0, 1, 1, 1, 0, 0.18)], limb(0.4, 2.8, 0, 3.0, 4.6, 0.3, 0.26, barkD), limb(0.3, 2.9, 0, -2.6, 4.0, 0.5, 0.24, barkD),
-      ...crown(2.6, 5.0, 0.2, 3.4, 1.1, 2.6, 4, 9, col(0x2c452a), 0.6), ...crown(-2.4, 4.4, 0.4, 3.0, 1.0, 2.4, 4, 10, col(0x34502f), 0.6),
-      ...crown(0.2, 6.0, -0.3, 2.6, 0.9, 2.2, 3, 12, col(0x2f4a2d), 0.6)]),
+    cypress: merge([bark(trunkG(0.6, 0.4, 3.2, 7), brownD, M(0, 0, 0, 1, 1, 1, 0, 0.18)), limb(0.4, 2.8, 0, 3.0, 4.6, 0.3, 0.26, brownD), limb(0.3, 2.9, 0, -2.6, 4.0, 0.5, 0.24, brownD),
+      ...[[2.6, 5.0, 0.2, 3.4, 1.2, 2.6, 9], [-2.4, 4.4, 0.4, 3.0, 1.1, 2.4, 10], [0.2, 6.0, -0.3, 2.6, 1.0, 2.2, 12]].flatMap(([x, y, z, rx, ry, rz, s]) =>
+        [core(x, y, z, rx * 0.75, ry * 0.7, rz * 0.75, F.cyp, s), leaves(crownCards(x, y, z, rx, ry, rz, 24, 2.5, LEAF.cypress, s, { out: 0.35, lift: 0.9, centre: [0, 5, 0] }), F.cyp)])]),
     // Monterey / bishop pine: a rounded, irregular dark crown high on a bare trunk
-    pine: merge([[trunkG(0.45, 0.28, 9, 6), barkD, null], limb(0, 7.5, 0, 2, 10, 0.5, 0.18, barkD), limb(0, 8, 0, -1.6, 10.6, -0.4, 0.16, barkD),
-      ...crown(0, 11, 0, 3.6, 2.4, 3.4, 6, 14, col(0x2f4a2b), 0.55)]),
-    // coyote brush and other coastal scrub: low, irregular mounds, sun-bleached on top
-    bush: merge([...crown(0, 0.55, 0, 1.5, 0.6, 1.3, 6, 11, col(0x5c6b3c), 0.55, 1, col(0x6b7845)), ...crown(0.9, 0.4, 0.5, 0.8, 0.45, 0.7, 3, 16, col(0x56653a), 0.6, 0)]),
+    pine: merge([bark(trunkG(0.45, 0.28, 9, 7), brownD), limb(0, 7.5, 0, 2, 10, 0.5, 0.18, brownD), limb(0, 8, 0, -1.6, 10.6, -0.4, 0.16, brownD),
+      core(0, 11, 0, 2.8, 1.8, 2.6, F.pine, 15), ...lumps(0, 11, 0, 3.8, 2.6, 3.6, 6, 14, 2.5, LEAF.pine, 14).map(g => leaves(g, F.pine))]),
+    // coyote brush and other coastal scrub: low, irregular mounds
+    bush: merge([core(0, 0.5, 0, 1.3, 0.55, 1.1, F.bush, 12), ...lumps(0, 0.6, 0, 1.7, 0.75, 1.5, 3, 12, 1.3, LEAF.scrub, 11, { lift: 0.5 }).map(g => leaves(g, F.bush))]),
     // toyon / manzanita: a taller shrub with a reddish base
-    shrub: merge([limb(0, 0, 0, 0.3, 1.2, 0.1, 0.08, col(0x7a3e2c)), limb(0, 0, 0, -0.4, 1.1, 0.2, 0.07, col(0x7a3e2c)),
-      ...crown(0, 1.7, 0, 1.4, 1.1, 1.3, 5, 15, col(0x3f5530), 0.6, 1, col(0x4a5f35))]),
+    shrub: merge([limb(0, 0, 0, 0.3, 1.2, 0.1, 0.08, col(0x7a3e2c, 1.4)), limb(0, 0, 0, -0.4, 1.1, 0.2, 0.07, col(0x7a3e2c, 1.4)),
+      core(0, 1.7, 0, 1.05, 0.85, 1.0, F.shrub, 16), ...lumps(0, 1.7, 0, 1.5, 1.2, 1.4, 4, 10, 1.15, LEAF.scrub, 15).map(g => leaves(g, F.shrub))]),
+    // sword fern under the redwoods
+    fern: merge([leaves(fronds(11, 1.4, 5), F.fern)]),
   };
 }
 

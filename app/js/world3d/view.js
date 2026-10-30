@@ -3,13 +3,15 @@
 // Rendering runs on its own requestAnimationFrame loop and never touches the ride: any error, a lost context or a
 // frame rate that stays bad calls onFail and the ride map falls back to the other views.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
-import { makeProj, tileX, tileY, key, unkey, headingOf, angDiff } from './geo.js';
-import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, gridMesh, upsample, gridNormals, gridCurvature, classMasks } from './terrain.js';
+import { makeProj, tileX, tileY, lonOf, latOf, key, unkey, headingOf, angDiff } from './geo.js';
+import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks } from './terrain.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
-import { scatter, hash2, KINDS } from './landuse.js';
+import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, WIND, BORES } from './materials.js';
-import { treeGeometries, species, buildingGeometry } from './props.js';
+import { treeGeometries, species, buildingGeometry, SPECIES, NEAR } from './props.js';
+import { bakeImpostors, impostorMesh } from './impostor.js';
+import { textures } from './tex.js';
 import { createSky } from './sky.js';
 import { createPost } from './post.js';
 import { createGrass } from './grass.js';
@@ -27,7 +29,12 @@ export const QUALITY = [
   { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, grass: [44, 2.6], detail: true, treeNear: 200 },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120 },
 ];
-const CAP = { 0: 6000, 1: 1600 };  // trees per tile at full share, by detail
+const CAP = { 0: 42000, 1: 26000 };  // trees per tile at full share, by detail
+// trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
+// wood (mixed, broadleaf, needleleaf), and ground no tree grows on (rock, sand, water). [class, metres between trees,
+// share of the spots kept, leaf type]
+const treeCode = f => ({ grass: 1, farm: 2, urban: 3, park: 4, scrub: 5, rock: 9, sand: 9, water: 9 })[f.k] ?? (f.k === 'wood' ? (f.lt === 'b' ? 7 : f.lt === 'n' ? 8 : 6) : 0);
+const TREE = [null, ['grass', 70, 0.6], ['farm', 90, 0.6], ['urban', 30, 0.55], ['park', 24, 1], ['scrub', 8, 1], ['wood', 11, 1, 'm'], ['wood', 11, 1, 'b'], ['wood', 11, 1, 'n'], null];
 const OCC = 512;  // the road mask per tile: cells of about 3.8 m (no grass, trees or shrubs on a road)
 const PORT = 12;  // metres of open cut before a tunnel's portal
 
@@ -49,10 +56,10 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const scene = new THREE.Scene(), proj = makeProj(...ORIGIN);
   const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 60000);
   const sky = createSky(scene, { far: 60000 }); sky.set(time);
-  const mats = { terrain: terrainMaterial(), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(), propLo: propMaterial({ wind: false }),
+  const mats = { terrain: terrainMaterial(), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
     tunnel: new THREE.MeshLambertMaterial({ color: 0x55524c, emissive: 0x15130f }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }) };
-  const trees = treeGeometries(), treesLo = treeGeometries(true), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
+  const trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera);
   const life = createLife({ THREE, scene, proj, marks, quality: q }), audio = createAudio({ on: sound });
@@ -62,7 +69,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const near = new Map(), far = new Map(), jobs = jobQueue();
   const tileOf = (x, z) => { const lat = proj.lat(z), lon = proj.lon(x); return [Math.floor(tileX(lon, NEAR_Z)), Math.floor(tileY(lat, NEAR_Z))]; };
   function disposeObj(o) {
-    o.traverse(m => { if (m.isInstancedMesh) m.dispose(); else if (m.geometry && !m.userData.shared) m.geometry.dispose(); });
+    o.traverse(m => { if (m.isInstancedMesh) m.dispose(); else if (m.geometry && !m.userData.shared) m.geometry.dispose(); if (m.userData.ownMat) m.material.dispose(); });
     o.parent?.remove(o);
   }
   function newChunk(k, lod) {
@@ -183,24 +190,31 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const occAt = (o, x, z) => { if (!o) return false; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < OCC && b < OCC && o.occ[b * OCC + a] === 1; };
   function buildTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
-    const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c);
-    const box = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
-    const out = {}; let n = 0;
-    const add = (sp, x, z, s, r) => { const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r]); n++; };
-    const STEP = { wood: 11, scrub: 8, park: 24, urban: 30, grass: 70, farm: 90 };
-    for (const f of t.features) {
-      const st = STEP[f.k]; if (!st) continue;
-      const rings = f.rings.map(r => r.map(([la, lo]) => proj.xz(la, lo)));
-      const step = st * (c.lod ? 2.2 : 1) / Math.sqrt(Math.max(0.15, share));
-      for (const [x, z, r] of scatter(rings, step, f.k === 'urban' ? 0.55 : f.k === 'grass' || f.k === 'farm' ? 0.6 : 1, box)) {
-        if (n > cap) break;
-        const lat = proj.lat(z), lon = proj.lon(x), h = hAt(x, z) ?? 0, sp = species(f.k, f.lt, h, lat, lon, r);
+    const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c), fine = c.lod === 0, box = tileBox(c);
+    const out = {}; let n = 0, ferns = 0;
+    const add = (sp, x, z, s, r) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r]); n++; };
+    // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
+    // class of the nearest raster vertex deciding (no point in polygon tests)
+    const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode), xs = [], zs = [];
+    for (let i = 0; i <= R; i++) { xs.push(proj.x(lonOf(c.x + i / R, c.z))); zs.push(proj.z(latOf(c.y + i / R, c.z))); }
+    const dens = k => { const T = TREE[k]; if (!T) return 0; const st = T[1] * (c.lod ? 1.2 : 1) / Math.sqrt(Math.max(0.15, share)); return T[2] / (st * st); };
+    for (let j = 0; j < R && n < cap; j++) for (let i = 0; i < R; i++) {
+      const v = j * (R + 1) + i, most = Math.max(dens(ras[v]), dens(ras[v + 1]), dens(ras[v + R + 1]), dens(ras[v + R + 2])); if (!most) continue;
+      const area = Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])), N = most * area, cnt = Math.floor(N) + (hash2(i * 7 + c.x, j * 13 + c.y) < N % 1 ? 1 : 0);
+      for (let m = 0; m < cnt; m++) {
+        const fi = i + hash2(i * 31 + m, j * 17 + c.x), fj = j + hash2(j * 29 + m, i * 11 + c.y), k = ras[Math.round(fj) * (R + 1) + Math.round(fi)], d = dens(k);
+        if (!d || hash2(m * 5 + i, j * 3 + m) * most > d) continue;
+        const x = xs[i] + (xs[i + 1] - xs[i]) * (fi - i), z = zs[j] + (zs[j + 1] - zs[j]) * (fj - j), r = hash2(Math.round(x * 3), Math.round(z * 3));
+        const lat = proj.lat(z), lon = proj.lon(x), h = hAt(x, z) ?? 0, sp = species(TREE[k][0], TREE[k][3], h, lat, lon, r);
         add(sp, x, z, 0.75 + 0.5 * hash2(Math.round(x), Math.round(z)), r);
+        if (sp !== 'redwood') continue;
+        // redwoods stand in rings round where an old one was; sword ferns under them (full models near the rider only)
+        if (r < 0.3) for (let e = 0; e < 3; e++) { const a = r * 40 + e * 2.1, rr = 3 + 1.5 * hash2(e, Math.round(x)); add('redwood', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.55 + 0.4 * hash2(e, Math.round(z)), hash2(Math.round(z), e)); }
+        if (fine && ferns < 14000) for (let e = 0; e < 5; e++) { const a = hash2(e, Math.round(x * 7)) * 6.283, rr = 2 + 5 * hash2(Math.round(z * 7), e); add('fern', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.7 + 0.6 * hash2(e, 3), hash2(e, Math.round(x))); ferns++; }
       }
     }
     // lone oaks on the open hills, in loose clumps
-    if (c.lod === 0) {
-      const step = 26 / Math.sqrt(Math.max(0.15, share));
+    { const step = 26 * (c.lod ? 1.4 : 1) / Math.sqrt(Math.max(0.15, share));
       for (let x = Math.ceil(box[0] / step) * step; x < box[2]; x += step) for (let z = Math.ceil(box[1] / step) * step; z < box[3]; z += step) {
         if (n > cap) break;
         const ix = Math.round(x / step), iz = Math.round(z / step), clump = hash2(Math.floor(x / 260), Math.floor(z / 260));
@@ -208,7 +222,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         const px = x + (hash2(iz, ix) - 0.5) * step, pz = z + (hash2(ix + 5, iz) - 0.5) * step, h = hAt(px, pz);
         if (h == null || h < 6) continue;
         add('oak', px, pz, 0.6 + 0.6 * hash2(ix, iz + 3), hash2(ix + 1, iz));
-      }
+      } }
+    if (fine) {
       // coyote brush and toyon in patches on the open hills: thickest on the shaded north slopes and in the gullies
       const ss = 7 / Math.sqrt(Math.max(0.2, share)), nn = g.segs + 1;
       let shrubs = 0;
@@ -234,39 +249,46 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         add('stone', px, pz, 0.6 + 1.4 * hash2(k, 3) ** 2, hash2(k, 5));
       }
     }
-    // per species two instanced sets: full trees near the rider, simple ones further out (partTrees splits them)
-    const grp = new THREE.Group(); c.treeSets = [];
+    // per species an instanced set of full models near the rider (fine tiles; partTrees fills it), and every tree of
+    // the tile as an impostor in one draw (the full models' circle left out)
+    const grp = new THREE.Group(), imp = []; c.treeSets = []; c.imp = null;
+    let y0 = Infinity, y1 = -Infinity;
     for (const [sp, list] of Object.entries(out)) {
-      const sm = sp === 'stone', mk = (geo, mat, shadow) => {
-        const im = new THREE.InstancedMesh(geo, mat, list.length); im.count = 0; im.userData.shared = true; im.castShadow = shadow; im.receiveShadow = c.lod === 0; grp.add(im); return im;
-      };
-      const hi = c.lod ? null : mk(trees[sp] ?? trees.bush, sm ? mats.propLo : mats.prop, !sm && QUALITY[q].shadow > 0);
-      const lo = sm ? null : mk(treesLo[sp] ?? treesLo.bush, mats.propLo, false);
-      c.treeSets.push({ sp, list, hi, lo });
+      const ci = SPECIES.indexOf(sp), low = sp === 'stone' || sp === 'fern', hi = fine ? new THREE.InstancedMesh(trees[sp], mats.prop, list.length) : null;
+      if (hi) { hi.count = 0; hi.userData.shared = true; hi.castShadow = !low && QUALITY[q].shadow > 0; hi.receiveShadow = true; hi.customDepthMaterial = mats.prop.userData.depth; grp.add(hi); }
+      if (ci >= 0) for (const [x, y, z, s, r] of list) {
+        imp.push([x, y, z, s, ci, 0.85 + 0.3 * r, 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
+        y0 = Math.min(y0, y); y1 = Math.max(y1, y + 50 * s);
+      }
+      c.treeSets.push({ sp, list, hi, near: NEAR[sp] ?? 1 });
+    }
+    if (imp.length) {
+      const cx = (box[0] + box[2]) / 2, cz = (box[1] + box[3]) / 2, sphere = new THREE.Sphere(new THREE.Vector3(cx, (y0 + y1) / 2, cz), Math.hypot(box[2] - box[0], box[3] - box[1], y1 - y0) / 2 + 30);
+      c.imp = impostorMesh(IMP, imp, sphere); c.imp.userData.ownMat = true; grp.add(c.imp);
     }
     c.partAt = null; partTrees(c, me.group.position.x, me.group.position.z);
     setPart(c, 'trees', grp);
   }
-  // split a tile's trees: within `near` metres of (x, z) the full models, the rest the simple ones (stones only near)
+  // split a tile's trees: within `treeNear` metres of (x, z) (a share of it per species, NEAR) the full models, the
+  // rest impostors (stones and ferns: nothing past it)
   function partTrees(c, x, z) {
-    const R2 = QUALITY[q].treeNear ** 2, m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(), tint = new THREE.Color();
+    const R = QUALITY[q].treeNear, m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(), tint = new THREE.Color();
     c.partAt = [x, z]; c.hiCount = 0;
-    for (const { sp, list, hi, lo } of c.treeSets || []) {
-      let a = 0, b = 0; const sm = sp === 'stone';
-      for (const [px, y, pz, sc, r] of list) {
-        const isHi = hi && (px - x) ** 2 + (pz - z) ** 2 < R2 * (sm ? 0.25 : 1);
-        if (!isHi && !lo) continue;
-        const im = isHi ? hi : lo, i = isHi ? a++ : b++;
-        e.set((r - 0.5) * 0.08, r * 6.283, 0); im.setMatrixAt(i, m4.compose(v.set(px, sm ? y + 0.25 : y, pz), qt.setFromEuler(e), s.set(sc, sc * (0.85 + 0.3 * r), sc)));
-        const k = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
-        im.setColorAt(i, tint.setRGB(k * (1 + w), k, k * (1 - w)));
+    for (const { sp, list, hi, near: k } of c.treeSets || []) {
+      if (!hi) continue;
+      let a = 0; const sm = sp === 'stone', R2 = (R * k) ** 2;
+      // nearest first: the GPU skips what is hidden behind them (the cards are alpha tested, so this matters)
+      const pick = []; for (const t of list) { const d = (t[0] - x) ** 2 + (t[2] - z) ** 2; if (d < R2) pick.push([d, t]); }
+      pick.sort((u, w) => u[0] - w[0]);
+      for (const [, [px, y, pz, sc, r]] of pick) {
+        e.set((r - 0.5) * 0.08, r * 6.283, 0); hi.setMatrixAt(a, m4.compose(v.set(px, sm ? y + 0.25 : y, pz), qt.setFromEuler(e), s.set(sc, sc * (0.85 + 0.3 * r), sc)));
+        const kk = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
+        hi.setColorAt(a++, tint.setRGB(kk * (1 + w), kk, kk * (1 - w)));
       }
-      c.hiCount += a;
-      for (const [im, n] of [[hi, a], [lo, b]]) if (im) {
-        im.count = n; im.visible = n > 0; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
-        if (n) im.computeBoundingSphere();
-      }
+      c.hiCount += a; hi.count = a; hi.visible = a > 0; hi.instanceMatrix.needsUpdate = true; if (hi.instanceColor) hi.instanceColor.needsUpdate = true;
+      if (a) hi.computeBoundingSphere();
     }
+    if (c.imp) { const u = c.imp.material.userData.u; u.nearC.value.set(x, z); u.nearR.value = c.lod === 0 ? R : 0; }
   }
   function buildBuildings(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'bldg', null);
@@ -457,6 +479,14 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const others = new Map();  // id -> { r, tag, x, z, yaw, seen }
   let grade = 0, dark = 0, camOver = null, sea = 0, seaAt = 0, lifeDt = 0, audioDt = 0;
   const cpu = { js: 0, draw: 0, max: 0 };  // milliseconds a frame on the CPU: the world's own work, issuing the draws
+  // milliseconds a frame on the GPU (timer queries, when the dev switch __w3.gpu is on): the last 600 frames
+  const gpuTime = (() => {
+    const gl = renderer.getContext(), ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'), wait = [], ms = [];
+    return { ms,
+      begin() { if (!ext) return null; for (let i = wait.length - 1; i >= 0; i--) if (gl.getQueryParameter(wait[i], gl.QUERY_RESULT_AVAILABLE)) { if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) ms.push(gl.getQueryParameter(wait[i], gl.QUERY_RESULT) / 1e6); gl.deleteQuery(wait[i]); wait.splice(i, 1); } if (ms.length > 600) ms.splice(0, ms.length - 600); const q = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, q); return q; },
+      end(q) { gl.endQuery(ext.TIME_ELAPSED_EXT); wait.push(q); },
+      get stat() { if (!ms.length) return null; const a = ms.slice().sort((x, y) => x - y); return { med: +a[a.length >> 1].toFixed(2), p95: +a[Math.floor(a.length * 0.95)].toFixed(2), n: a.length }; } };
+  })();
   // how much of the ground round a point is sea (for the sound of the waves): 16 points at 250 and 700 m
   function seaShare(x, z) {
     let n = 0; for (let k = 0; k < 16; k++) { const a = k * 0.785 + (k > 7 ? 0.39 : 0), r = k > 7 ? 700 : 250, h = groundAt(x + Math.cos(a) * r, z + Math.sin(a) * r); if (h == null || h < 0.4) n++; }
@@ -645,7 +675,9 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }
       renderer.info.reset();
       const c1 = performance.now();
+      const gq = dbg.gpu ? gpuTime.begin() : null;
       if (dbg.noPost) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = sky.exposure; renderer.render(scene, camera); } else post.render(sky.exposure * (1 + dark * 0.6));
+      if (gq) gpuTime.end(gq);
       const c2 = performance.now(); cpu.js += (c1 - c0 - cpu.js) * 0.05; cpu.draw += (c2 - c1 - cpu.draw) * 0.05; cpu.max = Math.max(cpu.max * 0.995, c1 - c0);
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
       governor(dt, now);
@@ -677,7 +709,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     setKit(kit, accent) { me.setKit?.(kit, accent); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) } }),
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point

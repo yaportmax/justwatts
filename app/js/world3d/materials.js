@@ -195,11 +195,11 @@ export function roadMaterial() {
   return m;
 }
 
-// Trees and shrubs: vertex coloured, the crowns lit with soft (spherical) normals; they lean with the wind by height.
-// Instanced; per instance colour varies the green a little.
-export function propMaterial({ wind = true } = {}) {
-  const m = new THREE.MeshLambertMaterial({ vertexColors: true });
-  if (!wind) return m;
+// Trees and shrubs: vertex coloured, bark and leaf cards from the leaf atlas (alpha tested; the shadows too), the
+// crowns lit with soft (spherical) normals, the same on both faces of a card, and glowing a little with the sun
+// behind them. They lean with the wind by height, the leaves flutter. Instanced; per instance colour varies the green.
+export function propMaterial() {
+  const T = textures(), m = new THREE.MeshLambertMaterial({ vertexColors: true, map: T.leaves, alphaTest: 0.5, side: THREE.DoubleSide });
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, { wTime: WIND.time, wGust: WIND.gust });
     sh.vertexShader = sh.vertexShader
@@ -210,9 +210,35 @@ export function propMaterial({ wind = true } = {}) {
         float jwPh = dot(jwRoot.xz, vec2(0.11, 0.07)), jwK = max(0.0, position.y - 1.5) * 0.012 * wGust;
         transformed.x += jwK * (sin(wTime * 0.9 + jwPh) + 0.4 * sin(wTime * 2.3 + jwPh * 3.0 + position.y));
         transformed.z += jwK * 0.6 * sin(wTime * 1.1 + jwPh * 1.7);
+        // leaves (the atlas's top three rows) flutter
+        float jwLf = step(uv.y, 0.74) * wGust;
+        transformed += normal * sin(wTime * 6.0 + dot(position, vec3(3.1, 2.3, 2.7)) + jwPh) * 0.05 * jwLf;
+        #endif`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <normal_fragment_begin>', 'float faceDirection = 1.0;\nvec3 normal = normalize(vNormal);\nvec3 nonPerturbedNormal = normal;')
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        #if NUM_DIR_LIGHTS > 0
+        float jwBack = pow(max(dot(normalize(-vViewPosition), directionalLights[0].direction), 0.0), 4.0) * step(vMapUv.y, 0.74);
+        reflectedLight.indirectDiffuse += diffuseColor.rgb * directionalLights[0].color * jwBack * 0.16;
         #endif`);
   };
-  m.customProgramCacheKey = () => 'jw-prop-2';
+  m.customProgramCacheKey = () => 'jw-prop-3';
+  // the shadow: the same wind, the cards a third of them (attribute sk), alpha tested
+  const d = m.userData.depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: T.leaves, alphaTest: 0.5, side: THREE.DoubleSide });
+  d.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, { wTime: WIND.time, wGust: WIND.gust });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float wTime, wGust;\nattribute float sk;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        #ifdef USE_INSTANCING
+        vec3 jwRoot = instanceMatrix[3].xyz;
+        float jwPh = dot(jwRoot.xz, vec2(0.11, 0.07)), jwK = max(0.0, position.y - 1.5) * 0.012 * wGust;
+        transformed.x += jwK * (sin(wTime * 0.9 + jwPh) + 0.4 * sin(wTime * 2.3 + jwPh * 3.0 + position.y));
+        transformed.z += jwK * 0.6 * sin(wTime * 1.1 + jwPh * 1.7);
+        #endif
+        transformed *= step(0.5, sk);`);
+  };
+  d.customProgramCacheKey = () => 'jw-prop-depth-1';
   return m;
 }
 

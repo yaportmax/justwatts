@@ -289,17 +289,20 @@ export function createSky(scene, { far, quality = 0 }) {
     // the fog banks as a volume (post draws them) or as billboards
     setVolume(on) { fog.vol = !!on; showBanks(); }, get exposure() { return exposure; }, get sunI() { return sunI; }, get hemiI() { return hemiI; },
     setBanks(on) { banks.on = !!on; showBanks(); return banks.on; }, get banksOn() { return banks.on; },
-    // follow the camera (sky, sea), the shadow box around the rider (snapped to its texels so shadows do not swim)
-    update(cam, rider, dt, shadowSpan) {
+    // follow the camera (sky, sea); box: move the shadow box round the rider instead (snapped to its texels so shadows
+    // do not swim; done on the frames the shadow map is drawn)
+    update(cam, rider, dt, shadowSpan, box = false) {
+      if (box) {   // only the shadow box round the rider
+        const c = sun.shadow.camera, span = shadowSpan;
+        if (span && c.right !== span) { c.left = c.bottom = -span; c.right = c.top = span; c.updateProjectionMatrix(); }
+        const texel = (2 * (span || 50)) / (sun.shadow.mapSize.x || 1024), tx = Math.round(rider.x / texel) * texel, tz = Math.round(rider.z / texel) * texel;
+        sun.target.position.set(tx, rider.y, tz); sun.position.set(tx + sunDir.x * 400, rider.y + sunDir.y * 400, tz + sunDir.z * 400);
+        return;
+      }
       sky.position.copy(cam.position);
       sea.position.set(cam.position.x, 0, cam.position.z);
       wu.time.value += dt; cu.cTime.value += dt; fog.u.fogTime.value += dt;
       if (move) { move.f = Math.min(1, move.f + dt / 4); const e = move.f * move.f * (3 - 2 * move.f); apply(mixTimes(move.from, move.to, e)); if (move.f >= 1) move = null; }
-      const c = sun.shadow.camera, span = shadowSpan;
-      if (span && c.right !== span) { c.left = c.bottom = -span; c.right = c.top = span; c.updateProjectionMatrix(); }
-      const texel = (2 * (span || 50)) / (sun.shadow.mapSize.x || 1024);
-      const tx = Math.round(rider.x / texel) * texel, tz = Math.round(rider.z / texel) * texel;
-      sun.target.position.set(tx, rider.y, tz); sun.position.set(tx + sunDir.x * 400, rider.y + sunDir.y * 400, tz + sunDir.z * 400);
     },
   };
 }

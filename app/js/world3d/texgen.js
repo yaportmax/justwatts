@@ -53,7 +53,8 @@ export function wavePixels(size = 256, waves = 28) {
 // Mipmaps for an alpha-tested atlas of cols x rows cells (RGBA bytes, w x h). Each level halves the one above, the
 // colour weighted by alpha (leaves keep their colour to the edge); then alpha is scaled per cell so the share of
 // texels that pass the alpha test (cut) stays what it is at full size: leaf cards do not thin out with distance. Clear
-// texels first take their cell's mean colour (no dark fringe where filtering meets an edge). -> [{ data, width, height }]
+// texels first take their cell's mean colour (no dark fringe where filtering meets an edge).
+// -> [{ data, width, height }]
 export function coverageMips(px, w, h, cols, rows, cut = 128) {
   const cw = w / cols, ch = h / rows;
   for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {

@@ -158,8 +158,8 @@ float a = max(0.0, 1.0 - length(vP / vec2(2.2, 7.0))); a = a * a * smoothstep(0.
   const flocks = [];
 
   let t = 0;
-  // ctx: { rider: { x, y, z, v, yaw }, riders: [{ x, z, v }] (all on the roads), roads: () => [{ P: [[x, y, z]], w, lanes, one, big }],
-  // ground: (x, z) -> h | null }
+  // ctx: { rider: { x, y, z, v, yaw }, riders: [{ x, z, v }] (all on the roads), roads: () => [{ P: [[x, y, z]], w,
+  // lanes, one, big }], ground: (x, z) -> h | null }
   function update(dt, ctx) {
     t += dt; bt.value = t;
     const R = ctx.rider;

@@ -1,8 +1,9 @@
 // World 3D terrain shadows at any distance: the terrain round the rider is drawn from straight above into a height map
 // (2048 texels over 40 km), then each texel walks toward the sun along it, ever further apart, and keeps the steepest
 // rise it meets: past the sun's own height it is in a hill's shadow (soft over about a degree). Lit materials read the
-// map (materials.js withSun). Made again when the sun moves, the rider gets 4 km from its middle or tiles were built.
-// A finer height map of the 4 km round the rider (about 4 m a texel) is for the sea: foam in its shallows.
+// map (materials.js withSun). A finer height map of the 4 km round the rider (about 4 m a texel) is for the sea: foam
+// in its shallows. Made again when the sun moves, the rider gets 4 km from the middle (1.2 km for the finer map) or,
+// at most every 6 s, when tiles were built.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { HORIZON } from './materials.js';
 
@@ -54,7 +55,7 @@ export function createHorizon(renderer, scene, sunDir) {
     touch() { dirty = true; },
     update(x, z, now) {
       // (while the sun moves across the sky, at most twice a second)
-      if (!at || Math.hypot(x - at[0], z - at[1]) > 4000 || Math.hypot(x - nat[0], z - nat[1]) > 1200 || (sun.angleTo(sunDir) > 0.004 && now - last > 500) || (dirty && now - last > 2000)) { last = now; draw(x, z); }
+      if (!at || Math.hypot(x - at[0], z - at[1]) > 4000 || Math.hypot(x - nat[0], z - nat[1]) > 1200 || (sun.angleTo(sunDir) > 0.004 && now - last > 500) || (dirty && now - last > 6000)) { last = now; draw(x, z); }
     },
     targets: { heights, vis, near: nearT },
     dispose() { heights.dispose(); vis.dispose(); nearT.dispose(); HORIZON.heights.value = HORIZON.near.value = null; hMat.dispose(); walk.dispose(); quad.geometry.dispose(); HORIZON.map.value = null; HORIZON.box.value.set(0, 0, 0, 0); },

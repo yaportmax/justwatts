@@ -154,7 +154,7 @@ const cone = (y0, y1, r, c, seed) => [bumpy(new THREE.ConeGeometry(r, y1 - y0, 8
 // bush, shrub (low), fern, stone (near the rider only)
 export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub'];
 // the share of the full models' radius each is drawn in full (the tall dense ones cost the most; impostors past it)
-export const NEAR = { oak: 1, bay: 1, fir: 0.5, redwood: 0.28, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, stone: 0.45, fern: 0.4 };
+export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, stone: 0.45, fern: 0.25 };
 export function treeGeometries() {
   const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15);
   // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
@@ -177,7 +177,7 @@ export function treeGeometries() {
     // flat feathery sprays in a narrow, ragged spire
     redwood: merge([bark(trunkG(1.25, 0.32, 46, 10), red), bark(new THREE.CylinderGeometry(1.2, 1.9, 3, 10, 1).translate(0, 1.5, 0), red),
       ...[[13, 0.5], [15, 2.6], [17.5, 4.4], [19, 1.2]].map(([y, a]) => limb(Math.cos(a) * 0.6, y, Math.sin(a) * 0.6, Math.cos(a) * 2.6, y - 0.8, Math.sin(a) * 2.6, 0.09, brownD)),
-      cone(20, 47, 1.6, F.red, 41), leaves(boughs(18.5, 45.5, 16, 6, 4.8, 1.1, 1.45, 0.36, LEAF.redwood, 40, LEAF.redwood2), F.red),
+      cone(20, 47, 1.6, F.red, 41), leaves(boughs(18.5, 45.5, 13, 6, 4.9, 1.1, 1.6, 0.36, LEAF.redwood, 40, LEAF.redwood2), F.red),
       leaves(crownCards(0, 46, 0, 0.5, 1.6, 0.5, 4, 1.3, LEAF.redwood, 44, { out: 0.2, hang: 1 }), F.red)]),
     // blue gum eucalyptus: a tall pale trunk leaning a little, loose blue-grey clumps of hanging leaves off high limbs
     euc: merge([bark(trunkG(0.5, 0.22, 17, 7), pale, M(0, 0, 0, 1, 1, 1, 0, 0.05)),

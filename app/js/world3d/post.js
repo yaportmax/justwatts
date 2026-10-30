@@ -115,7 +115,8 @@ export function createPost(renderer, scene, camera, fog = null) {
     composer = new EffectComposer(renderer, rt);
     composer.addPass(new RenderPass(scene, camera));
     if (Q.vol && fog) { fogp = new FogPass(camera, fog, Q.vol); composer.addPass(fogp); }
-    if (Q.bloom) { bloom = new UnrealBloomPass(new THREE.Vector2(size[0], size[1]), 0.22, 0.45, 1.15); composer.addPass(bloom); }
+    // the bloom at half size (its blurs start at a quarter): it is soft anyway, and costs half as much
+    if (Q.bloom) { bloom = new UnrealBloomPass(new THREE.Vector2(size[0], size[1]), 0.22, 0.45, 1.15); const set = bloom.setSize.bind(bloom); bloom.setSize = (w, h) => set(Math.max(1, w >> 1), Math.max(1, h >> 1)); composer.addPass(bloom); }
     grade = new ShaderPass(GradeShader); composer.addPass(grade);
     if (Q.fxaa) { fxaa = new ShaderPass(FXAAShader); composer.addPass(fxaa); }
     composer.setPixelRatio(size[2]); composer.setSize(size[0], size[1]); fxRes();

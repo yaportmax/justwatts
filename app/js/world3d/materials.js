@@ -101,7 +101,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         c *= 1.0 - clamp(vCv, 0.0, 1.0) * 0.25;
         // past the grass: the hills mottled, dots of scrub and their shade, drier and greener patches
         { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk);
-          float sp = jwN(vW.xz / 19.0 + 0.21).g, sp2 = jwN(mat2(0.6, -0.8, 0.8, 0.6) * vW.xz / 53.0).r, pt = jwN(vW.xz / 140.0 + 0.53).b;
+          vec4 ms = jwN(vW.xz / 19.0 + 0.21); float sp = ms.g, sp2 = ms.r, pt = jwN(vW.xz / 140.0 + 0.53).b;
           c *= 1.0 - far * open * (0.22 * smoothstep(0.6, 0.78, sp) + 0.12 * smoothstep(0.58, 0.8, sp2));
           c = mix(c, c * vec3(0.9, 1.0, 0.82), far * open * 0.6 * smoothstep(0.5, 0.75, pt));
           c = mix(c, c * vec3(1.08, 1.02, 0.94), far * open * 0.5 * (1.0 - smoothstep(0.3, 0.55, pt))); }
@@ -283,7 +283,7 @@ export function portalMaterial() {
   const m = new THREE.MeshLambertMaterial({ color: 0xb2ab9f });
   m.onBeforeCompile = sh => {
     sh.uniforms.tNoise = { value: textures().noise };
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vPl;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvPl = position;');
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 pl; varying vec3 vPl;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvPl = pl;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tNoise; varying vec3 vPl;')
       .replace('#include <color_fragment>', `#include <color_fragment>
         float row = floor(vPl.y / 0.62), joint = max(step(0.95, fract(vPl.y / 0.62)), step(0.97, fract(vPl.x / 1.9 + row * 0.5)));

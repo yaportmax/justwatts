@@ -26,11 +26,11 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // (segs) and upsampling near the rider (up), draw distance, post-processing (bloom, MSAA samples, fog volume steps),
 // grass radius and clumps per square metre, ground detail (bump, close-up noise), the full trees' radius
 export const QUALITY = [
-  { name: 'high', shadow: 2048, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 28, grass: [64, 4], detail: true, treeNear: 300 },
+  { name: 'high', shadow: 1536, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [64, 4], detail: true, treeNear: 300 },
   { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200 },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120 },
 ];
-const CAP = { 0: 42000, 1: 26000 };  // trees per tile at full share, by detail
+const CAP = { 0: 30000, 1: 22000 };  // trees per tile at full share, by detail
 // trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
 // wood (mixed, broadleaf, needleleaf), and ground no tree grows on (rock, sand, water). [class, metres between trees,
 // share of the spots kept, leaf type]
@@ -50,7 +50,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   if (!renderer.capabilities.isWebGL2) { renderer.dispose(); canvas.remove(); tags.remove(); throw new Error('no WebGL2'); }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.shadowMap.autoUpdate = true;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.shadowMap.autoUpdate = false;
   renderer.info.autoReset = false;
   canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); fail(new Error('WebGL context lost')); });
 
@@ -85,7 +85,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const near = new Map(), far = new Map(), jobs = jobQueue();
   const tileOf = (x, z) => { const lat = proj.lat(z), lon = proj.lon(x); return [Math.floor(tileX(lon, NEAR_Z)), Math.floor(tileY(lat, NEAR_Z))]; };
   function disposeObj(o) {
-    o.traverse(m => { if (m.isInstancedMesh) m.dispose(); else if (m.geometry && !m.userData.shared) m.geometry.dispose(); if (m.userData.ownMat) m.material.dispose(); });
+    o.traverse(m => { if (m.isInstancedMesh || m.isBatchedMesh) m.dispose(); else if (m.geometry && !m.userData.shared) m.geometry.dispose(); if (m.userData.ownMat) m.material.dispose(); });
     o.parent?.remove(o);
   }
   function newChunk(k, lod) {
@@ -222,7 +222,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
     const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c), fine = c.lod === 0, box = tileBox(c);
     const out = {}; let n = 0, ferns = 0;
-    const add = (sp, x, z, s, r) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r]); n++; };
+    // [x, y, z, scale, random, near only: a full model, no impostor]
+    const add = (sp, x, z, s, r, nearOnly = 0) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r, nearOnly]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
@@ -238,9 +239,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const lat = proj.lat(z), lon = proj.lon(x), h = hAt(x, z) ?? 0, sp = species(TREE[k][0], TREE[k][3], h, lat, lon, r);
         add(sp, x, z, 0.75 + 0.5 * hash2(Math.round(x), Math.round(z)), r);
         if (sp !== 'redwood') continue;
-        // redwoods stand in rings round where an old one was; sword ferns under them (full models near the rider only)
-        if (r < 0.25) for (let e = 0; e < 2; e++) { const a = r * 40 + e * 2.6, rr = 3 + 1.5 * hash2(e, Math.round(x)); add('redwood', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.55 + 0.4 * hash2(e, Math.round(z)), hash2(Math.round(z), e)); }
-        if (fine && ferns < 14000) for (let e = 0; e < 5; e++) { const a = hash2(e, Math.round(x * 7)) * 6.283, rr = 2 + 5 * hash2(Math.round(z * 7), e); add('fern', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.9 + 0.7 * hash2(e, Math.round(z)), hash2(e, Math.round(x))); ferns++; }
+        // redwoods stand in rings round where an old one was (the ring only near the rider: further away its impostor
+        // would be one more card over the same spot); sword ferns under them (full models near the rider only)
+        if (r < 0.2) for (let e = 0; e < 1; e++) { const a = r * 40 + e * 2.6, rr = 3 + 1.5 * hash2(e, Math.round(x)); add('redwood', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.55 + 0.4 * hash2(e, Math.round(z)), hash2(Math.round(z), e), 1); }
+        if (fine && ferns < 8000) for (let e = 0; e < 4; e++) { const a = hash2(e, Math.round(x * 7)) * 6.283, rr = 2 + 5 * hash2(Math.round(z * 7), e); add('fern', x + Math.cos(a) * rr, z + Math.sin(a) * rr, 0.9 + 0.7 * hash2(e, Math.round(z)), hash2(e, Math.round(x))); ferns++; }
       }
     }
     // lone oaks on the open hills, in loose clumps
@@ -285,11 +287,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     let y0 = Infinity, y1 = -Infinity;
     for (const [sp, list] of Object.entries(out)) {
       const ci = SPECIES.indexOf(sp);
-      if (ci >= 0) for (const [x, y, z, s, r] of list) {
-        imp.push([x, y, z, s, ci, 0.85 + 0.3 * r, 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
+      // the ring of tiles further out (2 km and more) keeps four trees in ten, bigger, once and for all (thinning in the
+      // shader would still cost the GPU every one of them); in the dense groves of redwood and fir fewer too
+      const keep = c.lod > 0 ? 0.42 : sp === 'redwood' ? 0.6 : sp === 'fir' ? 0.8 : 1, grow = 1 / Math.sqrt(keep);
+      if (ci >= 0) for (const [x, y, z, s, r, nearOnly] of list) {
+        const thin = c.lod > 0; if (nearOnly || (x * 0.1731 + z * 0.2917) - Math.floor(x * 0.1731 + z * 0.2917) > keep) continue;
+        imp.push([x, y, z, s * grow, ci, (thin ? -1 : 1) * (0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
         y0 = Math.min(y0, y); y1 = Math.max(y1, y + 50 * s);
       }
-      c.treeSets.push({ sp, list, fine, grp, low: sp === 'stone' || sp === 'fern', near: NEAR[sp] ?? 1, hi: null, mid: null });
+      list.sort((u, w) => u[0] - w[0]);  // by x: a split looks at the strip round the rider only
+      c.treeSets.push({ sp, list, fine, grp, low: sp === 'stone' || sp === 'fern', near: NEAR[sp] ?? 1, hi: null });
     }
     if (imp.length) {
       const cx = (box[0] + box[2]) / 2, cz = (box[1] + box[3]) / 2, sphere = new THREE.Sphere(new THREE.Vector3(cx, (y0 + y1) / 2, cz), Math.hypot(box[2] - box[0], box[3] - box[1], y1 - y0) / 2 + 30);
@@ -301,11 +308,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setPart(c, 'trees', grp);
   }
   // split a tile's trees: within `treeNear` metres of (x, z) (a share of it per species, NEAR) the full models, the
-  // rest impostors (stones and ferns: nothing past it). Of the full models only those near enough for the shadow map
-  // cast shadows (two sets: `hi` casts, `mid` does not); each set grows when it needs more room.
+  // rest impostors (stones and ferns: nothing past it). A set grows when it needs more room. Nearest first, so the
+  // shadow map (onBeforeShadow) draws just the first ones: those near enough for it.
   function partTrees(c, x, z) {
     const R = QUALITY[q].treeNear, m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(), tint = new THREE.Color();
-    const Rs2 = QUALITY[q].shadow > 0 ? (QUALITY[q].span + 25) ** 2 : -1;
+    const Rs2 = (QUALITY[q].span + 25) ** 2;
     c.partAt = [x, z]; c.hiCount = 0;
     const fill = (set, key, items, cast) => {
       let m = set[key];
@@ -313,6 +320,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (m) { set.grp.remove(m); m.dispose(); }
         m = set[key] = new THREE.InstancedMesh(trees[set.sp], mats.prop, Math.ceil(items.length * 1.3) + 16);
         m.userData.shared = true; m.castShadow = cast; m.receiveShadow = true; m.customDepthMaterial = mats.prop.userData.depth; set.grp.add(m);
+        m.onBeforeShadow = () => { m.userData.all = m.count; m.count = m.userData.cast; }; m.onAfterShadow = () => { m.count = m.userData.all; };
       }
       if (!m) return;
       let a = 0; const sm = set.sp === 'stone';
@@ -321,17 +329,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const kk = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
         m.setColorAt(a++, tint.setRGB(kk * (1 + w), kk, kk * (1 - w)));
       }
-      c.hiCount += a; m.count = a; m.visible = a > 0; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      let k = 0; while (k < items.length && items[k][0] < Rs2) k++;
+      c.hiCount += a; m.count = a; m.userData.cast = k; m.visible = a > 0; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
       if (a) m.computeBoundingSphere();
     };
     for (const set of c.treeSets || []) {
       if (!set.fine) continue;
       // nearest first: the GPU skips what is hidden behind them (the cards are alpha tested, so this matters)
-      const R2 = (R * set.near) ** 2, pick = [];
-      for (const t of set.list) { const d = (t[0] - x) ** 2 + (t[2] - z) ** 2; if (d < R2) pick.push([d, t]); }
+      const Rs = R * set.near, R2 = Rs * Rs, L = set.list, pick = [];
+      let lo = 0, hi = L.length; while (lo < hi) { const m = (lo + hi) >> 1; if (L[m][0] < x - Rs) lo = m + 1; else hi = m; }
+      for (let i = lo; i < L.length && L[i][0] <= x + Rs; i++) { const t = L[i], d = (t[0] - x) ** 2 + (t[2] - z) ** 2; if (d < R2) pick.push([d, t]); }
       pick.sort((u, w) => u[0] - w[0]);
-      let n = 0; if (!set.low) while (n < pick.length && pick[n][0] < Rs2) n++;
-      fill(set, 'hi', pick.slice(0, n), true); fill(set, 'mid', pick.slice(n), false);
+      fill(set, 'hi', pick, !set.low && QUALITY[q].shadow > 0);
     }
     if (c.imp) { const u = c.imp.material.userData.u; u.nearC.value.set(x, z); u.nearR.value = c.lod === 0 ? R : 0; }
   }
@@ -408,11 +417,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
     });
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
-    for (const [k, list] of Object.entries(items)) {
-      if (!list.length) continue;
-      const im = new THREE.InstancedMesh(FURN[k], mats.furn, list.length); im.userData.shared = true; im.castShadow = QUALITY[q].shadow > 0 && k !== 'post'; im.receiveShadow = true;
-      list.forEach(([x, y, z, yaw], i) => im.setMatrixAt(i, m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), one)));
-      im.computeBoundingSphere(); grp.add(im);
+    // every kind in one batched draw
+    const kinds = Object.keys(items).filter(k => items[k].length), count = kinds.reduce((n, k) => n + items[k].length, 0);
+    if (count) {
+      const bm = new THREE.BatchedMesh(count, kinds.reduce((n, k) => n + FURN[k].attributes.position.count, 0), 0, mats.furn);
+      for (const k of kinds) { const gi = bm.addGeometry(FURN[k]); for (const [x, y, z, yaw] of items[k]) bm.setMatrixAt(bm.addInstance(gi), m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), one)); }
+      bm.castShadow = QUALITY[q].shadow > 0; bm.receiveShadow = true; bm.computeBoundingSphere(); grp.add(bm);
     }
     // light from the street lamps on the road under them at dusk
     if (items.lamp.length) {
@@ -454,7 +464,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const farReach = (c, lat, lon) => { const b = tileBox(c), x = proj.x(lon), z = proj.z(lat); return !!b && Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3])) < 14000; };
   function buildFarTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
-    const R = 256, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode), xs = [], zs = [], list = [], step = 30 / Math.sqrt(Math.max(0.3, QUALITY[q].trees));
+    const R = 256, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode), xs = [], zs = [], list = [], step = 42 / Math.sqrt(Math.max(0.3, QUALITY[q].trees));
     for (let i = 0; i <= R; i++) { xs.push(proj.x(lonOf(c.x + i / R, c.z))); zs.push(proj.z(latOf(c.y + i / R, c.z))); }
     let y0 = Infinity, y1 = -Infinity;
     for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
@@ -464,7 +474,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const x = xs[i] + (xs[i + 1] - xs[i]) * hash2(i * 13 + m, j), z = zs[j] + (zs[j + 1] - zs[j]) * hash2(j * 17 + m, i), h = gridHeight(c.grid, x, z);
         if (h == null || h < 2) continue;
         const r = hash2(Math.round(x), Math.round(z)), sp = k === 5 ? (r < 0.7 ? 'bush' : 'shrub') : species('wood', TREE[k][3], h, proj.lat(z), proj.lon(x), r);
-        const s = (0.8 + 0.45 * hash2(Math.round(z), Math.round(x))) * (k === 5 ? 1.6 : 1);
+        const s = (0.8 + 0.45 * hash2(Math.round(z), Math.round(x))) * (k === 5 ? 1.6 : 1) * 1.2;
         list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -(0.85 + 0.3 * r), 0.86 + 0.28 * hash2(m, i + j), (hash2(j, i) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + 50 * s);
       }
     }
@@ -630,7 +640,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       lamps.forEach(([x, y, z, yaw, s], i) => lm.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), q4.setFromEuler(new THREE.Euler(0, yaw, s * 0.6, 'YXZ')), new THREE.Vector3(1, 1, 1))));
       lm.computeBoundingSphere(); grp.add(lm);
     }
-    // portals: a headwall with an arched opening at the end of the cut, wider and taller than the bore
+    // portals: a headwall with an arched opening at the end of the cut, wider and taller than the bore; all their parts
+    // in one draw (attribute pl: a part's own position, for the courses in the portal shader)
+    const pp = [], pn = [], pl = [], m4 = new THREE.Matrix4(), nm = new THREE.Matrix3();
+    const add = (g, x, y, z, ry) => {
+      const ng = g.index ? g.toNonIndexed() : g; ng.computeVertexNormals(); m4.makeRotationY(ry).setPosition(x, y, z); nm.getNormalMatrix(m4);
+      const p = ng.attributes.position, n = ng.attributes.normal, v = new THREE.Vector3();
+      for (let i = 0; i < p.count; i++) { pl.push(p.getX(i), p.getY(i), p.getZ(i)); v.fromBufferAttribute(p, i).applyMatrix4(m4); pp.push(v.x, v.y, v.z); v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize(); pn.push(v.x, v.y, v.z); }
+      if (ng !== g) ng.dispose(); g.dispose();
+    };
     for (const [x, y, z, yaw, R, H, dir] of port) {
       const top = H + R * 0.75 + 5, wing = R + 5, sh = new THREE.Shape(); sh.moveTo(-wing, -1); sh.lineTo(wing, -1); sh.lineTo(wing, top - 3); sh.lineTo(R + 2, top); sh.lineTo(-R - 2, top); sh.lineTo(-wing, top - 3); sh.lineTo(-wing, -1);
       const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H);
@@ -645,8 +663,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       ar.lineTo(R, H); ar.lineTo(R, -0.5);
       const parts = [pg, new THREE.ExtrudeGeometry(ar, { depth: 0.25, bevelEnabled: false }), new THREE.BoxGeometry(2 * R + 4.6, 0.45, 1.3).translate(0, top + 0.2, -0.45),
         ...[-1, 1].map(s => new THREE.BoxGeometry(1.1, top - 2.5, 1.2).translate(s * (wing - 0.55), (top - 2.5) / 2 - 1, -0.3))];
-      for (const g of parts) { const pm2 = new THREE.Mesh(g, mats.portal); pm2.position.set(x, y, z); pm2.rotation.y = yaw + (dir > 0 ? Math.PI : 0); pm2.castShadow = true; pm2.receiveShadow = true; grp.add(pm2); }
-      pg.dispose();
+      for (const g of parts) add(g, x, y, z, yaw + (dir > 0 ? Math.PI : 0));
+    }
+    if (pp.length) {
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pp, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(pn, 3)); g.setAttribute('pl', new THREE.Float32BufferAttribute(pl, 3)); g.computeBoundingSphere();
+      const pm = new THREE.Mesh(g, mats.portal); pm.castShadow = true; pm.receiveShadow = true; grp.add(pm);
     }
     tun.group = grp; scene.add(grp);
   }
@@ -824,7 +845,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         jobs.add(c.k + '|p', 0.5, () => partTrees(c, p[0], p[1]));
       }
       const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noLife, noImp, noHi, noSm, noTerrain, gpu }
-      if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) for (const m of [t.hi, t.mid]) if (m && dbg.noHi) m.visible = false; } }
+      if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) if (t.hi && dbg.noHi) t.hi.visible = false; } }
       if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2);
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
@@ -870,6 +891,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       sky.hemi.color.copy(hemiBase[0]).lerp(TUN_LIGHT, dark * 0.9); sky.hemi.groundColor.copy(hemiBase[1]).lerp(TUN_LIGHT, dark * 0.7);
       if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }
+      // the shadow map every other frame (the box only moves when it is drawn, so the old one stays true until then)
+      if (frames % (globalThis.__w3?.smEvery ?? 2) === 0) { sky.update(camera, me.group.position, 0, QUALITY[q].span, true); renderer.shadowMap.needsUpdate = true; }
       renderer.info.reset();
       const c1 = performance.now();
       const gq = dbg.gpu ? gpuTime.begin() : null;
@@ -911,7 +934,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
-    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, me: me.group.position.toArray(), probe: (x, z) => ({ tunnel: tunnelAt(x, z), ground: groundAt(x, z) }), tunnels: tun.list.map(T => ({ h0: T.h0, h1: T.h1, L: T.L })) }),
+    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, gpuMs: gpuTime.ms, me: me.group.position.toArray(), probe: (x, z) => ({ tunnel: tunnelAt(x, z), ground: groundAt(x, z) }), tunnels: tun.list.map(T => ({ h0: T.h0, h1: T.h1, L: T.L })) }),
     // a fixed camera for screenshots and checks: [lat, lon, height m, heading deg, pitch deg], null to follow the rider
     viewFrom(v) { camOver = v; },
   };

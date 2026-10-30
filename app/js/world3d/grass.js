@@ -41,7 +41,7 @@ export function clumpGeometry(blades = 9) {
 
 // THREE, scene, mat: grassMaterial(); sample(x, z) -> { h, nx, ny, nz, cv, m: [wood, green, sand, town], skip } | null
 export function createGrass({ THREE, scene, mat, sample }) {
-  const SIZE = 20, cells = new Map(), g0 = clumpGeometry(), geo = new THREE.BufferGeometry();
+  const SIZE = 24, cells = new Map(), g0 = clumpGeometry(), geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(g0.pos, 3)); geo.setIndex(new THREE.BufferAttribute(g0.idx, 1));
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(g0.pos.length).map((_, i) => i % 3 === 1 ? 1 : 0), 3));
   let R = 60, density = 3, gen = 0;

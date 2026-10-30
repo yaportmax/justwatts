@@ -69,7 +69,7 @@ export function impostorMaterial(imp) {
         vec4 cell = impCell[int(ib.x + 0.5)];
         float s = ia.w, d = distance(ia.xz, cameraPosition.xz);
         // thin out far away: keep a share, the kept ones grow to cover for the rest
-        float keep = ib.y < 0.0 ? 1.0 : mix(1.0, 0.3, smoothstep(160.0, 3500.0, d)), r = fract(ia.x * 0.1731 + ia.z * 0.2917), hs = abs(ib.y);
+        float keep = ib.y < 0.0 ? 1.0 : mix(1.0, 0.3, clamp((d - 140.0) / 1500.0, 0.0, 1.0)), r = fract(ia.x * 0.1731 + ia.z * 0.2917), hs = abs(ib.y);
         float inBox = step(nearBox.x, ia.x) * step(ia.x, nearBox.z) * step(nearBox.y, ia.z) * step(ia.z, nearBox.w);
         float on = step(r, keep) * step(nearR * cell.w, distance(ia.xz, nearC)) * (1.0 - step(14000.0, d)) * (1.0 - inBox);
         s *= inversesqrt(keep) * 0.92 + 0.08;

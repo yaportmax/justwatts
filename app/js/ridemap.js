@@ -289,7 +289,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     cbtn.onclick = () => toggleCamera();
   }
   function toggleCamera() { if (!wv) return false; const m = wv.toggleCamera(); cbtn?.classList.toggle('on', m === 'first'); return true; }
-  const TIMES = ['golden', 'sunset', 'dawn', 'morning', 'day', 'afternoon'];
+  const TIMES = ['golden', 'sunset', 'dusk', 'dawn', 'morning', 'day', 'afternoon'];
   function cycleTime() { if (!wv) return false; const t = TIMES[(TIMES.indexOf(store.get('hw.worldTime', 'golden')) + 1) % TIMES.length]; store.set('hw.worldTime', wv.setTime(t)); return true; }
   // world sound: its own switch, off at first when the app's sounds (beeps) are off
   const soundOn = () => store.get('hw.worldSound', store.get('hw.settings', {})?.beeps !== false) !== false;

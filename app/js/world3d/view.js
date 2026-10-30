@@ -64,6 +64,17 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
   REDWOODS.forEach(([s, w, n, e], i) => REDWOOD.value[i].set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)));
   const hz = createHorizon(renderer, scene, sky.sunDir);
+  // the pool of light a street lamp puts on the road (added light, faded out by day)
+  const lampPool = new THREE.PlaneGeometry(14, 14).rotateX(-Math.PI / 2), lampPoolMat = new THREE.ShaderMaterial({ uniforms: { lamps: LAMPS }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: `#include <common>
+#include <logdepthbuf_pars_vertex>
+varying vec2 vP; varying float vD; void main() { vP = position.xz; vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0); vD = distance(w.xyz, cameraPosition); gl_Position = projectionMatrix * viewMatrix * w;
+#include <logdepthbuf_vertex>
+}`,
+    fragmentShader: `#include <logdepthbuf_pars_fragment>
+uniform float lamps; varying vec2 vP; varying float vD; void main() {
+#include <logdepthbuf_fragment>
+float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * a * lamps * 0.5 * (1.0 - smoothstep(200.0, 500.0, vD)), 1.0); }` });
   const FURN = furnitureGeometries(), trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog.u);
@@ -402,6 +413,12 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       const im = new THREE.InstancedMesh(FURN[k], mats.furn, list.length); im.userData.shared = true; im.castShadow = QUALITY[q].shadow > 0 && k !== 'post'; im.receiveShadow = true;
       list.forEach(([x, y, z, yaw], i) => im.setMatrixAt(i, m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), one)));
       im.computeBoundingSphere(); grp.add(im);
+    }
+    // light from the street lamps on the road under them at dusk
+    if (items.lamp.length) {
+      const pm = new THREE.InstancedMesh(lampPool, lampPoolMat, items.lamp.length); pm.userData.shared = true; pm.renderOrder = 2;
+      items.lamp.forEach(([x, y, z, yaw], i) => pm.setMatrixAt(i, m4.compose(v.set(x + Math.cos(yaw) * 1.85, (hAt(x + Math.cos(yaw) * 1.85, z - Math.sin(yaw) * 1.85) ?? y) + 0.48, z - Math.sin(yaw) * 1.85), qq.identity(), one)));
+      pm.computeBoundingSphere(); grp.add(pm);
     }
     // the rails: a W-beam on the posts, a strip 0.3 m tall
     if (rail.length) {
@@ -883,7 +900,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     // the chase camera's distance behind and height (a wider view for screenshots)
     setChase(back, up) { chase = [back, up]; },
     toggleCamera() { mode = mode === 'chase' ? 'first' : 'chase'; size = ''; return mode; },
-    setTime(t) { sky.set(t); return sky.time; },
+    // a time of day (TIMES): the sun moves there over a few seconds
+    setTime(t) { sky.go(t); return sky.time; },
     // Karl the fog's banks on or off
     setFog(on) { return sky.setBanks(on); }, fog: () => sky.banksOn,
     setKit(kit, accent) { me.setKit?.(kit, accent); },

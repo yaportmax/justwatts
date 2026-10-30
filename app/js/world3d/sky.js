@@ -13,7 +13,7 @@ import { skyRadiance, sunTint } from './skymath.js';
 
 // az: compass degrees, el: degrees above the horizon; turb/mie: haze in the sky; haze, low: aerial haze and the low
 // marine layer (per million per metre); banks: fog bank amount; cl: cumulus cover, ci: cirrus; si: sun intensity;
-// exp: exposure
+// exp: exposure. Dusk: the sun just under the horizon, the lamps on.
 export const TIMES = {
   dawn: { az: 78, el: 4, turb: 3.2, ray: 2.2, mie: 0.006, si: 2.0, haze: 22, low: 120, banks: 1, cl: 0.3, ci: 0.6, exp: 1.05 },
   morning: { az: 100, el: 15, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.6, haze: 18, low: 110, banks: 1, cl: 0.22, ci: 0.4, exp: 0.92 },
@@ -21,8 +21,15 @@ export const TIMES = {
   afternoon: { az: 228, el: 36, turb: 2.2, ray: 1.3, mie: 0.004, si: 3.0, haze: 12, low: 22, banks: 0.6, cl: 0.4, ci: 0.45, exp: 0.84 },
   golden: { az: 248, el: 13, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.9, haze: 14, low: 30, banks: 0.75, cl: 0.3, ci: 0.55, exp: 0.88 },
   sunset: { az: 258, el: 3.5, turb: 3.4, ray: 2.4, mie: 0.006, si: 2.3, haze: 20, low: 50, banks: 0.8, cl: 0.36, ci: 0.7, exp: 1.02 },
+  dusk: { az: 266, el: -3, turb: 3.2, ray: 2.8, mie: 0.006, si: 1.6, haze: 22, low: 55, banks: 0.85, cl: 0.32, ci: 0.6, exp: 1.9 },
 };
-export const TIME_ORDER = ['golden', 'sunset', 'dawn', 'morning', 'day', 'afternoon'];
+export const TIME_ORDER = ['golden', 'sunset', 'dusk', 'dawn', 'morning', 'day', 'afternoon'];
+// a time of day between two presets (f 0..1): every number eased across, the sun along the shorter way round
+export function mixTimes(a, b, f) {
+  const out = {};
+  for (const k of Object.keys(a)) out[k] = k === 'az' ? a.az + ((((b.az - a.az) % 360) + 540) % 360 - 180) * f : a[k] + (b[k] - a[k]) * f;
+  return out;
+}
 
 /* ---------- three's fog chunks: height fog + aerial haze, warmer toward the sun ---------- */
 // THREE.Fog carries two numbers: near = haze density (per million per metre, scale height 1.4 km), far = low marine
@@ -235,8 +242,12 @@ export function createSky(scene, { far, quality = 0 }) {
   /* the time of day */
   let t = 'golden', exposure = 1, sunI = 3, hemiI = 1;
   const tmp = new THREE.Vector3(), col = new THREE.Color();
-  function set(name) {
-    const P = TIMES[name] || TIMES.golden; t = name in TIMES ? name : 'golden';
+  // a preset at once; go(name): the sun and everything with it moves there over a few seconds
+  let move = null, now = null;
+  function set(name) { t = name in TIMES ? name : 'golden'; move = null; apply(TIMES[t]); }
+  function go(name) { const to = name in TIMES ? name : 'golden'; if (!now) return set(to); move = { from: { ...now }, to: TIMES[to], f: 0 }; t = to; }
+  function apply(P) {
+    now = P;
     const az = P.az * Math.PI / 180, el = P.el * Math.PI / 180;
     sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
     su.turbidity.value = P.turb; su.rayleigh.value = P.ray; su.mieCoefficient.value = P.mie; su.mieDirectionalG.value = 0.82;
@@ -254,7 +265,7 @@ export function createSky(scene, { far, quality = 0 }) {
     sun.color.setRGB(tint[0], tint[1], tint[2], THREE.LinearSRGBColorSpace); sun.intensity = P.si * Math.min(1, 0.35 + P.el / 12);
     hemi.color.setRGB(zen[0] * 1.6 + 0.1, zen[1] * 1.5 + 0.12, zen[2] * 1.3 + 0.14, THREE.LinearSRGBColorSpace);
     hemi.groundColor.setRGB(0.42 * tint[0], 0.33 * tint[1], 0.2 * tint[2], THREE.LinearSRGBColorSpace);
-    hemi.intensity = 1.25 + 0.5 * Math.min(1, P.el / 40);
+    hemi.intensity = (1.25 + 0.5 * Math.min(1, P.el / 40)) * (P.el < 0 ? Math.max(0.3, 1 + P.el / 5) : 1);
     wu.hor.value.setRGB(hz[0], hz[1], hz[2], THREE.LinearSRGBColorSpace); wu.zen.value.setRGB(zen[0], zen[1], zen[2], THREE.LinearSRGBColorSpace);
     wu.sunC.value.copy(sun.color).multiplyScalar(sun.intensity); wu.sunD.value.copy(sunDir);
     wu.deep.value.setRGB(0.018, 0.075, 0.105, THREE.LinearSRGBColorSpace);
@@ -274,7 +285,7 @@ export function createSky(scene, { far, quality = 0 }) {
     exposure = P.exp; sunI = sun.intensity; hemiI = hemi.intensity;
   }
   return {
-    sunDir, sun, hemi, set, placeBanks, fog, get time() { return t; },
+    sunDir, sun, hemi, set, go, placeBanks, fog, get time() { return t; }, get moving() { return !!move; },
     // the fog banks as a volume (post draws them) or as billboards
     setVolume(on) { fog.vol = !!on; showBanks(); }, get exposure() { return exposure; }, get sunI() { return sunI; }, get hemiI() { return hemiI; },
     setBanks(on) { banks.on = !!on; showBanks(); return banks.on; }, get banksOn() { return banks.on; },
@@ -283,6 +294,7 @@ export function createSky(scene, { far, quality = 0 }) {
       sky.position.copy(cam.position);
       sea.position.set(cam.position.x, 0, cam.position.z);
       wu.time.value += dt; cu.cTime.value += dt; fog.u.fogTime.value += dt;
+      if (move) { move.f = Math.min(1, move.f + dt / 4); const e = move.f * move.f * (3 - 2 * move.f); apply(mixTimes(move.from, move.to, e)); if (move.f >= 1) move = null; }
       const c = sun.shadow.camera, span = shadowSpan;
       if (span && c.right !== span) { c.left = c.bottom = -span; c.right = c.top = span; c.updateProjectionMatrix(); }
       const texel = (2 * (span || 50)) / (sun.shadow.mapSize.x || 1024);

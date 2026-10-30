@@ -321,7 +321,7 @@ export function buildingMaterial() {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 bw;\nvarying vec4 vBw;\nvarying vec3 vW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBw = bw; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tWin, tNoise; uniform float lamps;\nvarying vec4 vBw;\nvarying vec3 vW;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.74, 0.42) * jwWin * 1.6;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.7, 0.38) * jwWin * 0.75;')
       .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
         float kind = floor(vBw.w + 0.5), style = floor(vBw.z + 0.5), jwWin = 0.0;
         float nz = texture2D(tNoise, vW.xz / 7.0 + vW.y / 5.0).r;
@@ -341,7 +341,7 @@ export function buildingMaterial() {
           #endif
           diffuseColor.rgb = mix(wall * w.rgb, glass, w.a);
           diffuseColor.rgb *= vBw.y < 0.5 ? 0.62 : 1.0;   // the foundation
-          jwWin = w.a * lamps * step(0.55, fract(sin(dot(cell + floor(vW.xz * 0.05), vec2(12.9898, 78.233))) * 43758.5453));
+          jwWin = w.a * lamps * step(0.68, fract(sin(dot(cell + floor(vW.xz * 0.05), vec2(12.9898, 78.233))) * 43758.5453));
         } else if (kind == 1.0) {
           float rows = fract(vBw.y / 0.32), tiles = fract(vBw.x / 0.45 + floor(vBw.y / 0.32) * 0.5);
           diffuseColor.rgb *= (0.86 + 0.14 * smoothstep(0.0, 0.25, rows)) * (0.95 + 0.05 * step(0.08, tiles)) * (0.9 + 0.2 * nz);

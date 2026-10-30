@@ -103,8 +103,15 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
   const carSets = carGeos.map(({ g }) => { const m = new THREE.InstancedMesh(g, carMat, perType); m.castShadow = quality === 0; m.frustumCulled = false; m.count = 0; scene.add(m); return m; });
   // headlight pools on the road ahead, added light at dusk (one instanced draw, flat quads)
   const poolMat = new THREE.ShaderMaterial({ uniforms: { lamps }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    vertexShader: 'varying vec2 vP; varying float vD; void main() { vP = position.xz; vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0); vD = distance(w.xyz, cameraPosition); gl_Position = projectionMatrix * viewMatrix * w; }',
-    fragmentShader: 'uniform float lamps; varying vec2 vP; varying float vD; void main() { float a = max(0.0, 1.0 - length(vP / vec2(2.2, 7.0))); a = a * a * smoothstep(0.0, 0.6, vP.y + 7.0) * lamps * (1.0 - smoothstep(150.0, 400.0, vD)); gl_FragColor = vec4(vec3(1.0, 0.85, 0.62) * a * 0.55, 1.0); }' });
+    vertexShader: `#include <common>
+#include <logdepthbuf_pars_vertex>
+varying vec2 vP; varying float vD; void main() { vP = position.xz; vec4 w = modelMatrix * instanceMatrix * vec4(position, 1.0); vD = distance(w.xyz, cameraPosition); gl_Position = projectionMatrix * viewMatrix * w;
+#include <logdepthbuf_vertex>
+}`,
+    fragmentShader: `#include <logdepthbuf_pars_fragment>
+uniform float lamps; varying vec2 vP; varying float vD; void main() {
+#include <logdepthbuf_fragment>
+float a = max(0.0, 1.0 - length(vP / vec2(2.2, 7.0))); a = a * a * smoothstep(0.0, 0.6, vP.y + 7.0) * lamps * (1.0 - smoothstep(150.0, 400.0, vD)); gl_FragColor = vec4(vec3(1.0, 0.85, 0.62) * a * 0.55, 1.0); }` });
   const pools = new THREE.InstancedMesh(new THREE.PlaneGeometry(4.4, 14, 1, 1).rotateX(-Math.PI / 2), poolMat, counts[0]); pools.frustumCulled = false; pools.count = 0; pools.renderOrder = 2; scene.add(pools);
   const fleet = [];
   for (let i = 0; i < counts[0]; i++) fleet.push({ i, kind: i < Math.round(counts[0] * 0.4) ? 'bridge' : 'road', type: Math.floor(hash2(i, 29) * nT) % nT, col: CAR_COLOURS[i % CAR_COLOURS.length], live: false, s: 0, v: 0, off: 0 });
@@ -162,7 +169,7 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
     const put = (c, x, y, z, yaw, pitch = 0) => {
       const m = carSets[c.type], i = fill[c.type]++; if (i >= perType) return;
       M4.compose(V.set(x, y, z), Q.setFromEuler(E.set(pitch, yaw, 0, 'YXZ')), S.set(1, 1, 1)); m.setMatrixAt(i, M4); m.setColorAt(i, C.set(c.col));
-      if (lamps.value > 0.05 && pn < counts[0]) { V.set(0, 0, -9.5).applyQuaternion(Q); M4.compose(V.set(x + V.x, y + 0.08, z + V.z), Q.setFromEuler(E.set(0, yaw, 0)), S.set(1, 1, 1)); pools.setMatrixAt(pn++, M4); }
+      if (lamps.value > 0.05 && pn < counts[0]) { V.set(0, 0, -9.5).applyQuaternion(Q); M4.compose(V.set(x + V.x, y + 0.42, z + V.z), Q.setFromEuler(E.set(0, yaw, 0)), S.set(1, 1, 1)); pools.setMatrixAt(pn++, M4); }
     };
     const [bx, bz] = marks.lane ? [marks.lane(0, 0).x, marks.lane(0, 0).z] : [0, 0], nearBridge = marks.lane && Math.hypot(R.x - bx, R.z - bz) < 6000;
     for (const c of fleet) {

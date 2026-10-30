@@ -53,7 +53,8 @@ export function createHorizon(renderer, scene, sunDir) {
     // the terrain changed (a tile built): draw again within a couple of seconds
     touch() { dirty = true; },
     update(x, z, now) {
-      if (!at || Math.hypot(x - at[0], z - at[1]) > 4000 || Math.hypot(x - nat[0], z - nat[1]) > 1200 || sun.angleTo(sunDir) > 0.004 || (dirty && now - last > 2000)) { last = now; draw(x, z); }
+      // (while the sun moves across the sky, at most twice a second)
+      if (!at || Math.hypot(x - at[0], z - at[1]) > 4000 || Math.hypot(x - nat[0], z - nat[1]) > 1200 || (sun.angleTo(sunDir) > 0.004 && now - last > 500) || (dirty && now - last > 2000)) { last = now; draw(x, z); }
     },
     targets: { heights, vis, near: nearT },
     dispose() { heights.dispose(); vis.dispose(); nearT.dispose(); HORIZON.heights.value = HORIZON.near.value = null; hMat.dispose(); walk.dispose(); quad.geometry.dispose(); HORIZON.map.value = null; HORIZON.box.value.set(0, 0, 0, 0); },

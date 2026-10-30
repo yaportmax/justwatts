@@ -26,11 +26,11 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // (segs) and upsampling near the rider (up), draw distance, post-processing (bloom, MSAA samples, fog volume steps),
 // grass radius and clumps per square metre, ground detail (bump, close-up noise), the full trees' radius
 export const QUALITY = [
-  { name: 'high', shadow: 1536, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [64, 4], detail: true, treeNear: 300 },
+  { name: 'high', shadow: 1536, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300 },
   { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200 },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120 },
 ];
-const CAP = { 0: 30000, 1: 22000 };  // trees per tile at full share, by detail
+const CAP = { 0: 22000, 1: 18000 };  // trees per tile at full share, by detail (a denser tile is thinned evenly)
 // trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
 // wood (mixed, broadleaf, needleleaf), and ground no tree grows on (rock, sand, water). [class, metres between trees,
 // share of the spots kept, leaf type]
@@ -228,8 +228,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
     for (let i = 0; i <= R; i++) { xs.push(proj.x(lonOf(c.x + i / R, c.z))); zs.push(proj.z(latOf(c.y + i / R, c.z))); }
-    const dens = k => { const T = TREE[k]; if (!T) return 0; const st = T[1] * (c.lod ? 1.2 : 1) / Math.sqrt(Math.max(0.15, share)); return T[2] / (st * st); };
-    for (let j = 0; j < R && n < cap; j++) for (let i = 0; i < R; i++) {
+    let thin = 1;
+    const dens = k => { const T = TREE[k]; if (!T) return 0; const st = T[1] * (c.lod ? 1.2 : 1) / Math.sqrt(Math.max(0.15, share)); return thin * T[2] / (st * st); };
+    // a tile with more trees than its cap keeps the same share of them everywhere (not the first rows only)
+    { let all = 0; for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) all += dens(ras[j * (R + 1) + i]) * Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])); thin = Math.min(1, cap / Math.max(1, all * 1.1)); }
+    for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
       const v = j * (R + 1) + i, most = Math.max(dens(ras[v]), dens(ras[v + 1]), dens(ras[v + R + 1]), dens(ras[v + R + 2])); if (!most) continue;
       const area = Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])), N = most * area, cnt = Math.floor(N) + (hash2(i * 7 + c.x, j * 13 + c.y) < N % 1 ? 1 : 0);
       for (let m = 0; m < cnt; m++) {
@@ -845,7 +848,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         jobs.add(c.k + '|p', 0.5, () => partTrees(c, p[0], p[1]));
       }
       const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noLife, noImp, noHi, noSm, noTerrain, gpu }
-      if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) if (t.hi && dbg.noHi) t.hi.visible = false; } }
+      if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain || dbg.noFurn) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.furn) c.parts.furn.visible = !dbg.noFurn; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) if (t.hi && dbg.noHi) t.hi.visible = false; } }
       if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2);
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();

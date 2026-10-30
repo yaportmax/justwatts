@@ -45,8 +45,11 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec3 hlg = mix(srgb(vec3(0.47, 0.49, 0.35)), srgb(vec3(0.58, 0.57, 0.44)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
   // and coastal scrub over most of it (coyote brush, sage: dark olive, about #6f7a52 to #8a8f6a), grass in the clearings
   vec3 scrubC = mix(srgb(vec3(0.38, 0.40, 0.29)), srgb(vec3(0.49, 0.50, 0.39)), smoothstep(0.35, 0.7, fine)) * (0.9 + 0.2 * small);
-  hlg = mix(hlg, scrubC, smoothstep(0.42, 0.62, mid * 0.5 + small * 0.35 + patch80 * 0.15 + north * 0.25) * (1.0 - town));
+  float scrA = smoothstep(0.42, 0.62, mid * 0.5 + small * 0.35 + patch80 * 0.15 + north * 0.25) * (1.0 - town);
+  hlg = mix(hlg, scrubC, scrA);
   c = mix(c, mix(hlg, srgb(vec3(0.66, 0.61, 0.43)), smoothstep(0.78, 0.95, small) * 0.5), hl * 0.9);
+  // the scrub's clumps: bushes a few metres across, darker in their hollows
+  if (hl * scrA > 0.02) { float bc = jwN(p / 4.3 + 0.17).g; c *= 1.0 - hl * scrA * (0.3 - 0.5 * bc); }
   // San Francisco seen across the strait: the city's speckle of roofs, streets and gardens (its blocks are too small
   // to survive into the distant tiles, which would leave it golden hills)
   float sf = step(sfBox.x, p.x) * step(p.x, sfBox.z) * step(sfBox.y, p.y) * step(p.y, sfBox.w);

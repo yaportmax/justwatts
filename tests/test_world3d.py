@@ -33,6 +33,13 @@ def test_carve_puts_the_ground_under_the_ridden_road(out):
     assert c["bridgeTouched"] is False                                        # 400 m above the ground: a bridge, no carve
 
 
+def test_the_ground_stays_under_the_roads(out):
+    p = out["pushUnder"]
+    assert p["on"] == pytest.approx(49.92)                                      # under the road: just under its top (was 53)
+    assert p["next"] == pytest.approx(49.92 + 0.02 * (p["step"] - 2.3), abs=0.02)  # the next rows: the rise allowed from its edge
+    assert p["far"] == 53 and p["moved"] == 3 * 17                              # further rows untouched; lowers only
+
+
 def test_ground_classes_from_polygons(out):
     assert out["classes"] == {"corner": 0, "wood": 6, "sand": 8, "count": 81}  # wood 9x9 vertices, beach on top, buildings not raster
 

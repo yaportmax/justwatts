@@ -231,3 +231,40 @@ export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
   }
   return { pos, cls, src, idx };
 }
+
+// Keep the ground under the roads: tris = [ax, ay, az, bx, by, bz, cx, cy, cz, ...] (a road's top surface); a grid point
+// under a triangle goes no higher than it less `below`, one within `margin` metres of it no higher than the triangle's
+// nearest point less `below`, plus `slope` for every metre past its edge (the ground's triangles are coarser than a path
+// is wide: without this they poke up through it). Lowers only. Returns how many points came down.
+export function pushUnder(g, tris, opt) { return drain(pushUnderSteps(g, tris, opt)); }
+// the same a slice at a time (a generator yielding every 1500 triangles)
+export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.08 } = {}) {
+  if (g.hs === g.raw) g.hs = g.raw.slice();
+  const s = g.segs, n = s + 1, hs = g.hs, lim = new Float32Array(n * n).fill(Infinity);
+  const seg = (px, pz, ax, ay, az, bx, by, bz) => {
+    const ex = bx - ax, ez = bz - az, L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((px - ax) * ex + (pz - az) * ez) / L2)) : 0;
+    return [Math.hypot(px - ax - ex * t, pz - az - ez * t), ay + (by - ay) * t];
+  };
+  for (let k = 0; k + 8 < tris.length; k += 9) {
+    if (k % 13500 === 13491) yield;
+    const ax = tris[k], ay = tris[k + 1], az = tris[k + 2], bx = tris[k + 3], by = tris[k + 4], bz = tris[k + 5], cx = tris[k + 6], cy = tris[k + 7], cz = tris[k + 8];
+    const [i0, j0] = gridIJ(g, Math.min(ax, bx, cx) - margin, Math.min(az, bz, cz) - margin), [i1, j1] = gridIJ(g, Math.max(ax, bx, cx) + margin, Math.max(az, bz, cz) + margin);
+    const det = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
+    for (let j = Math.max(0, Math.ceil(Math.min(j0, j1))); j <= Math.min(s, Math.floor(Math.max(j0, j1))); j++) for (let i = Math.max(0, Math.ceil(Math.min(i0, i1))); i <= Math.min(s, Math.floor(Math.max(i0, i1))); i++) {
+      const px = g.xs[i], pz = g.zs[j];
+      let d = 0, h;
+      const l1 = det ? ((bz - cz) * (px - cx) + (cx - bx) * (pz - cz)) / det : -1, l2 = det ? ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) / det : -1, l3 = 1 - l1 - l2;
+      if (l1 >= 0 && l2 >= 0 && l3 >= 0) h = l1 * ay + l2 * by + l3 * cy;
+      else {
+        let best = seg(px, pz, ax, ay, az, bx, by, bz);
+        for (const e of [seg(px, pz, bx, by, bz, cx, cy, cz), seg(px, pz, cx, cy, cz, ax, ay, az)]) if (e[0] < best[0]) best = e;
+        [d, h] = best; if (d > margin) continue;
+      }
+      const v = j * n + i, L = h - below + slope * Math.max(0, d - 0.3);
+      if (L < lim[v]) lim[v] = L;
+    }
+  }
+  let moved = 0;
+  for (let v = 0; v < n * n; v++) if (hs[v] > lim[v]) { hs[v] = lim[v]; moved++; }
+  return moved;
+}

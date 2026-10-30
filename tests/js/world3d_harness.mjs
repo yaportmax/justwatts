@@ -1,7 +1,7 @@
 // The 3D world's pure parts (app/js/world3d): terrain grids from a synthetic Terrarium tile, the carve, ground classes,
 // road ribbons, landuse parsing and the compact forms, streaming bookkeeping, the baked tile format, the leg solver,
 // the view choice and the WebGL fallback, the open world's edge. stdout: JSON report for tests/test_world3d.py.
-import { heightsOf, makeSampler, makeGrid, gridHeight, carve, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks } from '../../app/js/world3d/terrain.js';
+import { heightsOf, makeSampler, makeGrid, gridHeight, carve, pushUnder, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks } from '../../app/js/world3d/terrain.js';
 import { cellPoints, cellsAround, clumpGeometry } from '../../app/js/world3d/grass.js';
 import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
@@ -53,6 +53,13 @@ const zMid = (g.zs[0] + g.zs[16]) / 2, road = [[g.xs[0], zMid, 105], [g.xs[16], 
 const raw = g.hs.slice(); carve(g, road, 12, 40);
 const jm = Math.round(8), on = g.hs[jm * 17 + 4], off = g.hs[0 * 17 + 4];
 out.carve = { on: r3(on), rawOn: r3(raw[jm * 17 + 4]), off: r3(off), rawOff: r3(raw[4]), bridgeTouched: carve(makeGrid({ z: Z, x: X, y: Y, segs: 16, sample: S, proj }), [[g.xs[0], zMid, 600], [g.xs[16], zMid, 600]], 12, 40) };
+// the ground under a road's top: a 4 m wide road 3 m under the ground across the middle row of the tile; the row under
+// it comes down to just under it, the next rows only as far as the rise allowed from its edge, far rows not at all
+{ const g2 = makeGrid({ z: Z, x: X, y: Y, segs: 16, sample: S, proj }), zc = g2.zs[8], x0 = g2.xs[0], x1 = g2.xs[16], y = 50;
+  for (let v = 0; v < g2.hs.length; v++) g2.hs[v] = y + 3;
+  const T = [x0, y, zc - 2, x1, y, zc - 2, x1, y, zc + 2, x0, y, zc - 2, x1, y, zc + 2, x0, y, zc + 2], step = Math.abs(g2.zs[9] - g2.zs[8]);
+  const moved = pushUnder(g2, T, { margin: step * 1.2, slope: 0.02 });  // this tile's rows are 120 m apart
+  out.pushUnder = { moved, on: r3(g2.hs[8 * 17 + 5]), next: r3(g2.hs[9 * 17 + 5]), far: r3(g2.hs[2 * 17 + 5]), step: r3(step) }; }
 // classes: a wood square in the middle of the tile, a beach inside it wins (later class)
 const box = (s, w, n, e) => [[s, w], [s, e], [n, e], [n, w], [s, w]];
 const la = i => latOf(Y + i / 16, Z), lo = i => lonOf(X + i / 16, Z);

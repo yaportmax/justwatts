@@ -7,7 +7,7 @@ import * as roadLib from './ribbon.js';
 // the bridge's axis: the two tower centres (where the OpenStreetMap sidewalks step round the towers); along the axis
 // from mid span: the straight deck (the approaches curve, the road renderer draws those), the anchorages, the deck's
 // height (the same straight line the ride's road takes between the abutments)
-export const GGB = { south: [37.814, -122.47788], north: [37.82547, -122.47923], ends: [-1127, 985], anchor: 981, deckW: 27.4, walk: 29.5,
+export const GGB = { south: [37.814, -122.47788], north: [37.82547, -122.47923], ends: [-1005, 985], anchor: 981, deckW: 27.4, walk: 29.5,
   towerTop: 227, deck: [[-1127, 54.5], [985, 60.8]] };
 
 export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
@@ -79,9 +79,21 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   // anchorages
   // anchorages: massive blocks from the ground (or the sea floor) up under the deck
   for (const s of [-GGB.anchor, GGB.anchor]) { const top = deckH(s) - 8.2; box(42, top + 8, 56, concrete, s, 0, (top - 8) / 2); }
-  // the approach beyond the south anchorage: steel towers down to the ground
-  for (let s = GGB.ends[0] + 12; s < -GGB.anchor - 20; s += 48) for (const t of [-11, 11]) { const top = deckH(s) - 7.8; box(2.4, top + 6, 3.2, orange, s, t, (top - 6) / 2); }
-  bridge.traverse(o => { o.matrixAutoUpdate = true; });
+  // one draw per material for the boxes (towers, struts, deck truss, rails, piers): hundreds of meshes otherwise
+  {
+    bridge.updateMatrixWorld(true);
+    const groups = new Map();
+    for (const o of [...bridge.children]) if (o.isMesh && !o.isInstancedMesh && o.geometry.type === 'BoxGeometry') { (groups.get(o.material) ?? groups.set(o.material, []).get(o.material)).push(o); bridge.remove(o); }
+    for (const [m, list] of groups) {
+      const pos = [], nor = [];
+      for (const o of list) {
+        const g = o.geometry.toNonIndexed(); g.applyMatrix4(o.matrix);
+        pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array); g.dispose(); o.geometry.dispose();
+      }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.computeBoundingSphere();
+      const mesh = new THREE.Mesh(g, m); mesh.castShadow = true; mesh.receiveShadow = true; bridge.add(mesh);
+    }
+  }
 
   // the rider's deck: inside the deck's width and span, the deck top
   function deckAt(x, z) {

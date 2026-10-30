@@ -35,7 +35,7 @@ const CAP = { 0: 42000, 1: 26000 };  // trees per tile at full share, by detail
 // wood (mixed, broadleaf, needleleaf), and ground no tree grows on (rock, sand, water). [class, metres between trees,
 // share of the spots kept, leaf type]
 const treeCode = f => ({ grass: 1, farm: 2, urban: 3, park: 4, scrub: 5, rock: 9, sand: 9, water: 9 })[f.k] ?? (f.k === 'wood' ? (f.lt === 'b' ? 7 : f.lt === 'n' ? 8 : 6) : 0);
-const TREE = [null, ['grass', 70, 0.6], ['farm', 90, 0.6], ['urban', 30, 0.55], ['park', 24, 1], ['scrub', 8, 1], ['wood', 11, 1, 'm'], ['wood', 11, 1, 'b'], ['wood', 11, 1, 'n'], null];
+const TREE = [null, ['grass', 70, 0.6], ['farm', 90, 0.6], ['urban', 14, 0.65], ['park', 24, 1], ['scrub', 8, 1], ['wood', 11, 1, 'm'], ['wood', 11, 1, 'b'], ['wood', 11, 1, 'n'], null];
 const OCC = 512;  // the road mask per tile: cells of about 3.8 m (no grass, trees or shrubs on a road)
 const PORT = 12;  // metres of open cut before a tunnel's portal
 
@@ -133,7 +133,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       }
       carve(c.grid, [], 0, 1, under);
     }
-    const lu = rasterClasses(c.grid, t.features), m = gridMesh(c.grid, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: c.z === FAR_Z ? farSkip(c) : null });
+    const lu = rasterClasses(c.grid, withGardens(t)), m = gridMesh(c.grid, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: c.z === FAR_Z ? farSkip(c) : null });
     const nor = gridNormals(c.grid), mask = classMasks(lu, c.grid.cut), cv = gridCurvature(c.grid, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6);
     const nv = m.src.length, N = new Float32Array(nv * 3), A = new Uint8Array(nv * 4), B = new Uint8Array(nv * 4), CV = new Float32Array(nv);
     for (let i = 0; i < nv; i++) {
@@ -154,6 +154,11 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     return (i, j) => { const n = near.get(key(NEAR_Z, c.x * s + Math.floor(i / per), c.y * s + Math.floor(j / per))); return !!n?.built; };
   }
   const hOf = c => (x, z) => c.grid ? gridHeight(c.grid, x, z) : null;
+  // a tile's features with a garden round every building (its footprint grown by about 6 m, as town ground), once
+  const withGardens = t => t.gardens ??= t.features.concat(t.features.filter(f => f.k === 'building').map(f => {
+    const r = f.rings[0], n = r.length - 1; let la = 0, lo = 0; for (let i = 0; i < n; i++) { la += r[i][0]; lo += r[i][1]; } la /= n; lo /= n;
+    return { k: 'urban', rings: [r.map(([a, b]) => { const dy = (a - la) * 111195, dx = (b - lo) * 87800, d = Math.hypot(dx, dy) || 1, k = (d + 6) / d; return [la + (a - la) * k, lo + (b - lo) * k]; })] };
+  }));
   function buildRoads(c) {
     const t = c.tile; c.decks = []; c.occ = null;
     if (!t || !c.grid) return setPart(c, 'roads', null);
@@ -180,6 +185,12 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (!minor) centre.forEach((q, i) => { mark(q[0], q[2], st.w / 2 + 1.2); lanes.push(q[0], q[2], st.w / 2); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, st.w / 2 + 1.2); } });
       }
     }
+    for (const f of t.features) if (f.k === 'building') {
+      const r = f.rings[0].map(([la, lo]) => proj.xz(la, lo)); let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+      if ((x1 - x0) * (z1 - z0) > 4000) continue;
+      for (let x = x0; x <= x1; x += ow) for (let z = z0; z <= z1; z += oh) mark(x, z, 1.5);
+    }
     c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines;
     if (!B.n) return setPart(c, 'roads', null);
     const d = B.done(), geo = new THREE.BufferGeometry();
@@ -201,7 +212,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     const add = (sp, x, z, s, r) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r]); n++; };
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
-    const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode), xs = [], zs = [];
+    const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
     for (let i = 0; i <= R; i++) { xs.push(proj.x(lonOf(c.x + i / R, c.z))); zs.push(proj.z(latOf(c.y + i / R, c.z))); }
     const dens = k => { const T = TREE[k]; if (!T) return 0; const st = T[1] * (c.lod ? 1.2 : 1) / Math.sqrt(Math.max(0.15, share)); return T[2] / (st * st); };
     for (let j = 0; j < R && n < cap; j++) for (let i = 0; i < R; i++) {

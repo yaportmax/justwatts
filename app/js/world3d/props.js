@@ -254,15 +254,27 @@ const HOUSE = [0, 1, 3, 5, 5, 7, 0, 3], FLATS = [0, 3, 4, 4, 1], BIG = [2, 6, 2,
 export function buildingGeometry(list) {
   const pos = [], cl = [], bw = [];
   const tri = (a, b, c, k, w) => { pos.push(...a, ...b, ...c); cl.push(...k, ...k, ...k); bw.push(...w[0], ...w[1], ...w[2]); };
+  const quad = (a, b, c, d, k, w) => { tri(a, b, c, k, [w[0], w[1], w[2]]); tri(a, c, d, k, [w[0], w[2], w[3]]); };
+  const G = [0, 0, 0, 2], T = [G, G, G, G];
+  // a box standing on y0 (no floor), sides along (ux, uz) and across, in one colour as trim
+  const box = (cx, y0, cz, sl, sh, sw, ux, uz, k) => {
+    const P = (s, t, y) => [cx + ux * s - uz * t, y, cz + uz * s + ux * t], y1 = y0 + sh;
+    const c = [[-sl, -sw], [sl, -sw], [sl, sw], [-sl, sw]];
+    for (let i = 0; i < 4; i++) { const [s0, t0] = c[i], [s1, t1] = c[(i + 1) % 4]; quad(P(s1, t1, y0), P(s0, t0, y0), P(s0, t0, y1), P(s1, t1, y1), k, T); }
+    quad(P(-sl, sw, y1), P(sl, sw, y1), P(sl, -sw, y1), P(-sl, -sw, y1), k, T);
+  };
   for (const b of list) {
     let r = b.ring.slice(0, -1); if (r.length < 3) continue;
     if (THREE.ShapeUtils.isClockWise(r.map(p => new THREE.Vector2(p[0], p[1])))) r = r.reverse();
-    const top = b.base + b.h, wi = Math.floor(hash2(b.seed, 1) * WALLS.length), wc = col(WALLS[wi]), rc = col(ROOFS[Math.floor(hash2(b.seed, 2) * ROOFS.length)]);
-    const ob = orientedBox(r), house = b.h <= 10 && r.length <= 10 && ob.area < 450;
-    const style = wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(hash2(b.seed, 5) * 8) % (house ? 8 : 4)];
-    let run = hash2(b.seed, 6) * 3;
+    const h = (k) => hash2(b.seed, k), ob = orientedBox(r), area = Math.abs(THREE.ShapeUtils.area(r.map(p => new THREE.Vector2(p[0], p[1])))), fill = area / Math.max(1, ob.area);
+    // houses: small and near enough a box for one roof over it (an L or a T takes a flat roof); a few barns with a
+    // gambrel roof, in barn red
+    const house = b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.74, barn = !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
+    const top = b.base + b.h, wi = Math.floor(h(1) * WALLS.length), wc = barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    const style = barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
+    let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
-      const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * hash2(b.seed, i), k = [wc[0] * f, wc[1] * f, wc[2] * f];
+      const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];
       const A = [p[0], b.base - 1, p[1]], B = [q[0], b.base - 1, q[1]], C = [q[0], top, q[1]], D = [p[0], top, p[1]];
       const a = [run, -1, style, 0], bb = [run + L, -1, style, 0], c = [run + L, b.h, style, 0], d = [run, b.h, style, 0];
       tri(A, C, B, k, [a, c, bb]); tri(A, D, C, k, [a, d, c]);
@@ -272,28 +284,64 @@ export function buildingGeometry(list) {
       const tris = THREE.ShapeUtils.triangulateShape(r.map(p => new THREE.Vector2(p[0], p[1])), []);
       for (const [a, b2, c] of tris) tri([r[a][0], y, r[a][1]], [r[c][0], y, r[c][1]], [r[b2][0], y, r[b2][1]], k, [[r[a][0], r[a][1], 0, kind], [r[c][0], r[c][1], 0, kind], [r[b2][0], r[b2][1], 0, kind]]);
     };
-    if (house) {
-      // a gable roof along the long side, or a hip roof on a squarish house, a little over the walls
-      const { c: [cx, cz], u: [ux, uz], L, W: w } = ob, rh = Math.min(3.4, w * 0.4), o = 0.45, P = (s, t, y) => [cx + ux * s - uz * t, y, cz + uz * s + ux * t];
-      const hip = L < w * 1.35 || hash2(b.seed, 8) < 0.3, inset = hip ? Math.min(L / 2, w / 2) : 0;
-      const a1 = P(-L / 2 - o, -w / 2 - o, top - 0.15), a2 = P(L / 2 + o, -w / 2 - o, top - 0.15), b1 = P(-L / 2 - o, w / 2 + o, top - 0.15), b2 = P(L / 2 + o, w / 2 + o, top - 0.15);
-      const r1 = P(-L / 2 + inset, 0, top + rh), r2 = P(L / 2 - inset, 0, top + rh), sl = Math.hypot(w / 2 + o, rh);
-      const R = (s, y) => [s, y, 0, 1];
-      tri(a1, r1, a2, rc, [R(0, 0), R(inset, sl), R(L + 2 * o, 0)]); tri(a2, r1, r2, rc, [R(L + 2 * o, 0), R(inset, sl), R(L - inset, sl)]);
-      tri(b1, b2, r1, rc, [R(0, 0), R(L + 2 * o, 0), R(inset, sl)]); tri(b2, r2, r1, rc, [R(L + 2 * o, 0), R(L - inset, sl), R(inset, sl)]);
-      if (hip) { tri(a1, b1, r1, rc, [R(0, 0), R(w + 2 * o, 0), R(w / 2, sl)]); tri(b2, a2, r2, rc, [R(0, 0), R(w + 2 * o, 0), R(w / 2, sl)]); }
-      else {
-        const e1 = P(-L / 2, -w / 2, top), e2 = P(-L / 2, w / 2, top), e3 = P(-L / 2, 0, top + rh), f1 = P(L / 2, -w / 2, top), f2 = P(L / 2, w / 2, top), f3 = P(L / 2, 0, top + rh);
-        const G = [0, 0, 0, 2]; tri(e1, e2, e3, wc, [G, G, G]); tri(f1, f3, f2, wc, [G, G, G]);
+    const { c: [cx, cz], u: [ux, uz], L, W: w } = ob, P = (s, t, y) => [cx + ux * s - uz * t, y, cz + uz * s + ux * t], R = (s, y) => [s, y, 0, 1];
+    if (house || barn) {
+      const o = 0.45, e = top - 0.15;
+      if (barn) {
+        // a gambrel: steep lower slopes to a knee, shallow ones to the ridge; the ends closed in wall colour
+        const rh = Math.min(5, w * 0.42), kt = w / 2 * 0.62, ky = top + rh * 0.62;
+        const lo = (t, y) => [P(-L / 2 - o, t, y), P(L / 2 + o, t, y)];
+        for (const sd of [-1, 1]) {
+          const [a1, a2] = lo(sd * (w / 2 + o), e), [k1, k2] = lo(sd * kt, ky), [r1, r2] = lo(0, top + rh), s1 = Math.hypot(w / 2 + o - kt, ky - e), s2 = s1 + Math.hypot(kt, top + rh - ky);
+          if (sd > 0) { quad(a1, a2, k2, k1, rc, [R(0, 0), R(L, 0), R(L, s1), R(0, s1)]); quad(k1, k2, r2, r1, rc, [R(0, s1), R(L, s1), R(L, s2), R(0, s2)]); }
+          else { quad(a2, a1, k1, k2, rc, [R(0, 0), R(L, 0), R(L, s1), R(0, s1)]); quad(k2, k1, r1, r2, rc, [R(0, s1), R(L, s1), R(L, s2), R(0, s2)]); }
+        }
+        for (const sd of [-1, 1]) {
+          const s = sd * L / 2, pts = [P(s, -w / 2, top), P(s, -kt, ky), P(s, 0, top + rh), P(s, kt, ky), P(s, w / 2, top)];
+          for (let i = 1; i < 4; i++) sd > 0 ? tri(pts[0], pts[i], pts[i + 1], wc, [G, G, G]) : tri(pts[0], pts[i + 1], pts[i], wc, [G, G, G]);
+        }
+      } else {
+        // a gable roof along the long side, a hip roof on a squarish house, now and then a shed roof; pitches vary
+        const rh = Math.min(3.8, w * (0.26 + 0.24 * h(7))), shed = h(8) > 0.9, hip = !shed && (L < w * 1.35 || h(8) < 0.3), inset = hip ? Math.min(L / 2, w / 2) : 0;
+        if (shed) {
+          const a1 = P(-L / 2 - o, -w / 2 - o, e), a2 = P(L / 2 + o, -w / 2 - o, e), b1 = P(-L / 2 - o, w / 2 + o, e + rh * 0.7), b2 = P(L / 2 + o, w / 2 + o, e + rh * 0.7), sl = Math.hypot(w + 2 * o, rh * 0.7);
+          quad(a2, a1, b1, b2, rc, [R(0, 0), R(L, 0), R(L, sl), R(0, sl)]);
+          for (const sd of [-1, 1]) { const s = sd * L / 2, t1 = P(s, -w / 2, top), t2 = P(s, w / 2, top), t3 = P(s, w / 2, top + rh * 0.7); sd < 0 ? tri(t1, t2, t3, wc, [G, G, G]) : tri(t1, t3, t2, wc, [G, G, G]); }
+          const hi = P(0, w / 2, top + rh * 0.7); quad(P(-L / 2, w / 2, top), P(L / 2, w / 2, top), [hi[0] + ux * L / 2, hi[1], hi[2] + uz * L / 2], [hi[0] - ux * L / 2, hi[1], hi[2] - uz * L / 2], wc, T);
+        } else {
+          const a1 = P(-L / 2 - o, -w / 2 - o, e), a2 = P(L / 2 + o, -w / 2 - o, e), b1 = P(-L / 2 - o, w / 2 + o, e), b2 = P(L / 2 + o, w / 2 + o, e);
+          const r1 = P(-L / 2 + inset, 0, top + rh), r2 = P(L / 2 - inset, 0, top + rh), sl = Math.hypot(w / 2 + o, rh);
+          tri(a1, r1, a2, rc, [R(0, 0), R(inset, sl), R(L + 2 * o, 0)]); tri(a2, r1, r2, rc, [R(L + 2 * o, 0), R(inset, sl), R(L - inset, sl)]);
+          tri(b1, b2, r1, rc, [R(0, 0), R(L + 2 * o, 0), R(inset, sl)]); tri(b2, r2, r1, rc, [R(L + 2 * o, 0), R(L - inset, sl), R(inset, sl)]);
+          if (hip) { tri(a1, b1, r1, rc, [R(0, 0), R(w + 2 * o, 0), R(w / 2, sl)]); tri(b2, a2, r2, rc, [R(0, 0), R(w + 2 * o, 0), R(w / 2, sl)]); }
+          else {
+            const e1 = P(-L / 2, -w / 2, top), e2 = P(-L / 2, w / 2, top), e3 = P(-L / 2, 0, top + rh), f1 = P(L / 2, -w / 2, top), f2 = P(L / 2, w / 2, top), f3 = P(L / 2, 0, top + rh);
+            tri(e1, e2, e3, wc, [G, G, G]); tri(f1, f3, f2, wc, [G, G, G]);
+          }
+          // a brick chimney at one end, through the roof
+          if (h(13) < 0.45) { const sd = h(14) < 0.5 ? -1 : 1, p = P(sd * (L / 2 - 0.8), (h(15) - 0.5) * w * 0.3, 0); box(p[0], top - 0.5, p[2], 0.38, rh + 1.4, 0.38, ux, uz, col(h(16) < 0.6 ? 0x8a4a3a : 0x9a9690)); }
+        }
+        // a porch along one long side: a lean-to roof on two posts, a deck
+        if (h(17) < 0.35 && L > 6) {
+          const sd = h(18) < 0.5 ? -1 : 1, s0 = -L * 0.34, s1 = L * 0.34, t0 = sd * w / 2, t1 = sd * (w / 2 + 2.2), y0 = b.base + 2.95, y1 = b.base + 2.55, pc = col(0xe8e4dc);
+          const q1 = P(s0, t0, y0), q2 = P(s1, t0, y0), q3 = P(s1, t1, y1), q4 = P(s0, t1, y1), sl = Math.hypot(2.2, 0.4);
+          sd < 0 ? quad(q1, q2, q3, q4, rc, [R(0, sl), R(s1 - s0, sl), R(s1 - s0, 0), R(0, 0)]) : quad(q2, q1, q4, q3, rc, [R(0, sl), R(s1 - s0, sl), R(s1 - s0, 0), R(0, 0)]);
+          for (const s of [s0 + 0.2, s1 - 0.2]) { const p = P(s, sd * (w / 2 + 2.05), 0); box(p[0], b.base, p[2], 0.08, 2.6, 0.08, ux, uz, pc); }
+          const d = P(0, sd * (w / 2 + 1.1), 0); box(d[0], b.base - 0.4, d[2], (s1 - s0) / 2, 0.7, 1.1, ux, uz, col(0x8a7a66));
+        }
       }
       flat(top, wc, 2);  // the ceiling under the eaves (closes the box)
     } else {
-      // a flat roof inside a parapet
-      flat(top + 0.05, col(0x8c8a86, 0.9 + 0.2 * hash2(b.seed, 9)), 2);
-      const pc = col(0xd8d4cc);
+      // a flat roof inside a parapet; boxes on the roof (plant, a stair head) on the bigger ones
+      flat(top + 0.05, col(0x8c8a86, 0.9 + 0.2 * h(9)), 2);
+      const pc = col(0xd8d4cc), ph = 0.5 + 0.5 * h(10);
       for (let i = 0; i < r.length; i++) {
-        const p = r[i], q = r[(i + 1) % r.length], G = [0, 0, 0, 2];
-        tri([p[0], top, p[1]], [q[0], top + 0.7, q[1]], [q[0], top, q[1]], pc, [G, G, G]); tri([p[0], top, p[1]], [p[0], top + 0.7, p[1]], [q[0], top + 0.7, q[1]], pc, [G, G, G]);
+        const p = r[i], q = r[(i + 1) % r.length];
+        tri([p[0], top, p[1]], [q[0], top + ph, q[1]], [q[0], top, q[1]], pc, [G, G, G]); tri([p[0], top, p[1]], [p[0], top + ph, p[1]], [q[0], top + ph, q[1]], pc, [G, G, G]);
+      }
+      if (area > 120 && fill > 0.6) for (let i = 0, n = 1 + Math.floor(h(19) * 3); i < n; i++) {
+        const s = (h(30 + i) - 0.5) * L * 0.5, t = (h(40 + i) - 0.5) * w * 0.5, p = P(s, t, 0), sz = 0.8 + 1.4 * h(50 + i);
+        box(p[0], top, p[2], sz, 0.9 + 1.2 * h(60 + i), sz * (0.6 + 0.6 * h(70 + i)), ux, uz, col(i ? 0xa6a39e : 0xbdb9b2));
       }
     }
   }

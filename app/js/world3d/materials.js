@@ -268,18 +268,20 @@ export function furnitureMaterial() {
 
 // Buildings: wall colour from the vertex colour, windows from the atlas (one bay of one floor per cell, the ground
 // floor its own row) by bw = [metres along the wall, metres up, style, 0 wall / 1 roof / 2 trim]. Glass reflects
-// the haze colour. Roofs: tiles or shingles in rows.
+// the haze colour; at dusk some windows are lit (LAMPS). A darker band at the foot of the walls. Roofs: tiles or
+// shingles in rows.
 export function buildingMaterial() {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true });
   const T = textures();
   m.onBeforeCompile = sh => {
     sh.uniforms.tWin = { value: T.windows };
-    sh.uniforms.tNoise = { value: T.noise };
+    sh.uniforms.tNoise = { value: T.noise }; sh.uniforms.lamps = LAMPS;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 bw;\nvarying vec4 vBw;\nvarying vec3 vW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBw = bw; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tWin, tNoise;\nvarying vec4 vBw;\nvarying vec3 vW;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tWin, tNoise; uniform float lamps;\nvarying vec4 vBw;\nvarying vec3 vW;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.74, 0.42) * jwWin * 1.6;')
       .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
-        float kind = floor(vBw.w + 0.5), style = floor(vBw.z + 0.5);
+        float kind = floor(vBw.w + 0.5), style = floor(vBw.z + 0.5), jwWin = 0.0;
         float nz = texture2D(tNoise, vW.xz / 7.0 + vW.y / 5.0).r;
         if (kind == 0.0) {
           float fh = style >= 6.0 ? 3.7 : 3.0, bay = style == 2.0 || style == 6.0 ? 4.2 : 3.2;
@@ -296,6 +298,8 @@ export function buildingMaterial() {
           vec3 vd = normalize(vViewPosition); glass = mix(glass, fogColor * 0.55, 0.25 + 0.5 * pow(1.0 - abs(vd.z), 3.0));
           #endif
           diffuseColor.rgb = mix(wall * w.rgb, glass, w.a);
+          diffuseColor.rgb *= vBw.y < 0.5 ? 0.62 : 1.0;   // the foundation
+          jwWin = w.a * lamps * step(0.55, fract(sin(dot(cell + floor(vW.xz * 0.05), vec2(12.9898, 78.233))) * 43758.5453));
         } else if (kind == 1.0) {
           float rows = fract(vBw.y / 0.32), tiles = fract(vBw.x / 0.45 + floor(vBw.y / 0.32) * 0.5);
           diffuseColor.rgb *= (0.86 + 0.14 * smoothstep(0.0, 0.25, rows)) * (0.95 + 0.05 * step(0.08, tiles)) * (0.9 + 0.2 * nz);

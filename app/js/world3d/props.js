@@ -206,10 +206,10 @@ export function scrubGeometries() {
   // the bushes broad and low, their cores not much darker than their leaves (a cover with no black between the bushes)
   const brush = col(0x5f7445, 1.3), sage = col(0x878f72, 1.3);
   return {
-    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.55), M(0, 0.5, 0, 1.15, 0.45, 1.05), { soft: [0, 0.5, 0], shade: [0.3, 1.0] }], ...lumps(0, 0.62, 0, 1.6, 0.62, 1.5, 6, 12, 0.85, LEAF.scrub, 21, { lift: 0.45, lump: 0.7, out: 0.8 }).map(g => leaves(g, brush))]),
+    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.55), M(0, 0.5, 0, 1.15, 0.45, 1.05), { soft: [0, 0.5, 0], shade: [0.3, 1.0] }], ...lumps(0, 0.62, 0, 1.6, 0.62, 1.5, 5, 12, 0.85, LEAF.scrub, 21, { lift: 0.45, lump: 0.7, out: 0.8 }).map(g => leaves(g, brush))]),
     brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.25, 23), brush.map(v => v * 0.72), M(0, 0.55, 0, 1.5, 0.6, 1.4), { soft: [0, 0.55, 0], shade: [0.3, 1.2] }],
       ...lumps(0, 0.66, 0, 1.6, 0.62, 1.5, 3, 6, 1.35, LEAF.scrub, 21, { lift: 0.45, lump: 0.7 }).map(g => leaves(g, brush))]),
-    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.6), M(0, 0.38, 0, 0.95, 0.33, 0.88), { soft: [0, 0.38, 0], shade: [0.3, 0.8] }], ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 5, 12, 0.8, LEAF.scrub, 25, { lift: 0.65, lump: 0.7, out: 0.8 }).map(g => leaves(g, sage))]),
+    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.6), M(0, 0.38, 0, 0.95, 0.33, 0.88), { soft: [0, 0.38, 0], shade: [0.3, 0.8] }], ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 4, 12, 0.8, LEAF.scrub, 25, { lift: 0.65, lump: 0.7, out: 0.8 }).map(g => leaves(g, sage))]),
     sageLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.2, 27), sage.map(v => v * 0.72), M(0, 0.42, 0, 1.25, 0.47, 1.15), { soft: [0, 0.42, 0], shade: [0.3, 0.95] }],
       ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 3, 5, 1.2, LEAF.scrub, 25, { lift: 0.65, lump: 0.7 }).map(g => leaves(g, sage))]),
   };

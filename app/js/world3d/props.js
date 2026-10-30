@@ -172,13 +172,13 @@ export function treeGeometries() {
       core(0, 7.2, 0, 2.1, 2.8, 2.0, F.bay, 5), ...lumps(0, 7, 0, 2.8, 3.6, 2.7, 7, 15, 2.2, LEAF.bay, 4, { lump: 0.6 }).map(g => leaves(g, F.bay))]),
     // Douglas fir: a straight trunk, drooping boughs in tiers to a spire
     fir: merge([bark(trunkG(0.5, 0.12, 25, 7), brownD), cone(4, 25.5, 1.8, F.fir, 31), leaves(boughs(3.5, 24.2, 14, 8, 4.6, 0.8, 1.35, 0.3, LEAF.fir, 30), F.fir),
-      leaves(crownCards(0, 25, 0, 0.6, 1.4, 0.6, 6, 1.5, LEAF.fir, 33, { out: 0.2, hang: 1 }), F.fir)]),
+      leaves(crownCards(0, 24.6, 0, 0.35, 1.2, 0.35, 3, 1.0, LEAF.fir, 33, { out: 0.2, hang: 1 }), F.fir)]),
     // coast redwood: a tall fluted red trunk flaring at the foot, bare to near half its height, short drooping boughs of
     // flat feathery sprays in a narrow, ragged spire
     redwood: merge([bark(trunkG(1.25, 0.32, 46, 10), red), bark(new THREE.CylinderGeometry(1.2, 1.9, 3, 10, 1).translate(0, 1.5, 0), red),
       ...[[13, 0.5], [15, 2.6], [17.5, 4.4], [19, 1.2]].map(([y, a]) => limb(Math.cos(a) * 0.6, y, Math.sin(a) * 0.6, Math.cos(a) * 2.6, y - 0.8, Math.sin(a) * 2.6, 0.09, brownD)),
       cone(20, 47, 1.6, F.red, 41), leaves(boughs(18.5, 45.5, 16, 6, 4.8, 1.1, 1.45, 0.36, LEAF.redwood, 40, LEAF.redwood2), F.red),
-      leaves(crownCards(0, 46.5, 0, 0.9, 2, 0.9, 8, 1.8, LEAF.redwood, 44, { out: 0.2, hang: 1 }), F.red)]),
+      leaves(crownCards(0, 46, 0, 0.5, 1.6, 0.5, 4, 1.3, LEAF.redwood, 44, { out: 0.2, hang: 1 }), F.red)]),
     // blue gum eucalyptus: a tall pale trunk leaning a little, loose blue-grey clumps of hanging leaves off high limbs
     euc: merge([bark(trunkG(0.5, 0.22, 17, 7), pale, M(0, 0, 0, 1, 1, 1, 0, 0.05)),
       limb(0.5, 11, 0, 2.6, 15.5, 0.8, 0.2, pale), limb(0.4, 12, 0, -2.2, 16.2, -0.6, 0.18, pale), limb(0.7, 14, 0, 0.6, 18.5, 1.6, 0.16, pale),

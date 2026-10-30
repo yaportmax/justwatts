@@ -349,7 +349,8 @@ export function buildingMaterial() {
 
 // Terrain shadows at any distance (horizon.js draws the map): a lit material takes the sun as the map says at its own
 // place, past the shadow map's few dozen metres too. Wraps the material's onBeforeCompile (call it once, last).
-export const HORIZON = { map: { value: null }, box: { value: new THREE.Vector4(0, 0, 0, 0) } };
+// The heights themselves too (the sea finds its shallows in them): far (the shadow map's 40 km) and near (4 km, finer)
+export const HORIZON = { map: { value: null }, box: { value: new THREE.Vector4(0, 0, 0, 0) }, heights: { value: null }, near: { value: null }, nearBox: { value: new THREE.Vector4(0, 0, 0, 0) } };
 export function withSun(m) {
   const f = m.onBeforeCompile, key = m.customProgramCacheKey.call(m) + '|sun';
   m.onBeforeCompile = function (sh, r) {

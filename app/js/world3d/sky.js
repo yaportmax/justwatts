@@ -8,6 +8,7 @@ import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { Sky } from '../../vendor/three-0.180.0/addons/objects/Sky.js';
 import { textures } from './tex.js';
 import { noise3Pixels } from './texgen.js';
+import { HORIZON } from './materials.js';
 import { skyRadiance, sunTint } from './skymath.js';
 
 // az: compass degrees, el: degrees above the horizon; turb/mie: haze in the sky; haze, low: aerial haze and the low
@@ -112,8 +113,8 @@ export function createSky(scene, { far, quality = 0 }) {
   /* the sea: wave normals in three scales, fresnel to the sky, the sun's glitter */
   const wu = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
     time: { value: 0 }, sunD: { value: new THREE.Vector3() }, sunC: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, zen: { value: new THREE.Color() },
-    deep: { value: new THREE.Color() }, waves: { value: null } }]);
-  wu.waves.value = T.waves;
+    deep: { value: new THREE.Color() }, waves: { value: null }, tNoise: { value: null } }]);
+  wu.waves.value = T.waves; wu.tNoise.value = T.noise; Object.assign(wu, { hzH: HORIZON.heights, hzB: HORIZON.box, hzN: HORIZON.near, hzNB: HORIZON.nearBox });
   const seaMat = new THREE.ShaderMaterial({
     uniforms: wu, fog: true,
     vertexShader: `#include <common>
@@ -127,8 +128,16 @@ export function createSky(scene, { far, quality = 0 }) {
     fragmentShader: `#include <common>
       #include <fog_pars_fragment>
       #include <logdepthbuf_pars_fragment>
-      uniform float time; uniform vec3 sunD, sunC, hor, zen, deep; uniform sampler2D waves; varying vec3 vW;
+      uniform float time; uniform vec3 sunD, sunC, hor, zen, deep; uniform sampler2D waves, tNoise, hzH, hzN; uniform vec4 hzB, hzNB; varying vec3 vW;
       vec2 wn(vec2 uv) { return texture2D(waves, uv).xy * 2.0 - 1.0; }
+      // the ground under the water here (metres; below zero under the sea), from the height maps (horizon.js)
+      float seaFloor(vec2 p) {
+        vec2 u = vec2(p.x - hzNB.x, hzNB.y - p.y) * hzNB.z;
+        if (hzNB.z > 0.0 && u.x > 0.002 && u.y > 0.002 && u.x < 0.998 && u.y < 0.998) return texture2D(hzN, u).r;
+        u = vec2(p.x - hzB.x, hzB.y - p.y) * hzB.z;
+        if (hzB.z > 0.0 && u.x > 0.0 && u.y > 0.0 && u.x < 1.0 && u.y < 1.0) return texture2D(hzH, u).r;
+        return -60.0;
+      }
       void main() {
         #include <logdepthbuf_fragment>
         vec3 V = cameraPosition - vW; float dist = length(V); V /= dist;
@@ -142,6 +151,12 @@ export function createSky(scene, { far, quality = 0 }) {
         float sd = max(dot(R, sunD), 0.0);
         vec3 body = deep * (0.35 + 0.65 * clamp(sunD.y * 2.0, 0.0, 1.0)) * (0.9 + 0.2 * texture2D(waves, p / 41.0).z);
         vec3 c = mix(body, refl, fr) + sunC * (pow(sd, 900.0) * 30.0 + pow(sd, 90.0) * 0.6) * smoothstep(-0.02, 0.06, sunD.y);
+        // the shallows: paler water over sand, then foam: lines of swash running in to the shore, a band at its edge
+        float hf = seaFloor(p), nz = texture2D(tNoise, p / 23.0 + time * 0.01).r, nz2 = texture2D(tNoise, p / 7.0 - time * 0.02).g;
+        c = mix(c, mix(c, vec3(0.16, 0.27, 0.25) * (0.4 + 0.6 * clamp(sunD.y * 3.0, 0.0, 1.0)), 0.5), smoothstep(-9.0, -1.0, hf) * (1.0 - fr));
+        float swash = smoothstep(0.62, 0.95, sin(hf * 2.6 + time * 1.1 + nz * 4.0) * 0.5 + 0.5) * smoothstep(-4.0, -0.8, hf);
+        float foam = max(swash * 0.55, smoothstep(-1.1, -0.15, hf)) * (0.55 + 0.6 * nz2) * smoothstep(1.2, 0.2, hf);
+        c = mix(c, (hor * 1.15 + sunC * 0.06) * (0.9 + 0.1 * nz), clamp(foam, 0.0, 0.9) * (1.0 - smoothstep(600.0, 2500.0, dist)));
         gl_FragColor = vec4(c, 1.0);
         #include <fog_fragment>
         #include <tonemapping_fragment>

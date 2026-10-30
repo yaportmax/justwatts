@@ -8,6 +8,9 @@
 // 595194543 south, 1557712986 and 1557712987 north). Both sidewalks are on it, stepping out round the tower legs.
 export const GGB = {
   south: [37.814, -122.47788], north: [37.82547, -122.47923], span: [-1288, 1415], towers: 640.5, anchor: 981, deckW: 27.4, towerTop: 227,
+  // across (goldengate.org, Bridge Design and Construction Statistics): the roadway 62 ft between its curbs, each sidewalk
+  // 10 ft; the curb wall between them 0.3 m (Street View)
+  curb: 9.45, wall: 0.3, walk: 3.05,
   // the centre line's offset t at s where it curves (straight at 0 between; OpenStreetMap's ways run on to s -1302)
   curve: [[-1302, 56], [-1295, 51.6], [-1280, 42.8], [-1265, 34.9], [-1250, 27.4], [-1235, 20.9], [-1220, 15.3], [-1205, 10.6], [-1190, 6.5],
     [-1175, 3.4], [-1160, 1.1], [-1145, 0], [1220, 0], [1235, -0.9], [1250, -2.2], [1265, -4.2], [1280, -7], [1295, -10.4], [1310, -14.5],

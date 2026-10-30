@@ -42,18 +42,21 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   // curves, an open steel truss under each edge (below: 7.6 m deep over the suspended spans, 4.6 m on the approach
   // viaducts); on top six lanes with their lines and a sidewalk each side (the road shader), railings at the edges; at
   // the towers the sidewalks step out round the legs
+  // across the deck (ggb.js): the curb wall's middle, the outer railing (at the sidewalk's outer side)
+  const WALL = GGB.curb + GGB.wall / 2, RAIL = GGB.curb + GGB.wall + GGB.walk + 0.05;
   const rail = [], legT = 14.6, dpOf = (s0, s1) => s0 >= -1000 && s1 <= 1100 ? 7.6 : 4.6, inner = [];
   for (let i = 1; i < st.length; i++) {
     const s0 = st[i - 1], s1 = st[i], h0 = deckH(s0), h1 = deckH(s1);
     segBox(GGB.deckW - 1, 1.1, orange, s0, s1, 0, h0 - 0.7, h1 - 0.7);
-    for (const t of [-1, 1]) for (const [y, th] of [[1.15, 0.09], [0.55, 0.05]]) segBox(0.07, th, orange, s0, s1, t * (GGB.deckW / 2 - 0.15), h0 + y, h1 + y);
+    // the outer railing's rails: a heavy flat top (Street View) and a lower rail
+    for (const t of [-1, 1]) for (const [y, th, wd] of [[1.17, 0.1, 0.24], [0.55, 0.05, 0.07]]) segBox(wd, th, orange, s0, s1, t * RAIL, h0 + y, h1 + y);
     // between the roadway and each sidewalk a riveted steel wall (a rail on posts over it, below); down the middle the
     // movable median barrier, dark blocks with a yellow band (Street View)
-    for (const t of [-1, 1]) { segBox(0.3, 0.86, orange, s0, s1, t * 10.15, h0 + 0.43, h1 + 0.43); for (const y of [1.08, 1.38]) segBox(0.07, 0.07, orange, s0, s1, t * 10.15, h0 + y, h1 + y); }
+    for (const t of [-1, 1]) { segBox(GGB.wall, 0.86, orange, s0, s1, t * WALL, h0 + 0.43, h1 + 0.43); for (const y of [1.08, 1.38]) segBox(0.07, 0.07, orange, s0, s1, t * WALL, h0 + y, h1 + y); }
     segBox(0.6, 0.82, median, s0, s1, 0, h0 + 0.41, h1 + 0.41);
     segBox(0.68, 0.18, yellow, s0, s1, 0, h0 + 0.52, h1 + 0.52);
-    for (let k = s0; k < s1; k += 4) if (Math.abs(Math.abs(k) - GGB.towers) > 12) for (const t of [-1, 1]) { const p = D(k, t * (GGB.deckW / 2 - 0.15), deckH(k) + 0.6); rail.push(new THREE.Vector3(p.x, p.y, p.z)); }
-    for (let k = s0; k < s1; k += 3) for (const t of [-1, 1]) { const p = D(k, t * 10.15, deckH(k) + 1.15); inner.push(new THREE.Vector3(p.x, p.y, p.z)); }
+    for (let k = s0; k < s1; k += 4) if (Math.abs(Math.abs(k) - GGB.towers) > 12) for (const t of [-1, 1]) { const p = D(k, t * RAIL, deckH(k) + 0.6); rail.push(new THREE.Vector3(p.x, p.y, p.z)); }
+    for (let k = s0; k < s1; k += 3) for (const t of [-1, 1]) { const p = D(k, t * WALL, deckH(k) + 1.15); inner.push(new THREE.Vector3(p.x, p.y, p.z)); }
   }
   // the trusses: a Warren truss with verticals under each edge, the lateral bracing across their bottom chords, one mesh
   // with its members cut out in the shader (solid and darker where they are finer than a pixel)
@@ -91,8 +94,8 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     const { builder, ribbon } = roadLib, Bd = builder(), axis = [], H = (x, z) => deckH(toST(proj.lat(z), proj.lon(x))[0]);
     for (let s = S0; s <= S1; s += 5) axis.push(s);
     const line = d => axis.map(s => { const p = D(s, d, 0); return [p.x, p.z]; });
-    ribbon(Bd, line(0), { w: 20, lm: 2, lanes: 6, hAt: H, lift: 0.02, step: 10 });
-    for (const t of [-1, 1]) ribbon(Bd, line(t * 11.8), { w: 3.2, surf: 1, hAt: H, lift: 0.06, step: 10 });
+    ribbon(Bd, line(0), { w: 2 * GGB.curb, lm: 2, lanes: 6, hAt: H, lift: 0.02, step: 10 });
+    for (const t of [-1, 1]) ribbon(Bd, line(t * (GGB.curb + GGB.wall + GGB.walk / 2)), { w: GGB.walk, surf: 1, hAt: H, lift: 0.06, step: 10 });
     const d = Bd.done(), g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); g.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); g.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); g.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4));
     g.setIndex(new THREE.BufferAttribute(d.idx, 1)); g.computeVertexNormals(); g.computeBoundingSphere();
@@ -102,7 +105,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     rail.forEach((p, i) => post.setMatrixAt(i, m4.makeTranslation(p.x, p.y, p.z))); post.computeBoundingSphere(); bridge.add(post); }
   // the railings' bars: a strip along each edge, its balusters (19 cm apart) cut in the shader
   { const pos = [], uv = [], idx = [];
-    for (const [t, top] of [[-GGB.deckW / 2 + 0.15, 1.2], [GGB.deckW / 2 - 0.15, 1.2]]) { const b = pos.length / 3; let n = 0;  // the outer railings
+    for (const [t, top] of [[-RAIL, 1.12], [RAIL, 1.12]]) { const b = pos.length / 3; let n = 0;  // the outer railings (their balusters, under the flat top)
       for (let s = S0; s <= S1; s += 2, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 0.05, p.z, p.x, h + top, p.z); uv.push(s - S0, 0, s - S0, 1); }
       for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
@@ -116,7 +119,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   // over the land at the San Francisco end (to the arch over Fort Point's north end) a chain-link fence on both outer
   // railings, 1.9 m over them, on posts every 3 m (Street View)
   { const pos = [], uv = [], idx = [], posts = [], m4 = new THREE.Matrix4();
-    for (const t of [-GGB.deckW / 2 + 0.12, GGB.deckW / 2 - 0.12]) { const b = pos.length / 3; let n = 0;
+    for (const t of [-RAIL - 0.03, RAIL + 0.03]) { const b = pos.length / 3; let n = 0;
       for (let s = S0; s <= -987; s += 3, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 1.2, p.z, p.x, h + 3.1, p.z); uv.push((s - S0) / 0.06, 0, (s - S0) / 0.06, 1.9 / 0.06); posts.push([p.x, h + 2.15, p.z]); }
       for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();

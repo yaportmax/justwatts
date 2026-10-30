@@ -482,7 +482,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
       const c = courseOf(la, lo, hd), rows = ride(c).rows; let inRoad = 0, off = 0, n3 = 0;
       for (const r of rows) {
         const px = r.x + r.rx * r.lane, pz = r.z + r.rz * r.lane, la2 = proj.lat(pz), lo2 = proj.lon(px), [s] = toST(la2, lo2), dk = onDeck(la2, lo2); if (!dk || s < -1130 || s > 1220) continue; n3++;
-        const t = Math.abs(dk.t), tw = Math.abs(Math.abs(s) - GGB.towers) < 22; if (t < 10.45) inRoad++; else if (t > (tw ? 23.6 : GGB.deckW / 2 - 0.3)) off++;
+        const t = Math.abs(dk.t), tw = Math.abs(Math.abs(s) - GGB.towers) < 22; if (t < GGB.curb + GGB.wall) inRoad++; else if (t > (tw ? 23.6 : GGB.curb + GGB.wall + GGB.walk)) off++;
       }
       res[nm] = { n: n3, inRoad, off, road: c.nm.find(x => /Sidewalk/.test(x)) || c.nm[0] };
     }

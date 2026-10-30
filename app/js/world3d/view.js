@@ -201,8 +201,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
     c.grid = G; c.tmesh = { src: m.src, nv: (G.segs + 1) ** 2, skirt: c.z === FAR_Z ? 40 : 12 };
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); } else { c.nor = c.mask = c.cv = null; }
-    setPart(c, 'terrain', mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
+    setPart(c, 'terrain', mesh); upload(mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
   }
+  // a terrain mesh drawn in the next frame wherever it is (its buffers sent to the GPU then, a tile at a time), not
+  // first in the horizon's height map, all the tiles built behind the camera at once (a 100 to 250 ms hold)
+  const keepCulled = function () { this.frustumCulled = true; this.onAfterRender = () => {}; };
+  function upload(mesh) { mesh.frustumCulled = false; mesh.onAfterRender = keepCulled; }
   // far tiles leave out the quads a built near tile covers
   function farSkip(c, g = c.grid) {
     const s = 2 ** (NEAR_Z - FAR_Z), per = g.segs / s;
@@ -768,7 +772,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const g = c.grid; if (!g || !c.tmesh || !c.parts.terrain) return;
     const mesh = c.parts.terrain, old = mesh.geometry, geo = old.clone(), P = geo.attributes.position, { src, nv, skirt } = c.tmesh;
     for (let i = 0; i < src.length; i++) P.array[3 * i + 1] = g.hs[src[i]] - (i >= nv ? skirt : 0);
-    geo.computeBoundingSphere(); mesh.geometry = geo; old.dispose(); hz.touch();
+    geo.computeBoundingSphere(); mesh.geometry = geo; old.dispose(); upload(mesh); hz.touch();
   }
   // a tile's road tops for the rider: segments [x0, y0, z0, x1, y1, z1, half width] in 10 m cells
   function roadIndex(a) {

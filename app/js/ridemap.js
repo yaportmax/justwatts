@@ -55,14 +55,15 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
   let others = [], marks = new Map();  // other riders (social.js): [{ id, lat, lon, label, hi }]; their 3D markers by id
   const glide = createGlide(); let oraf = 0, o2d = 0;
   const box = $('#crsMapBox'), cv = $('#crsMap'), v3 = $('#crsMap3d');
-  const doc = globalThis.document, wbox = doc?.createElement('div'), wbtn = doc?.createElement('button'), cbtn = doc?.createElement('button'), dbadge = doc?.createElement('span');
+  const doc = globalThis.document, wbox = doc?.createElement('div'), wbtn = doc?.createElement('button'), cbtn = doc?.createElement('button'), sbtn = doc?.createElement('button'), dbadge = doc?.createElement('span');
   if (wbox) {
     wbox.id = 'crsWorld'; wbox.style.display = 'none'; box.insertBefore?.(wbox, v3.nextSibling);
     wbtn.id = 'mapWorld'; wbtn.textContent = 'World'; wbtn.title = 'Open world in 3D'; wbtn.setAttribute('aria-pressed', 'false');
     cbtn.id = 'mapCam'; cbtn.title = 'Camera (V)'; cbtn.setAttribute('aria-label', 'Camera');
     cbtn.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.2"/></svg>';
+    sbtn.id = 'mapSound'; sbtn.title = 'Sound (M)'; sbtn.setAttribute('aria-label', 'Sound');
     dbadge.className = 'w3draft'; dbadge.textContent = 'Draft';
-    const m3 = $('#map3d'); m3.parentNode?.insertBefore?.(wbtn, m3); m3.parentNode?.insertBefore?.(cbtn, $('#mapFocus')); box.appendChild?.(dbadge);
+    const m3 = $('#map3d'); m3.parentNode?.insertBefore?.(wbtn, m3); m3.parentNode?.insertBefore?.(cbtn, $('#mapFocus')); m3.parentNode?.insertBefore?.(sbtn, $('#mapFocus')); box.appendChild?.(dbadge);
   }
   const kind = () => pickView({ pref: cur?.open ? owPref : null, open: !!cur?.open, gl: !!cur?.open && probeWebGL2(), failed: wvFailed, d3 });
   $('#mapStyle').innerHTML = Object.entries(MAP_STYLES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join('');
@@ -81,7 +82,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     const k = cur ? kind() : '2d', w = k === 'world';
     if (wbox) {
       wbtn.style.display = cur?.open && probeWebGL2() && !wvFailed ? '' : 'none'; wbtn.classList.toggle('on', w); wbtn.setAttribute('aria-pressed', String(w));
-      cbtn.style.display = w ? '' : 'none'; wbox.style.display = w ? '' : 'none'; $('#mapStyle').style.display = w ? 'none' : '';
+      cbtn.style.display = w ? '' : 'none'; sbtn.style.display = w ? '' : 'none'; soundIcon(); wbox.style.display = w ? '' : 'none'; $('#mapStyle').style.display = w ? 'none' : '';
       if (!w) dbadge.classList.remove('on');
     }
     if (w) {
@@ -174,7 +175,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
       const m = await import('./world3d/view.js');
       if (!cur || kind() !== 'world') return;
       wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, quality: store.get('hw.worldQ', 0),
-        time: store.get('hw.worldTime', 'golden') });
+        time: store.get('hw.worldTime', 'golden'), sound: soundOn(), fog: store.get('hw.worldFog', true) !== false, kit: KITS[store.get('hw.worldKit', 0) % KITS.length] });
       wv.update(worldState());
     } catch (e) { worldFail(e?.message || String(e)); }
     finally { wvBusy = false; }
@@ -288,8 +289,18 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     cbtn.onclick = () => toggleCamera();
   }
   function toggleCamera() { if (!wv) return false; const m = wv.toggleCamera(); cbtn?.classList.toggle('on', m === 'first'); return true; }
-  const TIMES = ['golden', 'morning', 'day'];
+  const TIMES = ['golden', 'sunset', 'dawn', 'morning', 'day', 'afternoon'];
   function cycleTime() { if (!wv) return false; const t = TIMES[(TIMES.indexOf(store.get('hw.worldTime', 'golden')) + 1) % TIMES.length]; store.set('hw.worldTime', wv.setTime(t)); return true; }
+  // world sound: its own switch, off at first when the app's sounds (beeps) are off
+  const soundOn = () => store.get('hw.worldSound', store.get('hw.settings', {})?.beeps !== false) !== false;
+  const SPK = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z"/>', WAVES = '<path d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.5 6.5 0 0 1 0 9"/></svg>', MUTE = '<path d="M13.5 8l4 4M17.5 8l-4 4"/></svg>';
+  function soundIcon() { if (!sbtn) return; const on = soundOn(); sbtn.innerHTML = SPK + (on ? WAVES : MUTE); sbtn.classList.toggle('on', !on); sbtn.setAttribute('aria-pressed', String(!on)); }
+  function toggleSound() { if (!wv) return false; store.set('hw.worldSound', !soundOn()); wv.setSound(soundOn()); soundIcon(); return true; }
+  if (sbtn) sbtn.onclick = () => toggleSound();
+  function toggleFog() { if (!wv) return false; store.set('hw.worldFog', wv.setFog(!wv.fog())); return true; }
+  // kit colours for the rider in the world
+  const KITS = [0xf2c230, 0xd94b3d, 0x2f7fd9, 0x2fbf71, 0xf2f2ee, 0x1d232b, 0xe8609a, 0xf08a24];
+  function cycleKit() { if (!wv) return false; const k = (store.get('hw.worldKit', 0) + 1) % KITS.length; store.set('hw.worldKit', k); wv.setKit(KITS[k]); return true; }
   $('#mapFocus').onclick = toggleFocus;
-  return { update, toggleFocus, setOthers, toggleCamera, cycleTime, focused: () => placedOn, worldStats: () => wv?.stats() ?? null, view: () => cur ? kind() : null };
+  return { update, toggleFocus, setOthers, toggleCamera, cycleTime, toggleSound, toggleFog, cycleKit, focused: () => placedOn, worldStats: () => wv?.stats() ?? null, view: () => cur ? kind() : null };
 }

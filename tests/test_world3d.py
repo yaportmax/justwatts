@@ -112,3 +112,52 @@ def test_drafting(out, tmp_path):
     for _ in range(120):
         v0, v1 = speed_step(v0, 250, 0, 84, 1), speed_step(v1, 250, 0, 84, 1, 0.3)
     assert round(v0 * 3.6, 3) == s["solo"] and round(v1 * 3.6, 3) == pytest.approx(s["drafting"], abs=0.002)
+
+
+def test_terrain_upsampling_is_smooth_and_seamless(out):
+    s = out["smooth"]
+    assert s["n"] == 81 and s["through"] and s["linear"]                       # through every sample; a plane stays a plane
+    assert s["peak"] == 24 and s["overshoot"] and s["extSame"]                 # a bump stays where it is, rises smoothly
+    assert s["seam"] == 0                                                      # two tiles agree on the edge they share
+    assert s["normal"] == [-0.176, 0.88, -0.44] and s["unit"] == 1             # smooth normals from central differences
+    assert s["ridge"] == -1 and s["masks"] == [255, 255, 102, 255]             # a ridge; wood, lake, meadow tint, road bank
+
+
+def test_grass_scatter_is_deterministic(out):
+    g = out["scatter2"]
+    assert g["same"] and g["differs"] and g["inside"] and g["n"] == 50         # the same cell gives the same clumps, inside it
+    assert g["cells"] == 15 and g["first"] == [0, 0] and g["sorted"] and g["within"]  # cells round a point, nearest first
+    assert g["blades"] == 45 and g["verts"] == 63                              # 9 blades, 5 triangles each
+
+
+def test_sky_colours_follow_the_sun(out):
+    assert out["sky"] == {"zenBlue": True, "horPaler": True, "lowRed": True, "highWhite": True, "finite": True}
+
+
+def test_procedural_textures(out):
+    t = out["tex"]
+    assert t["n"] == 64 * 64 * 4 and t["same"] and t["smooth"] < 40 and t["waveFlat"] in range(118, 138)
+
+
+def test_world_sound_gain_curves(out):
+    a = out["audio"]
+    assert a["windStill"] == 0 and a["wind10"] == 0.067 and a["windCap"] == 0.22 and a["windUp"]      # wind grows with speed, capped
+    assert a["tireStill"] == 0 and a["tire10"] == 0.066 and a["tireGravel"] > a["tire10"] and a["tireUp"]
+    assert a["hz"] == [70, 160]
+    assert a["tickPedal"] == 0 and a["tickStill"] == 0 and a["tick5"] == 57.011 and a["tickCap"] == 140  # ticks only coasting
+    assert a["seaNone"] == 0 and a["seaHalf"] == 0.1 and a["seaSome"]
+
+
+def test_cars_pass_a_rider_in_their_lane(out):
+    p = out["pass"]
+    assert p["clear"] == {"v": 20, "pull": 0} and p["beside"] == {"v": 20, "pull": 0} and p["behind"] == {"v": 20, "pull": 0}
+    assert p["closing"] == {"v": 11, "pull": 1}                               # close behind: rider speed + 3, pulled out
+
+
+def test_rider_stands_on_steep_climbs_and_tucks_descending(out):
+    s = out["stance"]
+    assert s["up"] == {"up": True, "sb": 1} and s["held"]                     # stands above 7.5 percent, stays up at 7
+    assert s["down"] == {"up": False, "sb": 0}                                 # sits again below 6
+    assert s["level"] == 0 and s["still"] == 0                                 # coasting: cranks level and still
+    assert s["tuck"] == {"tuck": True, "tb": 1}                                # fast downhill: tucked
+    assert s["thigh"] == 0.46 and s["shin"] == 0.47 and s["forward"]           # the IK keeps bone lengths, knee forward

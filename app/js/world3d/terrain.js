@@ -40,6 +40,72 @@ export function gridFromHeights({ z, x, y, hs: src, n: sn, step = 1, proj }) {
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) hs[j * n + i] = src[j * step * sn + i * step];
   return { z, x, y, segs, hs, xs, zs, raw: hs.slice(), proj };
 }
+// Bicubic (Catmull-Rom) upsampling of an n x n height grid by an integer factor f: ((n - 1) f + 1)^2 heights that pass
+// through every source sample, smooth in between (no 15 m facets near the rider). ext(i, j): a sample outside the grid
+// (a neighbour tile's), null to clamp to the edge. Edge rows only use samples along the edge, so two tiles that share
+// an edge get the same heights on it.
+export function upsample(hs, n, f, ext = null) {
+  const m = (n - 1) * f + 1, out = new Float32Array(m * m), W = [];
+  for (let k = 0; k < f; k++) { const t = k / f, t2 = t * t, t3 = t2 * t; W.push([(-t3 + 2 * t2 - t) / 2, (3 * t3 - 5 * t2 + 2) / 2, (-3 * t3 + 4 * t2 + t) / 2, (t3 - t2) / 2]); }
+  const at = (i, j) => {
+    if (i >= 0 && j >= 0 && i < n && j < n) return hs[j * n + i];
+    const e = ext ? ext(i, j) : null; if (e != null) return e;
+    return hs[Math.max(0, Math.min(n - 1, j)) * n + Math.max(0, Math.min(n - 1, i))];
+  };
+  // rows first (every source row at the new columns), then columns
+  const rows = new Float32Array((n + 2) * m);
+  for (let j = -1; j <= n; j++) for (let I = 0; I < m; I++) {
+    const i = Math.floor(I / f), k = I - i * f, o = (j + 1) * m + I;
+    if (k === 0) { rows[o] = at(i, j); continue; }
+    const w = W[k]; rows[o] = w[0] * at(i - 1, j) + w[1] * at(i, j) + w[2] * at(i + 1, j) + w[3] * at(i + 2, j);
+  }
+  for (let J = 0; J < m; J++) {
+    const j = Math.floor(J / f), k = J - j * f, w = W[k];
+    for (let I = 0; I < m; I++) {
+      if (k === 0) { out[J * m + I] = rows[(j + 1) * m + I]; continue; }
+      const r = jj => rows[(Math.max(-1, Math.min(n, jj)) + 1) * m + I];
+      out[J * m + I] = w[0] * r(j - 1) + w[1] * r(j) + w[2] * r(j + 1) + w[3] * r(j + 2);
+    }
+  }
+  return out;
+}
+// smooth vertex normals of a grid's surface (central differences, one-sided on the edges): Float32Array n * n * 3
+export function gridNormals(g, hs = g.hs) {
+  const s = g.segs, n = s + 1, out = new Float32Array(n * n * 3);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const i0 = Math.max(0, i - 1), i1 = Math.min(s, i + 1), j0 = Math.max(0, j - 1), j1 = Math.min(s, j + 1);
+    const dx = (hs[j * n + i1] - hs[j * n + i0]) / (g.xs[i1] - g.xs[i0]), dz = (hs[j1 * n + i] - hs[j0 * n + i]) / (g.zs[j1] - g.zs[j0]);
+    const l = Math.hypot(dx, 1, dz), o = 3 * (j * n + i);
+    out[o] = -dx / l; out[o + 1] = 1 / l; out[o + 2] = -dz / l;
+  }
+  return out;
+}
+// hollows (+) and ridges (-) per vertex, -1..1: how far the ground `r` metres round sits above (below) the vertex,
+// over `scale` metres. Gullies stay green and a little darker; ridges dry.
+export function gridCurvature(g, r = 25, scale = 6, hs = g.raw) {
+  const s = g.segs, n = s + 1, out = new Float32Array(n * n), sp = Math.abs(g.xs[s] - g.xs[0]) / s, k = Math.max(1, Math.round(r / sp));
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const i0 = Math.max(0, i - k), i1 = Math.min(s, i + k), j0 = Math.max(0, j - k), j1 = Math.min(s, j + k);
+    const avg = (hs[j * n + i0] + hs[j * n + i1] + hs[j0 * n + i] + hs[j1 * n + i] + hs[j0 * n + i0] + hs[j0 * n + i1] + hs[j1 * n + i0] + hs[j1 * n + i1]) / 8;
+    out[j * n + i] = Math.max(-1, Math.min(1, (avg - hs[j * n + i]) / scale));
+  }
+  return out;
+}
+// Ground class weights per vertex for the terrain shader, so class edges blend instead of stepping per triangle:
+// 8 bytes per vertex [wood, green, sand, town, cut bank, rock, lake, farm] (0..255). lu: rasterClasses, cut: carve's.
+export function classMasks(lu, cut = null) {
+  const n = lu.length, out = new Uint8Array(n * 8);
+  //               park grass farm town scrub wood rock sand water
+  const W = [null, [0, 0], [1, 0.4], [7, 1], [3, 1], [0, 0.55], [0, 1], [5, 1], [2, 1], [6, 1]];
+  for (let v = 0; v < n; v++) {
+    const k = lu[v], o = v * 8;
+    if (k === 1) { out[o + 1] = 255; out[o] = 70; }          // a park: green, a few trees
+    else if (k === 5) { out[o] = 140; out[o + 1] = 90; }     // scrub: dark and green
+    else if (W[k]) out[o + W[k][0]] = Math.round(255 * W[k][1]);
+    if (cut && cut[v]) out[o + 4] = 255;
+  }
+  return out;
+}
 // grid coordinates (fractional column, row) of a local point
 export function gridIJ(g, px, pz) {
   const fi = (px - g.xs[0]) / (g.xs[g.segs] - g.xs[0]) * g.segs;
@@ -126,14 +192,15 @@ export function rasterClasses(g, features) {
 
 // The mesh: positions, ground class per vertex, triangles; skip(i, j): leave quad i, j out (a finer tile covers it).
 // Skirts hang `skirt` metres down from every edge that borders nothing.
+// Skirts face out (front faces seen from outside the tile). Returns src: for every vertex the grid vertex it copies.
 export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
   const s = g.segs, n = s + 1, nv = n * n;
-  const pos = [], cls = [], idx = [];
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { pos.push(g.xs[i], g.hs[j * n + i], g.zs[j]); cls.push(lu ? lu[j * n + i] : 0); }
+  const pos = [], cls = [], idx = [], src = [];
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { pos.push(g.xs[i], g.hs[j * n + i], g.zs[j]); cls.push(lu ? lu[j * n + i] : 0); src.push(j * n + i); }
   const keep = (i, j) => i >= 0 && j >= 0 && i < s && j < s && !(skip && skip(i, j));
   let nx = nv;
   const wall = (va, vb) => {
-    for (const v of [va, vb]) { pos.push(pos[3 * v], pos[3 * v + 1] - skirt, pos[3 * v + 2]); cls.push(cls[v]); }
+    for (const v of [va, vb]) { pos.push(pos[3 * v], pos[3 * v + 1] - skirt, pos[3 * v + 2]); cls.push(cls[v]); src.push(v); }
     idx.push(va, vb, nx, vb, nx + 1, nx); nx += 2;
   };
   for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
@@ -142,10 +209,10 @@ export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
     idx.push(a, c, b, b, c, d);
     if (skirt > 0) {
       if (!keep(i, j - 1)) wall(a, b);
-      if (!keep(i, j + 1)) wall(c, d);
-      if (!keep(i - 1, j)) wall(a, c);
+      if (!keep(i, j + 1)) wall(d, c);
+      if (!keep(i - 1, j)) wall(c, a);
       if (!keep(i + 1, j)) wall(b, d);
     }
   }
-  return { pos: new Float32Array(pos), cls: new Uint8Array(cls), idx: nx > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) };
+  return { pos: new Float32Array(pos), cls: new Uint8Array(cls), src: Uint32Array.from(src), idx: nx > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) };
 }

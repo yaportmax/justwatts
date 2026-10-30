@@ -383,7 +383,7 @@ main:has(#v-ride.on){max-width:none;padding:18px 28px 16px}
 .w3tag.hi{color:var(--good)}
 .w3draft{position:absolute;left:8px;bottom:8px;z-index:2;display:none;padding:2px 8px;border-radius:6px;background:rgba(11,13,16,.78);color:var(--acc);font-size:12px;font-weight:600}
 .w3draft.on{display:block}
-#mapCam svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;vertical-align:middle}
+#mapCam svg,#mapSound svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;vertical-align:middle}
 .owpin{width:12px;height:12px;padding:0;border-radius:50%;background:var(--ink);border:2px solid var(--bg);cursor:pointer;box-shadow:0 0 0 1px rgba(255,255,255,.3)}
 .rmapdot{width:16px;height:16px;border-radius:50%;background:var(--acc);border:3px solid var(--bg);box-shadow:0 0 0 1px rgba(255,255,255,.25)}
 /* open world: the junction ahead (over the big panel), the start picker */

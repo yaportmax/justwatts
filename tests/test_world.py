@@ -55,3 +55,27 @@ def test_a_start_on_a_long_bridge_rides_at_once_and_spans_it_later(out):
     assert b["n"] > 250 and b["d"] > 300                           # then the road beyond loads and comes
     assert 55 < b["mid"] < 75 and b["end"] == pytest.approx(90.2, abs=1)  # a straight line over the valley to the far end
     assert b["jump"] < 1                                           # no step where the line meets what was sent flat
+
+
+def test_u_turn_rides_back_the_way_the_rider_came(out):
+    u = out["uturn"]
+    assert u["ok"] and 0 < u["pivot"] < 60 and u["samePrefix"]       # a few metres on; the road behind never changes
+    assert u["turned"] > 160 and u["back"] < 15                      # facing back, on the same road as before
+    assert u["d1"] > u["d0"] + 300 and u["ahead"] > 1000              # the same ride goes on, the road keeps coming
+    assert u["jp"] == [] and u["spacing"] < 10.2                      # no jump: the road just turns back
+    r = out["uturnReload"]
+    assert r["ndOk"] and r["ahead"] > 1000 and r["spacing"] < 10.2   # a reload rebuilds the turned plan
+
+
+def test_teleport_jumps_and_the_ride_goes_on(out):
+    t = out["tele"]
+    assert t["ok"] and len(t["jp"]) == 1 and t["landed"] < 5 and t["gap"] > 300 and 0 < t["lead"] < 60
+    assert t["gradeJump"] == 0                                       # flat across the jump: the trainer never sees it
+    assert t["viewBefore"]["o"] == 0 and t["viewBefore"]["lastIsOld"]  # not there yet: the old road, up to the jump
+    a = t["after"]
+    assert a["same"] and a["samples"] == 30 and a["d"] > 100          # same ride, distance and time keep counting
+    assert a["climbed"] < 20 and a["road"] == "Bunker Road"
+    assert a["o"] == t["jp"][0] * 10 and a["first"] and 0 < a["vd"] < a["d"]  # the screen shows the road from the new spot
+    assert a["near"] < 200 and a["ahead"] > 1000
+    r = out["teleReload"]
+    assert r["jp"] == t["jp"] and r["o"] == a["o"] and r["ndOk"] and r["ahead"] > 1000 and r["spacing"] < 10.2

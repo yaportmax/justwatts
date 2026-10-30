@@ -4,7 +4,7 @@
 import {
   fmtT, esc, ZONES, zoneIdx, HRZ_COLORS, hrZone as hrZoneOf, parseWorkout, toText, compile, stepAt, stepWatts,
   estimate, toZwo as toZwoCore, PRESETS, FTP_TESTS, testKind, summarize, fitEncode, toTcx,
-  activeHrZones, validHrFloors, HR_MAX_DEFAULT, fromErgMrc, weightShow, weightKg, weightUnit, distText, treeText,
+  activeHrZones, validHrFloors, HR_MAX_DEFAULT, fromErgMrc, weightShow, weightKg, weightUnit, distText, isMetric, treeText,
 } from './core.js';
 import { MODE } from './mode.js';
 import { drawChart as drawChartOn, drawBlocks, maxTarget } from './chart.js';
@@ -599,6 +599,13 @@ function renderLive() {
   $('#hrTile').style.display = S?.devices?.hr || S?.devices?.hr_name ? '' : 'none';  // no strap: no HR anywhere
   const hrNow = live.hr || 0, hz = hrZone(hrNow);
   $('#lH').textContent = hrNow || '–';
+  // the world HUD (open world, the world in focus: see ridemap.js): the same numbers over the world
+  $('#hP').textContent = p3; $('#hPk').textContent = settings.weight > 0 ? (p3 / settings.weight).toFixed(1) + ' W/kg' : '';
+  $('#hC').textContent = cadOn() ? `${cad} rpm` : ''; $('#hH').textContent = hrNow ? `${hrNow} bpm` : '';
+  $('#hH').style.color = hz >= 0 ? `var(${HRZ_COLORS[hz]})` : '';
+  $('#hD').textContent = dv; $('#hDu').textContent = du;
+  if (rc) { const met = isMetric(settings.units); $('#hS').textContent = Math.round(met ? rc.speed_kmh : rc.speed_kmh * 0.621371); $('#hSu').textContent = met ? 'km/h' : 'mph';
+    $('#hU').textContent = Math.round(met ? rc.climbed_m : rc.climbed_m * 3.28084); $('#hUu').textContent = met ? 'm' : 'ft'; $('#hG').textContent = rc.grade.toFixed(1) + '%'; }
   $('#hrTile').style.setProperty('--hrc', hz >= 0 ? `var(${HRZ_COLORS[hz]})` : 'var(--line)');
   const hmax = hrZ().max;
   $('#lHs').innerHTML = hrNow ? (hz >= 0 ? `<span class="zn">Z${hz + 1}</span>` : 'below Z1') + (hmax ? ` · ${Math.round(hrNow / hmax * 100)}% max` : '') : 'bpm';
@@ -618,7 +625,10 @@ function renderRide() {
   $('#lI').parentElement.style.display = V.cw ? '' : 'none';  // no workout: no interval tile
   $('#tgtTile').querySelector('.of').style.display = t == null || (V.jr.wm && V.jr.wm !== 'e') ? 'none' : '';  // free riding: just the power
   $('#lTs').textContent = !V.cw && S.ride.course ? '' : V.cw ? (V.jr.wm && V.jr.wm !== 'e' ? 'ERG off · ' + valText(m) : t != null ? Math.round(t / V.ftp * 100) + '% FTP' : 'free · ' + valText(m)) : m === 'w' ? 'ERG' : valText(m);
-  $('#lE').textContent = fmtT(V.started ? samples.length : 0);  // time ridden (1 sample a second)
+  $('#lE').textContent = $('#hE').textContent = fmtT(V.started ? samples.length : 0);  // time ridden (1 sample a second)
+  const ow = S.ride.course?.open ? world.view() : null;
+  $('#hR').textContent = ow?.road || '';
+  $$('.owonly').forEach(el => { el.style.display = ow ? '' : 'none'; });
   $('#rName').textContent = V.name;
   const st = !V.started ? ['Ready', ''] : V.auto ? ['Start pedaling', 'warn'] : V.paused ? ['Paused', 'warn'] : S.ride.overtime ? ['Workout done · riding free', 'done'] : ['Riding', ''];
   $('#rState').textContent = st[0]; $('#rState').className = 'badge ' + st[1];
@@ -726,6 +736,15 @@ $('#cPlus').onclick = () => plusMinus(1);
 $('#cUndo').onclick = doUndo;
 $('#cMore').onclick = () => sheet();
 $('#cKeys').onclick = () => $('#keysModal').classList.add('on');
+// open world mid-ride: turn round, or jump to another spot (the spot picker; the ride goes on there)
+const uturn = () => world.active() && world.uturn().then(ok => { if (!ok && !world.busy()) toast('Cannot turn here'); });
+const spots = () => world.active() && picker.open('', p => world.teleport(p).catch(e => { toast(e.message); return false; }));
+// full screen: the whole page (dialogs and toasts stay visible), the sidebar hidden while it lasts
+const fullscreen = () => { const d = document; if (d.fullscreenElement) d.exitFullscreen?.(); else d.documentElement.requestFullscreen?.().catch(() => toast('Full screen unavailable here')); };
+document.addEventListener('fullscreenchange', () => { $('#cFull').classList.toggle('on', !!document.fullscreenElement); if (V) setTimeout(renderRide, 50); });
+$('#cUturn').onclick = uturn;
+$('#cTele').onclick = spots;
+$('#cFull').onclick = fullscreen;
 $('#keysClose').onclick = () => $('#keysModal').classList.remove('on');
 $('#keysModal').onclick = e => { if (e.target?.id === 'keysModal') $('#keysModal').classList.remove('on'); };
 
@@ -804,7 +823,7 @@ const KEYS = {
   ArrowRight: skipAct, ArrowLeft: backAct, BracketRight: () => stepTimeBy(timeSteps(R()?.step?.duration_s ?? 600)[1]), BracketLeft: () => stepTimeBy(-timeSteps(R()?.step?.duration_s ?? 600)[1]),
   Equal: () => stepWattsBy(5), NumpadAdd: () => stepWattsBy(5), Minus: () => stepWattsBy(-5), NumpadSubtract: () => stepWattsBy(-5),
   Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
-  KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo,
+  KeyA: () => sheet(), KeyF: e => e.shiftKey ? fullscreen() : courses.map.toggleFocus(), KeyZ: doUndo, KeyP: () => spots(),
   KeyV: () => courses.map.toggleCamera(), KeyT: () => courses.map.cycleTime(),  // the 3D world
   Comma: () => simStep(-10), Period: () => simStep(10),  // simulated trainer power
   KeyG: () => courses.map.toggleFog(), KeyM: () => courses.map.toggleSound(), KeyK: () => courses.map.cycleKit(),
@@ -892,7 +911,8 @@ async function openSummary(id) {
   const restHtml = rest.map(([k, v]) => `<span><b>${esc(k)}</b> ${esc(v)}</span>`).join('');
   $('#sStats').innerHTML = `<div class="shero">${heroHtml}</div><div class="srest">${restHtml}</div>`;
   // a course ride: its route, with how far the rider got
-  const ll = r.course?.ll, done = r.samples.at(-1)?.[8], mapDraw = () => drawMap($('#sMap'), { ll, dist: r.course.dist, done, fit, css, redraw: () => openRide === r && mapDraw() });
+  const j = r.course?.jp?.at(-1) || 0, ll = j ? r.course.ll.slice(j) : r.course?.ll, d8 = r.samples.at(-1)?.[8], done = j && d8 != null ? d8 - j * 10 : d8;  // open world: the road since the last teleport
+  const mapDraw = () => drawMap($('#sMap'), { ll, dist: r.course.dist - j * 10, done, fit, css, redraw: () => openRide === r && mapDraw() });
   $('#sMap').style.display = ll?.length > 1 ? '' : 'none'; if (ll?.length > 1) requestAnimationFrame(mapDraw);
   $('#sSaveCrs').style.display = r.course?.open && r.course.dist >= 100 ? '' : 'none';  // open world: keep the road ridden as a course
   $('#sSaveCrs').disabled = false; $('#sSaveCrs').textContent = 'Save route';
@@ -925,7 +945,8 @@ function closeSummary() { $('#summary').style.display = 'none'; $('#histMain').s
 $('#sClose').onclick = () => { closeSummary(); renderTrends(); };
 $('#sSaveCrs').onclick = () => {
   const r = openRide, c = r?.course; if (!c?.open) return;
-  try { if (courses.add(buildCourse(r.name, c.ll.map((p, i) => ({ lat: p[0], lon: p[1], ele: c.ele[i] }))))) { toast('Saved to Courses'); $('#sSaveCrs').disabled = true; $('#sSaveCrs').textContent = 'Saved'; } } catch (e) { toast(e.message); }
+  const j = c.jp?.at(-1) || 0;  // the road since the last teleport
+  try { if (courses.add(buildCourse(r.name, c.ll.slice(j).map((p, i) => ({ lat: p[0], lon: p[1], ele: c.ele[j + i] }))))) { toast('Saved to Courses'); $('#sSaveCrs').disabled = true; $('#sSaveCrs').textContent = 'Saved'; } } catch (e) { toast(e.message); }
 };
 $('#sDel').onclick = async () => { if (!openId) return; await api(`/api/rides/${openId}/delete`, {}).catch(() => {}); closeSummary(); renderHistory(); toast(WEB ? 'Deleted' : 'Deleted (kept in rides/trash)'); account?.sync.kick(); };
 const fileLink = async (ext, id = openId) => {

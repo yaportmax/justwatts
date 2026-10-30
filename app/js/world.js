@@ -1,7 +1,9 @@
 // Open world: the page is the road provider. It loads OpenStreetMap roads around the rider (Overpass, small cells,
 // one request at a time, cached), plans the road ahead (roads.js), samples its grade from terrain tiles and sends
 // it to the engine (control 'road'), which only follows a growing course. A reload or a server restart rebuilds
-// the plan from the engine's course. Junction choices: choose(), or key() with the arrow keys.
+// the plan from the engine's course. Junction choices: choose(), or key() with the arrow keys. uturn() rides back the
+// way the rider came, teleport() jumps to another spot (a jump in the course, see course.js jp): both replace the road
+// ahead from a point just ahead of the rider (pivot); the ride goes on.
 import { RoadGraph, Plan, OVERPASS, overpassQuery, parseWays, cellKey, cellBox, cellsAround, tileAt, tileEle, bridges, smoothFrom, label } from './roads.js';
 import { STEP_M } from './course.js';
 import { gridAt, sharedBaked } from './world3d/baked.js';
@@ -161,8 +163,9 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
   // ll, ele: the engine's course as sent; raw, br: terrain height and bridge/tunnel flag per point; dirty: first point a
   // junction choice changed; prov: first point of a bridge or tunnel still running at the end of what was sent (sent
   // flat for now, sent again once its far end is known)
-  let plan = null, ll = [], ele = [], raw = [], br = [], n = 0, d = 0, v = 0, rid = null, dirty = Infinity, prov = Infinity, pumping = false, syncing = false, gen = 0, jx = null;
-  const reset = () => { plan = null; ll = []; ele = []; raw = []; br = []; n = 0; d = 0; dirty = prov = Infinity; jx = null; gen++; };
+  // jumps: the course's teleports (point indices, the engine's jp); pv: a U-turn or teleport on its way (no other sends)
+  let plan = null, ll = [], ele = [], raw = [], br = [], n = 0, d = 0, v = 0, rid = null, dirty = Infinity, prov = Infinity, pumping = false, syncing = false, gen = 0, jx = null, jumps = [], pv = false;
+  const reset = () => { plan = null; ll = []; ele = []; raw = []; br = []; n = 0; d = 0; dirty = prov = Infinity; jx = null; jumps = []; gen++; };
   async function cell(key) { if (!key || g.cells.has(key)) return; const ways = await loader.get(key); g.addCell(key, ways); }
   // cells within m metres of a point
   function near(lat, lon, m) {
@@ -176,9 +179,11 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
     for (let i = 0; i < pts.length; i++) { R.push(e[i] ?? (R.length ? R.at(-1) : 0)); B.push(pts[i].br); }
     return [R, B];
   }
-  // smoothed heights from point at on; a bridge already partly sent goes on in a straight line from the last point kept
-  function heights(R, B, at) {
-    if (at > 0 && B[at - 1]) { R = R.slice(); B = B.slice(); R[at - 1] = ele[at - 1]; B[at - 1] = 0; }
+  // smoothed heights from point at on; a bridge already partly sent goes on in a straight line from the last point kept;
+  // nothing is smoothed or bridged across a teleport (J)
+  function heights(R, B, at, J = jumps) {
+    const j = J.reduce((m, x) => x <= at ? x : m, 0); R = R.slice(j); B = B.slice(j); at -= j;
+    if (at > 0 && B[at - 1]) { R[at - 1] = ele[j + at - 1]; B[at - 1] = 0; }
     return smoothFrom(bridges(R, B), at);
   }
   const tailSpan = B => { let i = B.length; while (i > 0 && B[i - 1]) i--; return i < B.length ? i : Infinity; };
@@ -208,7 +213,7 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
     try {
       const r = await course(), c = r?.course;
       if (my !== gen || !c?.open) return;
-      ll = c.ll; ele = c.ele; raw = c.ele.slice(); br = c.ele.map(() => 0); n = ll.length; d = r.d; dirty = prov = Infinity;
+      ll = c.ll; ele = c.ele; raw = c.ele.slice(); br = c.ele.map(() => 0); n = ll.length; d = r.d; dirty = prov = Infinity; jumps = c.jp || [];
       const here = ll[Math.min(n - 1, Math.floor(d / STEP_M))], tail = ll[n - 1];
       await Promise.all([...near(here[0], here[1], 300), ...near(tail[0], tail[1], 300)].map(cell));
       if (my === gen) plan = Plan.fromCourse(g, c);
@@ -216,7 +221,8 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
     pump();
   }
   async function send() {
-    const lo = Math.min(n, Math.floor(d / STEP_M) + 2), at = Math.max(lo, Math.min(n, dirty, prov, n - 8));
+    if (pv) return false;
+    const lo = Math.min(n, Math.floor(d / STEP_M) + 2), at = Math.max(lo, (jumps.at(-1) ?? 0) + 1, Math.min(n, dirty, prov, n - 8));  // a teleport is never resent
     const pts = planned(at), N = at + pts.length;
     if (dirty === Infinity && (N - n < BATCH && n * STEP_M - d > 1000 || N <= n)) return false;
     dirty = Infinity;
@@ -231,7 +237,7 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
   }
   // keep the road ahead loaded and sent; one loop at a time
   async function pump() {
-    if (pumping || !plan) return; pumping = true;
+    if (pumping || !plan || pv) return; pumping = true;
     try {
       for (let i = 0; plan && i < 200; i++) {
         // the cells around the rider (the ways at a junction) and around the end of the road sent, ahead of need
@@ -252,8 +258,54 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
     return j && j.d < (n - 1) * STEP_M ? j : null;
   }
 
+  // U-turn and teleport: the road of plan p from point at on (jump: point at is a teleport away from at - 1)
+  async function pivot(at, p, jump = false) {
+    if (!p) return false;
+    pv = true; const my = ++gen; plan = p; jx = null; dirty = Infinity;
+    try {
+      for (let i = 0; i < 20; i++) { const k = p.extend(at * STEP_M + 600); if (!k) break; await cell(k); }
+      const pts = my === gen ? planned(at) : [];
+      if (pts.length < 2) throw new Error('No road here');
+      const J = jumps.filter(x => x < at).concat(jump ? [at] : []), [R, B] = await elevation(pts, at);
+      if (my !== gen) return false;
+      const N = at + pts.length, hi = (N - 1) * STEP_M, nd = [], L = pts.map(x => x.ll), e = heights(R, B, at, J);
+      for (const q of p.seq) { nd.push([Math.floor(q.d * 100 + 0.5) / 100, q.id]); if (q.d >= hi) break; }  // from its first node: a reload rebuilds this plan
+      await control('road', { at, ele: e, ll: L, nd, ...(jump ? { jump: true } : {}) });
+      // the engine has it; a sync started meanwhile (the state saw the new road first) takes it from there
+      if (my === gen) { raw = R; br = B; ele = ele.slice(0, at).concat(e); ll = ll.slice(0, at).concat(L); n = ll.length; prov = tailSpan(B); jumps = J; }
+      return true;
+    } catch { if (my === gen) { gen++; plan = null; } return false; }
+    finally { pv = false; if (!plan) sync(); else { jx = junction(); onChange(); pump(); } }
+  }
+  // the first point a pivot may change: far enough ahead that the engine has not passed it when the road arrives
+  const pivotAt = () => Math.min(n, Math.floor((d + Math.max(20, v * 4)) / STEP_M) + 2);
+  // turn round where the rider is (a few metres on) and ride back the way they came
+  async function uturn() {
+    if (!plan || !rid || pv || n < 2) return false;
+    const at = pivotAt(), D = (at - 1) * STEP_M, k = plan.kAt(D), a = plan.seq[k - 1], b = plan.seq[k];
+    if (!a || !b || b.d < D) return false;
+    return pivot(at, Plan.pivot(g, b.id, a.id, ll[at - 1], D));
+  }
+  // jump to the road nearest to a point; the ride goes on there (same distance, time and samples)
+  async function teleport({ lat, lon, heading = null }) {
+    if (!rid || pv || n < 2) return false;
+    await Promise.all(near(lat, lon, 150).map(cell));
+    const s = g.snap(lat, lon, heading);
+    if (!s || s.m > 300) throw new Error('No road near here');
+    for (let i = 0; i < 2; i++) { const at = pivotAt(); if (await pivot(at, Plan.pivot(g, s.u, s.v, s.pt, at * STEP_M), true)) return true; if (!rid) break; }
+    return false;
+  }
+  // the stretch shown (a teleport splits the course: from the last one passed up to the next), kept while unchanged
+  let win = { ll: null };
+  function stretch() {
+    const a = jumps.reduce((m, j) => (j - 1) * STEP_M <= d ? j : m, 0), b = jumps.find(j => (j - 1) * STEP_M > d) ?? n;
+    if (win.ll !== ll || win.ele !== ele || win.a !== a || win.b !== b) win = { ll, ele, a, b, L: a || b < n ? ll.slice(a, b) : ll, E: a || b < n ? ele.slice(a, b) : ele };
+    return win;
+  }
+
   return {
-    start,
+    start, uturn, teleport,
+    busy: () => pv,
     // the road a start point snaps to (warms the road cache): { pt, name } | null
     async preview(lat, lon, heading = null) {
       await Promise.all(near(lat, lon, 150).map(cell));
@@ -263,7 +315,7 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
     update(rc, id) {
       if (!rc?.open) { if (rid) { rid = null; reset(); } return; }
       d = rc.odo_m; v = rc.speed_kmh / 3.6;
-      if (id !== rid || rc.n !== n) { if (!syncing && (id !== rid || !pumping)) { rid = id; plan = null; sync(); } return; }
+      if (id !== rid || rc.n !== n) { if (!syncing && (id !== rid || !pumping && !pv)) { rid = id; plan = null; sync(); } return; }
       jx = junction(); pump();
     },
     choose(to) {
@@ -272,22 +324,33 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
       dirty = Math.min(dirty, Math.floor(j.d / STEP_M) + 1);
       jx = junction(); onChange(); pump(); return true;
     },
-    // arrows: left and right move the choice one way over, up takes the straightest. true when used.
+    // arrows: left and right move the choice one way over, up takes the straightest, down turns round. true when used.
     key(code) {
+      if (code === 'ArrowDown') { if (!rid) return false; uturn(); return true; }
       const j = jx; if (!j?.opts.length || !['ArrowLeft', 'ArrowRight', 'ArrowUp'].includes(code)) return false;
       const i = j.opts.findIndex(o => o.to === j.sel), o = j.opts;
       const t = code === 'ArrowUp' ? [...o].sort((a, b) => Math.abs(a.a) - Math.abs(b.a))[0] : o[Math.max(0, Math.min(o.length - 1, i + (code === 'ArrowLeft' ? -1 : 1)))];
       this.choose(t.to); return true;
     },
-    // what the ride screen shows: the course line, its elevation, the junction prompt and the other ways there
+    // what the ride screen shows: the course line, its elevation, the junction prompt and the other ways there; after a
+    // teleport the stretch since it (ll, ele, n and d from its start; o: where it starts on the course, metres)
     view() {
       if (!rid || !n) return null;
-      const k = plan ? plan.kAt(d) : 0, w = plan?.wayAt(k), j = jx;
-      return { ll, ele, d, n, road: w ? label(w) : '', wait: d >= (n - 1) * STEP_M - 30,  // at the end of the road loaded so far
+      const k = plan ? plan.kAt(d) : 0, w = plan?.wayAt(k), j = jx, s = stretch();
+      return { ll: s.L, ele: s.E, d: Math.max(0, d - s.a * STEP_M), n: s.L.length, o: s.a * STEP_M, road: w ? label(w) : '', wait: d >= (n - 1) * STEP_M - 30,  // at the end of the road loaded so far
         turn: j && { m: Math.max(0, Math.round(j.d - d)), dead: !j.opts.length, opts: j.opts.map(o => ({ to: o.to, a: Math.round(o.a), name: label(o.w), on: o.to === j.sel })) },
         alts: j ? j.opts.filter(o => o.to !== j.sel).map(o => plan.peek(j.k, o.to)) : [] };
     },
     active: () => !!rid,
+    // the loaded roads within m metres of a point (the minimap): [[lat, lon, lat, lon, rank]], one per segment
+    roads(lat, lon, m) {
+      const dl = m / 111195, dk = dl / Math.cos(lat * Math.PI / 180), out = [], s = lat - dl, nn = lat + dl, w = lon - dk, e = lon + dk;
+      for (const a of g.nodes.values()) {
+        if (a.lat < s || a.lat > nn || a.lon < w || a.lon > e) continue;
+        for (const x of a.adj) if (x.f) { const b = g.nodes.get(x.to); out.push([a.lat, a.lon, b.lat, b.lon, /^(trunk|primary|secondary)/.test(x.w.hw) ? 2 : /^(path|footway|cycleway|pedestrian|bridleway)$/.test(x.w.hw) ? 0 : 1]); }
+      }
+      return out;
+    },
     // a rider close ahead (world3d/draft.js): the engine takes that share off the air drag for a few seconds
     draft(k) { if (rid) control('draft', { k }).catch(() => {}); },
   };

@@ -836,3 +836,71 @@ button.armed{color:var(--warn)}
 .socnew select,.socnew input{height:38px;font-size:14px}
 @media (hover:none){.smact{display:inline-flex}}
 @media (max-width:640px){.srchat{flex-basis:100%}.srchat input{width:auto;flex:1}.socrow{flex-wrap:wrap}.socrow .sc{flex-wrap:wrap}}
+
+/* ---------- the world HUD: an open-world ride with the world in focus (ridemap.js sets #rideOn.hud). The world fills
+   the ride screen edge to edge; the numbers, the minimap, the power chart, the elevation strip and the controls float
+   over it on dark glass with a text shadow, readable on sky, sea or road ---------- */
+.hudp,.hudt,.hudm{display:none}
+main:has(#rideOn.hud){padding:0}
+#v-ride.on:has(#rideOn.hud){height:calc(100vh - var(--hh,0px))}
+#rideOn.hud{position:relative;overflow:hidden;--hb:rgba(8,10,13,.5);--hs:0 1px 2px rgba(0,0,0,.7),0 0 10px rgba(0,0,0,.35)}
+#rideOn.hud>.rtop,#rideOn.hud>.tiles{display:none}
+#rideOn.hud>#rideBig{position:absolute;inset:0;min-height:0}
+#rideOn.hud .rmap{border-radius:0;background:#0b0d10}
+#rideOn.hud>.hudp,#rideOn.hud>.hudt,#rideOn.hud>.hudm{display:block;position:absolute;z-index:6;background:var(--hb);border-radius:12px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);text-shadow:var(--hs);pointer-events:none;font-variant-numeric:tabular-nums}
+.hudp{top:16px;left:16px;padding:6px 18px 10px;min-width:180px}
+.hpw{display:flex;align-items:baseline;gap:5px}
+.hpw b{font-size:68px;font-weight:700;line-height:1.05;letter-spacing:-.04em}
+.hpw span{font-size:20px;font-weight:650;color:var(--dim)}
+.hps{display:flex;gap:16px;font-size:16px;font-weight:650}
+.hps span:empty{display:none}
+#hPk{color:var(--dim);font-weight:550}
+.hudt{top:16px;left:50%;transform:translateX(-50%);padding:6px 22px 8px}
+.hts{display:flex;gap:30px;justify-content:center;align-items:baseline;white-space:nowrap}
+.hts b{font-size:32px;font-weight:700;letter-spacing:-.02em}
+.hts span:first-child b{font-size:44px;color:var(--acc)}
+.hts i{font-style:normal;font-size:14px;color:var(--dim);margin-left:4px;font-weight:600}
+.htr{display:flex;gap:14px;justify-content:center;font-size:14px;color:var(--dim);white-space:nowrap}
+.htr b{color:var(--ink);font-weight:650}
+.hudm{top:16px;right:16px;width:250px;height:210px;overflow:hidden}
+.hudm canvas{width:100%;height:100%;display:block}
+#rideOn.hud>.iv{position:absolute;z-index:6;top:128px;left:50%;transform:translateX(-50%);width:min(460px,60%);margin:0;padding:8px 14px;background:var(--hb);border-radius:10px;backdrop-filter:blur(6px);text-shadow:var(--hs)}
+#rideOn.hud .owturn{top:128px;padding:6px;background:rgba(8,10,13,.7);border-radius:14px}
+#rideOn.hud .owturn .owm{font-size:18px;padding:0 12px}
+#rideOn.hud:has(#ivNext:not(:empty)) .owturn{top:190px}
+#rideOn.hud .owturn button{height:42px;font-size:15px;color:var(--ink)}
+#rideOn.hud .owturn .owa{width:20px;height:20px}
+.owturn .owu{border-left:1px solid var(--line2) !important;border-radius:0 6px 6px 0}
+#rideOn.hud .rmapui{top:238px;left:auto;right:16px;justify-content:flex-end}
+#rideOn.hud .w3draft{top:142px;bottom:auto;left:16px}
+#rideOn.hud>.crs{position:absolute;z-index:6;left:16px;right:16px;bottom:78px;height:118px;margin:0;gap:12px}
+#rideOn.hud>.crs .crsslot{flex:1;width:auto;max-width:none;height:100%;padding:6px 4px 2px;background:var(--hb);border-radius:10px;backdrop-filter:blur(6px)}
+#rideOn.hud>.crs .crsp{flex:none;width:30%;max-width:460px;height:100%;padding:6px 12px 6px;background:var(--hb);border-radius:10px;backdrop-filter:blur(6px);text-shadow:var(--hs)}
+#rideOn.hud>.crs #crsChart{height:auto;flex:1;min-height:0}
+#rideOn.hud .crsk{color:var(--ink);margin-top:4px}
+#rideOn.hud>.controls{position:absolute;z-index:7;left:16px;right:16px;bottom:16px;margin:0;padding:6px 8px;border:0;border-radius:12px;background:rgba(8,10,13,.62);backdrop-filter:blur(8px)}
+#rideOn.hud>.controls button{height:36px}
+#rideOn.hud>.controls button:not(.pri):not(.danger){color:var(--ink)}
+#rideOn.hud>.controls .adj{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1)}
+#rideOn.hud>.controls .seg{background:none;border-color:rgba(255,255,255,.1)}
+#rideOn.hud>.controls #cPause.big{background:rgba(255,255,255,.08)}
+#rideOn.hud>.socride{position:absolute;z-index:6;left:16px;top:142px;max-width:320px;margin:0;padding:6px 10px;background:var(--hb);border-radius:10px}
+#rideOn.hud>.socride[style*=none]{display:none}
+#rideOn.hud .rmapattr{background:none;text-shadow:var(--hs);right:16px;bottom:0;border-radius:0;opacity:.7}
+#cFull.on{color:var(--acc) !important}
+/* full screen: the ride alone, no sidebar */
+html:fullscreen body:has(#v-ride.on){grid-template-columns:minmax(0,1fr);background:var(--bg)}
+html:fullscreen body:has(#v-ride.on) header.side{display:none}
+html:fullscreen body:has(#v-ride.on){--hh:0px}
+@media (max-width:1400px){.hpw b{font-size:56px}.hts b{font-size:26px}.hts span:first-child b{font-size:36px}.hts{gap:22px}.hudm{width:210px;height:170px}#rideOn.hud .rmapui{top:196px}#rideOn.hud>.crs{height:100px}}
+@media (max-width:900px){
+  #v-ride.on:has(#rideOn.hud){height:calc(100dvh - var(--hh,0px))}
+  .hudp{top:8px;left:8px;padding:4px 10px 6px;min-width:0}.hpw b{font-size:40px}.hps{font-size:13px;gap:10px}
+  .hudt{top:8px;left:auto;right:8px;transform:none;padding:4px 10px}.hts{gap:12px}.hts b{font-size:18px}.hts span:first-child b{font-size:26px}.hts span:nth-child(3){display:none}
+  #rideOn.hud>.hudm{display:none}
+  #rideOn.hud .rmapui{top:auto;bottom:250px;right:8px}
+  #rideOn.hud .owturn,#rideOn.hud:has(#ivNext:not(:empty)) .owturn{top:96px;left:8px;right:8px}
+  #rideOn.hud>.iv{top:auto;bottom:250px;width:auto;left:8px;right:8px;transform:none}
+  #rideOn.hud>.crs{left:8px;right:8px;bottom:118px;height:80px;flex-direction:row}#rideOn.hud>.crs .crsp{width:40%}
+  #rideOn.hud>.controls{left:8px;right:8px;bottom:8px;grid-template-columns:1fr;gap:4px;padding:4px}
+}

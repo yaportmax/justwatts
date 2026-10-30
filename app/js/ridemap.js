@@ -80,8 +80,14 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     $('#rideOn').classList.toggle('mapfocus', on);
     return true;
   }
+  // the world HUD: the world fills the ride screen, the numbers, chart and controls over it (css #rideOn.hud)
+  function hud(on) {
+    const el = $('#rideOn'); if (!el?.classList || el.classList.contains('hud') === on) return;
+    el.classList.toggle('hud', on); size = ''; setTimeout(relayout);
+  }
   function ui() {
     const k = cur ? kind() : '2d', w = k === 'world';
+    hud(!!cur && w && isFocus());
     if (wbox) {
       wbtn.style.display = cur?.open && probeWebGL2() && !wvFailed ? '' : 'none'; wbtn.classList.toggle('on', w); wbtn.setAttribute('aria-pressed', String(w));
       cbtn.style.display = w ? '' : 'none'; sbtn.style.display = w ? '' : 'none'; soundIcon(); wbox.style.display = w ? '' : 'none'; $('#mapStyle').style.display = w ? 'none' : '';
@@ -260,7 +266,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
   function update(ll, rc, alts = null, view = null) {
     ow = view;
     const has = !!(rc && ll?.length > 1);
-    if (!has) cur = null;
+    if (!has) { cur = null; hud(false); }
     else {
       if (cur?.ll !== ll) {  // an open-world course grows: the rider glides on
         const keep = cur?.open && rc.open;

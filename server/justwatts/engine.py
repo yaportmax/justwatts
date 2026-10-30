@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import events as E
-from .course import DRAFT_MAX, G_MAX, G_MIN, check_ride_course, ele_at, grade_at, mass_of, profile_of, ridden, road_extend, speed_step
+from .course import DRAFT_MAX, G_MAX, G_MIN, check_ride_course, ele_at, grade_at, jump_in, mass_of, profile_of, ridden, road_extend, speed_step
 from .devices import DeviceHub
 from .workout import WorkoutError, compile_workout, parse_workout, step_at, step_watts, to_text
 
@@ -75,7 +75,7 @@ class Ride:
         s = [x for x in self.samples if len(x) > 8]
         if not s:
             return
-        up = max(0.0, s[0][7] - self.course["ele"][0]) + sum(max(0.0, b[7] - a[7]) for a, b in zip(s, s[1:]))
+        up = max(0.0, s[0][7] - self.course["ele"][0]) + sum(max(0.0, b[7] - a[7]) for a, b in zip(s, s[1:]) if not jump_in(self.course, a[8], b[8]))
         end = not self.course.get("open") and bool(self.cs["end"] or s[-1][8] >= self.course["dist"])
         self.cs.update(d=float(s[-1][8]), v=s[-1][5] / 3.6, up=up, end=end)
 
@@ -864,11 +864,12 @@ class RideEngine:
         c, cs = r.course, r.cs
         draft = self._draft[0] if c.get("open") and self.clock() < self._draft[1] else 0.0
         cs["v"] = speed_step(cs["v"], self.hub.r.power, grade_at(c, cs["d"]), mass_of(self.settings().get("weight")), dt, draft)
-        e0 = ele_at(c, cs["d"])
+        e0, d0 = ele_at(c, cs["d"]), cs["d"]
         cs["d"] += cs["v"] * dt
         if c.get("open"):  # open world: wait at the end of the known road until the page adds more
             cs["d"] = min(cs["d"], c["dist"])
-        cs["up"] += max(0.0, ele_at(c, cs["d"]) - e0)
+        if not jump_in(c, d0, cs["d"]):  # a teleport climbs nothing
+            cs["up"] += max(0.0, ele_at(c, cs["d"]) - e0)
         if cs["d"] >= c["dist"] and not cs["end"] and not c.get("open"):
             cs["end"] = True
             self.log_event(f"COURSE DONE at T+{E.fmt_t(r.el)}, riding on until End")

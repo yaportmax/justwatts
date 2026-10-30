@@ -88,6 +88,9 @@ and intensity, watts, segment time, length, trainer mode and settings can be und
 | Cadence on/off and range (off: no readout, target or cues), beeps | Adjust | |
 | Map style (Map, Satellite, Topo, Cycling), 3D terrain, map or chart focus (courses with a route) | map | F |
 | Open world: the way at the junction ahead (shown about 200 m before it) | tap | ← ↑ → |
+| Open world: U-turn (ride back the way you came) | bar, junction prompt | ↓ |
+| Open world: go to another spot, the ride goes on | bar (Spots) | P |
+| Full screen | bar | Shift F |
 | Undo, Save, End (two taps) | bar | Z, S |
 | Reconnect trainer or HR | header | |
 

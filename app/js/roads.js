@@ -7,6 +7,7 @@ export const CELL = 0.01;   // degrees: about 1.1 x 0.9 km at 38 N
 export const DEM_Z = 14;    // Terrarium zoom for grade: about 7.5 m pixels at 38 N
 export const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
 const LOOK = 15;            // metres walked to measure a road's direction at a junction
+const DEAD = 250;           // a way that ends within this many metres is no option where another way goes on
 // how main a road is (higher wins at a junction); links rank low so the default never takes a ramp
 const RANK = { trunk: 7, primary: 6, secondary: 5, tertiary: 4, unclassified: 3, residential: 3, road: 2, living_street: 2, cycleway: 2,
   service: 1, trunk_link: 1, primary_link: 1, secondary_link: 1, tertiary_link: 1, path: 1, footway: 1, pedestrian: 1, bridleway: 1 };
@@ -75,6 +76,19 @@ export class RoadGraph {
     }
   }
   pos(id) { const n = this.nodes.get(id); return n ? [n.lat, n.lon] : null; }
+  // riding from cur toward `to`: 1 when the way ends within DEAD metres with no other way on, 0 when it goes on,
+  // -1 when not known yet (a node there not loaded). Known answers are kept: a loaded node never changes.
+  deadEnd(cur, to) {
+    const k = cur + '>' + to; if (this.dead?.has(k)) return this.dead.get(k);
+    let p = cur, c = to, m = dist(this.pos(cur), this.pos(to)), r = 0;
+    for (let i = 0; i < 400 && m < DEAD; i++) {
+      if (!this.complete(c)) { r = -1; break; }
+      const o = this.options(p, c); if (o.length !== 1) { r = o.length ? 0 : 1; break; }
+      p = c; c = o[0].to; m += dist(this.pos(p), this.pos(c));
+    }
+    if (r >= 0) (this.dead ??= new Map()).set(k, r);
+    return r;
+  }
   complete(id) { const n = this.nodes.get(id); return !!n && this.cells.has(cellKey(n.lat, n.lon)); }
   way(a, b) { return this.nodes.get(a)?.adj.find(e => e.to === b)?.w || null; }
   // ways leaving cur that do not go back to prev (one per neighbour), oneways the right way when there is a choice
@@ -130,7 +144,8 @@ export class Plan {
     const g = this.g, cur = this.seq[k]?.id;
     if (k < 1 || k >= this.seq.length || !g.complete(cur)) return null;
     const inB = this.inBearing(k);
-    return g.options(this.seq[k - 1].id, cur).map(e => ({ to: e.to, w: e.w, a: turn(inB, g.outBearing(cur, e.to)) })).sort((x, y) => x.a - y.a);
+    const o = g.options(this.seq[k - 1].id, cur), live = o.filter(e => g.deadEnd(cur, e.to) !== 1);
+    return (live.length ? live : o).map(e => ({ to: e.to, w: e.w, a: turn(inB, g.outBearing(cur, e.to)) })).sort((x, y) => x.a - y.a);
   }
   // the default way on at seq[k]: the same road, else straight on, else the main road; a dead end turns around
   next(k) {
@@ -194,10 +209,17 @@ export class Plan {
     for (let k = i0 > 0 ? this.kAt(lo + 1e-6) : 0; k < this.seq.length; k++) { out.push([Math.floor(this.seq[k].d * 100 + 0.5) / 100, this.seq[k].id]); if (this.seq[k].d >= hi) break; }
     return out;
   }
-  // the plan from an engine course (a reload): nd gives the nodes, ll[0] the start point
+  // the plan from an engine course (a reload): nd gives the nodes, ll[0] the start point; a U-turn or a teleport near
+  // the start leaves only its own first node, before 0 m (see pivot)
   static fromCourse(g, c) {
-    const seq = c.nd.map(([d, id]) => ({ id, d }));
-    return seq.length > 1 && seq[0].d === 0 ? new Plan(g, seq, c.ll[0]) : null;
+    const seq = c.nd.map(([d, id]) => ({ id, d })), pt = seq[0]?.d === 0 ? c.ll[0] : seq[0]?.d < 0 ? g.pos(seq[0].id) : null;
+    return seq.length > 1 && pt ? new Plan(g, seq, pt) : null;
+  }
+  // a plan on from the point pt (on the road from u toward v) at D metres: seq[0] is u itself at D - |u pt|, so the
+  // points (and a plan rebuilt from the engine's nd) pass through pt. U-turns and teleports.
+  static pivot(g, u, v, pt, D) {
+    const a = g.pos(u), b = g.pos(v); if (!a || !b) return null;
+    return new Plan(g, [{ id: u, d: D - dist(a, pt) }, { id: v, d: D + dist(pt, b) }], a);
   }
 }
 

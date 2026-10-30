@@ -392,6 +392,7 @@ async function poll() {  // fallback when EventSource is unavailable
 }
 
 /* ---------- devices (owned by the server) ---------- */
+let simW = 200;  // the simulated trainer's power until the server reports one
 function setStatus() {
   const d = S?.devices || {}, mode = d.trainer || 'none';
   $('#tDot').className = 'dot ' + ({ ble: 'on', wait: 'wait', sim: 'sim' }[mode] || '');
@@ -400,6 +401,9 @@ function setStatus() {
   $('#btnTrainer').textContent = mode === 'ble' || mode === 'wait' ? 'Disconnect' : again ? 'Reconnect' : 'Connect';
   $('#btnTrainer').title = again ? `Reconnect ${d.trainer_name || 'trainer'}` : '';
   $('#btnTrainer').className = mode === 'ble' || mode === 'wait' || mode === 'sim' ? '' : again ? 'pri reconnect' : 'pri';  // simulated: a real trainer is optional
+  $('#btnSim').hidden = mode === 'ble' || mode === 'wait'; $('#btnSim').textContent = mode === 'sim' ? 'Stop' : 'Simulate';
+  $('#simRow').hidden = mode !== 'sim';
+  if (mode === 'sim' && document.activeElement !== $('#simW')) $('#simW').value = d.sim_w ?? simW;
   $('#hDot').className = 'dot ' + (d.hr ? 'on' : d.hr_waiting || d.hr_name ? 'wait' : '');
   $('#hTxt').textContent = d.hr ? `HR ${d.hr}` : d.hr_state === 'waiting_heartbeat' ? 'Strap found, waiting for heartbeat (wet the contacts)' : d.hr_state === 'connecting' ? 'HR connecting…' : d.hr_waiting || d.hr_name ? 'HR waiting' : 'HR off';
   $('#btnHR').textContent = d.hr_name ? 'Disconnect' : d.reconnect?.hr ? 'Reconnect' : 'Connect';
@@ -434,6 +438,12 @@ $('#btnTrainer').onclick = () => {
   else if (WEB) apiJson('/api/devices', { action: 'choose', kind: 'trainer' }).catch(e => { if (!/cancel/i.test(e.message)) toast(e.message); });  // browser chooser
   else openDevices('trainer');
 };
+// simulated trainer: no bike needed, the power is whatever is set here
+const setSimW = w => { simW = Math.max(0, Math.min(1500, Math.round(w) || 0)); $('#simW').value = simW; apiJson('/api/devices', { action: 'sim', kind: 'trainer', power: simW }).catch(e => toast(e.message)); };
+const simStep = dw => S?.devices?.trainer === 'sim' && setSimW((S.devices.sim_w ?? simW) + dw);
+$('#btnSim').onclick = () => S?.devices?.trainer === 'sim' ? apiJson('/api/devices', { action: 'sim', kind: 'trainer', on: false }).catch(e => toast(e.message)) : setSimW(simW);
+$('#simDn').onclick = () => simStep(-10); $('#simUp').onclick = () => simStep(10);
+$('#simW').onchange = e => setSimW(+e.target.value);
 $('#btnHR').onclick = () => {
   if (S?.devices?.hr_name) apiJson('/api/devices', { action: 'disconnect', kind: 'hr' }).catch(e => toast(e.message));
   else if (WEB) apiJson('/api/devices', { action: 'choose', kind: 'hr' }).catch(e => { if (!/cancel/i.test(e.message)) toast(e.message); });
@@ -794,6 +804,7 @@ const KEYS = {
   Digit1: () => setMode('e'), Digit2: () => setMode('g'), Digit3: () => setMode('r'),
   KeyA: () => sheet(), KeyF: () => courses.map.toggleFocus(), KeyZ: doUndo,
   KeyV: () => courses.map.toggleCamera(), KeyT: () => courses.map.cycleTime(),  // the 3D world
+  Comma: () => simStep(-10), Period: () => simStep(10),  // simulated trainer power
   KeyG: () => courses.map.toggleFog(), KeyM: () => courses.map.toggleSound(), KeyK: () => courses.map.cycleKit(),
 };
 function onKey(e) {

@@ -49,6 +49,7 @@ class DeviceHub:
         self.log = log or (lambda m: None)
         self.r = Readings()
         self.mode = "none"  # none | wait | ble | sim
+        self.sim_w = None  # simulated rider power; None follows the target
         self.trainer: dict | None = None  # {address, name}
         self.hr: dict | None = None
         self.hr_connected = False
@@ -151,7 +152,7 @@ class DeviceHub:
                 "trainer_address": (self.trainer or {}).get("address"),
                 "hr": self.r.hr_src if hr_on else None, "hr_name": (self.hr or {}).get("name"),
                 "hr_connected": self.hr_connected, "hr_waiting": bool(self.r.hr_src) and not hr_on,
-                "hr_state": self.hr_state if self.hr else None,
+                "hr_state": self.hr_state if self.hr else None, "sim_w": self.sim_w,
                 "ble": self.ble_enabled, "error": self.error}
 
     def scan(self, kind: str = "trainer", timeout: float = 5.0) -> list[dict]:
@@ -217,8 +218,10 @@ class DeviceHub:
             if self.r.hr_src not in ("hub", "sim"):
                 self.r.hr_src = None
 
-    def set_sim(self, on: bool) -> None:
+    def set_sim(self, on: bool, w=...) -> None:
         r = self.r
+        if w is not ...:
+            self.sim_w = None if w is None else max(0, min(1500, round(float(w))))
         if on:
             if self.mode in ("ble", "wait"):
                 self.disconnect("trainer")

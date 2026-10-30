@@ -789,9 +789,10 @@ class RideEngine:
         self.sim_t += 1
         want = h.wanted_cmd or {}
         k = want.get("k")
-        tgt = want.get("w", 0) if k == "erg" else 60 + (want.get("r") or 0) * 12 if k == "res" else 150 + (want.get("g") or 0) * 25
-        r.power = max(0, round(r.power + (tgt - r.power) * 0.5 + (self.rng.random() - 0.5) * 18))
-        r.cadence = round(88 + math.sin(self.sim_t / 40) * 4 + (self.rng.random() - 0.5) * 3)
+        sw = getattr(h, "sim_w", None)
+        tgt = sw if sw is not None else want.get("w", 0) if k == "erg" else 60 + (want.get("r") or 0) * 12 if k == "res" else 150 + (want.get("g") or 0) * 25
+        r.power = max(0, round(r.power + (tgt - r.power) * 0.5 + (self.rng.random() - 0.5) * 18)) if tgt else 0  # set to 0 W: coast
+        r.cadence = round(88 + math.sin(self.sim_t / 40) * 4 + (self.rng.random() - 0.5) * 3) if tgt else 0
         r.speed = round((r.power / 0.0055) ** (1 / 3) * 0.1 * 3.6 / 1.6, 1)
         ftp = (self.ride.ftp if self.ride else self.settings().get("ftp")) or 200
         hr_t = 95 + r.power / ftp * 70

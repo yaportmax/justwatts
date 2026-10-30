@@ -308,9 +308,9 @@ export class Engine {
   simStep() {
     const h = this.hub, d = h.r, want = h.wantCmd || {};
     this.simT++;
-    const tgt = want.k === 'erg' ? want.w : want.k === 'res' ? 60 + (want.r || 0) * 12 : 150 + (want.g || 0) * 25;
-    d.power = Math.max(0, jsr(d.power + (tgt - d.power) * 0.5 + (Math.random() - 0.5) * 18));
-    d.cadence = jsr(88 + Math.sin(this.simT / 40) * 4 + (Math.random() - 0.5) * 3);
+    const tgt = h.simW != null ? h.simW : want.k === 'erg' ? want.w : want.k === 'res' ? 60 + (want.r || 0) * 12 : 150 + (want.g || 0) * 25;
+    d.power = tgt ? Math.max(0, jsr(d.power + (tgt - d.power) * 0.5 + (Math.random() - 0.5) * 18)) : 0;  // set to 0 W: coast
+    d.cadence = tgt ? jsr(88 + Math.sin(this.simT / 40) * 4 + (Math.random() - 0.5) * 3) : 0;
     d.speed = +(Math.cbrt(d.power / 0.0055) * 0.1 * 3.6 / 1.6).toFixed(1);
     const ftp = this.ride?.ftp || this.settings().ftp || 200, hrT = 95 + d.power / ftp * 70;
     d.hr = jsr((d.hr || 90) + (hrT - (d.hr || 90)) * 0.04); d.hrLast = d.last = this.clock();

@@ -123,26 +123,30 @@ export function gridHeight(g, px, pz, hs = g.hs) {
 
 // Carve the ridden road in: vertices within r0 metres of the road take its height (projected onto the nearest
 // segment), fading back to the ground by r1. Points far off the ground (a bridge, a tunnel) leave it alone.
-// pts: [[x, z, h], ...] in order along the road. under: other roads [{ pts, r0, r1 }] flattened first (each road
-// level across, so no hump of ground shows through it); the ridden road wins where they meet.
+// pts: [[x, z, h], ...] in order along the road. under: other roads [{ pts, r0, r1, rc }] flattened first (each road
+// level across, so no hump of ground shows through it); the ridden road wins where they meet. g.cut: the vertices the
+// carve lowered by more than 0.8 m (a fill is no cut), and those within rc (if given) of a road standing 1.5 m or more
+// over it and rising from its edge (half: half its width) at 4 in 5 or steeper (a cut bank the heights already have;
+// a natural slope is gentler).
 export function carve(g, pts, r0, r1, under = null) { return drain(carveSteps(g, pts, r0, r1, under)); }
 // the same a slice at a time (a generator yielding every few dozen roads; returns what carve returns)
 export function* carveSteps(g, pts, r0, r1, under = null) {
-  const base = under?.length ? (yield* blend(g, g.raw, under, false)).hs : g.raw;
+  const u = under?.length ? yield* blend(g, g.raw, under, false) : null, base = u ? u.hs : g.raw;
   const r = yield* blend(g, base, [{ pts, r0, r1 }], true);
-  if (under?.length) for (let v = 0; v < r.cut.length; v++) if (Math.abs(r.hs[v] - g.raw[v]) > 0.8) r.cut[v] = 1;
+  if (u) for (let v = 0; v < r.cut.length; v++) if (g.raw[v] - r.hs[v] > 0.8 || u.cut[v]) r.cut[v] = 1;
   g.hs = r.hs; g.cut = r.cut;
   return r.touched;
 }
 // run a generator to its end, its return value
 export function drain(it) { let r; do r = it.next(); while (!r.done); return r.value; }
 function* blend(g, from, lines, check) {
-  const s = g.segs, n = s + 1, best = new Float32Array(n * n).fill(Infinity), bh = new Float32Array(n * n), raw = g.raw, fade = new Float32Array(n * n);
+  const s = g.segs, n = s + 1, best = new Float32Array(n * n).fill(Infinity), bh = new Float32Array(n * n), raw = g.raw, fade = new Float32Array(n * n), bank = new Uint8Array(n * n);
   const x0 = g.xs[0], dx = (g.xs[s] - g.xs[0]) / s, z0 = g.zs[0], dz = (g.zs[s] - g.zs[0]) / s;
   let touched = false;
   let nl = 0;
-  for (const { pts, r0, r1 } of lines) {
+  for (const { pts, r0, r1: rf, rc = 0, half = 0 } of lines) {
     if (++nl % 24 === 0) yield;
+    const r1 = Math.max(rf, rc);
     const lo = Math.min(g.xs[0], g.xs[s]) - r1, hi = Math.max(g.xs[0], g.xs[s]) + r1, zlo = Math.min(g.zs[0], g.zs[s]) - r1, zhi = Math.max(g.zs[0], g.zs[s]) + r1;
     for (let k = 0; k + 1 < pts.length; k++) {
       const p = pts[k], q = pts[k + 1];
@@ -158,17 +162,19 @@ function* blend(g, from, lines, check) {
         const vx = g.xs[i] - p[0], vz = g.zs[j] - p[1], t = L ? Math.max(0, Math.min(1, (vx * ex + vz * ez) / L)) : 0;
         const d = Math.hypot(vx - ex * t, vz - ez * t), v = j * n + i;
         if (d >= r1) continue;
-        const f = d <= r0 ? 1 : 1 - (d - r0) / (r1 - r0);
+        if (d < rc) { const up = raw[v] - (p[2] + (q[2] - p[2]) * t); if (up > 1.5 && up > 0.8 * Math.max(0.5, d - half)) bank[v] = 1; }
+        if (d >= rf) continue;
+        const f = d <= r0 ? 1 : 1 - (d - r0) / (rf - r0);
         if (f > fade[v] || (f === fade[v] && d < best[v])) { fade[v] = f; best[v] = d; bh[v] = p[2] + (q[2] - p[2]) * t; touched = true; }
       }
     }
   }
-  const hs = from.slice(), cut = new Uint8Array(n * n);
+  const hs = from.slice(), cut = bank;
   if (touched) for (let v = 0; v < n * n; v++) {
     const t = fade[v]; if (!t) continue;
     const w = t * t * (3 - 2 * t);
     hs[v] = from[v] + (bh[v] - from[v]) * w;
-    if (Math.abs(hs[v] - raw[v]) > 0.8) cut[v] = 1;
+    if (raw[v] - hs[v] > 0.8) cut[v] = 1;
   }
   return { hs, cut, touched };
 }
@@ -248,10 +254,11 @@ function trisOverlap(A, B) {
 // nearest point less `below`, plus `slope` for every metre past its edge (the ground's triangles are coarser than a path
 // is wide: without this they poke up through it). Every corner of a ground triangle that overlaps a road triangle goes
 // no higher than that road triangle's lowest corner less `below` (else a corner further up a cut slope lifts the
-// triangle over the road's edge between them). Lowers only. Returns how many points came down.
+// triangle over the road's edge between them; cover: false leaves that out, for a trail draped on the ground). Lowers
+// only. Returns how many points came down.
 export function pushUnder(g, tris, opt) { return drain(pushUnderSteps(g, tris, opt)); }
 // the same a slice at a time (a generator yielding every 500 triangles)
-export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.08 } = {}) {
+export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.08, cover = true } = {}) {
   if (g.hs === g.raw) g.hs = g.raw.slice();
   const s = g.segs, n = s + 1, hs = g.hs, lim = new Float32Array(n * n).fill(Infinity);
   const seg = (px, pz, ax, ay, az, bx, by, bz) => {
@@ -277,6 +284,7 @@ export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.
       if (L < lim[v]) lim[v] = L;
     }
     // the ground triangles over it (the mesh's: a c b and b c d of each quad)
+    if (!cover) continue;
     const low = Math.min(ay, by, cy) - below, R = [[ax, az], [bx, bz], [cx, cz]];
     const [qi0, qj0] = gridIJ(g, Math.min(ax, bx, cx), Math.min(az, bz, cz)), [qi1, qj1] = gridIJ(g, Math.max(ax, bx, cx), Math.max(az, bz, cz));
     for (let j = Math.max(0, Math.floor(Math.min(qj0, qj1))); j <= Math.min(s - 1, Math.floor(Math.max(qj0, qj1))); j++) for (let i = Math.max(0, Math.floor(Math.min(qi0, qi1))); i <= Math.min(s - 1, Math.floor(Math.max(qi0, qi1))); i++) {

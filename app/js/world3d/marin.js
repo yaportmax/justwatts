@@ -96,12 +96,30 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     posts.forEach(([x, y, z], i) => pm.setMatrixAt(i, m4.makeTranslation(x, y, z))); pm.computeBoundingSphere(); bridge.add(pm); }
   // towers: two legs each (their inner faces at the roadway's edge, the sidewalks going round them), portal struts above
   // the deck, a pier at the water
+  // Each leg a steel column stepping in as it rises, its corners standing proud of recessed faces with a rib down the
+  // middle of each (the Art Deco fluting seen from the deck), a cap at each step; the portal struts with raised panels.
+  // All of a tower's steel in one mesh.
+  const part = (list, sx, sy, sz, s, t, y, a = 0, b = 0) => { const g = new THREE.BoxGeometry(sx, sy, sz).translate(a, 0, b), m = new THREE.Matrix4().makeRotationY(yaw); m.setPosition(W(s, t, y)); list.push(g.applyMatrix4(m)); };
   for (const s of [-half, half]) {
+    const steel = [];
     for (const t of [-legT, legT]) {
-      for (const [y0, y1, w] of [[0, 70, 9.6], [70, 150, 8.6], [150, GGB.towerTop, 7.4]]) box(w, y1 - y0, w * 1.6, orange, s, t, (y0 + y1) / 2);
+      for (const [y0, y1, w] of [[0, 70, 9.6], [70, 150, 8.6], [150, GGB.towerTop, 7.4]]) {
+        const L = w * 1.6, h = y1 - y0, y = (y0 + y1) / 2, c = w * 0.24;
+        part(steel, w * 0.8, h, L * 0.86, s, t, y);                                                      // the recessed core
+        for (const i of [-1, 1]) for (const k of [-1, 1]) part(steel, c, h, c * 1.3, s, t, y, i * (w - c) / 2, k * (L - c * 1.3) / 2);  // the corners
+        for (const i of [-1, 1]) part(steel, w * 0.12, h, 1.1, s, t, y, i * (w * 0.4 + 0.02), 0);       // a rib down each wide face
+        for (const k of [-1, 1]) part(steel, 1.1, h, L * 0.08, s, t, y, 0, k * (L * 0.43 + 0.02));      // and each narrow face
+        part(steel, w + 0.5, 1.2, L + 0.5, s, t, y1 - 0.6);                                               // the cap at its top
+      }
       box(3.2, 4, 3.2, orangeDark, s, t, GGB.towerTop + 2);
     }
-    for (const y of [deckH(s) - 12, deckH(s) + 40, deckH(s) + 85, deckH(s) + 125, GGB.towerTop - 6]) box(2 * legT, y === GGB.towerTop - 6 ? 9 : 6, 6, orange, s, 0, y);
+    for (const y of [deckH(s) - 12, deckH(s) + 40, deckH(s) + 85, deckH(s) + 125, GGB.towerTop - 6]) {
+      const h = y === GGB.towerTop - 6 ? 9 : 6, len = 2 * legT - 8;
+      part(steel, len, h, 5.4, s, 0, y);
+      for (let k = 0; k < 5; k++) part(steel, len / 5 - 0.9, h * 0.72, 6.2, s, 0, y, -len / 2 + (k + 0.5) * len / 5, 0);  // raised panels both faces
+      part(steel, len, 0.7, 6.6, s, 0, y + h / 2 - 0.35); part(steel, len, 0.7, 6.6, s, 0, y - h / 2 + 0.35);
+    }
+    const tw = new THREE.Mesh(mergeBoxes(steel), orange); tw.castShadow = true; tw.receiveShadow = true; bridge.add(tw);
     box(48, 14, 70, concrete, s, 0, 2);
   }
   // main cables: tower top to tower top sagging to just above the deck, and down the side spans to the anchorages

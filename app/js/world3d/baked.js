@@ -1,10 +1,12 @@
 // The baked Marin world (tools/bake_world.mjs): per Web Mercator tile a gzip file app/world/<z>/<x>_<y>.bin with the
-// tile's ground features (landuse, nature, water, buildings; landuse.js compact form), its power lines ([[lat, lon], ...]) and a height grid at the mesh's
-// vertices (z14: 129 x 129, about 15 m apart; z11: 65 x 65). index.json lists the tiles there are (the rest is sea).
+// tile's ground features (landuse, nature, water, buildings; landuse.js compact form), its power lines ([[lat, lon], ...]), guard rails (lines)
+// car parks (rings) and marked crossings (points) from OpenStreetMap, and a height grid at the mesh's
+// vertices (z14: 257 x 257 from USGS 3DEP lidar, about 7.5 m apart, or 129 x 129 from Terrarium; z11: 65 x 65). index.json
+// lists the tiles there are (the rest is sea).
 // The ride engine's grade (world.js) and the 3D view read the same heights. Pure apart from fetch.
 import { decode, decodeRoads } from './landuse.js';
 
-export const GRID = { 14: 128, 11: 64 };
+export const GRID = { 14: 128, 11: 64 };  // the coarsest grid per zoom (a tile may be finer: its size says)
 
 // pack / unpack one tile: [u32 json length][json][pad][int16 heights in decimetres, each the change from its left
 // neighbour (the first of a row: from the one above)]
@@ -16,12 +18,14 @@ export function packTile(json, hs, n) {
   for (let i = 0; i < n * n; i++) dv.setInt16(off + 2 * i, q[i] - (i % n ? q[i - 1] : i >= n ? q[i - n] : 0), true);
   return buf;
 }
-export function unpackTile(buf, n) {
+// (n: the grid's side, by default from the size of what follows the json)
+export function unpackTile(buf, n = 0) {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength), jl = dv.getUint32(0, true);
   const json = JSON.parse(new TextDecoder().decode(buf.subarray(4, 4 + jl))), off = 4 + jl + ((4 + jl) & 1);
+  n ||= Math.round(Math.sqrt((buf.byteLength - off) / 2));
   const hs = new Float32Array(n * n), q = new Int32Array(n * n);
   for (let i = 0; i < n * n; i++) { q[i] = dv.getInt16(off + 2 * i, true) + (i % n ? q[i - 1] : i >= n ? q[i - n] : 0); hs[i] = q[i] / 10; }
-  return { json, hs };
+  return { json, hs, n };
 }
 
 async function gunzip(r) {
@@ -42,8 +46,8 @@ export function createBaked({ fetch = globalThis.fetch?.bind(globalThis), base =
       for (let i = 0; i < 3; i++) {
         try {
           const r = await fetch(`${base}${z}/${x}_${y}.bin`); if (!r.ok) return null;
-          const n = GRID[z] + 1, { json, hs } = unpackTile(await unzip(r), n);
-          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), roads: decodeRoads(json.r || []), places: json.p || [], power: json.w || [] };
+          const { json, hs, n } = unpackTile(await unzip(r));
+          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), roads: decodeRoads(json.r || []), places: json.p || [], power: json.w || [], rails: json.g || [], lots: json.pk || [], xings: json.x || [] };
         } catch { await new Promise(ok => setTimeout(ok, 500 * 2 ** i)); }
       }
       return null;

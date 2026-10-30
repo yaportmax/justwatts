@@ -38,7 +38,7 @@ vec4 jwVeg(vec2 p) {
 }
 // set by jwGround: how much of the point is coastal scrub from the aerial imagery, and whether there is any there; set
 // before it: how near the point is (1: among the scrub's drawn bushes, its ground the litter and grass under them)
-float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0;
+float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0;
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
   float north = clamp(-n.z * 1.9, 0.0, 1.0) * smoothstep(0.03, 0.22, slope);
@@ -49,6 +49,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // the Headlands' cover from the aerial imagery where there is one (veg.js), the cells' edges broken up a little; its
   // trees in place of OpenStreetMap's woods and scrub there
   vec4 vg = jwVeg(p + (jwN(p / 13.0).ba - 0.5) * 7.0); float known = vg.a;
+  float pav = min(vg.r, min(vg.g, vg.b)); vg.rgb -= pav;  // paving and gravel by the roads (all three at once, veg.js)
   wood = mix(wood, vg.g, known);
   // the open hills: straw, gold and tawny patches
   vec3 straw = srgb(vec3(0.85, 0.75, 0.52)), gold = srgb(vec3(0.76, 0.62, 0.37)), tawny = srgb(vec3(0.62, 0.49, 0.31));
@@ -67,7 +68,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // San Francisco seen across the strait: the city's speckle of roofs, streets and gardens (its blocks are too small
   // to survive into the distant tiles, which would leave it golden hills)
   float sf = step(sfBox.x, p.x) * step(p.x, sfBox.z) * step(sfBox.y, p.y) * step(p.y, sfBox.w);
-  c = mix(c, mix(srgb(vec3(0.63, 0.61, 0.57)), srgb(vec3(0.40, 0.45, 0.33)), step(0.56, fine * 0.7 + small * 0.3)), sf * 0.85);
+  c = mix(c, mix(srgb(vec3(0.56, 0.56, 0.54)), srgb(vec3(0.30, 0.36, 0.27)), step(0.5, fine * 0.7 + small * 0.3)), sf * 0.9);
   c *= 0.9 + 0.2 * fine;
   // green: shaded north slopes, hollows and gullies, parks and lawns, the damp coast
   float moist = north * 0.72 + max(cv, 0.0) * 1.3 - max(-cv, 0.0) * 0.5 + (big - 0.5) * 0.35 + (mid - 0.5) * 0.25 + green * 1.1 + town * 0.35;
@@ -98,6 +99,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     scrC = mix(scrC, scrC * 0.72, jwNear);  // near the camera its bushes stand on it: the shade under them
     vec3 bareC = mix(srgb(vec3(0.49, 0.43, 0.37)), srgb(vec3(0.57, 0.46, 0.37)), smoothstep(0.3, 0.7, fine));
     vec3 d = mix(grassC, scrC, sc); d = mix(d, bareC, br); d = mix(d, srgb(vec3(0.24, 0.22, 0.17)), tr);
+    // the pullouts, car parks and gravel shoulders: pale grey, a little warm, mottled
+    d = mix(d, mix(srgb(vec3(0.47, 0.46, 0.43)), srgb(vec3(0.58, 0.56, 0.51)), smoothstep(0.3, 0.7, fine * 0.7 + small * 0.3)), smoothstep(0.25, 0.65, pav));
     c = mix(c, d * (0.92 + 0.16 * fine), known * (1.0 - town * 0.6));
     jwScrub = sc * known * (1.0 - br) * (1.0 - tr);
   }
@@ -108,8 +111,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
   c = mix(c, rockC, rk);
   float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.92, hl) * mix(1.0, smoothstep(0.1, 0.3, slope) * mix(0.4, 1.0, smoothstep(0.1, 0.5, vg.b)), jwKnown);  // the Headlands' road cuts bare even where the grid softens them (where the imagery says what grows there: the steep cuts, fully where it shows bare earth)
-  c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), srgb(vec3(0.60, 0.36, 0.26)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: red chert
-  rk = max(rk, bare);
+  c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), mix(srgb(vec3(0.50, 0.39, 0.34)), srgb(vec3(0.59, 0.45, 0.38)), smoothstep(0.3, 0.7, small)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: red chert, weathered (USDA NAIP's bare red earth, about #8e7a70)
+  rk = max(rk, bare); jwPav = smoothstep(0.25, 0.65, pav) * known;
   // under the redwoods: red-brown needle litter, patches of sorrel
   float rw = 0.0;
   for (int i = 0; i < 4; i++) rw = max(rw, step(rwBox[i].x, p.x) * step(p.x, rwBox[i].z) * step(rwBox[i].y, p.y) * step(p.y, rwBox[i].w));
@@ -152,7 +155,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         // hollows a little darker (sky light does not reach the bottom of a gully)
         c *= 1.0 - clamp(vCv, 0.0, 1.0) * 0.25;
         // past the grass: the hills mottled, dots of scrub and their shade, drier and greener patches
-        { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk) * (1.0 - jwKnown * 0.75);
+        { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk) * (1.0 - jwKnown * 0.75) * (1.0 - jwPav);
           vec4 ms = jwN(vW.xz / 19.0 + 0.21); float sp = ms.g, sp2 = ms.r, pt = jwN(vW.xz / 2400.0 + 0.53).r;
           c *= 1.0 - far * open * (0.22 * smoothstep(0.6, 0.78, sp) + 0.12 * smoothstep(0.58, 0.8, sp2));
           c = mix(c, c * vec3(0.9, 1.0, 0.82), far * open * 0.6 * smoothstep(0.5, 0.75, pt));
@@ -162,7 +165,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         float near = 1.0 - smoothstep(40.0, 260.0, dist);
         float f1 = jwN(vW.xz / 9.0).r, f2 = jwN(mat2(0.8, 0.6, -0.6, 0.8) * vW.xz / 2.3).g;
         c *= 1.0 + near * ((f1 - 0.5) * 0.16 + (f2 - 0.5) * 0.1 * (1.0 - rk * 0.5));
-        float hb = f1 * 0.35 + f2 * 0.3 + rk * jwN(vW.xz / 1.1).b * 0.6 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
+        float hb = (f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * jwN(vW.xz / 1.1).b * 0.6 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
         vec3 dpx = dFdx(vW), dpy = dFdy(vW); float dhx = dFdx(hb), dhy = dFdy(hb);
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
         vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.55 + rk) * near;
@@ -214,6 +217,23 @@ export function grassMaterial() {
 
 // road attributes rd = [marking, surface, lanes, width], rd2 = [a, b, pL, pR] (ribbon.js roadStyle); uv: across 0..1
 // from the right edge, metres along
+// a bike lane's symbol (a bicycle and its rider, an arrow ahead), white on the road: q in metres, x across the lane, y
+// along it (the arrow toward +y); coverage 0..1 over antialiasing width aa
+const GLSL_BIKE = /* glsl */`
+float jwSeg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)); }
+float jwBike(vec2 q, float aa) {
+  q = q / 0.75 + vec2(0.35, 0.6);
+  float d = min(abs(length(q - vec2(0.0, -0.55)) - 0.3), abs(length(q - vec2(0.0, 0.55)) - 0.3));
+  d = min(d, min(jwSeg(q, vec2(0.0, -0.55), vec2(0.42, -0.18)), jwSeg(q, vec2(0.42, -0.18), vec2(0.0, -0.02))));
+  d = min(d, min(jwSeg(q, vec2(0.0, -0.02), vec2(0.0, 0.55)), jwSeg(q, vec2(0.0, -0.02), vec2(0.42, 0.33))));
+  d = min(d, min(jwSeg(q, vec2(0.42, -0.18), vec2(0.42, 0.33)), jwSeg(q, vec2(0.42, 0.33), vec2(0.0, 0.55))));
+  d = min(d, min(jwSeg(q, vec2(0.52, -0.16), vec2(0.88, 0.16)), jwSeg(q, vec2(0.84, 0.18), vec2(0.5, 0.42))));
+  d = min(d, abs(length(q - vec2(1.04, 0.2)) - 0.06));
+  d = min(d, jwSeg(q, vec2(0.25, 1.15), vec2(0.25, 1.85)));
+  d = min(d, min(jwSeg(q, vec2(0.25, 2.15), vec2(0.0, 1.8)), jwSeg(q, vec2(0.25, 2.15), vec2(0.5, 1.8))));
+  return 1.0 - smoothstep(0.045, 0.045 + aa / 0.75, d);
+}
+`;
 export function roadMaterial() {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   const T = textures();
@@ -223,7 +243,7 @@ export function roadMaterial() {
       .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec4 rd2;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON)
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_BIKE)
       .replace('#include <color_fragment>', /* glsl */`
         float lm = floor(vRd.x + 0.5), surf = floor(vRd.y + 0.5), lanes = floor(vRd.z + 0.5), W = vRd.w;
         float along = vRuv.y, x = (vRuv.x - 0.5) * W, ax = abs(x);
@@ -270,6 +290,13 @@ export function roadMaterial() {
           float lw = (tb - ta) / lanes, dash = step(fract(along / 12.0), 0.3);
           for (int i = 1; i < 6; i++) { if (float(i) >= lanes) break; ln1 = max(ln1, LN(ta + lw * float(i), 0.06)); }
           line = max(line, ln1 * dash);
+        }
+        // the bike lanes' symbols every 150 m, each pointing the way its lane runs (the right one with the way, the left
+        // one against it)
+        if (lm >= 1.0) {
+          float pr = vRd2.w, pl = vRd2.z, rl = W - pl;
+          if (ta - pr > 1.2 && r > pr && r < ta) line = max(line, jwBike(vec2(r - (pr + ta) * 0.5, mod(along, 150.0) - 75.0), aa));
+          if (rl - tb > 1.2 && r > tb && r < rl) line = max(line, jwBike(vec2((tb + rl) * 0.5 - r, 75.0 - mod(along + 40.0, 150.0)), aa));
         }
         float fade = wear * (1.0 - smoothstep(0.25, 0.6, aa));  // lines fade where they would shimmer
         c = mix(c, srgb(vec3(0.86, 0.68, 0.22)), yel * 0.92 * fade);

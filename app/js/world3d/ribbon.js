@@ -84,8 +84,9 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
 
 // Add one ribbon to builder B. pts: [[x, z], ...]; hAt(x, z): ground height (null: unknown, the last known is kept);
 // deck: [h0, h1] the heights at the two ends (a bridge), else the ground under each edge; joints: where it eases to
-// another way's width (tapers). Returns the centre line [[x, y, z, half width], ...] (for pillars, arrows, the rails).
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null }) {
+// another way's width (tapers); drape: the edges on the ground however steep it is across (a trail on a hillside).
+// Returns the centre line [[x, y, z, half width], ...] (for pillars, arrows, the rails).
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false }) {
   const P = resample(pts, step), n = P.length; if (n < 2) return [];
   let code = [lm, surf, lanes, w, a, b, pL, pR];
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
@@ -109,7 +110,7 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
       hc = hAt(c[0], c[1]); hl = hAt(c[0] + nx, c[1] + nz); hr = hAt(c[0] - nx, c[1] - nz);
       if (hc == null) hc = last; if (hl == null) hl = hc; if (hr == null) hr = hc;
       // a road's crossfall: the edges within a few per cent of the centre (a steep bank beside it never tips the edge up)
-      const cf = Math.max(0.25, half * 0.07); hl = Math.max(hc - cf, Math.min(hc + cf, hl)); hr = Math.max(hc - cf, Math.min(hc + cf, hr));
+      const cf = drape ? Infinity : Math.max(0.25, half * 0.07); hl = Math.max(hc - cf, Math.min(hc + cf, hl)); hr = Math.max(hc - cf, Math.min(hc + cf, hr));
     }
     last = hc;
     B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);

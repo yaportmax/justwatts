@@ -34,9 +34,13 @@ export function createHorizon(renderer, scene, sunDir) {
   const qScene = new THREE.Scene(); qScene.add(quad);
   let at = null, nat = null, sun = new THREE.Vector3(), dirty = true, last = 0;
   HORIZON.map.value = vis.texture; HORIZON.heights.value = heights.texture; HORIZON.near.value = nearT.texture;
+  // the scene's lights in its passes too: three sets a scene's lights up after its shadow map, from the scene's last
+  // render, so a pass without them had the next shadow map's programs built again for no lights (a quarter-second
+  // hold a few seconds into every ride); the shadow map itself waits for the frame's own render
+  scene.traverse(o => { if (o.isLight) o.layers.enable(HZ_LAYER); });
   function draw(cx, cz) {
-    const prev = renderer.getRenderTarget(), au = renderer.shadowMap.autoUpdate, ac = renderer.autoClear, cc = renderer.getClearColor(new THREE.Color()), ca = renderer.getClearAlpha(), tm = renderer.toneMapping;
-    renderer.shadowMap.autoUpdate = false; renderer.autoClear = true; renderer.toneMapping = THREE.NoToneMapping; renderer.setClearColor(0x000000, 1);
+    const prev = renderer.getRenderTarget(), au = renderer.shadowMap.autoUpdate, nu = renderer.shadowMap.needsUpdate, ac = renderer.autoClear, cc = renderer.getClearColor(new THREE.Color()), ca = renderer.getClearAlpha(), tm = renderer.toneMapping;
+    renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = false; renderer.autoClear = true; renderer.toneMapping = THREE.NoToneMapping; renderer.setClearColor(0x000000, 1);
     cam.position.set(cx, 4000, cz); cam.lookAt(cx, 0, cz); cam.updateMatrixWorld();
     const ov = scene.overrideMaterial, fog = scene.fog, bg = scene.background; scene.overrideMaterial = hMat; scene.fog = null; scene.background = null;
     renderer.setRenderTarget(heights); renderer.render(scene, cam);
@@ -46,7 +50,7 @@ export function createHorizon(renderer, scene, sunDir) {
     const hl = Math.hypot(sunDir.x, sunDir.z) || 1e-6, k = 1 / HZ_RES;
     walk.uniforms.step.value.set(sunDir.x / hl * k, -sunDir.z / hl * k); walk.uniforms.tanSun.value = sunDir.y / hl;
     renderer.setRenderTarget(vis); renderer.render(qScene, cam);
-    renderer.setRenderTarget(prev); renderer.shadowMap.autoUpdate = au; renderer.autoClear = ac; renderer.setClearColor(cc, ca); renderer.toneMapping = tm;
+    renderer.setRenderTarget(prev); renderer.shadowMap.autoUpdate = au; renderer.shadowMap.needsUpdate = nu; renderer.autoClear = ac; renderer.setClearColor(cc, ca); renderer.toneMapping = tm;
     HORIZON.box.value.set(cx - HZ_SIZE / 2, cz + HZ_SIZE / 2, 1 / HZ_SIZE, 0); HORIZON.nearBox.value.set(cx - NEAR / 2, cz + NEAR / 2, 1 / NEAR, 0);
     at = [cx, cz]; nat = [cx, cz]; sun.copy(sunDir); dirty = false;
   }

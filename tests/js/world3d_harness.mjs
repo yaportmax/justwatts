@@ -8,7 +8,7 @@ import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texg
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan, carStep } from '../../app/js/world3d/life.js';
 import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, TAPER } from '../../app/js/world3d/ribbon.js';
-import { parseVeg, makeVeg, SCRUB, GRASS } from '../../app/js/world3d/veg.js';
+import { parseVeg, makeVeg, SCRUB, GRASS, PAVED } from '../../app/js/world3d/veg.js';
 import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
@@ -54,14 +54,25 @@ out.mesh = { tris: m.idx.length / 3, verts: m.pos.length / 3, up, down, skipTris
 const zMid = (g.zs[0] + g.zs[16]) / 2, road = [[g.xs[0], zMid, 105], [g.xs[16], zMid, 360.5]];
 const raw = g.hs.slice(); carve(g, road, 12, 40);
 const jm = Math.round(8), on = g.hs[jm * 17 + 4], off = g.hs[0 * 17 + 4];
-out.carve = { on: r3(on), rawOn: r3(raw[jm * 17 + 4]), off: r3(off), rawOff: r3(raw[4]), bridgeTouched: carve(makeGrid({ z: Z, x: X, y: Y, segs: 16, sample: S, proj }), [[g.xs[0], zMid, 600], [g.xs[16], zMid, 600]], 12, 40) };
+out.carve = { on: r3(on), rawOn: r3(raw[jm * 17 + 4]), off: r3(off), rawOff: r3(raw[4]), bridgeTouched: carve(makeGrid({ z: Z, x: X, y: Y, segs: 16, sample: S, proj }), [[g.xs[0], zMid, 600], [g.xs[16], zMid, 600]], 12, 40), fillCut: g.cut[jm * 17 + 4] };
+// a road 5 m under a level ground (a cut), and one on it with a wall of ground beside it: the carve's cut, and the bank
+// the heights already have (steep beside it: a cut; gentle: not)
+{ const flat = (h, f) => { const g3 = makeGrid({ z: Z, x: X, y: Y, segs: 16, sample: S, proj }); for (let v = 0; v < g3.hs.length; v++) g3.hs[v] = g3.raw[v] = f(v); return g3; };
+  const step = Math.abs(g.zs[9] - g.zs[8]), line = h => [{ pts: [[g.xs[0], g.zs[8], h], [g.xs[16], g.zs[8], h]], r0: 6, r1: 20, rc: step * 1.5, half: 3 }];
+  const cutG = flat(0, () => 50); carve(cutG, [], 0, 1, line(45));
+  const steep = flat(0, v => (Math.floor(v / 17) === 7 ? 50 + step : 50)), gentle = flat(0, v => (Math.floor(v / 17) === 7 ? 50 + step * 0.4 : 50));
+  carve(steep, [], 0, 1, [{ ...line(50)[0], r0: 1, r1: 2 }]); carve(gentle, [], 0, 1, [{ ...line(50)[0], r0: 1, r1: 2 }]);
+  out.cuts = { cut: cutG.cut[8 * 17 + 4], steep: steep.cut[7 * 17 + 4], gentle: gentle.cut[7 * 17 + 4], far: steep.cut[2 * 17 + 4] }; }
 // the ground under a road's top: a 4 m wide road 3 m under the ground across the middle row of the tile; the row under
 // it comes down to just under it, the next rows only as far as the rise allowed from its edge, far rows not at all
 { const g2 = makeGrid({ z: Z, x: X, y: Y, segs: 16, sample: S, proj }), zc = g2.zs[8], x0 = g2.xs[0], x1 = g2.xs[16], y = 50;
   for (let v = 0; v < g2.hs.length; v++) g2.hs[v] = y + 3;
   const T = [x0, y, zc - 2, x1, y, zc - 2, x1, y, zc + 2, x0, y, zc - 2, x1, y, zc + 2, x0, y, zc + 2], step = Math.abs(g2.zs[9] - g2.zs[8]);
   const moved = pushUnder(g2, T, { margin: step * 1.2, slope: 0.02 });  // this tile's rows are 120 m apart
-  out.pushUnder = { moved, on: r3(g2.hs[8 * 17 + 5]), next: r3(g2.hs[9 * 17 + 5]), far: r3(g2.hs[2 * 17 + 5]), step: r3(step) }; }
+  out.pushUnder = { moved, on: r3(g2.hs[8 * 17 + 5]), next: r3(g2.hs[9 * 17 + 5]), far: r3(g2.hs[2 * 17 + 5]), step: r3(step) };
+  // a trail (cover: false): only the ground at its own points comes down, not the whole triangles across it
+  for (let v = 0; v < g2.hs.length; v++) g2.hs[v] = y + 3;
+  out.trailPush = { moved: pushUnder(g2, T, { margin: 0.6, slope: 1, cover: false }), next: r3(g2.hs[9 * 17 + 5]) }; }
 // classes: a wood square in the middle of the tile, a beach inside it wins (later class)
 const box = (s, w, n, e) => [[s, w], [s, e], [n, e], [n, w], [s, w]];
 const la = i => latOf(Y + i / 16, Z), lo = i => lonOf(X + i / 16, Z);
@@ -73,6 +84,10 @@ out.coarse = { segs: gf.segs, n: gf.hs.length, corner: r3(gf.hs[4]), same: r3(g.
 /* ---------- roads ---------- */
 const B = builder();
 const centre = ribbon(B, [[0, 0], [0, -20]], { w: 6, lm: 2, lanes: 2, hAt: (x, z) => 10 + x * 0.1, lift: 0.25, step: 5 });
+// a trail across a 1 in 1 hillside: draped, its edges on the ground; a road there stays level across within its crossfall
+{ const T1 = builder(), T2 = builder(), hill = (x, z) => 10 + x;
+  ribbon(T1, [[0, 0], [0, -20]], { w: 2, surf: 2, hAt: hill, lift: 0.15, drape: true }); ribbon(T2, [[0, 0], [0, -20]], { w: 2, hAt: hill, lift: 0.15 });
+  const a1 = T1.done().pos, a2 = T2.done().pos; out.drape = { trail: r3(Math.abs(a1[1] - a1[4])), road: r3(Math.abs(a2[1] - a2[4])) }; }
 const d = B.done(), ys = [], xs = [];
 for (let i = 0; i < d.pos.length; i += 3) { xs.push(r3(d.pos[i])); ys.push(r3(d.pos[i + 1])); }
 let faceUp = 0; for (let t = 0; t < d.idx.length; t += 3) {
@@ -127,6 +142,9 @@ out.jobs = { first, left, ran };
 const hs = new Float32Array(17 * 17).map((_, i) => 100 + (i % 17) * 1.25 - Math.floor(i / 17) * 0.75 + (i === 40 ? -150.3 : 0));
 const packed = packTile({ f: [[1, [[1, 2, 3, 4]]]] }, hs, 17), un = unpackTile(packed, 17);
 out.baked = { json: un.json, maxErr: Math.max(...hs.map((h, i) => Math.abs(h - un.hs[i]))), bytes: packed.length, at: r3(gridAt(un.hs, 17, 2.5, 0)), corner: r3(gridAt(un.hs, 17, 0, 0)) };
+// a tile's grid side from its own size (the lidar's tiles are finer than Terrarium's)
+{ const fine = new Float32Array(33 * 33).map((_, i) => 20 + (i % 33) * 0.5), u2 = unpackTile(packTile({ r: [] }, fine, 33)), u3 = unpackTile(packed);
+  out.bakedSide = { fine: u2.n, coarse: u3.n, last: r3(u2.hs.at(-1)) }; }
 
 /* ---------- rider ---------- */
 const hip = [BIKE.saddle[1], BIKE.saddle[2]], feet = [[0.12, 0.2], [0.46, 0.02], [0.3, -0.15]];
@@ -278,7 +296,8 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   new DataView(buf.buffer).setUint32(0, head.length, true); buf.set(head, 4); buf.set(cls, 4 + head.length + pad);
   const v = parseVeg(buf), rgba = v.rgba(), proj = makeProj(37.805, -122.595), at = (x, z) => v.at(proj.lat(z), proj.lon(x));
   const b1 = cellBushes(-3, -2, at), b2 = cellBushes(-3, -2, at), west = cellBushes(-10, 0, at), east = cellBushes(8, 0, at);
-  out.veg = { west: v.at(37.805, -122.598), east: v.at(37.805, -122.591), outside: v.at(37.9, -122.598), rgba: [...rgba.slice(0, 4)], rgbaEast: [...rgba.slice(4 * (n - 1), 4 * n)],
+  const paved = makeVeg([37.8, -122.6, 37.81, -122.59], 1, Uint8Array.of(PAVED)).rgba();
+  out.veg = { west: v.at(37.805, -122.598), east: v.at(37.805, -122.591), outside: v.at(37.9, -122.598), rgba: [...rgba.slice(0, 4)], rgbaEast: [...rgba.slice(4 * (n - 1), 4 * n)], paved: [...paved],
     same: JSON.stringify(b1) === JSON.stringify(b2), westN: west.length, eastN: east.length, onScrub: west.every(([x, z]) => at(x, z) === SCRUB),
     perCell: SCRUB_CELL * SCRUB_CELL, scales: [r3(Math.min(...west.map(q => q[2]))), r3(Math.max(...west.map(q => q[2])))] };
 }

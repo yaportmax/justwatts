@@ -86,4 +86,4 @@ def test_the_golden_gate_bridge_course_rides_on_its_deck(out):
     assert g["d"] > 2800 and g["deck"] > 260                      # Vista Point to the south end: 2.7 km on the deck, unbroken
     assert g["sMin"] < -1250 and g["sMax"] > 1350                  # from the south abutment to Vista Point
     assert g["worst"] < 0.6                                        # every point at the deck's own height (ggb.js)
-    assert 66 < g["mid"] < 70                                      # mid span about 68 m up, not the sea floor
+    assert 69 < g["mid"] < 73                                      # mid span about 71 m up, not the sea floor

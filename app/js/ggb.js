@@ -25,10 +25,11 @@ export function centreT(s) {
   let i = 1; while (C[i][0] < s) i++;
   return C[i - 1][1] + (C[i][1] - C[i - 1][1]) * (s - C[i - 1][0]) / (C[i][0] - C[i - 1][0]);
 }
-// The roadway's height at s: a straight line between the ground at the two ends (the DEM at the south abutment and
-// at Vista Point), with a crown over the suspended spans (6 m at mid span, easing to none at the anchorages): about
-// 68 m at mid span, the deck's underside some 60 m over the water. Grades stay under 1.6 %.
-export const H0 = 53.8, H1 = 71.3;
+// The roadway's height at s: a straight line between the ground at the two ends (USGS 3DEP lidar: the toll plaza's
+// roadway at the south abutment, the road at Vista Point), with a crown over the suspended spans (6 m at mid span,
+// easing to none at the anchorages): about 71 m at mid span, the deck's underside some 63 m over the water. Grades
+// stay under 1.6 %.
+export const H0 = 56.2, H1 = 74.2;
 export function deckH(s) {
   const c = Math.max(-1, Math.min(1, s / 985)), k = Math.cos(c * Math.PI / 2);
   return H0 + (H1 - H0) * (Math.max(GGB.span[0], Math.min(GGB.span[1], s)) - GGB.span[0]) / (GGB.span[1] - GGB.span[0]) + 6 * k * k;

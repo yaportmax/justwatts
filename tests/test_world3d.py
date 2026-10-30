@@ -31,6 +31,16 @@ def test_carve_puts_the_ground_under_the_ridden_road(out):
     assert c["on"] == pytest.approx(168.875) and c["rawOn"] == 163.5          # on the road: the road's height
     assert c["off"] == c["rawOff"]                                            # far from it: the ground
     assert c["bridgeTouched"] is False                                        # 400 m above the ground: a bridge, no carve
+    assert c["fillCut"] == 0                                                  # raised to the road: a fill, not a cut bank
+    k = out["cuts"]
+    assert k["cut"] == 1 and k["steep"] == 1                                  # lowered 5 m; a wall of ground beside the road
+    assert k["gentle"] == 0 and k["far"] == 0                                 # a gentle rise, or far away: no cut
+
+
+def test_trails_lie_on_the_hillside(out):
+    assert out["drape"]["trail"] == 2 and out["drape"]["road"] == 0.5         # edges on a 1 in 1 slope; a road's crossfall capped
+    assert out["trailPush"]["moved"] == 17 and out["trailPush"]["next"] == 53  # only the row under a trail comes down, not the
+                                                                                # rows whose triangles cross it (a road: 3 rows)
 
 
 def test_the_ground_stays_under_the_roads(out):
@@ -77,6 +87,7 @@ def test_ground_cover_and_scrub(out):
     v = out["veg"]
     assert v["west"] == 2 and v["east"] == 1 and v["outside"] == 0             # scrub west, grass east, nothing outside
     assert v["rgba"] == [255, 0, 0, 255] and v["rgbaEast"] == [0, 0, 0, 255]
+    assert v["paved"] == [255, 255, 255, 255]                                 # paving: all three channels (the shader's sign)
     assert v["same"] and v["onScrub"] and v["eastN"] == 0                      # bushes on scrub only, the same every time
     assert 0.6 * 164 < v["westN"] <= 169 and 0.45 <= v["scales"][0] < v["scales"][1] <= 1.75  # about a bush every 2.5 m
 
@@ -112,6 +123,7 @@ def test_baked_tile_format(out):
     b = out["baked"]
     assert b["json"] == {"f": [[1, [[1, 2, 3, 4]]]]} and b["maxErr"] < 0.0501 and b["corner"] == 100
     assert b["at"] == pytest.approx(103.15, abs=0.06)
+    assert out["bakedSide"] == {"fine": 33, "coarse": 17, "last": 36}           # the side read from the tile's own size
 
 
 def test_legs_keep_their_length(out):

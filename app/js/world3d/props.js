@@ -203,14 +203,15 @@ export function treeGeometries() {
 // 1.4 m tall, and California sage, lower, softer and grey-green; each in full near the camera and with fewer, bigger
 // cards further out. Colours from the aerial imagery's scrub (USDA NAIP, about #50624b), the atlas's light on top.
 export function scrubGeometries() {
-  const brush = col(0x5b7042, 1.3), sage = col(0x838e6c, 1.3);
+  // the bushes broad and low, their cores not much darker than their leaves (a cover with no black between the bushes)
+  const brush = col(0x5f7445, 1.3), sage = col(0x878f72, 1.3);
   return {
-    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.36), M(0, 0.58, 0, 0.95, 0.5, 0.86), { soft: [0, 0.58, 0], shade: [0.08, 1.08] }], ...lumps(0, 0.72, 0, 1.4, 0.78, 1.28, 5, 13, 0.85, LEAF.scrub, 21, { lift: 0.5, lump: 0.6, out: 0.7 }).map(g => leaves(g, brush))]),
-    brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.25, 23), brush.map(v => v * 0.62), M(0, 0.62, 0, 1.3, 0.72, 1.18), { soft: [0, 0.62, 0], shade: [0, 1.3] }],
-      ...lumps(0, 0.75, 0, 1.4, 0.75, 1.28, 3, 6, 1.35, LEAF.scrub, 21, { lift: 0.5, lump: 0.65 }).map(g => leaves(g, brush))]),
-    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.4), M(0, 0.42, 0, 0.78, 0.36, 0.72), { soft: [0, 0.42, 0], shade: [0.06, 0.78] }], ...lumps(0, 0.5, 0, 1.2, 0.55, 1.1, 4, 13, 0.8, LEAF.scrub, 25, { lift: 0.7, lump: 0.6, out: 0.7 }).map(g => leaves(g, sage))]),
-    sageLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.2, 27), sage.map(v => v * 0.62), M(0, 0.45, 0, 1.1, 0.52, 1.0), { soft: [0, 0.45, 0], shade: [0, 0.95] }],
-      ...lumps(0, 0.5, 0, 1.2, 0.55, 1.1, 3, 5, 1.2, LEAF.scrub, 25, { lift: 0.7, lump: 0.65 }).map(g => leaves(g, sage))]),
+    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.55), M(0, 0.5, 0, 1.15, 0.45, 1.05), { soft: [0, 0.5, 0], shade: [0.3, 1.0] }], ...lumps(0, 0.62, 0, 1.6, 0.62, 1.5, 6, 12, 0.85, LEAF.scrub, 21, { lift: 0.45, lump: 0.7, out: 0.8 }).map(g => leaves(g, brush))]),
+    brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.25, 23), brush.map(v => v * 0.72), M(0, 0.55, 0, 1.5, 0.6, 1.4), { soft: [0, 0.55, 0], shade: [0.3, 1.2] }],
+      ...lumps(0, 0.66, 0, 1.6, 0.62, 1.5, 3, 6, 1.35, LEAF.scrub, 21, { lift: 0.45, lump: 0.7 }).map(g => leaves(g, brush))]),
+    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.6), M(0, 0.38, 0, 0.95, 0.33, 0.88), { soft: [0, 0.38, 0], shade: [0.3, 0.8] }], ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 5, 12, 0.8, LEAF.scrub, 25, { lift: 0.65, lump: 0.7, out: 0.8 }).map(g => leaves(g, sage))]),
+    sageLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.2, 27), sage.map(v => v * 0.72), M(0, 0.42, 0, 1.25, 0.47, 1.15), { soft: [0, 0.42, 0], shade: [0.3, 0.95] }],
+      ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 3, 5, 1.2, LEAF.scrub, 25, { lift: 0.65, lump: 0.7 }).map(g => leaves(g, sage))]),
   };
 }
 
@@ -226,6 +227,14 @@ export function furnitureGeometries() {
     post: merge([[B(0.1, 0.78, 0.15, 0, 0.39, 0), steel], [B(0.07, 0.3, 0.15, 0.06, 0.66, 0), steel]]),
     pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),
     lamp: merge([[C(0.1, 0.07, 6.6), dark], [B(1.9, 0.08, 0.1, 0.95, 6.5, 0), dark], [B(0.6, 0.14, 0.26, 1.85, 6.42, 0), dark], [B(0.5, 0.03, 0.2, 1.85, 6.34, 0), lampC, null, { tag: 2 }]]),
+    // painted on a stop's way in (flat on the road, the driver's right +x, toward the junction -z): the stop bar across a
+    // lane, and STOP in block letters 2.4 m long
+    stopbar: merge([[B(3.2, 0.012, 0.45), white]]),
+    stopword: merge(stopWord().map(g => [g, white])),
+    // a marked crossing: bars 0.5 m wide along the road (+z), 2.8 m long, 1.1 m apart across a road of up to 8 m
+    xwalk: merge(Array.from({ length: 7 }, (_, i) => [B(0.5, 0.012, 2.8, (i - 3) * 1.1, 0, 0), white])),
+    // a flexible delineator post on the centre line: yellow, two white reflective bands
+    delin: merge([[C(0.045, 0.04, 0.95, 8), col(0xd9b21c)], ...[0.72, 0.84].map(y => [new THREE.CylinderGeometry(0.047, 0.047, 0.06, 8).translate(0, y, 0), white])]),
     stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [octagon, red], [new THREE.CylinderGeometry(0.33, 0.33, 0.035, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.04), white], [B(0.5, 0.12, 0.04, 0, 2.2, 0.06), red]]),
     limit: merge([[C(0.035, 0.035, 2.4, 6), grey], [B(0.6, 0.76, 0.03, 0, 2.15, 0.03), white], [B(0.5, 0.06, 0.035, 0, 2.38, 0.04), dark], [B(0.3, 0.26, 0.035, 0, 2.05, 0.04), dark]]),
     fence: merge([[B(0.12, 1.25, 0.12, 0, 0.62, 0), wood], [B(0.12, 1.25, 0.12, 3, 0.62, 0), wood], ...[0.45, 0.8, 1.12].map(y => [B(3, 0.1, 0.04, 1.5, y, 0.06), wood])]),
@@ -233,6 +242,16 @@ export function furnitureGeometries() {
     signal: merge([[C(0.1, 0.08, 4.4), grey], ...signalHead(3.55)]),
     signalHead: merge(signalHead(0)),
   };
+  // STOP in block strokes: each letter 0.55 m wide and 2.4 m long (its top toward -z), 0.12 m strokes, 0.2 m apart
+  function stopWord() {
+    const L = { S: [[0, 0, 1, 0], [0, 0, 0, 0.5], [0, 0.5, 1, 0.5], [1, 0.5, 1, 1], [0, 1, 1, 1]], T: [[0, 0, 1, 0], [0.5, 0, 0.5, 1]],
+      O: [[0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 0, 1]], P: [[0, 0, 1, 0], [1, 0, 1, 0.5], [0, 0.5, 1, 0.5], [0, 0, 0, 1]] };
+    const w = 0.55, h = 2.4, t = 0.12, out = [];
+    [...'STOP'].forEach((ch, k) => { const x0 = (k - 1.5) * (w + 0.2) - w / 2;
+      for (const [a, b, c, d] of L[ch]) { const xa = x0 + a * w, xb = x0 + c * w, za = -h / 2 + b * h, zb = -h / 2 + d * h;
+        out.push(B(Math.abs(xb - xa) + t, 0.012, Math.abs(zb - za) + t, (xa + xb) / 2, 0, (za + zb) / 2)); } });
+    return out;
+  }
   // a signal head centred at height y: backplate, the housing, red, amber and green lamps under their visors
   function signalHead(y0) {
     return [[B(0.62, 1.32, 0.03, 0, y0, -0.02), dark], [B(0.38, 1.1, 0.28, 0, y0, 0.13), col(0x2a2c2e)],
@@ -299,8 +318,8 @@ export function buildingGeometry(list) {
     // houses: small and near enough a box for one roof over it (an L or a T takes a flat roof); a few barns with a
     // gambrel roof, in barn red
     // (b.fort: the Headlands' army posts, Fort Baker, Barry and Cronkhite: white clapboard under red tile or grey roofs,
-    // gabled or hipped barracks and houses, Street View)
-    const house = b.fort ? b.h <= 14 && r.length <= 12 && ob.area < 1600 && fill > 0.7 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.74, barn = !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
+    // gabled or hipped barracks, halls and houses, the big ones too, Street View)
+    const house = b.fort ? b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.7 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.74, barn = !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
     const top = b.base + b.h, wi = Math.floor(h(1) * WALLS.length), wc = b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.fort ? (h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     const style = b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
     let run = h(6) * 3;

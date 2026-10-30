@@ -14,6 +14,8 @@ export const WIND = { time: { value: 0 }, gust: { value: 0.6 } };
 export const REDWOOD = { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, -1, -1)) };
 // the Marin Headlands (props.js HEADLANDS) in local metres [x0, z0, x1, z1]: green coastal grass on the open hills
 export const HL = { value: new THREE.Vector4(0, 0, -1, -1) };
+// San Francisco north of the park, seen across the strait (props.js SF_CITY): its ground a city's, not open hills
+export const SFB = { value: new THREE.Vector4(0, 0, -1, -1) };
 export const BORES = { a: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, b: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, n: { value: 0 } };
 
 const GLSL_COMMON = /* glsl */`
@@ -25,7 +27,7 @@ float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 *
 // p: world xz; n: world normal; m: [wood, green, sand, town]; m2: [cut bank, rock, lake, farm]; cv: hollow (+) or
 // ridge (-); h: height. Returns the albedo; rk: how much of it is rock or bare earth (no grass grows there).
 const GLSL_GROUND = /* glsl */`
-uniform sampler2D tNoise; uniform vec4 rwBox[4]; uniform vec4 hlBox;
+uniform sampler2D tNoise; uniform vec4 rwBox[4]; uniform vec4 hlBox; uniform vec4 sfBox;
 vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
@@ -40,8 +42,15 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   c = mix(c, tawny, smoothstep(0.5, 0.9, small) * 0.5);
   // the Headlands: green coastal grass with dry patches (Street View, spring), the edge eased over a kilometre
   float hl = smoothstep(hlBox.x, hlBox.x + 1000.0, p.x) * (1.0 - smoothstep(hlBox.z - 1000.0, hlBox.z, p.x)) * smoothstep(hlBox.y, hlBox.y + 1000.0, p.y) * (1.0 - smoothstep(hlBox.w - 1000.0, hlBox.w, p.y));
-  vec3 hlg = mix(srgb(vec3(0.43, 0.47, 0.31)), srgb(vec3(0.54, 0.56, 0.41)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
-  c = mix(c, mix(hlg, srgb(vec3(0.66, 0.61, 0.43)), smoothstep(0.7, 0.92, small) * 0.6), hl * 0.85);
+  vec3 hlg = mix(srgb(vec3(0.47, 0.49, 0.35)), srgb(vec3(0.58, 0.57, 0.44)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
+  // and coastal scrub over most of it (coyote brush, sage: dark olive, about #6f7a52 to #8a8f6a), grass in the clearings
+  vec3 scrubC = mix(srgb(vec3(0.38, 0.40, 0.29)), srgb(vec3(0.49, 0.50, 0.39)), smoothstep(0.35, 0.7, fine)) * (0.9 + 0.2 * small);
+  hlg = mix(hlg, scrubC, smoothstep(0.42, 0.62, mid * 0.5 + small * 0.35 + patch80 * 0.15 + north * 0.25) * (1.0 - town));
+  c = mix(c, mix(hlg, srgb(vec3(0.66, 0.61, 0.43)), smoothstep(0.78, 0.95, small) * 0.5), hl * 0.9);
+  // San Francisco seen across the strait: the city's speckle of roofs, streets and gardens (its blocks are too small
+  // to survive into the distant tiles, which would leave it golden hills)
+  float sf = step(sfBox.x, p.x) * step(p.x, sfBox.z) * step(sfBox.y, p.y) * step(p.y, sfBox.w);
+  c = mix(c, mix(srgb(vec3(0.63, 0.61, 0.57)), srgb(vec3(0.40, 0.45, 0.33)), step(0.56, fine * 0.7 + small * 0.3)), sf * 0.85);
   c *= 0.9 + 0.2 * fine;
   // green: shaded north slopes, hollows and gullies, parks and lawns, the damp coast
   float moist = north * 0.72 + max(cv, 0.0) * 1.3 - max(-cv, 0.0) * 0.5 + (big - 0.5) * 0.35 + (mid - 0.5) * 0.25 + green * 1.1 + town * 0.35;
@@ -64,8 +73,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
   c = mix(c, rockC, rk);
-  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(0.2, 0.5, slope + (small - 0.5) * 0.2) * 0.65;
-  c = mix(c, srgb(vec3(0.55, 0.45, 0.33)) * (0.85 + 0.3 * fine), bare);
+  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.85, hl);  // the Headlands' road cuts bare even where the grid softens them
+  c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), srgb(vec3(0.58, 0.40, 0.29)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: reddish chert
   rk = max(rk, bare);
   // under the redwoods: red-brown needle litter, patches of sorrel
   float rw = 0.0;
@@ -87,7 +96,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
@@ -138,7 +147,7 @@ export function grassMaterial() {
   const T = textures(), U = { radius: { value: 60 }, centre: { value: new THREE.Vector2() } };
   m.userData.u = U;
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 gA; attribute vec4 gB; uniform float wTime, wGust, radius; uniform vec2 centre; varying vec3 vGc;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <begin_vertex>', /* glsl */`

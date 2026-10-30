@@ -222,6 +222,8 @@ export function furnitureGeometries() {
 export const REDWOODS = [[37.885, -122.59, 37.905, -122.565], [38.0, -122.76, 38.035, -122.69], [37.89, -122.555, 37.915, -122.53], [37.96, -122.67, 37.99, -122.62]];
 // the Marin Headlands [s, w, n, e]: coastal scrub and grass, no lone trees on the open hills (Street View)
 export const HEADLANDS = [37.80, -122.56, 37.865, -122.46];
+// San Francisco from the Golden Gate Park north to the bay (the Presidio's and the park's woods keep their own colour)
+export const SF_CITY = [37.745, -122.515, 37.806, -122.36];
 export const inHeadlands = (lat, lon) => lat >= HEADLANDS[0] && lat <= HEADLANDS[2] && lon >= HEADLANDS[1] && lon <= HEADLANDS[3];
 export function species(k, lt, h, lat, lon, r) {
   if (k === 'scrub') return r < (inHeadlands(lat, lon) ? 0.9 : 0.75) ? 'bush' : r < 0.94 || inHeadlands(lat, lon) ? 'shrub' : 'cypress';

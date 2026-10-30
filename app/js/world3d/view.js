@@ -8,9 +8,9 @@ import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSt
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, LAMPS } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS, HEADLANDS, inHeadlands } from './props.js';
+import { treeGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
 import { createSky, FOG_SUN } from './sky.js';
@@ -65,6 +65,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
   REDWOODS.forEach(([s, w, n, e], i) => REDWOOD.value[i].set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)));
   { const [s, w, n, e] = HEADLANDS; HL.value.set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)); }
+  { const [s, w, n, e] = SF_CITY; SFB.value.set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)); }
   const hz = createHorizon(renderer, scene, sky.sunDir);
   // the pool of light a street lamp puts on the road (added light, faded out by day)
   const lampPool = new THREE.PlaneGeometry(14, 14).rotateX(-Math.PI / 2), lampPoolMat = new THREE.ShaderMaterial({ uniforms: { lamps: LAMPS }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -290,9 +291,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     yield;
     if (fine) {
       // coyote brush and toyon in patches on the open hills: thickest on the shaded north slopes and in the gullies
-      const ss = 7 / Math.sqrt(Math.max(0.2, share)), nn = g.segs + 1;
+      const hlT = inHeadlands(proj.lat((box[1] + box[3]) / 2), proj.lon((box[0] + box[2]) / 2)), ss = (hlT ? 5 : 7) / Math.sqrt(Math.max(0.2, share)), nn = g.segs + 1;
       let shrubs = 0;
-      const hlT = inHeadlands(proj.lat((box[1] + box[3]) / 2), proj.lon((box[0] + box[2]) / 2)), cap = (hlT ? 11000 : 5000) * share;
+      const cap = (hlT ? 14000 : 5000) * share;
       for (let x = Math.ceil(box[0] / ss) * ss; x < box[2]; x += ss) for (let z = Math.ceil(box[1] / ss) * ss; z < box[3]; z += ss) {
         if (shrubs > cap) break;
         const ix = Math.round(x / ss), iz = Math.round(z / ss), px = x + (hash2(ix + 7, iz) - 0.5) * ss, pz = z + (hash2(ix, iz + 7) - 0.5) * ss;
@@ -304,7 +305,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const p = (patch - 0.55) * 1.6 + north * 0.5 + Math.max(0, c.cv[v]) * 0.9 + (mk[8 * v + 1] > 0 ? -0.2 : 0) + (hlT ? 0.45 : 0);
         if (hash2(ix * 3, iz * 5) > p) continue;
         const r = hash2(ix, iz * 3);
-        add(r < (hlT ? 0.92 : 0.78) ? 'bush' : 'shrub', px, pz, (0.7 + 0.8 * hash2(iz, ix + 1)) * (hlT ? 1.25 : 1), r); shrubs++;
+        add(r < (hlT ? 0.92 : 0.78) ? 'bush' : 'shrub', px, pz, (0.7 + 0.8 * hash2(iz, ix + 1)) * (hlT ? 1.6 : 1), r); shrubs++;
         if (shrubs % 600 === 0) yield;
       }
       yield;
@@ -949,7 +950,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   applyQuality();
   // the materials a tile or a tunnel brings in later, compiled up front in the background (a first use would otherwise
   // hold up a frame for 100 ms or more)
-  mats.underpass = withSun(new THREE.MeshLambertMaterial({ color: 0xbdb6a8, side: THREE.DoubleSide }));
+  mats.underpass = withSun(new THREE.MeshLambertMaterial({ color: 0xbdb6a8, emissive: 0x3a3832, side: THREE.DoubleSide }));  // the light bounced in from the openings
   { const g = new THREE.Group(), geo = new THREE.BoxGeometry(1, 1, 1); for (const m of [mats.underpass, mats.tunnel, mats.portal, mats.pillar]) g.add(new THREE.Mesh(geo, m));
     renderer.compileAsync?.(g, camera, scene).catch(() => {}).finally(() => geo.dispose()); }
   function governor(dt, now) {
@@ -987,7 +988,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const lat = proj.lat(p[1]), lon = proj.lon(p[0]);
       stream(lat, lon, now);
       const PF = globalThis.__w3?.prof, pm = PF ? [c0] : null, mark = PF ? () => pm.push(performance.now()) : () => {}, gq0 = PF && globalThis.__w3.gpu ? gpuTime.begin() : null;
-      jobs.run(q === 2 ? 2.5 : 4); mark();
+      jobs.run(globalThis.__w3?.budget ?? (q === 2 ? 2.5 : 4)); mark();  // (__w3.budget: tools that only want it built)
       marks.update(camera, dt);
       // the full trees follow the rider: split a tile again after 60 m, unless it is all far away and already all simple
       for (const c of near.values()) if (c.treeSets && c.lod === 0 && (!c.partAt || Math.hypot(c.partAt[0] - p[0], c.partAt[1] - p[1]) > 60)) {

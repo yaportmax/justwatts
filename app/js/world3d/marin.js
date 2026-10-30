@@ -10,7 +10,7 @@ export { GGB };
 export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const root = new THREE.Group(); scene.add(root);
   const mat = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, ...o });
-  const orange = mat(0xc0452f), orangeDark = mat(0x8e3224), concrete = mat(0xb8b2a6), white = mat(0xf2f0ea), red = mat(0xb03026);
+  const orange = mat(0xc0452f), orangeDark = mat(0x8e3224), concrete = mat(0xb8b2a6), white = mat(0xf2f0ea), red = mat(0xb03026), median = mat(0xa9a69e);
 
   /* ---------- the Golden Gate Bridge ---------- */
   const A = proj.xz(...GGB.south), B = proj.xz(...GGB.north);
@@ -45,6 +45,9 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     const dp = s0 >= -1000 && s1 <= 1100 ? 7.6 : 2.4;  // the stiffening truss over the suspended spans, girders on the approaches
     segBox(GGB.deckW, dp, orange, s0, s1, 0, h0 - 0.15 - dp / 2, h1 - 0.15 - dp / 2);
     for (const t of [-1, 1]) for (const [y, th] of [[1.15, 0.09], [0.55, 0.05]]) segBox(0.07, th, orange, s0, s1, t * (GGB.deckW / 2 - 0.15), h0 + y, h1 + y);
+    // a low curb between the roadway and each sidewalk (a railing on it, below), the movable median barrier down the middle
+    for (const t of [-1, 1]) segBox(0.35, 0.3, concrete, s0, s1, t * 10.15, h0 + 0.15, h1 + 0.15);
+    segBox(0.6, 0.82, median, s0, s1, 0, h0 + 0.41, h1 + 0.41);
     for (let k = s0; k < s1; k += 4) if (Math.abs(Math.abs(k) - GGB.towers) > 12) for (const t of [-1, 1]) { const p = D(k, t * (GGB.deckW / 2 - 0.15), deckH(k) + 0.6); rail.push(new THREE.Vector3(p.x, p.y, p.z)); }
   }
   for (const s of [-GGB.towers, GGB.towers]) for (const t of [-1, 1]) {  // the walkways round the tower legs
@@ -64,6 +67,19 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   }
   { const post = new THREE.InstancedMesh(new THREE.BoxGeometry(0.06, 1.2, 0.06), orange, rail.length), m4 = new THREE.Matrix4();
     rail.forEach((p, i) => post.setMatrixAt(i, m4.makeTranslation(p.x, p.y, p.z))); post.computeBoundingSphere(); bridge.add(post); }
+  // the railings' bars: a strip along each edge, its balusters (19 cm apart) cut in the shader
+  { const pos = [], uv = [], idx = [];
+    for (const [t, top] of [[-GGB.deckW / 2 + 0.15, 1.2], [GGB.deckW / 2 - 0.15, 1.2], [-10.15, 1.1], [10.15, 1.1]]) { const b = pos.length / 3; let n = 0;  // outer railings, the ones between road and sidewalk
+      for (let s = S0; s <= S1; s += 2, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 0.05, p.z, p.x, h + top, p.z); uv.push(s - S0, 0, s - S0, 1); }
+      for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+    const m = new THREE.MeshLambertMaterial({ color: 0xc0452f, side: THREE.DoubleSide });
+    m.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vBar;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvBar = uv;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vBar;').replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vBar.y > 0.06 && vBar.y < 0.93 && fract(vBar.x / 0.19) > 0.3) discard;');
+    };
+    m.customProgramCacheKey = () => 'jw-ggb-rail-1';
+    const bars = new THREE.Mesh(g, m); bars.castShadow = true; bars.receiveShadow = true; bridge.add(bars); }
   // towers: two legs each (their inner faces at the roadway's edge, the sidewalks going round them), portal struts above
   // the deck, a pier at the water
   for (const s of [-half, half]) {
@@ -85,7 +101,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const susp = [];
   for (const t of [-legT, legT]) {
     const pts = cablePts(t), curve = new THREE.CatmullRomCurve3(pts);
-    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, pts.length * 3, 0.65, 6), orange); tube.castShadow = true; bridge.add(tube);
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, pts.length * 3, 0.46, 8), orange); tube.castShadow = true; bridge.add(tube);  // 0.92 m across
     for (const p of pts) { const s = (p.x - mid[0]) * ux + (p.z - mid[1]) * uz, d = deckH(s); if (p.y - d > 3) susp.push(p.x, p.y, p.z, p.x, d + 0.5, p.z); }
     // between the samples, every 15 m
     for (let s = -half + 15; s < half; s += 15) { const f = s / half, top = GGB.towerTop - 2, low = deckH(0) + 4, y = low + (top - low) * f * f, p = W(s, t, y); susp.push(p.x, y, p.z, p.x, deckH(s) + 0.5, p.z); }
@@ -98,7 +114,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   { const s = 1038, top = deckH(s) - 8.2; box(44, top + 8, 120, concrete, s, 0, (top - 8) / 2); }
   // the San Francisco end: concrete pylons rising over the roadway either side at both ends of the steel arch over Fort
   // Point (S1 at the anchorage, S2 at the arch's south end: OpenStreetMap's Pylon S1 / S2), the arch itself
-  for (const s of [-GGB.anchor, -1100]) for (const t of [-1, 1]) box(7, deckH(s) + 14, 9, concrete, s, t * (GGB.deckW / 2 + 3.6), (deckH(s) + 14) / 2);
+  for (const s of [-GGB.anchor, -1100]) for (const t of [-1, 1]) box(5, deckH(s) + 9, 8, concrete, s, t * (GGB.deckW / 2 + 2.8), (deckH(s) + 9) / 2);
   for (const t of [-9, 9]) {
     const pts = []; for (let s = -1094; s <= -987; s += 6) { const f = (s + 1040.5) / 53.5; pts.push(W(s, t, 14 + (deckH(s) - 8.5 - 14) * (1 - f * f))); }
     const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 1.1, 6), orange); tube.castShadow = true; bridge.add(tube);

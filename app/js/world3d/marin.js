@@ -173,7 +173,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   /* ---------- Karl the fog: banks lying on the sea along the coast, rolling in through the Golden Gate ---------- */
   // [lat, lon] of each end of a bank's spine, its width (m) and height (m)
   const banks = [];
-  for (const [a, b, w, h] of [[[37.8085, -122.492], [37.8035, -122.545], 900, 150], [[37.818, -122.548], [37.842, -122.585], 1100, 190],
+  for (const [a, b, w, h] of [[[37.8105, -122.4805], [37.8085, -122.4995], 520, 95], [[37.8085, -122.492], [37.8035, -122.545], 900, 150], [[37.818, -122.548], [37.842, -122.585], 1100, 190],
     [[37.85, -122.6], [37.885, -122.655], 1300, 210], [[37.89, -122.67], [37.93, -122.735], 1400, 230], [[37.79, -122.56], [37.79, -122.64], 1800, 260],
     [[37.95, -122.76], [37.99, -122.83], 1600, 240]]) {
     const [ax, az] = proj.xz(...a), [bx, bz] = proj.xz(...b), L = Math.hypot(bx - ax, bz - az), n = Math.max(10, Math.round(L / 160));

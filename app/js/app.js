@@ -401,7 +401,7 @@ function setStatus() {
   $('#btnTrainer').textContent = mode === 'ble' || mode === 'wait' ? 'Disconnect' : again ? 'Reconnect' : 'Connect';
   $('#btnTrainer').title = again ? `Reconnect ${d.trainer_name || 'trainer'}` : '';
   $('#btnTrainer').className = mode === 'ble' || mode === 'wait' || mode === 'sim' ? '' : again ? 'pri reconnect' : 'pri';  // simulated: a real trainer is optional
-  $('#btnSim').hidden = mode === 'ble' || mode === 'wait'; $('#btnSim').textContent = mode === 'sim' ? 'Stop' : 'Simulate';
+  $('#btnSim').hidden = mode === 'ble' || mode === 'wait'; $('#btnSim').textContent = mode === 'sim' ? 'Stop simulating' : 'No trainer? Simulate one';
   $('#simRow').hidden = mode !== 'sim';
   if (mode === 'sim' && document.activeElement !== $('#simW')) $('#simW').value = d.sim_w ?? simW;
   $('#hDot').className = 'dot ' + (d.hr ? 'on' : d.hr_waiting || d.hr_name ? 'wait' : '');

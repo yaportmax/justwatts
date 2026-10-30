@@ -75,6 +75,7 @@ nav button.on svg{color:var(--acc)}
 .dev button{height:28px;padding:0 10px;font-size:12px}
 .dev button:not(.pri){background:none;border-color:var(--line2);color:var(--dim)}
 .dev button:not(.pri):hover{color:var(--ink)}
+.simrow[hidden],.simlink[hidden]{display:none}.simlink{background:none;border:0;padding:2px 10px;height:auto;font-size:11px;color:var(--faint);text-align:left;cursor:pointer}.simlink:hover{color:var(--ink)}
 .simrow{gap:4px}.simrow button{width:28px;padding:0}.simrow input{width:58px;height:28px;text-align:right}.simrow .u{font-size:12px;color:var(--dim)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);display:inline-block;margin-right:8px;flex:none}
 .dot.on{background:var(--good);box-shadow:0 0 0 3px rgba(34,197,94,.15)}.dot.wait{background:var(--warn)}.dot.sim{background:var(--sim);box-shadow:0 0 0 3px rgba(167,139,250,.15)}

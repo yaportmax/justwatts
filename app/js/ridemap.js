@@ -183,7 +183,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
       const m = await import('./world3d/view.js');
       if (!cur || kind() !== 'world') return;
       wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, quality: store.get('hw.worldQ', 0),
-        time: store.get('hw.worldTime', 'golden'), sound: soundOn(), fog: store.get('hw.worldFog', true) !== false, kit: KITS[store.get('hw.worldKit', 0) % KITS.length] });
+        time: store.get('hw.worldTime', 'day'), sound: soundOn(), fog: store.get('hw.worldFog', true) !== false, kit: KITS[store.get('hw.worldKit', 0) % KITS.length] });
       wv.update(worldState());
     } catch (e) { worldFail(e?.message || String(e)); }
     finally { wvBusy = false; }
@@ -297,8 +297,8 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     cbtn.onclick = () => toggleCamera();
   }
   function toggleCamera() { if (!wv) return false; const m = wv.toggleCamera(); cbtn?.classList.toggle('on', m === 'first'); return true; }
-  const TIMES = ['golden', 'sunset', 'dusk', 'dawn', 'morning', 'day', 'afternoon'];
-  function cycleTime() { if (!wv) return false; const t = TIMES[(TIMES.indexOf(store.get('hw.worldTime', 'golden')) + 1) % TIMES.length]; store.set('hw.worldTime', wv.setTime(t)); return true; }
+  const TIMES = ['day', 'afternoon', 'golden', 'sunset', 'dusk', 'dawn', 'morning'];
+  function cycleTime() { if (!wv) return false; const t = TIMES[(TIMES.indexOf(store.get('hw.worldTime', 'day')) + 1) % TIMES.length]; store.set('hw.worldTime', wv.setTime(t)); return true; }
   // world sound: its own switch, off at first when the app's sounds (beeps) are off
   const soundOn = () => store.get('hw.worldSound', store.get('hw.settings', {})?.beeps !== false) !== false;
   const SPK = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-3.5v11L6 12H3z"/>', WAVES = '<path d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5.5a6.5 6.5 0 0 1 0 9"/></svg>', MUTE = '<path d="M13.5 8l4 4M17.5 8l-4 4"/></svg>';

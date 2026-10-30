@@ -205,10 +205,11 @@ export function treeGeometries() {
 // fence and a picket fence section (3 m along +x). Vertex coloured.
 export function furnitureGeometries() {
   const B = (w, h, d, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z), C = (r0, r1, h, s = 8) => new THREE.CylinderGeometry(r1, r0, h, s).translate(0, h / 2, 0);
-  const grey = col(0x8c8f92), dark = col(0x3b3d40), wood = col(0x6f5a44), white = col(0xeeeeea), red = col(0xb3241c), lampC = col(0xfff1d0);
+  const grey = col(0x8c8f92), steel = col(0x9da3a6), dark = col(0x3b3d40), wood = col(0x6f5a44), pole = col(0x6a5e50), white = col(0xeeeeea), red = col(0xb3241c), lampC = col(0xfff1d0);
   const octagon = new THREE.CylinderGeometry(0.38, 0.38, 0.03, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.03);
   return {
-    post: merge([[B(0.16, 0.85, 0.12, 0, 0.42, 0), wood], [B(0.06, 0.32, 0.22, 0.04, 0.68, 0), grey]]),
+    post: merge([[B(0.1, 0.78, 0.15, 0, 0.39, 0), steel], [B(0.07, 0.3, 0.15, 0.06, 0.66, 0), steel]]),
+    pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),
     lamp: merge([[C(0.1, 0.07, 6.6), dark], [B(1.9, 0.08, 0.1, 0.95, 6.5, 0), dark], [B(0.6, 0.14, 0.26, 1.85, 6.42, 0), dark], [B(0.5, 0.03, 0.2, 1.85, 6.34, 0), lampC, null, { tag: 2 }]]),
     stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [octagon, red], [new THREE.CylinderGeometry(0.33, 0.33, 0.035, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.04), white], [B(0.5, 0.12, 0.04, 0, 2.2, 0.06), red]]),
     limit: merge([[C(0.035, 0.035, 2.4, 6), grey], [B(0.6, 0.76, 0.03, 0, 2.15, 0.03), white], [B(0.5, 0.06, 0.035, 0, 2.38, 0.04), dark], [B(0.3, 0.26, 0.035, 0, 2.05, 0.04), dark]]),
@@ -219,12 +220,15 @@ export function furnitureGeometries() {
 
 // which tree grows here: k ground class, lt leaf type, h height, lat/lon, r a random 0..1
 export const REDWOODS = [[37.885, -122.59, 37.905, -122.565], [38.0, -122.76, 38.035, -122.69], [37.89, -122.555, 37.915, -122.53], [37.96, -122.67, 37.99, -122.62]];
+// the Marin Headlands [s, w, n, e]: coastal scrub and grass, no lone trees on the open hills (Street View)
+export const HEADLANDS = [37.80, -122.56, 37.865, -122.46];
+export const inHeadlands = (lat, lon) => lat >= HEADLANDS[0] && lat <= HEADLANDS[2] && lon >= HEADLANDS[1] && lon <= HEADLANDS[3];
 export function species(k, lt, h, lat, lon, r) {
-  if (k === 'scrub') return r < 0.75 ? 'bush' : r < 0.94 ? 'shrub' : 'cypress';
+  if (k === 'scrub') return r < (inHeadlands(lat, lon) ? 0.9 : 0.75) ? 'bush' : r < 0.94 || inHeadlands(lat, lon) ? 'shrub' : 'cypress';
   if (k === 'wood') {
     if (REDWOODS.some(([s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e) && h < 350) return r < 0.7 ? 'redwood' : r < 0.85 ? 'bay' : 'fir';
-    if (lt === 'n') return r < 0.6 ? 'fir' : r < 0.8 ? 'pine' : 'redwood';
     const coast = h < 140 && lon < -122.47 && lat < 37.92;
+    if (lt === 'n') return coast || inHeadlands(lat, lon) ? (r < 0.65 ? 'cypress' : 'pine') : r < 0.6 ? 'fir' : r < 0.8 ? 'pine' : 'redwood';  // the coast's planted groves: Monterey cypress and pine
     if (coast && r < 0.35) return 'euc';
     if (coast && r < 0.5) return 'cypress';
     if (h > 320 && lt !== 'b') return r < 0.45 ? 'fir' : r < 0.8 ? 'oak' : 'bay';

@@ -96,6 +96,18 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   // from the side span to the north approach (OpenStreetMap's road on it runs s 984 to 1092)
   box(42, deckH(-GGB.anchor) - 8.2 + 8, 56, concrete, -GGB.anchor, 0, (deckH(-GGB.anchor) - 8.2 - 8) / 2);
   { const s = 1038, top = deckH(s) - 8.2; box(44, top + 8, 120, concrete, s, 0, (top - 8) / 2); }
+  // the San Francisco end: concrete pylons rising over the roadway either side at both ends of the steel arch over Fort
+  // Point (S1 at the anchorage, S2 at the arch's south end: OpenStreetMap's Pylon S1 / S2), the arch itself
+  for (const s of [-GGB.anchor, -1100]) for (const t of [-1, 1]) box(7, deckH(s) + 14, 9, concrete, s, t * (GGB.deckW / 2 + 3.6), (deckH(s) + 14) / 2);
+  for (const t of [-9, 9]) {
+    const pts = []; for (let s = -1094; s <= -987; s += 6) { const f = (s + 1040.5) / 53.5; pts.push(W(s, t, 14 + (deckH(s) - 8.5 - 14) * (1 - f * f))); }
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 1.1, 6), orange); tube.castShadow = true; bridge.add(tube);
+  }
+  // lamp standards along both rails every 50 m (the Art Deco lamps), the lantern leaning over the roadway
+  { const lp = [], lg = new THREE.BoxGeometry(0.22, 7.4, 0.22).translate(0, 3.7, 0), am = new THREE.BoxGeometry(0.14, 0.14, 1.4).translate(0, 7.3, 0.6), ln = new THREE.BoxGeometry(0.42, 0.5, 0.42).translate(0, 7.1, 1.25);
+    for (let s = S0 + 25; s < S1 - 10; s += 50) if (Math.abs(Math.abs(s) - GGB.towers) > 30) for (const t of [-1, 1]) { const p = D(s, t * (GGB.deckW / 2 - 0.4), deckH(s)); lp.push([p.x, p.y, p.z, p.yaw + (t > 0 ? Math.PI / 2 : -Math.PI / 2)]); }
+    const geo = mergeBoxes([lg, am, ln]), im = new THREE.InstancedMesh(geo, orange, lp.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1);
+    lp.forEach(([x, y, z, ry], i) => im.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), q.setFromEuler(e.set(0, ry, 0)), one))); im.castShadow = true; im.computeBoundingSphere(); bridge.add(im); }
   // the approaches' piers (concrete, to well below the ground) every 45 m where the deck curves off the axis
   for (let s = S0 + 12; s < S1; s += 45) if (s < -1140 || s > 1100) {
     const p = D(s, 0, 0), h = deckH(s) - 2.6, o = new THREE.Mesh(new THREE.BoxGeometry(18, h + 40, 3.2), concrete);
@@ -117,6 +129,10 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     }
   }
 
+  function mergeBoxes(list) {
+    const pos = [], nor = []; for (const g of list) { const n = g.toNonIndexed(); pos.push(...n.attributes.position.array); nor.push(...n.attributes.normal.array); n.dispose(); g.dispose(); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); return g;
+  }
   // the rider's deck (ggb.js, the same deck the course's heights come from): the roadway's height, null off the deck
   function deckAt(x, z) { const k = onDeck(proj.lat(z), proj.lon(x)); return k ? k.h + 0.05 : null; }
 
@@ -140,15 +156,27 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
       const w = 20 + hash2(i + 7, j) * 22 + tall * 8;
       blocks.push([x, z, w, h, w * (0.7 + hash2(j + 2, i) * 0.6), groundSF(x, z)]);
     }
+    // the low city seen across the strait from the Headlands (Street View): the Marina, Cow Hollow, Pacific Heights, the
+    // Richmond and Sea Cliff, rows of two to four storey houses; not the Presidio's woods, Lincoln Park or the water
+    for (let la = 37.772; la < 37.806; la += 0.0007) for (let lo = -122.512; lo < -122.43; lo += 0.0009) {
+      const i = Math.round(la * 1e4), j = Math.round(lo * 1e4); if (hash2(i + 11, j) < 0.3) continue;
+      const lat = la + (hash2(j, i + 5) - 0.5) * 0.0004, lon = lo + (hash2(i + 7, j) - 0.5) * 0.0005;
+      if (lat > (lon < -122.49 ? 37.787 : lon < -122.447 ? 37.7885 : 37.8045)) continue;   // Sea Cliff's bluffs, the Presidio, the Marina's shore
+      if (lat > 37.778 && lon < -122.494) continue;                                        // Lincoln Park
+      if (lat < 37.7745 && lon < -122.454) continue;                                       // Golden Gate Park
+      const [x, z] = proj.xz(lat, lon), w = 14 + hash2(i, j + 2) * 12;
+      blocks.push([x, z, w, 7 + hash2(j + 1, i) * 8, w * (0.8 + hash2(i + 2, j) * 0.5), 4 + 40 * hash2(Math.round(la * 300), Math.round(lo * 300)) ** 2]);
+    }
     // a city block: a box with floors of windows in its own shader (bands that fade out far away)
     const cityMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     cityMat.onBeforeCompile = sh => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vCw;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvCw = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCw;').replace('#include <color_fragment>', `#include <color_fragment>
+        if (distance(vCw.xz, cameraPosition.xz) < 3400.0) discard;  // near: the baked world's own buildings
         float fl = vCw.y / 3.6, fw = fwidth(fl), band = smoothstep(0.35, 0.5, fract(fl)) * (1.0 - smoothstep(0.85, 1.0, fract(fl)));
         diffuseColor.rgb *= mix(1.0, mix(0.62, 0.86, step(0.5, fract(vCw.x * 0.05 + vCw.z * 0.03))), band * (1.0 - smoothstep(0.15, 0.5, fw)) * step(0.3, abs(normalize(vNormal).x) + abs(normalize(vNormal).z)));`);
     };
-    cityMat.customProgramCacheKey = () => 'jw-city-1';
+    cityMat.customProgramCacheKey = () => 'jw-city-2';
     const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), im = new THREE.InstancedMesh(geo, cityMat, blocks.length);
     const m4 = new THREE.Matrix4(), c = new THREE.Color(), tones = [0xe9e6df, 0xd9d4ca, 0xc8c6c2, 0xb9b8b6, 0xe2d6c0, 0xa9b2ba, 0xf0ece4, 0xcfc2ae];
     blocks.forEach(([x, z, w, h, dep, g], i) => {

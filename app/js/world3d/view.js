@@ -8,9 +8,9 @@ import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSt
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, LAMPS } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, LAMPS } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS } from './props.js';
+import { treeGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS, HEADLANDS, inHeadlands } from './props.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
 import { createSky, FOG_SUN } from './sky.js';
@@ -64,6 +64,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xb9bdc1, side: THREE.DoubleSide }) };
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
   REDWOODS.forEach(([s, w, n, e], i) => REDWOOD.value[i].set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)));
+  { const [s, w, n, e] = HEADLANDS; HL.value.set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)); }
   const hz = createHorizon(renderer, scene, sky.sunDir);
   // the pool of light a street lamp puts on the road (added light, faded out by day)
   const lampPool = new THREE.PlaneGeometry(14, 14).rotateX(-Math.PI / 2), lampPoolMat = new THREE.ShaderMaterial({ uniforms: { lamps: LAMPS }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -76,6 +77,7 @@ varying vec2 vP; varying float vD; void main() { vP = position.xz; vec4 w = mode
 uniform float lamps; varying vec2 vP; varying float vD; void main() {
 #include <logdepthbuf_fragment>
 float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * a * lamps * 0.5 * (1.0 - smoothstep(200.0, 500.0, vD)), 1.0); }` });
+  const wireMat = new THREE.LineBasicMaterial({ color: 0x2c2d2e });
   const FURN = furnitureGeometries(), trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog);
@@ -180,7 +182,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   const hOf = c => (x, z) => c.grid ? gridHeight(c.grid, x, z) : null;
   // a tile's features with a garden round every building (its footprint grown by about 6 m, as town ground), once
-  const withGardens = t => t.gardens ??= t.features.concat(t.features.filter(f => f.k === 'building').map(f => {
+  // (not round the Headlands' forts west of Fort Baker: scrub runs up to their walls, Street View)
+  const withGardens = t => t.gardens ??= t.features.concat(t.features.filter(f => f.k === 'building' && !(inHeadlands(...f.rings[0][0]) && f.rings[0][0][1] < -122.49)).map(f => {
     const r = f.rings[0], n = r.length - 1; let la = 0, lo = 0; for (let i = 0; i < n; i++) { la += r[i][0]; lo += r[i][1]; } la /= n; lo /= n;
     return { k: 'urban', rings: [r.map(([a, b]) => { const dy = (a - la) * 111195, dx = (b - lo) * 87800, d = Math.hypot(dx, dy) || 1, k = (d + 6) / d; return [la + (a - la) * k, lo + (b - lo) * k]; })] };
   }));
@@ -281,7 +284,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const ix = Math.round(x / step), iz = Math.round(z / step), clump = hash2(Math.floor(x / 260), Math.floor(z / 260));
         if (hash2(ix, iz) > clump * clump * 0.5) continue;
         const px = x + (hash2(iz, ix) - 0.5) * step, pz = z + (hash2(ix + 5, iz) - 0.5) * step, h = hAt(px, pz);
-        if (h == null || h < 6) continue;
+        if (h == null || h < 6 || inHeadlands(proj.lat(pz), proj.lon(px))) continue;
         add('oak', px, pz, 0.6 + 0.6 * hash2(ix, iz + 3), hash2(ix + 1, iz));
       } }
     yield;
@@ -289,18 +292,19 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // coyote brush and toyon in patches on the open hills: thickest on the shaded north slopes and in the gullies
       const ss = 7 / Math.sqrt(Math.max(0.2, share)), nn = g.segs + 1;
       let shrubs = 0;
+      const hlT = inHeadlands(proj.lat((box[1] + box[3]) / 2), proj.lon((box[0] + box[2]) / 2)), cap = (hlT ? 11000 : 5000) * share;
       for (let x = Math.ceil(box[0] / ss) * ss; x < box[2]; x += ss) for (let z = Math.ceil(box[1] / ss) * ss; z < box[3]; z += ss) {
-        if (shrubs > 5000 * share) break;
+        if (shrubs > cap) break;
         const ix = Math.round(x / ss), iz = Math.round(z / ss), px = x + (hash2(ix + 7, iz) - 0.5) * ss, pz = z + (hash2(ix, iz + 7) - 0.5) * ss;
         const [fi, fj] = gridIJ(g, px, pz), v = Math.round(fj) * nn + Math.round(fi);
         if (!(v >= 0 && v < nn * nn) || !c.mask) continue;
         const mk = c.mask, open = mk[8 * v] < 80 && mk[8 * v + 2] < 60 && mk[8 * v + 3] < 60 && mk[8 * v + 4] < 128 && mk[8 * v + 5] < 128 && mk[8 * v + 6] < 128;
         if (!open || c.nor[3 * v + 1] < 0.8) continue;
         const north = Math.max(0, -c.nor[3 * v + 2] * 2.5), patch = hash2(Math.floor(px / 90), Math.floor(pz / 90)) * 0.7 + hash2(Math.floor(px / 31) + 5, Math.floor(pz / 31)) * 0.3;
-        const p = (patch - 0.55) * 1.6 + north * 0.5 + Math.max(0, c.cv[v]) * 0.9 + (mk[8 * v + 1] > 0 ? -0.2 : 0);
+        const p = (patch - 0.55) * 1.6 + north * 0.5 + Math.max(0, c.cv[v]) * 0.9 + (mk[8 * v + 1] > 0 ? -0.2 : 0) + (hlT ? 0.45 : 0);
         if (hash2(ix * 3, iz * 5) > p) continue;
         const r = hash2(ix, iz * 3);
-        add(r < 0.78 ? 'bush' : 'shrub', px, pz, 0.7 + 0.8 * hash2(iz, ix + 1), r); shrubs++;
+        add(r < (hlT ? 0.92 : 0.78) ? 'bush' : 'shrub', px, pz, (0.7 + 0.8 * hash2(iz, ix + 1)) * (hlT ? 1.25 : 1), r); shrubs++;
         if (shrubs % 600 === 0) yield;
       }
       yield;
@@ -389,7 +393,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { post: [], lamp: [], stop: [], limit: [], fence: [], picket: [] }, rail = [];
+    const items = { post: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [] }, rail = [], wires = [];
+    const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw) => items[k].push([x, y, z, yaw]);
     // a spatial hash of the lines' points (10 m), to find where a road ends on another
     const cell = new Map(), ck = (x, z) => `${Math.floor(x / 10)},${Math.floor(z / 10)}`;
@@ -416,8 +421,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // lamps along town streets every 32 m, sides in turn; a speed limit along the bigger roads now and then
         if (k === 3 && !L.br && run >= 32) { run = 0; const s = (i >> 2) % 2 ? 1 : -1; put('lamp', x + nx * s * (half + 0.9), road, z + nz * s * (half + 0.9), Math.atan2(nz * s, -nx * s)); }
         if (big && !L.br && i % 90 === 45 && r < 0.6) put('limit', x + nx * (half + 1.3), road, z + nz * (half + 1.3), Math.atan2(-dx, -dz));
+
         // fences: post and rail along farm roads, picket in front of the houses on town streets, in stretches
-        if (i % 3 === 0 && !L.br && i + 1 < n) for (const s of [1, -1]) {
+        if (i % 3 === 0 && !L.br && i + 1 < n && !hlTile) for (const s of [1, -1]) {  // (none in the Headlands, Street View)
           const blk = hash2(Math.floor(x / 40) + s * 7, Math.floor(z / 40));
           if (k === 2 && blk < 0.75) put('fence', x + nx * s * (half + 3), hAt(x + nx * s * (half + 3), z + nz * s * (half + 3)) ?? road, z + nz * s * (half + 3), Math.atan2(-dz, dx));
           else if (k === 3 && small && blk < 0.3) put('picket', x + nx * s * (half + 2.4), hAt(x + nx * s * (half + 2.4), z + nz * s * (half + 2.4)) ?? road, z + nz * s * (half + 2.4), Math.atan2(-dz, dx));
@@ -443,11 +449,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           const pts = []; for (let k = Math.max(0, i - 1); k <= Math.min(n - 1, j + 1); k++) { const [dx, dz] = dir(k), o = half + 0.75; pts.push([P[k][0] - dz * s * o, P[k][1] - 0.25, P[k][2] + dx * s * o]); }
           let len = 0; for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][2] - pts[k - 1][2]);
           if (len >= 12) {
-            rail.push(pts);
+            pts.side = -s; rail.push(pts);  // its ridges toward the road
             let d = 0, next = 0;
             for (let k = 1; k < pts.length; k++) {
               const a = pts[k - 1], b = pts[k], L2 = Math.hypot(b[0] - a[0], b[2] - a[2]);
-              for (; next <= d + L2; next += 2.5) { const f = (next - d) / (L2 || 1); put('post', a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, Math.atan2(-(b[2] - a[2]), b[0] - a[0])); }
+              for (; next <= d + L2; next += 1.9) { const f = (next - d) / (L2 || 1); put('post', a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, Math.atan2(-(b[2] - a[2]), b[0] - a[0])); }
               d += L2;
             }
           }
@@ -455,6 +461,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         }
       }
     }
+    // OpenStreetMap's power lines: a wooden pole with a crossarm at each node in the tile (across the line), two wires
+    // from it to the next node
+    { const bx = tileBox(c);
+      for (const line of t.power || []) {
+        const Q = line.map(([la, lo]) => proj.xz(la, lo)), at = Q.map(([x, z]) => [x, (hAt(x, z) ?? 0) - 0.1, z]);
+        const yawAt = i => { const a = Q[Math.max(0, i - 1)], b = Q[Math.min(Q.length - 1, i + 1)]; return Math.atan2(b[0] - a[0], b[1] - a[1]) + Math.PI / 2; };
+        for (let i = 0; i < Q.length; i++) {
+          const [x, z] = Q[i]; if (!(x >= bx[0] && x < bx[2] && z >= bx[1] && z < bx[3])) continue;
+          const yaw = yawAt(i); put('pole', x, at[i][1], z, yaw);
+          if (i + 1 < Q.length) { const yb = yawAt(i + 1); for (const o of [-0.8, 0.8]) wires.push([x + Math.sin(yaw) * o, at[i][1] + 9.1, z + Math.cos(yaw) * o, Q[i + 1][0] + Math.sin(yb) * o, at[i + 1][1] + 9.1, Q[i + 1][1] + Math.cos(yb) * o]); }
+        }
+      } }
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
     // every kind in one batched draw
@@ -464,19 +482,29 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const k of kinds) { const gi = bm.addGeometry(FURN[k]); for (const [x, y, z, yaw] of items[k]) bm.setMatrixAt(bm.addInstance(gi), m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), one)); }
       bm.castShadow = QUALITY[q].shadow > 0; bm.receiveShadow = true; bm.computeBoundingSphere(); grp.add(bm);
     }
+    // the wires: hanging a little between the poles (three straight pieces each)
+    if (wires.length) {
+      const pos = [];
+      for (const [x0, y0, z0, x1, y1, z1] of wires) { let p = [x0, y0, z0]; for (const f of [1 / 3, 2 / 3, 1]) { const q = [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f - Math.sin(Math.PI * f) * 0.7, z0 + (z1 - z0) * f]; pos.push(...p, ...q); p = q; } }
+      const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); wg.computeBoundingSphere();
+      grp.add(new THREE.LineSegments(wg, wireMat));
+    }
     // light from the street lamps on the road under them at dusk
     if (items.lamp.length) {
       const pm = new THREE.InstancedMesh(lampPool, lampPoolMat, items.lamp.length); pm.userData.shared = true; pm.renderOrder = 2;
       items.lamp.forEach(([x, y, z, yaw], i) => pm.setMatrixAt(i, m4.compose(v.set(x + Math.cos(yaw) * 1.85, (hAt(x + Math.cos(yaw) * 1.85, z - Math.sin(yaw) * 1.85) ?? y) + 0.48, z - Math.sin(yaw) * 1.85), qq.identity(), one)));
       pm.computeBoundingSphere(); grp.add(pm);
     }
-    // the rails: a W-beam on the posts, a strip 0.3 m tall
+    // the rails: a galvanised W-beam on the posts, 0.31 m tall, its two ridges standing out toward the road
     if (rail.length) {
-      const pos = [], idx = [];
+      const pos = [], idx = [], W = [[0.5, 0], [0.56, 0.05], [0.65, 0], [0.74, 0.05], [0.81, 0]], N = W.length;
       for (const pts of rail) {
         const b0 = pos.length / 3;
-        for (const [x, y, z] of pts) pos.push(x, y + 0.5, z, x, y + 0.8, z);
-        for (let k = 1; k < pts.length; k++) { const a = b0 + 2 * (k - 1), b = a + 2; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+        for (let k = 0; k < pts.length; k++) {
+          const a = pts[Math.max(0, k - 1)], b = pts[Math.min(pts.length - 1, k + 1)], dx = b[0] - a[0], dz = b[2] - a[2], l = Math.hypot(dx, dz) || 1, [x, y, z] = pts[k];
+          for (const [h, o] of W) pos.push(x - dz / l * o * pts.side, y + h, z + dx / l * o * pts.side);
+        }
+        for (let k = 1; k < pts.length; k++) for (let m = 0; m + 1 < N; m++) { const a = b0 + N * (k - 1) + m, b = a + N; idx.push(a, b, a + 1, a + 1, b, b + 1); }
       }
       const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); rg.setIndex(idx); rg.computeVertexNormals(); rg.computeBoundingSphere();
       const rm = new THREE.Mesh(rg, mats.rail); rm.castShadow = QUALITY[q].shadow > 0; rm.receiveShadow = true; grp.add(rm);
@@ -496,6 +524,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (c.lod > 0 && ring.length > 12) continue;
       let base = Infinity; for (const p of ring) { const h = hAt(p[0], p[1]); if (h != null) base = Math.min(base, h); }
       if (!isFinite(base)) continue;
+      { const dk = marks.deckAt(...ring[0]); if (dk != null && base + (f.h || 6) > dk - 12) continue; }  // the bridge's own anchorages and pylons (its model draws them); Fort Point under it stays
       list.push({ ring, base, h: (f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7) });
     }
     if (!list.length) return setPart(c, 'bldg', null);

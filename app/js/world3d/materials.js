@@ -12,6 +12,8 @@ export const WIND = { time: { value: 0 }, gust: { value: 0.6 } };
 // a: [x0, z0, x1, z1] a straight piece of bore, b: [floor y at 0, at 1, half width, height]
 // the redwood groves (props.js REDWOODS) in local metres [x0, z0, x1, z1]: needle litter on the ground under them
 export const REDWOOD = { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, -1, -1)) };
+// the Marin Headlands (props.js HEADLANDS) in local metres [x0, z0, x1, z1]: green coastal grass on the open hills
+export const HL = { value: new THREE.Vector4(0, 0, -1, -1) };
 export const BORES = { a: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, b: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, n: { value: 0 } };
 
 const GLSL_COMMON = /* glsl */`
@@ -23,7 +25,7 @@ float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 *
 // p: world xz; n: world normal; m: [wood, green, sand, town]; m2: [cut bank, rock, lake, farm]; cv: hollow (+) or
 // ridge (-); h: height. Returns the albedo; rk: how much of it is rock or bare earth (no grass grows there).
 const GLSL_GROUND = /* glsl */`
-uniform sampler2D tNoise; uniform vec4 rwBox[4];
+uniform sampler2D tNoise; uniform vec4 rwBox[4]; uniform vec4 hlBox;
 vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
@@ -36,6 +38,10 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec3 straw = srgb(vec3(0.85, 0.75, 0.52)), gold = srgb(vec3(0.76, 0.62, 0.37)), tawny = srgb(vec3(0.62, 0.49, 0.31));
   vec3 c = mix(gold, straw, smoothstep(0.25, 0.8, mid * 0.75 + small * 0.25));
   c = mix(c, tawny, smoothstep(0.5, 0.9, small) * 0.5);
+  // the Headlands: green coastal grass with dry patches (Street View, spring), the edge eased over a kilometre
+  float hl = smoothstep(hlBox.x, hlBox.x + 1000.0, p.x) * (1.0 - smoothstep(hlBox.z - 1000.0, hlBox.z, p.x)) * smoothstep(hlBox.y, hlBox.y + 1000.0, p.y) * (1.0 - smoothstep(hlBox.w - 1000.0, hlBox.w, p.y));
+  vec3 hlg = mix(srgb(vec3(0.43, 0.47, 0.31)), srgb(vec3(0.54, 0.56, 0.41)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
+  c = mix(c, mix(hlg, srgb(vec3(0.66, 0.61, 0.43)), smoothstep(0.7, 0.92, small) * 0.6), hl * 0.85);
   c *= 0.9 + 0.2 * fine;
   // green: shaded north slopes, hollows and gullies, parks and lawns, the damp coast
   float moist = north * 0.72 + max(cv, 0.0) * 1.3 - max(-cv, 0.0) * 0.5 + (big - 0.5) * 0.35 + (mid - 0.5) * 0.25 + green * 1.1 + town * 0.35;
@@ -81,7 +87,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
@@ -132,7 +138,7 @@ export function grassMaterial() {
   const T = textures(), U = { radius: { value: 60 }, centre: { value: new THREE.Vector2() } };
   m.userData.u = U;
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 gA; attribute vec4 gB; uniform float wTime, wGust, radius; uniform vec2 centre; varying vec3 vGc;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <begin_vertex>', /* glsl */`
@@ -178,12 +184,16 @@ export function roadMaterial() {
         float lm = floor(vRd.x + 0.5), surf = floor(vRd.y + 0.5), lanes = floor(vRd.z + 0.5), W = vRd.w;
         float along = vRuv.y, x = (vRuv.x - 0.5) * W, ax = abs(x);
         float n1 = texture2D(tNoise, vW.xz / 31.0).g, n2 = texture2D(tNoise, vW.xz / 3.7).r, n3 = texture2D(tNoise, vW.xz / 0.9).r;
-        // asphalt: aggregate, patches, the wheel tracks a little darker and smoother, the edges dusty
-        vec3 c = mix(srgb(vec3(0.27, 0.275, 0.28)), srgb(vec3(0.36, 0.36, 0.365)), n1 * 0.8) * (0.9 + 0.2 * n3);
+        // asphalt as it is on the Headlands' roads (Street View, sRGB about #8c8b87 to #a7a59f): pale weathered grey,
+        // darker patches where it was mended, black sealed cracks, the wheel tracks a little darker, the edges dusty
+        vec3 c = mix(srgb(vec3(0.43, 0.425, 0.41)), srgb(vec3(0.54, 0.53, 0.51)), n1) * (0.93 + 0.14 * n3);
+        float n4 = texture2D(tNoise, vW.xz / 9.0 + 0.37).b, n5 = texture2D(tNoise, vW.xz / 5.3 + 0.11).a;
+        c *= 1.0 - 0.16 * smoothstep(0.78, 0.8, n4);                                        // patches
+        c *= 1.0 - 0.4 * (1.0 - smoothstep(0.0015, 0.005, abs(n5 - 0.5))) * step(0.62, n2);  // sealed cracks
         float lane = W / max(1.0, lanes), lx = mod(x + W * 0.5, max(lane, 1.0)) / max(lane, 1.0);
         c *= 1.0 - 0.07 * (smoothstep(0.12, 0.25, abs(lx - 0.28)) < 0.5 || smoothstep(0.12, 0.25, abs(lx - 0.72)) < 0.5 ? 1.0 : 0.0) * step(0.5, lanes);
-        c = mix(c, srgb(vec3(0.46, 0.43, 0.38)), smoothstep(W * 0.5 - 0.5, W * 0.5, ax) * 0.45 * n2);
-        if (surf == 1.0) c = mix(srgb(vec3(0.33, 0.34, 0.33)), srgb(vec3(0.40, 0.40, 0.38)), n1) * (0.92 + 0.16 * n3);
+        c = mix(c, srgb(vec3(0.66, 0.62, 0.54)), smoothstep(W * 0.5 - 0.6, W * 0.5, ax) * 0.55 * n2);
+        if (surf == 1.0) c = mix(srgb(vec3(0.50, 0.50, 0.48)), srgb(vec3(0.60, 0.59, 0.56)), n1) * (0.92 + 0.16 * n3);
         if (surf == 2.0) {
           // a dirt trail: packed earth with two worn lines, ragged grassy edges
           float edge = ax / max(W * 0.5, 0.1) + (n2 - 0.5) * 0.7 + (n3 - 0.5) * 0.25;
@@ -218,11 +228,11 @@ export function roadMaterial() {
           line = max(line, ln1 * dash);
         }
         float fade = wear * (1.0 - smoothstep(0.25, 0.6, aa));  // lines fade where they would shimmer
-        c = mix(c, srgb(vec3(0.90, 0.70, 0.20)), yel * 0.95 * fade);
-        c = mix(c, srgb(vec3(0.92, 0.92, 0.88)), line * fade);
+        c = mix(c, srgb(vec3(0.86, 0.68, 0.22)), yel * 0.92 * fade);
+        c = mix(c, srgb(vec3(0.88, 0.88, 0.85)), line * 0.92 * fade);
         diffuseColor.rgb *= c;`);
   };
-  m.customProgramCacheKey = () => 'jw-road-3';
+  m.customProgramCacheKey = () => 'jw-road-4';
   return m;
 }
 

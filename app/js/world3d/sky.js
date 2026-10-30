@@ -17,13 +17,13 @@ import { skyRadiance, sunTint } from './skymath.js';
 export const TIMES = {
   dawn: { az: 78, el: 4, turb: 3.2, ray: 2.2, mie: 0.006, si: 2.0, haze: 22, low: 120, banks: 1, cl: 0.3, ci: 0.6, exp: 1.05 },
   morning: { az: 100, el: 15, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.6, haze: 18, low: 110, banks: 1, cl: 0.22, ci: 0.4, exp: 0.92 },
-  day: { az: 185, el: 58, turb: 2.0, ray: 1.2, mie: 0.004, si: 3.1, haze: 10, low: 16, banks: 0.5, cl: 0.34, ci: 0.3, exp: 0.82 },
+  day: { az: 150, el: 52, turb: 1.9, ray: 1.15, mie: 0.0035, si: 3.1, haze: 7, low: 8, banks: 0, cl: 0.26, ci: 0.3, exp: 0.82 },
   afternoon: { az: 228, el: 36, turb: 2.2, ray: 1.3, mie: 0.004, si: 3.0, haze: 12, low: 22, banks: 0.6, cl: 0.4, ci: 0.45, exp: 0.84 },
   golden: { az: 248, el: 13, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.9, haze: 14, low: 30, banks: 0.75, cl: 0.3, ci: 0.55, exp: 0.88 },
   sunset: { az: 258, el: 3.5, turb: 3.4, ray: 2.4, mie: 0.006, si: 2.3, haze: 20, low: 50, banks: 0.8, cl: 0.36, ci: 0.7, exp: 1.02 },
   dusk: { az: 266, el: -3, turb: 3.2, ray: 2.8, mie: 0.006, si: 1.6, haze: 22, low: 55, banks: 0.85, cl: 0.32, ci: 0.6, exp: 1.9 },
 };
-export const TIME_ORDER = ['golden', 'sunset', 'dusk', 'dawn', 'morning', 'day', 'afternoon'];
+export const TIME_ORDER = ['day', 'afternoon', 'golden', 'sunset', 'dusk', 'dawn', 'morning'];
 // a time of day between two presets (f 0..1): every number eased across, the sun along the shorter way round
 export function mixTimes(a, b, f) {
   const out = {};
@@ -274,12 +274,12 @@ export function createSky(scene, { far, quality = 0 }) {
   };
 
   /* the time of day */
-  let t = 'golden', exposure = 1, sunI = 3, hemiI = 1;
+  let t = 'day', exposure = 1, sunI = 3, hemiI = 1;
   const tmp = new THREE.Vector3(), col = new THREE.Color();
   // a preset at once; go(name): the sun and everything with it moves there over a few seconds
   let move = null, now = null;
-  function set(name) { t = name in TIMES ? name : 'golden'; move = null; apply(TIMES[t]); }
-  function go(name) { const to = name in TIMES ? name : 'golden'; if (!now) return set(to); move = { from: { ...now }, to: TIMES[to], f: 0 }; t = to; }
+  function set(name) { t = name in TIMES ? name : 'day'; move = null; apply(TIMES[t]); }
+  function go(name) { const to = name in TIMES ? name : 'day'; if (!now) return set(to); move = { from: { ...now }, to: TIMES[to], f: 0 }; t = to; }
   function apply(P) {
     now = P;
     const az = P.az * Math.PI / 180, el = P.el * Math.PI / 180;

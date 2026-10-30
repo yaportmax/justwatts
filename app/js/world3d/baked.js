@@ -1,5 +1,5 @@
 // The baked Marin world (tools/bake_world.mjs): per Web Mercator tile a gzip file app/world/<z>/<x>_<y>.bin with the
-// tile's ground features (landuse, nature, water, buildings; landuse.js compact form) and a height grid at the mesh's
+// tile's ground features (landuse, nature, water, buildings; landuse.js compact form), its power lines ([[lat, lon], ...]) and a height grid at the mesh's
 // vertices (z14: 129 x 129, about 15 m apart; z11: 65 x 65). index.json lists the tiles there are (the rest is sea).
 // The ride engine's grade (world.js) and the 3D view read the same heights. Pure apart from fetch.
 import { decode, decodeRoads } from './landuse.js';
@@ -43,7 +43,7 @@ export function createBaked({ fetch = globalThis.fetch?.bind(globalThis), base =
         try {
           const r = await fetch(`${base}${z}/${x}_${y}.bin`); if (!r.ok) return null;
           const n = GRID[z] + 1, { json, hs } = unpackTile(await unzip(r), n);
-          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), roads: decodeRoads(json.r || []), places: json.p || [] };
+          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), roads: decodeRoads(json.r || []), places: json.p || [], power: json.w || [] };
         } catch { await new Promise(ok => setTimeout(ok, 500 * 2 ** i)); }
       }
       return null;

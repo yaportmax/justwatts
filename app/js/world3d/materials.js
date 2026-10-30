@@ -252,6 +252,20 @@ export function propMaterial() {
   return m;
 }
 
+// Street furniture: vertex coloured; tag 2 (a street lamp) lights up with LAMPS (0 off .. 1 on, dusk and dark)
+export const LAMPS = { value: 0 };
+export function furnitureMaterial() {
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+  m.onBeforeCompile = sh => {
+    sh.uniforms.lamps = LAMPS;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float tag; varying float vTag;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvTag = tag;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float lamps; varying float vTag;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nif (vTag > 1.5) totalEmissiveRadiance += vec3(1.0, 0.82, 0.55) * lamps * 14.0;');
+  };
+  m.customProgramCacheKey = () => 'jw-furn-1';
+  return m;
+}
+
 // Buildings: wall colour from the vertex colour, windows from the atlas (one bay of one floor per cell, the ground
 // floor its own row) by bw = [metres along the wall, metres up, style, 0 wall / 1 roof / 2 trim]. Glass reflects
 // the haze colour. Roofs: tiles or shingles in rows.

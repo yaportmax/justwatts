@@ -8,9 +8,9 @@ import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, rasterBy, gr
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, withSun, WIND, BORES, REDWOOD } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, withSun, WIND, BORES, REDWOOD, LAMPS } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, species, buildingGeometry, SPECIES, NEAR, REDWOODS } from './props.js';
+import { treeGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS } from './props.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
 import { createSky } from './sky.js';
@@ -59,11 +59,12 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const sky = createSky(scene, { far: 60000 }); sky.set(time);
   const mats = { terrain: terrainMaterial(), terrainBore: terrainMaterial({ bores: true }), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
-    tunnel: new THREE.MeshLambertMaterial({ color: 0x55524c, emissive: 0x15130f }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }) };
+    tunnel: new THREE.MeshLambertMaterial({ color: 0x55524c, emissive: 0x15130f }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }),
+    furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xb9bdc1, side: THREE.DoubleSide }) };
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
   REDWOODS.forEach(([s, w, n, e], i) => REDWOOD.value[i].set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)));
   const hz = createHorizon(renderer, scene, sky.sunDir);
-  const trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
+  const FURN = furnitureGeometries(), trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog.u);
   const life = createLife({ THREE, scene, proj, marks, quality: q }), audio = createAudio({ on: sound });
@@ -159,7 +160,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     const B = builder(), pillars = [], hAt = hOf(c), g = c.grid, occ = new Uint8Array(OCC * OCC), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     const mark = (x, z, r) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = 1; };
-    const minor = c.lod > 0, lanes = [], drive = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
+    const minor = c.lod > 0, lanes = [], drive = [], lines = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     for (const r of t.roads) {
       if (r.fl & 2) continue;                          // tunnels: under the hill
       if (minor && /path|footway|track|bridleway|service/.test(r.hw)) continue;
@@ -170,6 +171,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (pts.length < 2) continue;
       const dk = r.fl & 16 && r.dk ? [marks.deckLine(...pts[0]), marks.deckLine(...pts.at(-1))] : r.dk;  // the approaches meet the deck
       const centre = ribbon(B, pts, { ...st, hAt, lift: roadLift(r.hw), deck: dk || null, step: minor ? 12 : 5 });
+      if (!minor && !st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk });
       if (!minor && st.lm && st.lanes >= 2 && !st.surf && centre.length > 3) drive.push({ P: centre, w: st.w, lanes: st.lanes, one: !!(r.fl & 8), big: /motorway|trunk|primary/.test(r.hw) });
       if (dk) {
         pillars.push(...deckSides(B, centre, st.w, 1.4, hAt));
@@ -178,7 +180,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (!minor) centre.forEach((q, i) => { mark(q[0], q[2], st.w / 2 + 1.2); lanes.push(q[0], q[2], st.w / 2); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, st.w / 2 + 1.2); } });
       }
     }
-    c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive;
+    c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines;
     if (!B.n) return setPart(c, 'roads', null);
     const d = B.done(), geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); geo.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2));
@@ -309,6 +311,98 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     }
     if (c.imp) { const u = c.imp.material.userData.u; u.nearC.value.set(x, z); u.nearR.value = c.lod === 0 ? R : 0; }
   }
+/* ---------- street furniture: guardrails where the ground falls away beside a road, lamps along town streets, stop
+     signs where a small road meets another, a speed limit now and then, ranch fences along farm roads, picket fences
+     in front of houses. Fine tiles only; one draw per kind. ---------- */
+  function buildFurniture(c) {
+    const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
+    const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
+    const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
+    const items = { post: [], lamp: [], stop: [], limit: [], fence: [], picket: [] }, rail = [];
+    const put = (k, x, y, z, yaw) => items[k].push([x, y, z, yaw]);
+    // a spatial hash of the lines' points (10 m), to find where a road ends on another
+    const cell = new Map(), ck = (x, z) => `${Math.floor(x / 10)},${Math.floor(z / 10)}`;
+    c.lines.forEach((L, li) => L.P.forEach(p => { const k = ck(p[0], p[2]); (cell.get(k) ?? cell.set(k, []).get(k)).push(li); }));
+    const meets = (x, z, self) => {
+      const seen = new Set(); let ends = 0;
+      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const li of cell.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
+        if (li === self || seen.has(li)) continue; seen.add(li);
+        const Q = c.lines[li].P; let best = 1e9, bi = -1; Q.forEach((p, i) => { const d = Math.hypot(p[0] - x, p[2] - z); if (d < best) { best = d; bi = i; } });
+        if (best > c.lines[li].w / 2 + 3) continue;
+        if (bi > 1 && bi < Q.length - 2) return true;  // another road passes: a T
+        ends++;
+      }
+      return ends >= 2;  // three ways meet (one road going on is only a joint)
+    };
+    c.lines.forEach((L, li) => {
+      const P = L.P, n = P.length, half = L.w / 2, big = /motorway|trunk|primary|secondary|tertiary/.test(L.hw), small = /residential|unclassified|living|road|service/.test(L.hw);
+      const dir = i => { const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dz = b[2] - a[2], l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
+      let run = 0;
+      for (let i = 0; i < n; i++) {
+        const [dx, dz] = dir(i), nx = -dz, nz = dx, [x, y, z] = P[i], k = cls(x, z), road = y - 0.25, r = hash2(Math.round(x), Math.round(z));
+        run += i ? Math.hypot(x - P[i - 1][0], z - P[i - 1][2]) : 0;
+        // lamps along town streets every 32 m, sides in turn; a speed limit along the bigger roads now and then
+        if (k === 3 && !L.br && run >= 32) { run = 0; const s = (i >> 2) % 2 ? 1 : -1; put('lamp', x + nx * s * (half + 0.9), road, z + nz * s * (half + 0.9), Math.atan2(nz * s, -nx * s)); }
+        if (big && !L.br && i % 90 === 45 && r < 0.6) put('limit', x + nx * (half + 1.3), road, z + nz * (half + 1.3), Math.atan2(-dx, -dz));
+        // fences: post and rail along farm roads, picket in front of the houses on town streets, in stretches
+        if (i % 3 === 0 && !L.br && i + 1 < n) for (const s of [1, -1]) {
+          const blk = hash2(Math.floor(x / 40) + s * 7, Math.floor(z / 40));
+          if (k === 2 && blk < 0.75) put('fence', x + nx * s * (half + 3), hAt(x + nx * s * (half + 3), z + nz * s * (half + 3)) ?? road, z + nz * s * (half + 3), Math.atan2(-dz, dx));
+          else if (k === 3 && small && blk < 0.3) put('picket', x + nx * s * (half + 2.4), hAt(x + nx * s * (half + 2.4), z + nz * s * (half + 2.4)) ?? road, z + nz * s * (half + 2.4), Math.atan2(-dz, dx));
+        }
+      }
+      // stop signs where a small road ends on another
+      if (small && n > 3) for (const [i, sgn] of [[0, -1], [n - 1, 1]]) {
+        const [x, y, z] = P[i]; if (!meets(x, z, li)) continue;
+        const [dx, dz] = dir(i), fx = dx * sgn, fz = dz * sgn, nx = -fz, nz = fx;  // toward the junction, and right of it
+        put('stop', x - fx * (half + 4) + nx * (half + 0.8), y - 0.25, z - fz * (half + 4) + nz * (half + 0.8), Math.atan2(-fx, -fz));
+      }
+      // guardrails where the ground falls away beside the road (not bridges, not in town), in runs of 12 m or more
+      if (L.br || L.hw === 'service') return;
+      for (const s of [1, -1]) {
+        const steep = P.map(([x, y, z], i) => {
+          // the ground as it was before the road was cut in: a drop of 4 m within 9 m of the edge
+          const [dx, dz] = dir(i), nx = -dz * s, nz = dx * s, e = raw(x + nx * (half + 1.5), z + nz * (half + 1.5)), f = raw(x + nx * (half + 9), z + nz * (half + 9));
+          return e != null && f != null && y - 0.25 - f > 4 && e - (y - 0.25) < 1.5 && cls(x, z) !== 3;
+        });
+        for (let i = 0; i < n;) {
+          if (!steep[i]) { i++; continue; }
+          let j = i; while (j + 1 < n && steep[j + 1]) j++;
+          const pts = []; for (let k = Math.max(0, i - 1); k <= Math.min(n - 1, j + 1); k++) { const [dx, dz] = dir(k), o = half + 0.75; pts.push([P[k][0] - dz * s * o, P[k][1] - 0.25, P[k][2] + dx * s * o]); }
+          let len = 0; for (let k = 1; k < pts.length; k++) len += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][2] - pts[k - 1][2]);
+          if (len >= 12) {
+            rail.push(pts);
+            let d = 0, next = 0;
+            for (let k = 1; k < pts.length; k++) {
+              const a = pts[k - 1], b = pts[k], L2 = Math.hypot(b[0] - a[0], b[2] - a[2]);
+              for (; next <= d + L2; next += 2.5) { const f = (next - d) / (L2 || 1); put('post', a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, Math.atan2(-(b[2] - a[2]), b[0] - a[0])); }
+              d += L2;
+            }
+          }
+          i = j + 1;
+        }
+      }
+    });
+    const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+    for (const [k, list] of Object.entries(items)) {
+      if (!list.length) continue;
+      const im = new THREE.InstancedMesh(FURN[k], mats.furn, list.length); im.userData.shared = true; im.castShadow = QUALITY[q].shadow > 0 && k !== 'post'; im.receiveShadow = true;
+      list.forEach(([x, y, z, yaw], i) => im.setMatrixAt(i, m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), one)));
+      im.computeBoundingSphere(); grp.add(im);
+    }
+    // the rails: a W-beam on the posts, a strip 0.3 m tall
+    if (rail.length) {
+      const pos = [], idx = [];
+      for (const pts of rail) {
+        const b0 = pos.length / 3;
+        for (const [x, y, z] of pts) pos.push(x, y + 0.5, z, x, y + 0.8, z);
+        for (let k = 1; k < pts.length; k++) { const a = b0 + 2 * (k - 1), b = a + 2; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+      }
+      const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); rg.setIndex(idx); rg.computeVertexNormals(); rg.computeBoundingSphere();
+      const rm = new THREE.Mesh(rg, mats.rail); rm.castShadow = QUALITY[q].shadow > 0; rm.receiveShadow = true; grp.add(rm);
+    }
+    setPart(c, 'furn', grp.children.length ? grp : null);
+  }
   function buildBuildings(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'bldg', null);
     const list = [], hAt = hOf(c);
@@ -372,6 +466,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (c.ver != null && c.sig.roads !== ds) { c.sig.roads = ds; jobs.add(c.k + '|r', pri + 0.1, () => buildRoads(c)); }
       if (c.ver != null && c.sig.trees !== ds) { c.sig.trees = ds; jobs.add(c.k + '|v', pri + 0.3 + c.lod, () => buildTrees(c)); }
       if (c.ver != null && c.sig.bldg !== ds) { c.sig.bldg = ds; jobs.add(c.k + '|b', pri + 0.2 + c.lod, () => buildBuildings(c)); }
+      if (c.ver != null && c.sig.furn !== ds) { c.sig.furn = ds; jobs.add(c.k + '|f', pri + 0.4 + c.lod, () => buildFurniture(c)); }
       if (c.ver != null && c.sig.tun !== ds) { c.sig.tun = ds; jobs.add(c.k + '|u', pri + 0.15, () => buildTunnels(c)); }
     }
     for (const c of far.values()) {
@@ -721,7 +816,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       // inside a tunnel: the daylight fades out
       const tk = tunnelAt(camPos.x, camPos.z)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
       // the cars' lamps: on with the sun low (under about 8 degrees) and in tunnels
-      { const sy = sky.sunDir.y, k = Math.min(1, Math.max(0, (0.14 - sy) / 0.12)); life.setLamps(Math.max(k * k * (3 - 2 * k), dark), scene.fog.color); }
+      { const sy = sky.sunDir.y, k = Math.min(1, Math.max(0, (0.14 - sy) / 0.12)); life.setLamps(Math.max(k * k * (3 - 2 * k), dark), scene.fog.color); LAMPS.value = Math.min(1, Math.max(0, (0.07 - sy) / 0.08)); }
       sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.85 * dark);
       if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }

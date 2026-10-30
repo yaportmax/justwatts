@@ -307,6 +307,29 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     const mesh = new THREE.Mesh(buildingGeometry(list), mats.bldg); mesh.castShadow = c.lod === 0 && QUALITY[q].shadow > 0; mesh.receiveShadow = c.lod === 0;
     setPart(c, 'bldg', mesh);
   }
+  // a far tile's woods (beyond the near tiles, out to where trees vanish): impostors on a coarse raster of its polygons
+  const farReach = (c, lat, lon) => { const b = tileBox(c), x = proj.x(lon), z = proj.z(lat); return !!b && Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3])) < 14000; };
+  function buildFarTrees(c) {
+    const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
+    const R = 256, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode), xs = [], zs = [], list = [], step = 30 / Math.sqrt(Math.max(0.3, QUALITY[q].trees));
+    for (let i = 0; i <= R; i++) { xs.push(proj.x(lonOf(c.x + i / R, c.z))); zs.push(proj.z(latOf(c.y + i / R, c.z))); }
+    let y0 = Infinity, y1 = -Infinity;
+    for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
+      const k = ras[j * (R + 1) + i]; if (k < 5 || k > 8) continue;  // scrub and woods
+      const area = Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])), N = area / (step * step) * (k === 5 ? 0.4 : 1);
+      for (let m = 0, cnt = Math.floor(N) + (hash2(i, j + c.y) < N % 1 ? 1 : 0); m < cnt; m++) {
+        const x = xs[i] + (xs[i + 1] - xs[i]) * hash2(i * 13 + m, j), z = zs[j] + (zs[j + 1] - zs[j]) * hash2(j * 17 + m, i), h = gridHeight(c.grid, x, z);
+        if (h == null || h < 2) continue;
+        const r = hash2(Math.round(x), Math.round(z)), sp = k === 5 ? (r < 0.7 ? 'bush' : 'shrub') : species('wood', TREE[k][3], h, proj.lat(z), proj.lon(x), r);
+        const s = (0.8 + 0.45 * hash2(Math.round(z), Math.round(x))) * (k === 5 ? 1.6 : 1);
+        list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -(0.85 + 0.3 * r), 0.86 + 0.28 * hash2(m, i + j), (hash2(j, i) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + 50 * s);
+      }
+    }
+    c.farImp = null;
+    if (!list.length) return setPart(c, 'trees', null);
+    const b = tileBox(c), sphere = new THREE.Sphere(new THREE.Vector3((b[0] + b[2]) / 2, (y0 + y1) / 2, (b[1] + b[3]) / 2), Math.hypot(b[2] - b[0], b[3] - b[1], y1 - y0) / 2);
+    c.farImp = impostorMesh(IMP, list, sphere); c.farImp.userData.ownMat = true; setPart(c, 'trees', c.farImp);
+  }
   let farDirty = false, lastStream = 0, ready = false;
   const poke = () => { lastStream = 0; };
   function stream(lat, lon, now) {
@@ -337,6 +360,10 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       const mask = childrenOf(c.k).map(k => near.get(k)?.built ? 1 : 0).join('');
       const fs = `${mask}|${q}`;
       if (c.sig.terrain !== fs) { c.sig.terrain = fs; jobs.add(c.k + '|t', 20 + (farDirty ? 0 : 5), () => buildTerrain(c)); }
+      // its woods as impostors, once, within reach of the eye (the near tiles' square is left out in the shader)
+      if (c.grid && c.sig.trees !== q && farReach(c, lat, lon)) { c.sig.trees = q; jobs.add(c.k + '|v', 26, () => buildFarTrees(c)); }
+      if (c.farImp) { const u = c.farImp.material.userData.u.nearBox.value, R = Q.rings.at(-1), X = Math.floor(tileX(lon, NEAR_Z)), Y = Math.floor(tileY(lat, NEAR_Z));
+        u.set(proj.x(lonOf(X - R, NEAR_Z)), proj.z(latOf(Y - R, NEAR_Z)), proj.x(lonOf(X + R + 1, NEAR_Z)), proj.z(latOf(Y + R + 1, NEAR_Z))); }
     }
     farDirty = false;
     if (tun.dirty) { tun.dirty = false; jobs.add('tunnels', 30, rebuildTunnels); }

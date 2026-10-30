@@ -51,41 +51,42 @@ export function bakeImpostors(renderer, geos, names, leaves, near = {}) {
 }
 
 // The impostor material: a MeshLambertMaterial (three's lights, fog and haze) on an InstancedBufferGeometry quad with
-// per instance ia = [x, y, z, scale], ib = [cell, height scale, light, warm]. One per tile (they share the program):
-// userData.u.nearC / nearR, the full models' circle (none drawn inside it).
+// per instance ia = [x, y, z, scale], ib = [cell, height scale (negative: a far tile's tree, never thinned), light,
+// warm]. One per tile (they share the program): userData.u.nearC / nearR, the full models' circle, and nearBox
+// [x0, z0, x1, z1] the near tiles' square (a far tile's trees), none drawn inside them.
 export function impostorMaterial(imp) {
-  const m = new THREE.MeshLambertMaterial({ color: 0xffffff }), u = m.userData.u = { nearC: { value: new THREE.Vector2(0, 0) }, nearR: { value: 0 } };
+  const m = new THREE.MeshLambertMaterial({ color: 0xffffff }), u = m.userData.u = { nearC: { value: new THREE.Vector2(0, 0) }, nearR: { value: 0 }, nearBox: { value: new THREE.Vector4(1e9, 1e9, -1e9, -1e9) } };
   imp.cellU ??= { value: Array.from({ length: 16 }, (_, i) => new THREE.Vector4(...(imp.cells[i] || [1, 1, 0, 0]))) };
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { impColor: { value: imp.color }, impNormal: { value: imp.normal }, impCell: imp.cellU, impN: { value: imp.n }, nearC: u.nearC, nearR: u.nearR });
+    Object.assign(sh.uniforms, { impColor: { value: imp.color }, impNormal: { value: imp.normal }, impCell: imp.cellU, impN: { value: imp.n }, nearC: u.nearC, nearR: u.nearR, nearBox: u.nearBox });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-        attribute vec4 ia; attribute vec4 ib; uniform vec4 impCell[16]; uniform float impN; uniform vec2 nearC; uniform float nearR;
-        varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying float vIel; varying vec3 vItint;`)
+        attribute vec4 ia; attribute vec4 ib; uniform vec4 impCell[16]; uniform float impN; uniform vec2 nearC; uniform float nearR; uniform vec4 nearBox;
+        varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);')
       .replace('#include <begin_vertex>', /* glsl */`
         vec4 cell = impCell[int(ib.x + 0.5)];
         float s = ia.w, d = distance(ia.xz, cameraPosition.xz);
         // thin out far away: keep a share, the kept ones grow to cover for the rest
-        float keep = mix(1.0, 0.3, smoothstep(250.0, 4000.0, d)), r = fract(ia.x * 0.1731 + ia.z * 0.2917);
-        float on = step(r, keep) * step(nearR * cell.w, distance(ia.xz, nearC)) * (1.0 - step(14000.0, d));
+        float keep = ib.y < 0.0 ? 1.0 : mix(1.0, 0.3, smoothstep(250.0, 4000.0, d)), r = fract(ia.x * 0.1731 + ia.z * 0.2917), hs = abs(ib.y);
+        float inBox = step(nearBox.x, ia.x) * step(ia.x, nearBox.z) * step(nearBox.y, ia.z) * step(ia.z, nearBox.w);
+        float on = step(r, keep) * step(nearR * cell.w, distance(ia.xz, nearC)) * (1.0 - step(14000.0, d)) * (1.0 - inBox);
         s *= inversesqrt(keep) * 0.92 + 0.08;
-        vec3 ctr = ia.xyz + vec3(0.0, cell.z * s * ib.y, 0.0);
+        vec3 ctr = ia.xyz + vec3(0.0, cell.z * s * hs, 0.0);
         vec3 F = cameraPosition - ctr; F = normalize(F);
         vec3 R = normalize(cross(vec3(0.0, 1.0, 0.0), F)), U = cross(F, R);
-        vec3 transformed = ctr + (R * position.x * cell.x * s + U * position.y * cell.y * s * ib.y) * on;
+        vec3 transformed = ctr + (R * position.x * cell.x * s + U * position.y * cell.y * s * hs) * on;
         vec2 quv = position.xy * 0.5 + 0.5;
-        vIR = R; vIU = U; vIF = F; vIel = asin(clamp(F.y, -1.0, 1.0));
-        vIu = vec2((ib.x + quv.x) / impN, quv.y * 0.5);
+        // the view from the side or from above, each tree crossing over at its own angle between 18 and 34 degrees up
+        float top = step(fract(ia.x * 0.37 + ia.z * 0.61), smoothstep(0.31, 0.6, asin(clamp(F.y, -1.0, 1.0))));
+        vIR = R; vIU = U; vIF = F;
+        vIu = vec2((ib.x + quv.x) / impN, quv.y * 0.5 + (1.0 - top) * 0.5);
         vItint = ib.z * vec3(1.0 + ib.w, 1.0, 1.0 - ib.w);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D impColor, impNormal; varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying float vIel; varying vec3 vItint;`)
+        uniform sampler2D impColor, impNormal; varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
       .replace('#include <map_fragment>', /* glsl */`
-        // the view from the side or from above, crossing over by a dither between 18 and 34 degrees up
-        float dz = fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)) * 52.9829189);
-        float top = step(dz, smoothstep(0.31, 0.6, vIel));
-        vec2 iuv = vec2(vIu.x, vIu.y + (1.0 - top) * 0.5);
+        vec2 iuv = vIu;
         vec4 ic = texture2D(impColor, iuv);
         // alpha thins in the mipmaps: scale it back up by the level (the trees keep their size far away)
         vec2 px = iuv * vec2(textureSize(impColor, 0));

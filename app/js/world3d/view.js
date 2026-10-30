@@ -66,7 +66,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const mats = { terrain: terrainMaterial(), terrainBore: terrainMaterial({ bores: true }), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
     tunnel: tunnelMaterial(), portal: portalMaterial(),
-    furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xb9bdc1, side: THREE.DoubleSide }) };
+    furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xc9cdd1, emissive: 0x2a2c2e, side: THREE.DoubleSide }) };  // galvanised, bright even on its shaded side
   const scrubFade = { centre: { value: new THREE.Vector2() }, radius: { value: 150 } }; mats.scrub = propMaterial({ fade: scrubFade });
   mats.walk = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });  // a tunnel's walk and pipes
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
@@ -266,13 +266,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     setPart(c, 'roads', grp);
   }
+  // within 12 m of the Golden Gate Bridge's deck (no tree grows through it)
+  const nearDeck = (x, z) => { const la = proj.lat(z), lo = proj.lon(x); if (la < 37.80 || la > 37.835 || lo < -122.486 || lo > -122.47) return false; for (const [a, b] of [[0, 0], [12, 0], [-12, 0], [0, 12], [0, -12]]) if (marks.deckAt(x + a, z + b) != null) return true; return false; };
   const occAt = (o, x, z) => { if (!o) return false; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < OCC && b < OCC && o.occ[b * OCC + a] === 1; };
   function* buildTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
     const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c), fine = c.lod === 0, box = tileBox(c);
     const out = {}; let n = 0, ferns = 0;
     // [x, y, z, scale, random, near only: a full model, no impostor]
-    const add = (sp, x, z, s, r, nearOnly = 0) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r, nearOnly]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
+    const add = (sp, x, z, s, r, nearOnly = 0) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y = hAt(x, z); if (y == null || y < 1.2 || occAt(c.occ, x, z) || nearDeck(x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r, nearOnly]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
@@ -302,13 +304,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     yield;
     // the Headlands' groves where the aerial imagery has them (veg.js): Monterey cypress and pine, blue gum eucalyptus,
-    // a tree every 7 m or so, tall (the planted groves are 15 to 40 m)
-    if (veg) { const st = 6.8, [s0, w0, n0, e0] = veg.box, bx0 = Math.max(box[0], proj.x(w0)), bx1 = Math.min(box[2], proj.x(e0)), bz0 = Math.max(box[1], proj.z(n0)), bz1 = Math.min(box[3], proj.z(s0));
+    // a tree every 10 m or so, tall (the planted groves are 15 to 40 m)
+    if (veg) { const st = 8.5, [s0, w0, n0, e0] = veg.box, bx0 = Math.max(box[0], proj.x(w0)), bx1 = Math.min(box[2], proj.x(e0)), bz0 = Math.max(box[1], proj.z(n0)), bz1 = Math.min(box[3], proj.z(s0));
       for (let x = Math.ceil(bx0 / st) * st; x < bx1; x += st) {
         if (Math.round(x / st) % 4 === 0) yield;
         for (let z = Math.ceil(bz0 / st) * st; z < bz1; z += st) {
           const ix = Math.round(x / st), iz = Math.round(z / st), px = x + (hash2(ix, iz + 3) - 0.5) * st * 0.8, pz = z + (hash2(iz + 5, ix) - 0.5) * st * 0.8, k = vcls(px, pz);
-          if ((k !== CYPRESS && k !== EUC) || hash2(ix * 3, iz * 7) > 0.85) continue;
+          if ((k !== CYPRESS && k !== EUC) || hash2(ix * 3, iz * 7) > 0.75) continue;
           const r = hash2(ix + 9, iz * 3), sc = 0.8 + 0.5 * hash2(iz, ix + 1);
           if (k === EUC) add('euc', px, pz, 1.45 * sc, r); else add(r < 0.72 ? 'cypress' : 'pine', px, pz, (r < 0.72 ? 2.1 : 1.6) * sc, r);
         }
@@ -565,7 +567,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       let base = Infinity; for (const p of ring) { const h = hAt(p[0], p[1]); if (h != null) base = Math.min(base, h); }
       if (!isFinite(base)) continue;
       { const dk = marks.deckAt(...ring[0]); if (dk != null && base + (f.h || 6) > dk - 12) continue; }  // the bridge's own anchorages and pylons (its model draws them); Fort Point under it stays
-      list.push({ ring, base, h: (f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7) });
+      list.push({ ring, base, h: (f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: inHeadlands(...f.rings[0][0]) });
     }
     if (!list.length) return setPart(c, 'bldg', null);
     const grp = new THREE.Group();
@@ -722,10 +724,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // grass: clumps in cells round the camera (grass.js); the ground under a point: height, normal, class weights
   function groundSample(x, z) {
     const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid || !c.mask) return null;
-    if (occAt(c.occ, x, z) || tunnelAt(x, z)) return { skip: true };
+    if (occAt(c.occ, x, z)) return { skip: true };
     const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), i = Math.round(fi), j = Math.round(fj);
     if (i < 0 || j < 0 || i >= n || j >= n) return null;
     const v = j * n + i, h = gridHeight(g, x, z), mk = c.mask, N = c.nor; if (h == null || h < 1.2) return null;
+    if (onTunnel(x, z, h)) return { skip: true };
     if ((mk[8 * v + 4] > 100 && N[3 * v + 1] < 0.8) || mk[8 * v + 5] > 128 || mk[8 * v + 6] > 100) return { skip: true };
     if (mk[8 * v] > 120 && REDWOOD.value.some(b => x > b.x && x < b.z && z > b.y && z < b.w)) return { skip: true };  // no grass under the redwoods
     const vk = vcls(x, z); if (vk === CYPRESS || vk === EUC || (vk === SCRUB && hash2(Math.round(x * 7), Math.round(z * 7)) < 0.5)) return { skip: true };  // under the groves none; between the scrub's bushes some
@@ -736,10 +739,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // coarser), not in a building, a bore or on a steep bank cut for a road
   function scrubGround(x, z) {
     const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid || !c.mask || !c.occ) return null;
-    if ((occAt(c.occ, x, z) && (roadGap(x, z) ?? -1) < 1.5) || tunnelAt(x, z)) return { skip: true };
+    if (occAt(c.occ, x, z) && (roadGap(x, z) ?? -1) < 1.5) return { skip: true };
     const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), v = Math.round(fj) * n + Math.round(fi), h = gridHeight(g, x, z);
     if (h == null || !(v >= 0 && v < n * n)) return null;
-    if (h < 1.2 || (c.mask[8 * v + 4] > 100 && c.nor[3 * v + 1] < 0.75)) return { skip: true };
+    if (onTunnel(x, z, h)) return { skip: true };
+    if (h < 1.2 || (c.mask[8 * v + 4] > 100 && c.nor[3 * v + 1] < 0.9)) return { skip: true };  // the road cuts bare (Street View: red chert)
     return { h };
   }
   const scrub = createScrub({ THREE, scene, geos: scrubGeometries(), mat: mats.scrub, fade: scrubFade, cls: vcls, ground: scrubGround });
@@ -922,6 +926,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     if (tun.group) disposeObj(tun.group);
     tun.group = grp; tun.list = list; scene.add(grp);
+  }
+  // is ground at height h on a tunnel's way at its floor's level (its open cuts, its portals): nothing grows there
+  function onTunnel(x, z, h) {
+    for (const T of tun.list) {
+      const { P, D, bb } = T; if (x < bb[0] || z < bb[1] || x > bb[2] || z > bb[3]) continue;
+      for (let i = 1; i < P.length; i++) {
+        const a = P[i - 1], b = P[i], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2)) : 0;
+        if (Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t) < T.w + 1.5 && Math.abs(h - (T.h0 + (T.h1 - T.h0) * (D[i - 1] + (D[i] - D[i - 1]) * t) / T.L)) < 7) return true;
+      }
+    }
+    return false;
   }
   // the tunnel a point is in: { y, k } (k: how far in, 0 at a portal .. 1 from 25 m in), null outside
   function tunnelAt(x, z) {

@@ -90,12 +90,12 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   jwScrub = 0.0; jwKnown = known;
   if (known > 0.0) {
     float sc = smoothstep(0.25, 0.75, vg.r + (fine - 0.5) * 0.35), br = smoothstep(0.3, 0.7, vg.b + (fine - 0.5) * 0.3), tr = smoothstep(0.3, 0.7, vg.g);
-    vec3 grassC = mix(srgb(vec3(0.42, 0.45, 0.36)), srgb(vec3(0.51, 0.50, 0.42)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
-    grassC = mix(grassC, srgb(vec3(0.37, 0.43, 0.28)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
+    vec3 grassC = mix(srgb(vec3(0.41, 0.47, 0.31)), srgb(vec3(0.51, 0.52, 0.38)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
+    grassC = mix(grassC, srgb(vec3(0.36, 0.45, 0.25)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
     vec3 scrC = mix(srgb(vec3(0.27, 0.35, 0.26)), srgb(vec3(0.37, 0.42, 0.33)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));
     float bush = jwN(p / 3.1 + 0.37).g;
     scrC *= 0.68 + 0.5 * smoothstep(0.25, 0.75, bush);
-    scrC = mix(scrC, grassC * (0.78 + 0.12 * fine), jwNear);
+    scrC = mix(scrC, scrC * 0.72, jwNear);  // near the camera its bushes stand on it: the shade under them
     vec3 bareC = mix(srgb(vec3(0.49, 0.43, 0.37)), srgb(vec3(0.57, 0.46, 0.37)), smoothstep(0.3, 0.7, fine));
     vec3 d = mix(grassC, scrC, sc); d = mix(d, bareC, br); d = mix(d, srgb(vec3(0.24, 0.22, 0.17)), tr);
     c = mix(c, d * (0.92 + 0.16 * fine), known * (1.0 - town * 0.6));
@@ -107,8 +107,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22) * (1.0 - jwScrub * 0.8)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
   c = mix(c, rockC, rk);
-  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.85, hl) * mix(1.0, smoothstep(0.22, 0.42, slope), jwKnown);  // the Headlands' road cuts bare even where the grid softens them (where the imagery says what grows there, only the steep cuts)
-  c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), srgb(vec3(0.58, 0.40, 0.29)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: reddish chert
+  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.92, hl) * mix(1.0, smoothstep(0.1, 0.3, slope) * mix(0.4, 1.0, smoothstep(0.1, 0.5, vg.b)), jwKnown);  // the Headlands' road cuts bare even where the grid softens them (where the imagery says what grows there: the steep cuts, fully where it shows bare earth)
+  c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), srgb(vec3(0.60, 0.36, 0.26)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: red chert
   rk = max(rk, bare);
   // under the redwoods: red-brown needle litter, patches of sorrel
   float rw = 0.0;
@@ -333,7 +333,7 @@ export function propMaterial({ fade = null } = {}) {
 // A tunnel's lining: lit by its lamps (rows high on both walls, every 9 m): pools of warm light along the bore,
 // brightest under the lamps. attribute tl = [metres along, height share 0 floor .. 1 crown, side -1 .. 1]
 export function tunnelMaterial() {
-  const m = new THREE.MeshLambertMaterial({ color: 0x5f5c57, side: THREE.DoubleSide });
+  const m = new THREE.MeshLambertMaterial({ color: 0x9c9586, side: THREE.DoubleSide });  // pale concrete (Street View: the Baker-Barry tunnel)
   m.onBeforeCompile = sh => {
     sh.uniforms.tNoise = { value: textures().noise };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 tl; varying vec3 vTl; varying vec3 vTw;')
@@ -341,28 +341,30 @@ export function tunnelMaterial() {
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tNoise; varying vec3 vTl; varying vec3 vTw;')
       .replace('#include <color_fragment>', `#include <color_fragment>
         // concrete in pours 3 m long, stained toward the floor
-        float n = texture2D(tNoise, vTw.xz / 3.0 + vTw.y / 7.0).r, ring = step(0.96, fract(vTl.x / 6.0));
-        diffuseColor.rgb *= (0.82 + 0.3 * n) * (1.0 - 0.15 * ring) * mix(0.7, 1.0, smoothstep(0.0, 0.3, vTl.y));`)
+        float n = texture2D(tNoise, vTw.xz / 3.0 + vTw.y / 7.0).r, ring = step(0.93, fract(vTl.x / 6.0));
+        diffuseColor.rgb *= (0.88 + 0.2 * n) * (1.0 - 0.3 * ring) * mix(0.7, 1.0, smoothstep(0.0, 0.3, vTl.y));`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         float pool = pow(0.5 + 0.5 * cos(6.2832 * vTl.x / 9.0), 2.0), lamp = exp(-pow((vTl.y - 0.72) * 5.0, 2.0));
-        totalEmissiveRadiance += vec3(1.0, 0.86, 0.66) * diffuseColor.rgb * (0.18 + 1.1 * pool * (0.35 + 0.65 * lamp));`);
+        totalEmissiveRadiance += vec3(1.0, 0.88, 0.6) * diffuseColor.rgb * (0.35 + 1.3 * pool * (0.45 + 0.55 * lamp));`);
   };
-  m.customProgramCacheKey = () => 'jw-tunnel-1';
+  m.customProgramCacheKey = () => 'jw-tunnel-2';
   return m;
 }
 // A portal's headwall: concrete in courses with a coping, an arch ring round the opening (lighter), weathered lower down
 export function portalMaterial() {
-  const m = new THREE.MeshLambertMaterial({ color: 0xb2ab9f });
+  const m = new THREE.MeshLambertMaterial({ color: 0xc4bfb3 });
   m.onBeforeCompile = sh => {
     sh.uniforms.tNoise = { value: textures().noise };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 pl; varying vec3 vPl;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvPl = pl;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tNoise; varying vec3 vPl;')
       .replace('#include <color_fragment>', `#include <color_fragment>
-        float row = floor(vPl.y / 0.62), joint = max(step(0.95, fract(vPl.y / 0.62)), step(0.97, fract(vPl.x / 1.9 + row * 0.5)));
+        // cast concrete (Street View: the Headlands' portals and headwalls): faint lines of the forms' boards, rain streaks
+        // down from the top, darker toward the foot
+        float board = step(0.97, fract(vPl.y / 0.3)) * 0.06, streak = texture2D(tNoise, vec2(vPl.x / 1.3, vPl.y / 14.0)).g;
         float n = texture2D(tNoise, vPl.xy / 4.0).g, f = texture2D(tNoise, vPl.xy / 0.8).r;
-        diffuseColor.rgb *= (0.84 + 0.22 * n + 0.08 * f) * (1.0 - 0.22 * joint) * mix(0.72, 1.0, smoothstep(-1.0, 3.0, vPl.y));`);
+        diffuseColor.rgb *= (0.86 + 0.16 * n + 0.06 * f) * (1.0 - board) * (1.0 - 0.18 * smoothstep(0.55, 0.85, streak)) * mix(0.78, 1.0, smoothstep(-1.0, 3.0, vPl.y));`);
   };
-  m.customProgramCacheKey = () => 'jw-portal-1';
+  m.customProgramCacheKey = () => 'jw-portal-2';
   return m;
 }
 

@@ -203,7 +203,7 @@ export function treeGeometries() {
 // 1.4 m tall, and California sage, lower, softer and grey-green; each in full near the camera and with fewer, bigger
 // cards further out. Colours from the aerial imagery's scrub (USDA NAIP, about #50624b), the atlas's light on top.
 export function scrubGeometries() {
-  const brush = col(0x4f6639, 1.3), sage = col(0x76835f, 1.3);
+  const brush = col(0x5b7042, 1.3), sage = col(0x838e6c, 1.3);
   return {
     brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.36), M(0, 0.58, 0, 0.95, 0.5, 0.86), { soft: [0, 0.58, 0], shade: [0.08, 1.08] }], ...lumps(0, 0.72, 0, 1.4, 0.78, 1.28, 5, 13, 0.85, LEAF.scrub, 21, { lift: 0.5, lump: 0.6, out: 0.7 }).map(g => leaves(g, brush))]),
     brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.25, 23), brush.map(v => v * 0.62), M(0, 0.62, 0, 1.3, 0.72, 1.18), { soft: [0, 0.62, 0], shade: [0, 1.3] }],
@@ -214,7 +214,7 @@ export function scrubGeometries() {
   };
 }
 
-// Street furniture at its typical size (metres), instanced along the roads: a guardrail's timber post, a street lamp (its arm
+// Street furniture at its typical size (metres), instanced along the roads: a guardrail post, a street lamp (its arm
 // along +x over the road, the lamp's underside tag 2: lit at dusk), stop and speed limit signs (facing +z), a ranch
 // fence and a picket fence section (3 m along +x), a traffic signal on its pole (facing +z, its green lamp tag 4 lit,
 // the red and amber dark). Vertex coloured.
@@ -223,7 +223,7 @@ export function furnitureGeometries() {
   const grey = col(0x8c8f92), steel = col(0x9da3a6), dark = col(0x3b3d40), wood = col(0x6f5a44), pole = col(0x6a5e50), white = col(0xeeeeea), red = col(0xb3241c), lampC = col(0xfff1d0);
   const octagon = new THREE.CylinderGeometry(0.38, 0.38, 0.03, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.03);
   return {
-    post: merge([[B(0.15, 0.82, 0.2, 0, 0.41, 0), col(0x76695a)], [B(0.15, 0.36, 0.15, 0.08, 0.64, 0), col(0x6c5f51)]]),  // weathered timber, a timber block under the rail (Street View)
+    post: merge([[B(0.1, 0.78, 0.15, 0, 0.39, 0), steel], [B(0.07, 0.3, 0.15, 0.06, 0.66, 0), steel]]),
     pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),
     lamp: merge([[C(0.1, 0.07, 6.6), dark], [B(1.9, 0.08, 0.1, 0.95, 6.5, 0), dark], [B(0.6, 0.14, 0.26, 1.85, 6.42, 0), dark], [B(0.5, 0.03, 0.2, 1.85, 6.34, 0), lampC, null, { tag: 2 }]]),
     stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [octagon, red], [new THREE.CylinderGeometry(0.33, 0.33, 0.035, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.04), white], [B(0.5, 0.12, 0.04, 0, 2.2, 0.06), red]]),
@@ -298,9 +298,11 @@ export function buildingGeometry(list) {
     const h = (k) => hash2(b.seed, k), ob = orientedBox(r), area = Math.abs(THREE.ShapeUtils.area(r.map(p => new THREE.Vector2(p[0], p[1])))), fill = area / Math.max(1, ob.area);
     // houses: small and near enough a box for one roof over it (an L or a T takes a flat roof); a few barns with a
     // gambrel roof, in barn red
-    const house = b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.74, barn = !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
-    const top = b.base + b.h, wi = Math.floor(h(1) * WALLS.length), wc = barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
-    const style = barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
+    // (b.fort: the Headlands' army posts, Fort Baker, Barry and Cronkhite: white clapboard under red tile or grey roofs,
+    // gabled or hipped barracks and houses, Street View)
+    const house = b.fort ? b.h <= 14 && r.length <= 12 && ob.area < 1600 && fill > 0.7 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.74, barn = !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
+    const top = b.base + b.h, wi = Math.floor(h(1) * WALLS.length), wc = b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.fort ? (h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    const style = b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];

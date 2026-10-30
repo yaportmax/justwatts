@@ -3,6 +3,7 @@
 // it: one instanced draw a tile, every tree in it, the near ones (the full models' circle) left out in the vertex
 // shader, so moving the circle costs nothing on the CPU. Far away they thin out, the ones left a little bigger.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
+import { withSun } from './materials.js';
 
 const CW = 256, CH = 512, TOP = 50 * Math.PI / 180;
 
@@ -98,7 +99,7 @@ export function impostorMaterial(imp) {
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(jwImpN, 0.0)).xyz);');
   };
   m.customProgramCacheKey = () => 'jw-imp-1';
-  return m;
+  return withSun(m);
 }
 
 // one tile's far trees: list [[x, y, z, scale, cell, height scale, light, warm], ...] -> a mesh with its own material

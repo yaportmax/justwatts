@@ -4,6 +4,7 @@
 // tuck on fast descents. The model faces -z (three.js forward), x is the rider's right, origin on the ground between
 // the wheels, metres. knee(), ik() and stance() are pure; knee() is tested in tests/test_world3d.py.
 
+import { withSun } from './materials.js';
 const DEG = Math.PI / 180;
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -367,7 +368,7 @@ function useMaterial(THREE, cols) {
   if (!e) {
     const m = new THREE.MeshStandardMaterial({ vertexColors: true }), c = new THREE.Color(), pal = new Float32Array(18);
     cols.forEach((h, i) => { c.setHex(h); pal[i * 3] = c.r; pal[i * 3 + 1] = c.g; pal[i * 3 + 2] = c.b; });
-    m.userData.pal = { value: pal }; m.onBeforeCompile = onCompile;
+    m.userData.pal = { value: pal }; m.onBeforeCompile = onCompile; withSun(m);
     e = { m, key, n: 0 }; SHARED.mats.set(key, e);
   }
   e.n++; return e;

@@ -8,7 +8,8 @@ import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, rasterBy, gr
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, WIND, BORES } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, withSun, WIND, BORES } from './materials.js';
+import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, species, buildingGeometry, SPECIES, NEAR } from './props.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
@@ -59,6 +60,8 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const mats = { terrain: terrainMaterial(), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
     tunnel: new THREE.MeshLambertMaterial({ color: 0x55524c, emissive: 0x15130f }), portal: new THREE.MeshLambertMaterial({ color: 0xa8a297 }) };
+  for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
+  const hz = createHorizon(renderer, scene, sky.sunDir);
   const trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog.u);
@@ -139,7 +142,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
     g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
     g.setIndex(new THREE.BufferAttribute(m.idx, 1)); g.computeBoundingSphere();
-    const mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? mats.terrain : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false;
+    const mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? mats.terrain : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(); } else { c.nor = c.mask = c.cv = null; }
     setPart(c, 'terrain', mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
   }
@@ -690,6 +693,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       camera.position.copy(camPos); camera.lookAt(camLook);
       if (camOver) { const [la, lo, h, hd, pitch] = camOver, [x, z] = proj.xz(la, lo), r = hd * Math.PI / 180; camera.position.set(x, h, z); camera.lookAt(x + Math.sin(r) * 100, h + Math.tan(pitch * Math.PI / 180) * 100, z - Math.cos(r) * 100); }
       sky.update(camera, me.group.position, dt, QUALITY[q].span);
+      if (ready) hz.update(p[0], p[1], now);
       // the bores nearest the camera, for the ground to leave out
       { const segs = [];
         for (const T of tun.list) for (const g of T.segs) segs.push([Math.hypot((g[0] + g[2]) / 2 - camPos.x, (g[1] + g[3]) / 2 - camPos.z), g]);
@@ -722,7 +726,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     if (dead) return; dead = true; cancelAnimationFrame(raf);
     for (const m of [near, far]) for (const k of [...m.keys()]) dropChunk(m, k);
     me.dispose(); for (const e of others.values()) e.r.dispose();
-    grass.dispose(); post.dispose(); life.dispose(); audio.dispose(); if (tun.group) disposeObj(tun.group);
+    grass.dispose(); post.dispose(); life.dispose(); audio.dispose(); hz.dispose(); if (tun.group) disposeObj(tun.group);
     renderer.dispose(); renderer.forceContextLoss?.(); canvas.remove(); tags.remove();
   }
   raf = requestAnimationFrame(frame);
@@ -743,7 +747,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
-    debug: () => ({ scene, camera, THREE, me: me.group.position.toArray(), probe: (x, z) => ({ tunnel: tunnelAt(x, z), ground: groundAt(x, z) }), tunnels: tun.list.map(T => ({ h0: T.h0, h1: T.h1, L: T.L })) }),
+    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, me: me.group.position.toArray(), probe: (x, z) => ({ tunnel: tunnelAt(x, z), ground: groundAt(x, z) }), tunnels: tun.list.map(T => ({ h0: T.h0, h1: T.h1, L: T.L })) }),
     // a fixed camera for screenshots and checks: [lat, lon, height m, heading deg, pitch deg], null to follow the rider
     viewFrom(v) { camOver = v; },
   };

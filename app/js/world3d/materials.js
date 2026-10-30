@@ -282,3 +282,27 @@ export function buildingMaterial() {
   m.customProgramCacheKey = () => 'jw-bldg-2';
   return m;
 }
+
+// Terrain shadows at any distance (horizon.js draws the map): a lit material takes the sun as the map says at its own
+// place, past the shadow map's few dozen metres too. Wraps the material's onBeforeCompile (call it once, last).
+export const HORIZON = { map: { value: null }, box: { value: new THREE.Vector4(0, 0, 0, 0) } };
+export function withSun(m) {
+  const f = m.onBeforeCompile, key = m.customProgramCacheKey.call(m) + '|sun';
+  m.onBeforeCompile = function (sh, r) {
+    f.call(this, sh, r);
+    Object.assign(sh.uniforms, { hzMap: HORIZON.map, hzBox: HORIZON.box });
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <fog_pars_fragment>', `#include <fog_pars_fragment>
+        uniform sampler2D hzMap; uniform vec4 hzBox;
+        float jwSunVis() {
+          #ifdef USE_FOG
+          vec2 u = vec2(vFogW.x - hzBox.x, hzBox.y - vFogW.z) * hzBox.z;
+          if (hzBox.z > 0.0 && u.x > 0.0 && u.y > 0.0 && u.x < 1.0 && u.y < 1.0) return texture2D(hzMap, u).r;
+          #endif
+          return 1.0;
+        }`)
+      .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= jwSunVis();'));
+  };
+  m.customProgramCacheKey = () => key;
+  return m;
+}

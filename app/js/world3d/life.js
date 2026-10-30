@@ -3,6 +3,7 @@
 // and never touch one; lamps and light on the road at dusk), people standing about at the vista points, gulls
 // wheeling over the coast and turkey vultures soaring over the hills.
 import { merge } from './props.js';
+import { withSun } from './materials.js';
 import { hash2 } from './landuse.js';
 
 // vista points: [lat, lon, people]
@@ -96,7 +97,7 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
         float jwFr = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 3.0) * step(vTag, 1.5);
         reflectedLight.indirectDiffuse += sheen * (0.02 + 0.28 * jwFr);`);
   };
-  carMat.customProgramCacheKey = () => 'jw-car-1';
+  carMat.customProgramCacheKey = () => 'jw-car-1'; withSun(carMat);
   const counts = [[44, 1, 1], [26, 1, 1], [10, 0.6, 0]][quality] ?? [26, 1, 1];
   const nT = carGeos.length, perType = Math.ceil(counts[0] / nT) + 2;
   const carSets = carGeos.map(({ g }) => { const m = new THREE.InstancedMesh(g, carMat, perType); m.castShadow = quality === 0; m.frustumCulled = false; m.count = 0; scene.add(m); return m; });
@@ -122,7 +123,7 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
       folk.push({ x: x + Math.cos(a) * r, z: z + Math.sin(a) * r, yaw: hash2(k, 3) * 6.283, walk: hash2(k, 5) < 0.35, ph: hash2(k, 7) * 6.283, sc: 0.92 + 0.14 * hash2(k, 9), y: null, c: SHIRTS[(k + n) % SHIRTS.length] });
     }
   }
-  const bodies = new THREE.InstancedMesh(bodyGeo, lam(), Math.max(1, folk.length)), rests = new THREE.InstancedMesh(restGeo, lam(), Math.max(1, folk.length));
+  const bodies = new THREE.InstancedMesh(bodyGeo, withSun(lam()), Math.max(1, folk.length)), rests = new THREE.InstancedMesh(restGeo, withSun(lam()), Math.max(1, folk.length));
   folk.forEach((p, i) => bodies.setColorAt(i, C.set(p.c)));
   for (const m of [bodies, rests]) { m.frustumCulled = false; m.castShadow = quality === 0; scene.add(m); }
 

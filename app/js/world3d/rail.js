@@ -63,6 +63,9 @@ export const BIKE_LANE = 1.8;
 export function laneOf(r, fwd = true) {
   const st = roadStyle(r.hw, r.ln, r.fl, r.wd), half = st.w / 2, park = fwd ? st.pR : st.pL, bike = r.fl & (fwd ? 64 : 32);
   if (isTrail(r) || /cycleway|pedestrian/.test(r.hw) || half < 2) return 0;
+  // a one-lane bore both ways in turn (the Baker-Barry tunnel: OpenStreetMap's lanes=1, Street View): 1.4 m right of its
+  // line, inside its 4.4 m lane (view.js draws the bore that wide)
+  if (r.fl & 2 && r.ln === 1 && !(r.fl & 8)) return 1.4;
   return Math.max(0, Math.min(6.5, bike ? half - park - BIKE_LANE / 2 : half - park - 1));
 }
 
@@ -98,6 +101,13 @@ export function railIndex(json, xz) {
     }
     return best;
   }
+  // the highest drawn top at a point among the roads there within `reach` of the height y (where two roads meet, one is
+  // drawn over the other: the rider on whichever is on top), null on none
+  function topMax(x, z, y, reach = 0.1) {
+    let best = null;
+    for (const id of near(x, z)) { const q = out[id], p = q.T.at(x, z); if (!p || Math.abs(p.d) > q.half) continue; const t = p.h + q.lift; if (Math.abs(t - y) < reach && (best == null || t > best)) best = t; }
+    return best;
+  }
   function match(x, z, hx, hz, e = null, prev = -1, dir = null) {
     let best = -1, bc = Infinity; const hl = Math.hypot(hx, hz) || 1;
     for (const id of near(x, z)) {
@@ -111,7 +121,7 @@ export function railIndex(json, xz) {
     }
     return best;
   }
-  return { rails: out, top, match, on, near };
+  return { rails: out, top, topMax, match, on, near };
 }
 
 // A course's profile: the rail each of its points rides (P: [[x, z], ...] its points, ele: its heights or null),
@@ -155,8 +165,12 @@ export function profileAt(idx, pr, i, f) {
   const n = pr.ri.length; if (i >= n - 1) { i = n - 2; f = 1; } if (i < 0) return null;
   const a = pr.ri[i], b = pr.ri[i + 1], S = pr.s, o = 4 * i;
   if (a < 0 && b < 0) return null;
-  const at = (r, s) => { const q = idx.rails[r], p = railXZ(q, s); return { y: railY(q, s), x: p[0], z: p[1], rail: q }; };
+  // (tx, tz: the rail's tangent there over 3 m, as the drawn road's cross-sections turn: a lane offset across it lands on
+  // the drawn road's own line of that height)
+  const at = (r, s) => { const q = idx.rails[r], p = railXZ(q, s), a = railXZ(q, s - 1.5), b = railXZ(q, s + 1.5), l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    return { y: railY(q, s), x: p[0], z: p[1], tx: (b[0] - a[0]) / l, tz: (b[1] - a[1]) / l, rail: q }; };
   const A = a >= 0 ? at(a, S[o] + (S[o + 1] - S[o]) * f) : null, B = b >= 0 && b !== a ? at(b, S[o + 2] + (S[o + 3] - S[o + 2]) * f) : A;
   if (!A) return B; if (!B || A === B) return A;
-  return { y: A.y + (B.y - A.y) * f, x: A.x + (B.x - A.x) * f, z: A.z + (B.z - A.z) * f, rail: f < 0.5 ? A.rail : B.rail };
+  const sg = A.tx * B.tx + A.tz * B.tz < 0 ? -1 : 1, tx = A.tx + (B.tx * sg - A.tx) * f, tz = A.tz + (B.tz * sg - A.tz) * f, tl = Math.hypot(tx, tz) || 1;
+  return { y: A.y + (B.y - A.y) * f, x: A.x + (B.x - A.x) * f, z: A.z + (B.z - A.z) * f, tx: tx / tl, tz: tz / tl, rail: f < 0.5 ? A.rail : B.rail };
 }

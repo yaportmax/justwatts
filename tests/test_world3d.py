@@ -244,7 +244,7 @@ def test_road_sides_embankments_cuts_and_rails(out):
     c = b["cut"]
     assert b["cutH"] == pytest.approx(6.75) and c[1][3] == pytest.approx(16.75)   # a face to the lidar's bank, 4.5 m out
     assert c[1][2] - c[1][0] == pytest.approx(0.4 * 6.75) and c[1][4] == 1        # at 68 degrees, bare (a cut face); its verge not
-    assert c[0][4] == 0 and b["tris"] == b["up"] == 96                            # every face toward the sky (or out over the road)
+    assert c[0][4] == 0 and b["tris"] == b["up"] == 112                           # every face toward the sky (or out over the road)
     r = b["rail"]
     assert r["z"] == pytest.approx(3.45) and r["gap"] == pytest.approx(1.9)       # a rail's posts 0.45 m past the edge, 1.9 m apart
     assert r["posts"] == 21 and r["yaw"] == pytest.approx(1.571, abs=0.01)        # by arc length; each post's front toward the road

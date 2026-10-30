@@ -441,7 +441,9 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     for (let d = 0; d <= (P.length - 1) * 10; d += 1 / 3) {
       const i = Math.min(P.length - 2, Math.floor(d / 10)), f = d / 10 - i, x = P[i][0] + (P[i + 1][0] - P[i][0]) * f, z = P[i][1] + (P[i + 1][1] - P[i][1]) * f;
       const dk0 = onDeck(proj.lat(z), proj.lon(x)), dk = dk0 && Math.abs(c.ele[i] - dk0.h) < 8 ? dk0 : null, hh = profileAt(RI, pr, i, f), hx = P[i + 1][0] - P[i][0], hz = P[i + 1][1] - P[i][1], L = Math.hypot(hx, hz) || 1, lane = pr.lane[i] + (pr.lane[i + 1] - pr.lane[i]) * f;
-      rows.push({ d, x: hh ? hh.x : x, z: hh ? hh.z : z, y: dk ? dk.h + 0.05 : hh ? hh.y : null, rail: hh?.rail ?? null, lane, rx: -hz / L, rz: hx / L, fw: pr.fw[i] > 0 });
+      // (as view.js: across the rail's tangent, on the topmost road there)
+      const sg = hh && hh.tx * hx + hh.tz * hz < 0 ? -1 : 1, nx = hh ? -hh.tz * sg : -hz / L, nz = hh ? hh.tx * sg : hx / L, yr = hh ? Math.max(hh.y, RI.topMax((hh.x) + nx * lane, hh.z + nz * lane, hh.y) ?? hh.y) : null;
+      rows.push({ d, x: hh ? hh.x : x, z: hh ? hh.z : z, y: dk ? dk.h + 0.05 : yr, yp: hh ? hh.y : null, rail: hh?.rail ?? null, lane, rx: nx, rz: nz, fw: pr.fw[i] > 0 });
     }
     return { P, pr, rows };
   };
@@ -459,7 +461,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     // 1.5 m in from the right edge of their travel lane (a path, a bike path: its middle)
     for (let i = 0; i < pr.ri.length; i++) {
       const q = RI.rails[pr.ri[i]]; if (!q) continue; const st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd), half = st.w / 2, fw = pr.fw[i] > 0, park = fw ? st.pR : st.pL, bike = q.r.fl & (fw ? 64 : 32), edge = half - park - pr.lane[i];
-      if (!isTrail(q.r) && !/cycleway|pedestrian/.test(q.r.hw) && half >= 2 && (bike ? Math.abs(edge - 0.9) > 0.05 : edge > 1.5 || edge < 0.5)) laneBad++;
+      if (!isTrail(q.r) && !/cycleway|pedestrian/.test(q.r.hw) && half >= 2 && !(q.r.fl & 2 && q.r.ln === 1) && (bike ? Math.abs(edge - 0.9) > 0.05 : edge > 1.5 || edge < 0.5)) laneBad++;
     }
     const bn = bounce(rows); out.courses[key] = { pts: c.ll.length, jump: r3(jump), bounce: r3(bn), none, onRail, laneBad };
   }
@@ -468,7 +470,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     let dh = 0, sides = 0, n2 = 0;
     for (let d = 20; d < L - 20; d += 10) {
       const a = fwd.rows[Math.round(d * 3)], b = rev.rows[Math.round((L - d) * 3)]; if (!a?.rail || !b?.rail || a.y == null || b.y == null || a.rail !== b.rail) continue; n2++;
-      dh = Math.max(dh, Math.abs(a.y - b.y));
+      dh = Math.max(dh, Math.abs(a.yp - b.yp));  // (the rail's height: the same whichever way)
       const pa = a.rail.T.at(a.x + a.rx * a.lane, a.z + a.rz * a.lane), pb = a.rail.T.at(b.x + b.rx * b.lane, b.z + b.rz * b.lane);
       if (a.lane < 0.5 || (Math.sign(pa.d) !== Math.sign(pb.d) && Math.abs(pa.d) > 0.4 && Math.abs(pb.d) > 0.4)) sides++;
     }

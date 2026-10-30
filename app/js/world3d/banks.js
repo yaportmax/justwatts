@@ -2,7 +2,8 @@
 // so on a hillside a road's edge would float over the slope below it, and a cut bank would lean back over a whole ring
 // of the grid. Here, per side of a road: where the ground lies below the edge, an embankment from the edge down to it
 // at 1 in 1.5 at most (a shoulder first where a rail stands); where the lidar's ground rises steeply from the edge, a
-// face up to the bank's top (red chert where it is bare) and back onto the hillside; where neither, nothing. Pure (no
+// face up to the bank's top (red chert where it is bare) and back onto the hillside; where neither, a verge on the ground
+// as carved to the road. Pure (no
 // three.js): tests/test_world3d.py.
 
 // A ribbon's drawn edge on one side (side 1: its right as it runs, -1: its left) from ribbon()'s centre entries [x, y,
@@ -58,7 +59,10 @@ export function bands(p, K, ground, { sh = 0.15, verge = 0.6 } = {}) {
     let toe = sh;
     for (let o = sh; o <= 8; o += 0.5) { toe = o; if (y - 0.06 - (o - sh) / 1.5 <= g(o) + 0.05) break; }
     const yt = y - 0.06 - (toe - sh) / 1.5, o2 = toe + Math.max(0.5, Math.min(4, (yt - g(toe)) * 0.5));
-    return [[0, y - 0.03, sh, y - 0.06, 0], [sh, y - 0.06, toe, Math.max(yt, g(toe)) - 0.05, 0], [toe, Math.max(yt, g(toe)) - 0.05, o2, g(o2) - 0.3, 0]];
+    // (and on over the ground as carved to the road out to 6 m at least: where the grid is pushed further down under a
+    // road beside, this is what shows)
+    const o3 = Math.max(o2 + 1.5, 6);
+    return [[0, y - 0.03, sh, y - 0.06, 0], [sh, y - 0.06, toe, Math.max(yt, g(toe)) - 0.05, 0], [toe, Math.max(yt, g(toe)) - 0.05, o2, g(o2) - 0.03, 0], [o2, g(o2) - 0.03, o3, g(o3) - 0.03, 0]];
   }
   if (K.kind === CUT) {
     // a face from the verge's outer side up to the bank's height at 68 degrees, then back onto the hillside
@@ -69,24 +73,23 @@ export function bands(p, K, ground, { sh = 0.15, verge = 0.6 } = {}) {
     const H = K.h, of = verge, ot = of + 0.4 * H, oc = Math.max(ot + 2.5, 7.5), hc = Math.min(g(oc), y + H + 0.4 * (oc - ot));
     return [[0, y - 0.03, of, y - 0.05, 0], [of, y - 0.3, ot, y + H, 1], [ot, y + H, oc, Math.max(hc, y + H - 1) - 0.15, 1]];
   }
-  return null;
+  // level: a verge on the ground as carved to the road, out to 6 m, a few centimetres under it (where the ground is
+  // pushed further down under a road beside, the verge is what shows: no pit)
+  const v = o => Math.min(y - 0.04, g(o) - 0.03);
+  return [[0, y - 0.04, 1.5, v(1.5), 0], [1.5, v(1.5), 3.5, v(3.5), 0], [3.5, v(3.5), 6, g(6) - 0.03, 0]];
 }
 
-// Runs of one kind along an edge, each point's bands; the first and last point of a run drawn into the edge (no blunt
-// end). -> [[{ p, b }, ...], ...]
+// Runs of one kind along an edge, each point's bands; each run on to the next run's first point in its own kind (the
+// two overlap there: no gap between them where the ground shows). -> [[{ p, b }, ...], ...]
 export function sideRuns(E, kinds, ground, opt = {}) {
   const runs = [];
   for (let i = 0; i < E.length;) {
     let j = i; while (j + 1 < E.length && kinds[j + 1].kind === kinds[i].kind) j++;
-    if (kinds[i].kind !== LEVEL && j > i) {
-      const run = [];
-      for (let k = i; k <= j; k++) {
-        let b = bands(E[k], kinds[k], ground, { ...opt, sh: kinds[k].rail ? 0.85 : opt.sh ?? 0.15 }); if (!b) continue;
-        if ((k === i && i > 0) || (k === j && j < E.length - 1)) b = b.map(([o0, h0, o1, h1, c]) => [o0 * 0.15, E[k][1] + (h0 - E[k][1]) * 0.15, o1 * 0.15, E[k][1] + (h1 - E[k][1]) * 0.15, c]);
-        run.push({ p: E[k], b });
-      }
-      if (run.length > 1) runs.push(run);
+    const run = [];
+    for (let k = i; k <= Math.min(E.length - 1, j + 1); k++) {
+      const K = kinds[Math.min(k, j)], b = bands(E[k], K, ground, { ...opt, sh: K.rail ? 0.85 : opt.sh ?? 0.15 }); if (b) run.push({ p: E[k], b });
     }
+    if (run.length > 1) runs.push(run);
     i = j + 1;
   }
   return runs;

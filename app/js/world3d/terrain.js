@@ -232,10 +232,23 @@ export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
   return { pos, cls, src, idx };
 }
 
+// do two triangles [[x, z] x 3] overlap (separating axes)
+function trisOverlap(A, B) {
+  for (const T of [A, B]) for (let k = 0; k < 3; k++) {
+    const p = T[k], q = T[(k + 1) % 3], nx = q[1] - p[1], nz = p[0] - q[0];
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const v of A) { const t = v[0] * nx + v[1] * nz; a0 = Math.min(a0, t); a1 = Math.max(a1, t); }
+    for (const v of B) { const t = v[0] * nx + v[1] * nz; b0 = Math.min(b0, t); b1 = Math.max(b1, t); }
+    if (a1 < b0 + 1e-6 || b1 < a0 + 1e-6) return false;
+  }
+  return true;
+}
 // Keep the ground under the roads: tris = [ax, ay, az, bx, by, bz, cx, cy, cz, ...] (a road's top surface); a grid point
 // under a triangle goes no higher than it less `below`, one within `margin` metres of it no higher than the triangle's
 // nearest point less `below`, plus `slope` for every metre past its edge (the ground's triangles are coarser than a path
-// is wide: without this they poke up through it). Lowers only. Returns how many points came down.
+// is wide: without this they poke up through it). Every corner of a ground triangle that overlaps a road triangle goes
+// no higher than that road triangle's lowest corner less `below` (else a corner further up a cut slope lifts the
+// triangle over the road's edge between them). Lowers only. Returns how many points came down.
 export function pushUnder(g, tris, opt) { return drain(pushUnderSteps(g, tris, opt)); }
 // the same a slice at a time (a generator yielding every 1500 triangles)
 export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.08 } = {}) {
@@ -262,6 +275,13 @@ export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.
       }
       const v = j * n + i, L = h - below + slope * Math.max(0, d - 0.3);
       if (L < lim[v]) lim[v] = L;
+    }
+    // the ground triangles over it (the mesh's: a c b and b c d of each quad)
+    const low = Math.min(ay, by, cy) - below, R = [[ax, az], [bx, bz], [cx, cz]];
+    const [qi0, qj0] = gridIJ(g, Math.min(ax, bx, cx), Math.min(az, bz, cz)), [qi1, qj1] = gridIJ(g, Math.max(ax, bx, cx), Math.max(az, bz, cz));
+    for (let j = Math.max(0, Math.floor(Math.min(qj0, qj1))); j <= Math.min(s - 1, Math.floor(Math.max(qj0, qj1))); j++) for (let i = Math.max(0, Math.floor(Math.min(qi0, qi1))); i <= Math.min(s - 1, Math.floor(Math.max(qi0, qi1))); i++) {
+      const a = j * n + i, b = a + 1, c = a + n, d2 = c + 1, P = v => [g.xs[v % n], g.zs[Math.floor(v / n)]];
+      for (const tri of [[a, c, b], [b, c, d2]]) if (trisOverlap(tri.map(P), R)) for (const v of tri) if (low < lim[v]) lim[v] = low;
     }
   }
   let moved = 0;

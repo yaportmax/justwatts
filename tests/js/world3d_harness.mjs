@@ -7,7 +7,9 @@ import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan, carStep } from '../../app/js/world3d/life.js';
-import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners } from '../../app/js/world3d/ribbon.js';
+import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, TAPER } from '../../app/js/world3d/ribbon.js';
+import { parseVeg, makeVeg, SCRUB, GRASS } from '../../app/js/world3d/veg.js';
+import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
 import { packTile, unpackTile, gridAt } from '../../app/js/world3d/baked.js';
@@ -257,5 +259,27 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   // a right angle corner of two 20 m legs: rounded, never more than dmax from the corner's lines, ends kept
   const rc = roundCorners([[0, 0], [20, 0], [20, 20]], 0.35), dev = Math.max(...rc.map(([x, z]) => Math.min(Math.abs(z), Math.abs(x - 20))));
   out.chain = { n: ch.length, first: ch[0].pts.length, joined: JSON.stringify(ch[0].pts) === JSON.stringify([a, b, cc]), rest: ch.map(r => r.pts.length), round: { n: rc.length, dev: r3(dev), ends: JSON.stringify([rc[0], rc.at(-1)]) === '[[0,0],[20,20]]' } };
+}
+{
+  // two ways of one road meet end to end, 10 m and 7.6 m wide: each eases to 8.8 m at the joint over TAPER metres; a
+  // bridge on the other side keeps its own width and the road meets it at that
+  const a = [37.9, -122.6], b = [37.9, -122.599], c2 = [37.9, -122.598], proj = makeProj(37.9, -122.6), W = { wide: 10, narrow: 7.6, deck: 12 };
+  const roads = [{ hw: 'wide', pts: [a, b] }, { hw: 'narrow', pts: [b, c2] }, { hw: 'deck', fl: 1, pts: [c2, [37.9, -122.597]] }];
+  const j = tapers(roads, { width: r => W[r.hw], rigid: r => r.fl & 1, xz: proj.xz }), [bx, bz] = proj.xz(...b);
+  const B = builder(), cen = ribbon(B, [proj.xz(...a), proj.xz(...b)], { w: 10, hAt: () => 0, joints: j.get(0), step: 5 }), d = B.done();
+  out.taper = { ends: [...j.keys()].sort(), atJoint: r3(taperedWidth(10, j.get(0), bx, bz)), narrowAtJoint: r3(taperedWidth(7.6, j.get(1), bx, bz)),
+    away: r3(taperedWidth(10, j.get(0), bx - TAPER - 1, bz)), toDeck: r3(taperedWidth(7.6, j.get(1), ...proj.xz(...c2))), deckHas: j.has(2),
+    first: r3(Math.hypot(d.pos[0] - d.pos[3], d.pos[2] - d.pos[5])), last: r3(Math.hypot(d.pos.at(-6) - d.pos.at(-3), d.pos.at(-4) - d.pos.at(-1))), half: r3(cen.at(-1)[3]), code: r3(d.code.at(-1 - 4)) };
+}
+{
+  // the ground cover grid: header, classes, lookups; the scrub's bushes only on scrub cells, the same every time
+  const n = 64, cls = new Uint8Array(n * n).fill(GRASS); for (let j = 0; j < n; j++) for (let i = 0; i < n / 2; i++) cls[j * n + i] = SCRUB;
+  const head = new TextEncoder().encode(JSON.stringify({ box: [37.8, -122.6, 37.81, -122.59], n })), pad = (4 + head.length) % 2, buf = new Uint8Array(4 + head.length + pad + n * n);
+  new DataView(buf.buffer).setUint32(0, head.length, true); buf.set(head, 4); buf.set(cls, 4 + head.length + pad);
+  const v = parseVeg(buf), rgba = v.rgba(), proj = makeProj(37.805, -122.595), at = (x, z) => v.at(proj.lat(z), proj.lon(x));
+  const b1 = cellBushes(-3, -2, at), b2 = cellBushes(-3, -2, at), west = cellBushes(-10, 0, at), east = cellBushes(8, 0, at);
+  out.veg = { west: v.at(37.805, -122.598), east: v.at(37.805, -122.591), outside: v.at(37.9, -122.598), rgba: [...rgba.slice(0, 4)], rgbaEast: [...rgba.slice(4 * (n - 1), 4 * n)],
+    same: JSON.stringify(b1) === JSON.stringify(b2), westN: west.length, eastN: east.length, onScrub: west.every(([x, z]) => at(x, z) === SCRUB),
+    perCell: SCRUB_CELL * SCRUB_CELL, scales: [r3(Math.min(...west.map(q => q[2]))), r3(Math.max(...west.map(q => q[2])))] };
 }
 console.log(JSON.stringify(out));

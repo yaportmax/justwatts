@@ -36,7 +36,8 @@ def test_carve_puts_the_ground_under_the_ridden_road(out):
 def test_the_ground_stays_under_the_roads(out):
     p = out["pushUnder"]
     assert p["on"] == pytest.approx(49.92)                                      # under the road: just under its top (was 53)
-    assert p["next"] == pytest.approx(49.92 + 0.02 * (p["step"] - 2.3), abs=0.02)  # the next rows: the rise allowed from its edge
+    assert p["next"] == pytest.approx(49.92)                                    # the next rows: their triangles cross the road,
+                                                                                # so they come down whole (none over its edge)
     assert p["far"] == 53 and p["moved"] == 3 * 17                              # further rows untouched; lowers only
 
 
@@ -47,7 +48,7 @@ def test_ground_classes_from_polygons(out):
 def test_road_ribbon_geometry(out):
     r = out["ribbon"]
     assert r["verts"] == 10 and r["tris"] == 8 and r["faceUp"] == 8 and r["resample"] == 6
-    assert r["xs"] == [-3, 3] and r["edgeY"] == [10.55, 9.95] and r["centre"] == [10.25] * 5  # each edge on the ground, lifted
+    assert r["xs"] == [-3, 3] and r["edgeY"] == [10.5, 10.0] and r["centre"] == [10.25] * 5  # edges on the ground, a crossfall of 0.25 m at most
     assert r["code"] == [2, 0, 2, 6] and r["v"] == [20, 20]                                 # markings, lanes, width; metres along
     assert r["deck"] == [40, 60, 50] and r["pillars"] == 3                                  # a bridge: straight between its ends
     s = out["styles"]
@@ -61,6 +62,23 @@ def test_road_ribbon_geometry(out):
     assert s["tertiary/0/0/9"]["w"] == 9                                                    # a tagged width wins
     assert s["residential/0/0"]["lm"] == 0 and s["path/0/0"]["surf"] == 2 and s["tertiary/0/4"]["surf"] == 2
     assert out["clip"] == [[[0, 5], [5, 5], [5, 10]]]
+
+
+def test_road_widths_ease_across_joints(out):
+    t = out["taper"]
+    assert t["ends"] == [0, 1] and not t["deckHas"]                             # the bridge keeps its own width
+    assert t["atJoint"] == t["narrowAtJoint"] == pytest.approx(8.8)            # both meet halfway, no step
+    assert t["away"] == 10 and t["toDeck"] == 12                               # its own width further on; the deck's at the deck
+    assert t["first"] == pytest.approx(10) and t["last"] == pytest.approx(8.8) and t["half"] == pytest.approx(4.4)
+    assert t["code"] == pytest.approx(8.8)                                     # the shader's width follows
+
+
+def test_ground_cover_and_scrub(out):
+    v = out["veg"]
+    assert v["west"] == 2 and v["east"] == 1 and v["outside"] == 0             # scrub west, grass east, nothing outside
+    assert v["rgba"] == [255, 0, 0, 255] and v["rgbaEast"] == [0, 0, 0, 255]
+    assert v["same"] and v["onScrub"] and v["eastN"] == 0                      # bushes on scrub only, the same every time
+    assert 0.6 * 164 < v["westN"] <= 169 and 0.45 <= v["scales"][0] < v["scales"][1] <= 1.75  # about a bush every 2.5 m
 
 
 def test_road_ways_join_and_corners_round(out):

@@ -16,6 +16,9 @@ export const REDWOOD = { value: Array.from({ length: 4 }, () => new THREE.Vector
 export const HL = { value: new THREE.Vector4(0, 0, -1, -1) };
 // San Francisco north of the park, seen across the strait (props.js SF_CITY): its ground a city's, not open hills
 export const SFB = { value: new THREE.Vector4(0, 0, -1, -1) };
+// the Headlands' ground cover (veg.js): per cell scrub, trees, bare earth, known (RGBA, blended between cells) over
+// box [x0, z0, x1, z1] in local metres (none until it loads); near: the radius the scrub's bushes are drawn in
+export const VEG = { tex: { value: null }, box: { value: new THREE.Vector4(0, 0, -1, -1) }, near: { value: 150 } };
 export const BORES = { a: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, b: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, n: { value: 0 } };
 
 const GLSL_COMMON = /* glsl */`
@@ -27,8 +30,15 @@ float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 *
 // p: world xz; n: world normal; m: [wood, green, sand, town]; m2: [cut bank, rock, lake, farm]; cv: hollow (+) or
 // ridge (-); h: height. Returns the albedo; rk: how much of it is rock or bare earth (no grass grows there).
 const GLSL_GROUND = /* glsl */`
-uniform sampler2D tNoise; uniform vec4 rwBox[4]; uniform vec4 hlBox; uniform vec4 sfBox;
+uniform sampler2D tNoise; uniform vec4 rwBox[4]; uniform vec4 hlBox; uniform vec4 sfBox; uniform sampler2D tVeg; uniform vec4 vegBox;
 vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
+vec4 jwVeg(vec2 p) {
+  vec2 uv = (p - vegBox.xy) / (vegBox.zw - vegBox.xy);
+  return texture2D(tVeg, clamp(uv, 0.0, 1.0)) * step(0.0, uv.x) * step(0.0, uv.y) * step(uv.x, 1.0) * step(uv.y, 1.0);
+}
+// set by jwGround: how much of the point is coastal scrub from the aerial imagery, and whether there is any there; set
+// before it: how near the point is (1: among the scrub's drawn bushes, its ground the litter and grass under them)
+float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0;
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
   float north = clamp(-n.z * 1.9, 0.0, 1.0) * smoothstep(0.03, 0.22, slope);
@@ -36,6 +46,10 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec4 nA = jwN(p / 4100.0 + 0.31), nB = jwN(mat2(0.8, -0.6, 0.6, 0.8) * p / 330.0 + 0.7);
   float big = nA.a, mid = nA.r, small = nB.g, fine = nB.r, patch80 = nB.b, patch160 = nB.a;
   float wood = m.x, green = m.y, sand = m.z, town = m.w, cut = m2.x, rockc = m2.y, lake = m2.z, farm = m2.w;
+  // the Headlands' cover from the aerial imagery where there is one (veg.js), the cells' edges broken up a little; its
+  // trees in place of OpenStreetMap's woods and scrub there
+  vec4 vg = jwVeg(p + (jwN(p / 13.0).ba - 0.5) * 7.0); float known = vg.a;
+  wood = mix(wood, vg.g, known);
   // the open hills: straw, gold and tawny patches
   vec3 straw = srgb(vec3(0.85, 0.75, 0.52)), gold = srgb(vec3(0.76, 0.62, 0.37)), tawny = srgb(vec3(0.62, 0.49, 0.31));
   vec3 c = mix(gold, straw, smoothstep(0.25, 0.8, mid * 0.75 + small * 0.25));
@@ -60,7 +74,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec3 g1 = srgb(vec3(0.50, 0.55, 0.29)), g2 = srgb(vec3(0.34, 0.42, 0.20));
   c = mix(c, mix(g1, g2, small), smoothstep(0.38, 0.8, moist));
   // coyote brush and coastal scrub: dark olive patches, more where it is damp
-  float scr = smoothstep(0.58, 0.92, small * 0.6 + mid * 0.3 + north * 0.22 + max(cv, 0.0) * 0.6 + wood * 0.25) * (1.0 - town) * (1.0 - green * 0.7);
+  float scr = smoothstep(0.58, 0.92, small * 0.6 + mid * 0.3 + north * 0.22 + max(cv, 0.0) * 0.6 + wood * 0.25) * (1.0 - town) * (1.0 - green * 0.7) * (1.0 - known);
   c = mix(c, srgb(vec3(0.33, 0.36, 0.21)) * (0.88 + 0.24 * fine), scr * 0.6);
   // woods: dark under the canopy (and the canopy itself from far away)
   vec3 forest = mix(srgb(vec3(0.13, 0.19, 0.10)), srgb(vec3(0.21, 0.28, 0.14)), smoothstep(0.3, 0.7, small)) * (0.8 + 0.4 * fine);
@@ -70,13 +84,30 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   c = mix(c, field * (0.9 + 0.2 * fine), farm * 0.85);
   // town: lawns, gardens, paving
   c = mix(c, mix(srgb(vec3(0.42, 0.50, 0.27)), srgb(vec3(0.55, 0.54, 0.50)), smoothstep(0.45, 0.7, small)), town * 0.7);
+  // the Headlands from the aerial imagery (veg.js; its colours from the same imagery, USDA NAIP): grass in the
+  // openings, greener in the shade and the hollows; coastal scrub, coyote brush to sage, in clumps of bushes with shade
+  // between them; bare red-brown earth; the litter under the groves
+  jwScrub = 0.0; jwKnown = known;
+  if (known > 0.0) {
+    float sc = smoothstep(0.25, 0.75, vg.r + (fine - 0.5) * 0.35), br = smoothstep(0.3, 0.7, vg.b + (fine - 0.5) * 0.3), tr = smoothstep(0.3, 0.7, vg.g);
+    vec3 grassC = mix(srgb(vec3(0.42, 0.45, 0.36)), srgb(vec3(0.51, 0.50, 0.42)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
+    grassC = mix(grassC, srgb(vec3(0.37, 0.43, 0.28)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
+    vec3 scrC = mix(srgb(vec3(0.27, 0.35, 0.26)), srgb(vec3(0.37, 0.42, 0.33)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));
+    float bush = jwN(p / 3.1 + 0.37).g;
+    scrC *= 0.68 + 0.5 * smoothstep(0.25, 0.75, bush);
+    scrC = mix(scrC, grassC * (0.78 + 0.12 * fine), jwNear);
+    vec3 bareC = mix(srgb(vec3(0.49, 0.43, 0.37)), srgb(vec3(0.57, 0.46, 0.37)), smoothstep(0.3, 0.7, fine));
+    vec3 d = mix(grassC, scrC, sc); d = mix(d, bareC, br); d = mix(d, srgb(vec3(0.24, 0.22, 0.17)), tr);
+    c = mix(c, d * (0.92 + 0.16 * fine), known * (1.0 - town * 0.6));
+    jwScrub = sc * known * (1.0 - br) * (1.0 - tr);
+  }
   // sand: the beach and dunes
   c = mix(c, srgb(vec3(0.84, 0.77, 0.61)) * (0.94 + 0.12 * fine), sand);
   // rock: cliffs and bluffs; bare earth on road banks and steep grass
-  rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
+  rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22) * (1.0 - jwScrub * 0.8)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
   c = mix(c, rockC, rk);
-  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.85, hl);  // the Headlands' road cuts bare even where the grid softens them
+  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.85, hl) * mix(1.0, smoothstep(0.22, 0.42, slope), jwKnown);  // the Headlands' road cuts bare even where the grid softens them (where the imagery says what grows there, only the steep cuts)
   c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), srgb(vec3(0.58, 0.40, 0.29)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: reddish chert
   rk = max(rk, bare);
   // under the redwoods: red-brown needle litter, patches of sorrel
@@ -99,12 +130,12 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN;\n' + GLSL_COMMON + GLSL_GROUND)
+      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN; uniform float scrubR;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <color_fragment>', /* glsl */`
         bool inBore = false;
         ${bores ? `
@@ -115,12 +146,13 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         }
         if (inBore) discard;` : ''}
         vec3 nW = normalize(vNw); float rk;
-        vec3 c = jwGround(vW.xz, nW, vMk, vMk2, vCv, vW.y, rk);
         float dist = length(vViewPosition);
+        jwNear = 1.0 - smoothstep(scrubR * 0.6, scrubR * 0.95, dist);
+        vec3 c = jwGround(vW.xz, nW, vMk, vMk2, vCv, vW.y, rk);
         // hollows a little darker (sky light does not reach the bottom of a gully)
         c *= 1.0 - clamp(vCv, 0.0, 1.0) * 0.25;
         // past the grass: the hills mottled, dots of scrub and their shade, drier and greener patches
-        { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk);
+        { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk) * (1.0 - jwKnown * 0.75);
           vec4 ms = jwN(vW.xz / 19.0 + 0.21); float sp = ms.g, sp2 = ms.r, pt = jwN(vW.xz / 2400.0 + 0.53).r;
           c *= 1.0 - far * open * (0.22 * smoothstep(0.6, 0.78, sp) + 0.12 * smoothstep(0.58, 0.8, sp2));
           c = mix(c, c * vec3(0.9, 1.0, 0.82), far * open * 0.6 * smoothstep(0.5, 0.75, pt));
@@ -130,7 +162,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         float near = 1.0 - smoothstep(40.0, 260.0, dist);
         float f1 = jwN(vW.xz / 9.0).r, f2 = jwN(mat2(0.8, 0.6, -0.6, 0.8) * vW.xz / 2.3).g;
         c *= 1.0 + near * ((f1 - 0.5) * 0.16 + (f2 - 0.5) * 0.1 * (1.0 - rk * 0.5));
-        float hb = f1 * 0.35 + f2 * 0.3 + rk * jwN(vW.xz / 1.1).b * 0.6;
+        float hb = f1 * 0.35 + f2 * 0.3 + rk * jwN(vW.xz / 1.1).b * 0.6 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
         vec3 dpx = dFdx(vW), dpy = dFdy(vW); float dhx = dFdx(hb), dhy = dFdy(hb);
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
         vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.55 + rk) * near;
@@ -138,7 +170,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-3' + (detail ? 'd' : '') + (bores ? 'b' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-4' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 
@@ -150,7 +182,7 @@ export function grassMaterial() {
   const T = textures(), U = { radius: { value: 60 }, centre: { value: new THREE.Vector2() } };
   m.userData.u = U;
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 gA; attribute vec4 gB; uniform float wTime, wGust, radius; uniform vec2 centre; varying vec3 vGc;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <begin_vertex>', /* glsl */`
@@ -165,7 +197,7 @@ export function grassMaterial() {
         float sway = (sin(wTime * 1.7 + ph) * 0.6 + sin(wTime * 3.1 + ph * 2.3) * 0.25 + 0.35) * wGust;
         transformed.x += sway * tip * tip * 0.22; transformed.z += sway * tip * tip * 0.12;
         vec3 gn = normalize(vec3(gA.x, sqrt(max(0.0, 1.0 - gA.x * gA.x - gA.y * gA.y)), gA.y)); float rk;
-        vec3 gc = jwGround(root.xz, gn, gB, vec4(0.0), gA.z, root.y, rk);
+        jwNear = 1.0; vec3 gc = jwGround(root.xz, gn, gB, vec4(0.0), gA.z, root.y, rk);
         float l = dot(gc, vec3(0.3, 0.55, 0.15)), far = smoothstep(10.0, 40.0, distance(root, cameraPosition));
         vec3 blade = mix(gc, vec3(l) * vec3(1.08, 1.0, 0.82), tip * 0.35) * mix(0.62, 1.22, tip) * (0.92 + 0.16 * h21(root.xz));
         vGc = mix(blade, gc * 0.97, far);   // further away the blades take the ground's own colour (no speckle)`)
@@ -176,7 +208,7 @@ export function grassMaterial() {
       // both faces lit like the ground under them
       .replace('#include <normal_fragment_begin>', 'float faceDirection = gl_FrontFacing ? 1.0 : -1.0;\nvec3 normal = normalize(vNormal);\nvec3 nonPerturbedNormal = normal;');
   };
-  m.customProgramCacheKey = () => 'jw-grass-2';
+  m.customProgramCacheKey = () => 'jw-grass-3';
   return m;
 }
 
@@ -251,12 +283,14 @@ export function roadMaterial() {
 // Trees and shrubs: vertex coloured, bark and leaf cards from the leaf atlas (alpha tested; the shadows too), the
 // crowns lit with soft (spherical) normals, the same on both faces of a card, and glowing a little with the sun
 // behind them. They lean with the wind by height, the leaves flutter. Instanced; per instance colour varies the green.
-export function propMaterial() {
+// fade: { centre, radius } uniforms: each instance shrinks into the ground over the outer quarter of the radius round
+// the centre (the scrub: no edge where its bushes end)
+export function propMaterial({ fade = null } = {}) {
   const T = textures(), m = new THREE.MeshLambertMaterial({ vertexColors: true, map: T.leaves, alphaTest: 0.5, side: THREE.DoubleSide });
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { wTime: WIND.time, wGust: WIND.gust });
+    Object.assign(sh.uniforms, { wTime: WIND.time, wGust: WIND.gust }, fade ? { fadeC: fade.centre, fadeR: fade.radius } : {});
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float wTime, wGust;')
+      .replace('#include <common>', '#include <common>\nuniform float wTime, wGust;' + (fade ? '\nuniform vec2 fadeC; uniform float fadeR;' : ''))
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         #ifdef USE_INSTANCING
         vec3 jwRoot = instanceMatrix[3].xyz;
@@ -266,6 +300,7 @@ export function propMaterial() {
         // leaves (the atlas's top three rows) flutter
         float jwLf = step(uv.y, 0.74) * wGust;
         transformed += normal * sin(wTime * 6.0 + dot(position, vec3(3.1, 2.3, 2.7)) + jwPh) * 0.05 * jwLf;
+        ${fade ? 'transformed *= 1.0 - smoothstep(fadeR * 0.75, fadeR, distance(jwRoot.xz, fadeC));' : ''}
         #endif`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <normal_fragment_begin>', 'float faceDirection = 1.0;\nvec3 normal = normalize(vNormal);\nvec3 nonPerturbedNormal = normal;')
@@ -275,7 +310,7 @@ export function propMaterial() {
         reflectedLight.indirectDiffuse += diffuseColor.rgb * directionalLights[0].color * jwBack * 0.16;
         #endif`);
   };
-  m.customProgramCacheKey = () => 'jw-prop-3';
+  m.customProgramCacheKey = () => 'jw-prop-3' + (fade ? 'f' : '');
   // the shadow: the same wind, the cards a third of them (attribute sk), alpha tested
   const d = m.userData.depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: T.leaves, alphaTest: 0.5, side: THREE.DoubleSide });
   d.onBeforeCompile = sh => {
@@ -339,9 +374,9 @@ export function furnitureMaterial() {
     sh.uniforms.lamps = LAMPS;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float tag; varying float vTag;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvTag = tag;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float lamps; varying float vTag;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nif (vTag > 1.5) totalEmissiveRadiance += vec3(1.0, 0.82, 0.55) * lamps * 14.0;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\nif (vTag > 3.5) totalEmissiveRadiance += vec3(0.25, 1.0, 0.55) * 4.0; else if (vTag > 1.5) totalEmissiveRadiance += vec3(1.0, 0.82, 0.55) * lamps * 14.0;');
   };
-  m.customProgramCacheKey = () => 'jw-furn-1';
+  m.customProgramCacheKey = () => 'jw-furn-2';
   return m;
 }
 

@@ -58,16 +58,42 @@ export function builder() {
   };
 }
 
+// The width at (x, z) of a road `w` wide that eases to the joint's width within TAPER metres of each joint [[x, z,
+// width], ...] (tapers): no step where two ways of different layouts meet
+export const TAPER = 25;
+export function taperedWidth(w, joints, x, z) {
+  for (const [jx, jz, wj] of joints || []) { const d = Math.hypot(x - jx, z - jz); if (d < TAPER) { const f = d / TAPER; w = wj + (w - wj) * f * f * (3 - 2 * f); } }
+  return w;
+}
+// Where two ways meet end to end and only they (OpenStreetMap splits a road where its tags change) with widths
+// width(road) more than 0.3 m apart: per road index its joints [[x, z, width], ...], the width there halfway between
+// the two (the other's own where that one is rigid(road): a bridge or a tunnel drawn at its own width). pts in
+// [lat, lon], xz(lat, lon) to local metres; ok(road): a road that takes part.
+export function tapers(roads, { width, rigid = () => false, ok = () => true, xz }) {
+  const k = p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`, ends = new Map(), out = new Map();
+  roads.forEach((r, i) => { if (r.pts.length < 2 || !ok(r)) return; for (const e of [0, 1]) { const q = k(e ? r.pts.at(-1) : r.pts[0]); (ends.get(q) ?? ends.set(q, []).get(q)).push([i, e]); } });
+  for (const at of ends.values()) {
+    if (at.length !== 2 || at[0][0] === at[1][0]) continue;
+    const [[i, e], [j]] = at, wa = width(roads[i]), wb = width(roads[j]), ra = rigid(roads[i]), rb = rigid(roads[j]);
+    if (Math.abs(wa - wb) < 0.3 || (ra && rb)) continue;
+    const wj = ra ? wa : rb ? wb : (wa + wb) / 2, [x, z] = xz(...(e ? roads[i].pts.at(-1) : roads[i].pts[0]));
+    for (const [n, rg] of [[i, ra], [j, rb]]) if (!rg) (out.get(n) ?? out.set(n, []).get(n)).push([x, z, wj]);
+  }
+  return out;
+}
+
 // Add one ribbon to builder B. pts: [[x, z], ...]; hAt(x, z): ground height (null: unknown, the last known is kept);
-// deck: [h0, h1] the heights at the two ends (a bridge), else the ground under each edge. Returns the centre line
-// [[x, y, z], ...] (for pillars, arrows).
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0 }) {
+// deck: [h0, h1] the heights at the two ends (a bridge), else the ground under each edge; joints: where it eases to
+// another way's width (tapers). Returns the centre line [[x, y, z, half width], ...] (for pillars, arrows, the rails).
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null }) {
   const P = resample(pts, step), n = P.length; if (n < 2) return [];
-  const code = [lm, surf, lanes, w, a, b, pL, pR];
+  let code = [lm, surf, lanes, w, a, b, pL, pR];
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
-  const tot = L[n - 1] || 1, half = w / 2, centre = [];
-  let last = 0, base = B.n;
+  const tot = L[n - 1] || 1, centre = [];
+  let last = 0, base = B.n, half = w / 2;
+  const ins = [a, b, pL, pR];
   for (let i = 0; i < n; i++) {
+    if (joints?.length) { const wi = taperedWidth(w, joints, P[i][0], P[i][1]), s = wi / w; half = wi / 2; code = [lm, surf, lanes, wi, ...ins.map(v => v * s)]; }
     // the join: the average of the two segments' normals, stretched to keep the width (capped at sharp turns)
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], c = P[i];
     let tx = b[0] - a[0], tz = b[1] - a[1]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
@@ -82,13 +108,13 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
     else {
       hc = hAt(c[0], c[1]); hl = hAt(c[0] + nx, c[1] + nz); hr = hAt(c[0] - nx, c[1] - nz);
       if (hc == null) hc = last; if (hl == null) hl = hc; if (hr == null) hr = hc;
-      // never sink the middle: keep the edges within a little of the centre
-      hl = Math.max(hc - 2, Math.min(hc + 2, hl)); hr = Math.max(hc - 2, Math.min(hc + 2, hr));
+      // a road's crossfall: the edges within a few per cent of the centre (a steep bank beside it never tips the edge up)
+      const cf = Math.max(0.25, half * 0.07); hl = Math.max(hc - cf, Math.min(hc + cf, hl)); hr = Math.max(hc - cf, Math.min(hc + cf, hr));
     }
     last = hc;
     B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);
     B.v(c[0] - nx, hr + lift, c[1] - nz, 1, v0 + L[i], code);
-    centre.push([c[0], hc + lift, c[1]]);
+    centre.push([c[0], hc + lift, c[1], half]);
     if (i) { const p = base + 2 * (i - 1), q = base + 2 * i; B.tri(p, q, p + 1); B.tri(p + 1, q, q + 1); }  // facing up
   }
   return centre;

@@ -80,6 +80,16 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     };
     m.customProgramCacheKey = () => 'jw-ggb-rail-1';
     const bars = new THREE.Mesh(g, m); bars.castShadow = true; bars.receiveShadow = true; bridge.add(bars); }
+  // over the land at the San Francisco end (to the arch over Fort Point's north end) a chain-link fence on both outer
+  // railings, 1.9 m over them, on posts every 3 m (Street View)
+  { const pos = [], idx = [], posts = [], m4 = new THREE.Matrix4();
+    for (const t of [-GGB.deckW / 2 + 0.12, GGB.deckW / 2 - 0.12]) { const b = pos.length / 3; let n = 0;
+      for (let s = S0; s <= -987; s += 3, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 1.2, p.z, p.x, h + 3.1, p.z); posts.push([p.x, h + 2.15, p.z]); }
+      for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+    const net = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x6d7173, transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide })); net.renderOrder = 3; bridge.add(net);
+    const pm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.035, 0.035, 1.95, 6), mat(0x8c8f91), posts.length);
+    posts.forEach(([x, y, z], i) => pm.setMatrixAt(i, m4.makeTranslation(x, y, z))); pm.computeBoundingSphere(); bridge.add(pm); }
   // towers: two legs each (their inner faces at the roadway's edge, the sidewalks going round them), portal struts above
   // the deck, a pier at the water
   for (const s of [-half, half]) {

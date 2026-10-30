@@ -199,10 +199,25 @@ export function treeGeometries() {
     fern: merge([leaves(fronds(12, 1.7, 5), F.fern)]),
   };
 }
+// The Headlands' coastal scrub (scrub.js), about 2.6 m across at scale 1: coyote brush, a dense lumpy mound about
+// 1.4 m tall, and California sage, lower, softer and grey-green; each in full near the camera and with fewer, bigger
+// cards further out. Colours from the aerial imagery's scrub (USDA NAIP, about #50624b), the atlas's light on top.
+export function scrubGeometries() {
+  const brush = col(0x4f6639, 1.3), sage = col(0x76835f, 1.3);
+  return {
+    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.36), M(0, 0.58, 0, 0.95, 0.5, 0.86), { soft: [0, 0.58, 0], shade: [0.08, 1.08] }], ...lumps(0, 0.72, 0, 1.4, 0.78, 1.28, 6, 16, 0.8, LEAF.scrub, 21, { lift: 0.5, lump: 0.6, out: 0.7 }).map(g => leaves(g, brush))]),
+    brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.25, 23), brush.map(v => v * 0.62), M(0, 0.62, 0, 1.3, 0.72, 1.18), { soft: [0, 0.62, 0], shade: [0, 1.3] }],
+      ...lumps(0, 0.75, 0, 1.4, 0.75, 1.28, 3, 6, 1.35, LEAF.scrub, 21, { lift: 0.5, lump: 0.65 }).map(g => leaves(g, brush))]),
+    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.4), M(0, 0.42, 0, 0.78, 0.36, 0.72), { soft: [0, 0.42, 0], shade: [0.06, 0.78] }], ...lumps(0, 0.5, 0, 1.2, 0.55, 1.1, 5, 14, 0.75, LEAF.scrub, 25, { lift: 0.7, lump: 0.6, out: 0.7 }).map(g => leaves(g, sage))]),
+    sageLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.2, 27), sage.map(v => v * 0.62), M(0, 0.45, 0, 1.1, 0.52, 1.0), { soft: [0, 0.45, 0], shade: [0, 0.95] }],
+      ...lumps(0, 0.5, 0, 1.2, 0.55, 1.1, 3, 5, 1.2, LEAF.scrub, 25, { lift: 0.7, lump: 0.65 }).map(g => leaves(g, sage))]),
+  };
+}
 
 // Street furniture at its typical size (metres), instanced along the roads: a guardrail post, a street lamp (its arm
 // along +x over the road, the lamp's underside tag 2: lit at dusk), stop and speed limit signs (facing +z), a ranch
-// fence and a picket fence section (3 m along +x). Vertex coloured.
+// fence and a picket fence section (3 m along +x), a traffic signal on its pole (facing +z, its green lamp tag 4 lit,
+// the red and amber dark). Vertex coloured.
 export function furnitureGeometries() {
   const B = (w, h, d, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z), C = (r0, r1, h, s = 8) => new THREE.CylinderGeometry(r1, r0, h, s).translate(0, h / 2, 0);
   const grey = col(0x8c8f92), steel = col(0x9da3a6), dark = col(0x3b3d40), wood = col(0x6f5a44), pole = col(0x6a5e50), white = col(0xeeeeea), red = col(0xb3241c), lampC = col(0xfff1d0);
@@ -215,7 +230,15 @@ export function furnitureGeometries() {
     limit: merge([[C(0.035, 0.035, 2.4, 6), grey], [B(0.6, 0.76, 0.03, 0, 2.15, 0.03), white], [B(0.5, 0.06, 0.035, 0, 2.38, 0.04), dark], [B(0.3, 0.26, 0.035, 0, 2.05, 0.04), dark]]),
     fence: merge([[B(0.12, 1.25, 0.12, 0, 0.62, 0), wood], [B(0.12, 1.25, 0.12, 3, 0.62, 0), wood], ...[0.45, 0.8, 1.12].map(y => [B(3, 0.1, 0.04, 1.5, y, 0.06), wood])]),
     picket: merge([...Array.from({ length: 12 }, (_, i) => [B(0.09, 0.95, 0.025, 0.12 + i * 0.25, 0.47, 0), white]), [B(3, 0.07, 0.04, 1.5, 0.3, -0.03), white], [B(3, 0.07, 0.04, 1.5, 0.75, -0.03), white]]),
+    signal: merge([[C(0.1, 0.08, 4.4), grey], ...signalHead(3.55)]),
+    signalHead: merge(signalHead(0)),
   };
+  // a signal head centred at height y: backplate, the housing, red, amber and green lamps under their visors
+  function signalHead(y0) {
+    return [[B(0.62, 1.32, 0.03, 0, y0, -0.02), dark], [B(0.38, 1.1, 0.28, 0, y0, 0.13), col(0x2a2c2e)],
+      ...[[0.35, col(0x4a1410), 0], [0, col(0x4a3610), 0], [-0.35, col(0x8affc0), 4]].flatMap(([y, c, tag]) => [[new THREE.CylinderGeometry(0.12, 0.12, 0.04, 12).rotateX(Math.PI / 2).translate(0, y0 + y, 0.29), c, null, { tag }],
+        [new THREE.CylinderGeometry(0.15, 0.15, 0.2, 12, 1, true, -Math.PI / 2, Math.PI).rotateX(Math.PI / 2).translate(0, y0 + y + 0.02, 0.38), col(0x1e2022)]])];
+  }
 }
 
 // which tree grows here: k ground class, lt leaf type, h height, lat/lon, r a random 0..1

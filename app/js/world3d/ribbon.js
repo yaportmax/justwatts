@@ -128,3 +128,39 @@ export function clipLine(pts, [x0, z0, x1, z1]) {
   }
   return runs.filter(r => r.length > 1 && (r.length > 2 || Math.hypot(r[1][0] - r[0][0], r[1][1] - r[0][1]) > 0.5 || inside(r[0])));
 }
+
+// Join ways that go on as one road: where exactly two ends meet and both ways have the same key (class, lanes,
+// flags), one polyline through the joint (no seam, the markings run on). roads: [{ pts: [[lat, lon], ...], ... }];
+// keyOf(road): their key, null to leave a way alone. -> new list (joined ways take the first one's fields)
+export function chainWays(roads, keyOf) {
+  const k = p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`, ends = new Map(), used = new Set(), out = [];
+  roads.forEach((r, i) => { if (keyOf(r) == null || r.pts.length < 2) return; for (const e of [0, 1]) { const q = k(e ? r.pts.at(-1) : r.pts[0]); (ends.get(q) ?? ends.set(q, []).get(q)).push([i, e]); } });
+  const next = (i, p) => { const at = ends.get(k(p)); if (!at || at.length !== 2) return null; const o = at.find(([j]) => j !== i); return o && !used.has(o[0]) && keyOf(roads[o[0]]) === keyOf(roads[i]) ? o : null; };
+  roads.forEach((r, i) => {
+    if (used.has(i)) return; used.add(i);
+    if (keyOf(r) == null) { out.push(r); return; }
+    let pts = r.pts.slice();
+    for (let o; (o = next(i, pts.at(-1)));) { used.add(o[0]); const q = roads[o[0]].pts; pts = pts.concat((o[1] ? q.slice().reverse() : q).slice(1)); }
+    for (let o; (o = next(i, pts[0]));) { used.add(o[0]); const q = roads[o[0]].pts; pts = (o[1] ? q : q.slice().reverse()).slice(0, -1).concat(pts); }
+    out.push({ ...r, pts });
+  });
+  return out;
+}
+// Round a polyline's corners (local metres [[x, z], ...]): each corner becomes a curve that strays at most `dmax`
+// from it, cut back no more than half a segment; the ends stay
+export function roundCorners(pts, dmax = 0.35, step = 1.5) {
+  if (pts.length < 3) return pts;
+  const out = [pts[0]];
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], c = pts[i + 1], l1 = Math.hypot(b[0] - a[0], b[1] - a[1]), l2 = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    if (l1 < 1e-6 || l2 < 1e-6) continue;
+    const u = [(b[0] - a[0]) / l1, (b[1] - a[1]) / l1], v = [(c[0] - b[0]) / l2, (c[1] - b[1]) / l2], th = Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1])));
+    if (th < 0.02) { out.push(b); continue; }
+    // a quadratic curve from b - u * cut to b + v * cut strays cut * sin(th / 2) / 2 from the corner
+    const cut = Math.min(l1 / 2, l2 / 2, 2 * dmax / Math.sin(th / 2)), p0 = [b[0] - u[0] * cut, b[1] - u[1] * cut], p2 = [b[0] + v[0] * cut, b[1] + v[1] * cut];
+    const n = Math.max(2, Math.ceil(cut * th / step) + 1);
+    for (let s = 0; s <= n; s++) { const t = s / n, m = 1 - t; out.push([m * m * p0[0] + 2 * m * t * b[0] + t * t * p2[0], m * m * p0[1] + 2 * m * t * b[1] + t * t * p2[1]]); }
+  }
+  out.push(pts.at(-1));
+  return out;
+}

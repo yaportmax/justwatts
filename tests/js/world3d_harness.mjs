@@ -7,7 +7,7 @@ import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan, carStep } from '../../app/js/world3d/life.js';
-import { builder, ribbon, resample, roadStyle, clipLine, deckSides } from '../../app/js/world3d/ribbon.js';
+import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners } from '../../app/js/world3d/ribbon.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
 import { packTile, unpackTile, gridAt } from '../../app/js/world3d/baked.js';
@@ -240,4 +240,13 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   out.stance = { up, held, down, level, still, tuck, thigh: r3(L(root, mid)), shin: r3(L(mid, [0, 0.2, -0.3])), forward: mid[2] < -0.15 };
 }
 
+{
+  // three ways of one road (the middle one drawn backwards) and a side road at the second joint: two chains
+  const a = [37.9, -122.6], b = [37.9, -122.599], cc = [37.9, -122.598], d = [37.9, -122.597], side = [37.901, -122.598];
+  const ws = [{ hw: 'tertiary', fl: 0, pts: [a, b] }, { hw: 'tertiary', fl: 0, pts: [cc, b] }, { hw: 'tertiary', fl: 0, pts: [cc, d] }, { hw: 'residential', fl: 0, pts: [cc, side] }, { hw: 'tertiary', fl: 1, pts: [d, [37.9, -122.596]] }];
+  const ch = chainWays(ws, r => r.fl & 3 ? null : r.hw);
+  // a right angle corner of two 20 m legs: rounded, never more than dmax from the corner's lines, ends kept
+  const rc = roundCorners([[0, 0], [20, 0], [20, 20]], 0.35), dev = Math.max(...rc.map(([x, z]) => Math.min(Math.abs(z), Math.abs(x - 20))));
+  out.chain = { n: ch.length, first: ch[0].pts.length, joined: JSON.stringify(ch[0].pts) === JSON.stringify([a, b, cc]), rest: ch.map(r => r.pts.length), round: { n: rc.length, dev: r3(dev), ends: JSON.stringify([rc[0], rc.at(-1)]) === '[[0,0],[20,20]]' } };
+}
 console.log(JSON.stringify(out));

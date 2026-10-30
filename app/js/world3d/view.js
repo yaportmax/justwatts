@@ -5,7 +5,7 @@
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { makeProj, tileX, tileY, lonOf, latOf, key, unkey, headingOf, angDiff } from './geo.js';
 import { gridFromHeights, gridHeight, gridIJ, carve, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks } from './terrain.js';
-import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine } from './ribbon.js';
+import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, withSun, WIND, BORES, REDWOOD, LAMPS } from './materials.js';
@@ -166,11 +166,13 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     const mark = (x, z, r) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = 1; };
     const minor = c.lod > 0, lanes = [], drive = [], lines = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
-    for (const r of t.roads) {
+    // ways that go on as one road drawn as one ribbon (no seam where OpenStreetMap splits a road), corners rounded
+    t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}`);
+    for (const r of t.chained) {
       if (r.fl & 2) continue;                          // tunnels: under the hill
       if (minor && /path|footway|track|bridleway|service/.test(r.hw)) continue;
       const st = roadStyle(r.hw, r.ln, r.fl);
-      const all = r.pts.map(([la, lo]) => proj.xz(la, lo)), runs = [[]];
+      const all = (r.fl & 1 ? (p => p) : roundCorners)(r.pts.map(([la, lo]) => proj.xz(la, lo))), runs = [[]];
       for (const p of all) { if (r.fl & 16 && marks.deckAt(p[0], p[1]) != null) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(p); }  // the bridge's own deck
       for (const pts of runs.flatMap(run => run.length > 1 ? clipLine(run, tbox) : [])) {  // exactly this tile: the next one draws on from its edge
       if (pts.length < 2) continue;

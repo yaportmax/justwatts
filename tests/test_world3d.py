@@ -51,6 +51,12 @@ def test_road_ribbon_geometry(out):
     assert out["clip"] == [[[0, 5], [5, 5], [5, 10]]]
 
 
+def test_road_ways_join_and_corners_round(out):
+    c = out["chain"]
+    assert c["joined"] and c["rest"] == [3, 2, 2, 2]                          # a-b-c one ribbon; the side road and c-d meet a third
+    assert c["round"]["ends"] and c["round"]["n"] > 5 and 0 < c["round"]["dev"] <= 0.35  # a curve, never far from the corner
+
+
 def test_landuse_parse_and_compact_forms(out):
     lu = out["landuse"]
     assert lu["kinds"] == ["wood", "building", "water"] and lu["ids"] == ["w1", "w2", "r5"]  # no roads, no open rings

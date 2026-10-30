@@ -47,7 +47,9 @@ export function createGlide(ms = 2000) {
 
 export function createRideMap({ $, store, fit, css, toast, relayout, live = () => null, onDraft = () => {} }) {
   let style = MAP_STYLES[store.get('hw.mapStyle', 'sat')] ? store.get('hw.mapStyle', 'sat') : 'sat';  // satellite and 3D by default
-  let d3 = !!store.get('hw.map3d', true), focus = !!store.get('hw.mapFocus', false);
+  let d3 = !!store.get('hw.map3d', true);
+  // map focus, kept apart for the open world (the world fills the big panel by default) and for courses (the chart does)
+  const fkey = () => cur?.open ? 'hw.worldFocus' : 'hw.mapFocus', isFocus = () => !!store.get(fkey(), !!cur?.open);
   // the open world's 3D world view (world3d/view.js, three.js loaded on first use); falls back to MapLibre 3D
   let wv = null, wvBusy = false, wvFailed = false, owPref = store.get('hw.owView', null), ow = null;
   let cur = null;  // { ll, n, D, dist, done, open, alts }
@@ -70,7 +72,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
 
   // Map focus: the map takes the big chart panel, the power chart its small slot
   function place() {
-    const on = focus && !!cur;
+    const on = !!cur && isFocus();
     if (on === placedOn) return false;
     placedOn = on;
     (on ? $('#rideBig') : $('#crsSlot')).appendChild(box);
@@ -87,14 +89,14 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     }
     if (w) {
       $('#map3d').classList.remove('on'); $('#map3d').setAttribute('aria-pressed', 'false');
-      $('#mapFocus').classList.toggle('on', focus); $('#mapFocus').title = focus ? 'Chart focus (F)' : 'Map focus (F)';
+      $('#mapFocus').classList.toggle('on', isFocus()); $('#mapFocus').title = isFocus() ? 'Chart focus (F)' : 'Map focus (F)';
       $('#mapAttr').textContent = '© OpenStreetMap contributors · Terrain © Mapzen, AWS';
       v3.style.display = 'none'; cv.style.display = 'none'; return;
     }
     const live = d3 && ready;
     $('#mapStyle').value = style;
     $('#map3d').classList.toggle('on', d3); $('#map3d').setAttribute('aria-pressed', String(d3));
-    $('#mapFocus').classList.toggle('on', focus); $('#mapFocus').title = focus ? 'Chart focus (F)' : 'Map focus (F)';
+    $('#mapFocus').classList.toggle('on', isFocus()); $('#mapFocus').title = isFocus() ? 'Chart focus (F)' : 'Map focus (F)';
     const a = styleOf(style).attr;
     $('#mapAttr').textContent = a + (cur?.open && !a.includes('OpenStreetMap') ? ' · ' + OSM_ROADS : '') + (live ? ' · ' + DEM_ATTR : '');
     v3.style.display = d3 ? '' : 'none'; cv.style.display = live ? 'none' : '';  // 2D shows until the terrain is up
@@ -274,7 +276,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
   }
   function toggleFocus() {
     if (!cur) return false;
-    focus = !focus; store.set('hw.mapFocus', focus);
+    store.set(fkey(), !isFocus());
     place(); draw(); relayout();
     return true;
   }

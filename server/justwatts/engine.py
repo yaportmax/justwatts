@@ -795,7 +795,7 @@ class RideEngine:
         r.cadence = round(88 + math.sin(self.sim_t / 40) * 4 + (self.rng.random() - 0.5) * 3) if tgt else 0
         r.speed = round((r.power / 0.0055) ** (1 / 3) * 0.1 * 3.6 / 1.6, 1)
         ftp = (self.ride.ftp if self.ride else self.settings().get("ftp")) or 200
-        hr_t = 95 + r.power / ftp * 70
+        hr_t = min(188, 95 + r.power / ftp * 70)  # a heart that tops out
         r.hr = round((r.hr or 90) + (hr_t - (r.hr or 90)) * 0.04)
         r.hr_last = r.last = self.clock()
 

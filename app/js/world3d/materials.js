@@ -8,6 +8,9 @@ import { textures } from './tex.js';
 
 // shared by every material that moves in the wind
 export const WIND = { time: { value: 0 }, gust: { value: 0.6 } };
+// tunnel bores near the rider: the ground inside one is not drawn (seen through a portal it would fill the bore).
+// a: [x0, z0, x1, z1] a straight piece of bore, b: [floor y at 0, at 1, half width, height]
+export const BORES = { a: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, b: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, n: { value: 0 } };
 
 const GLSL_COMMON = /* glsl */`
 vec3 srgb(vec3 c) { return pow(c, vec3(2.2)); }
@@ -67,13 +70,19 @@ export function terrainMaterial({ detail = true } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    sh.uniforms.tNoise = { value: T.noise };
+    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;\n' + GLSL_COMMON + GLSL_GROUND)
+      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <color_fragment>', /* glsl */`
+        for (int i = 0; i < 12; i++) {
+          if (i >= boreN) break;
+          vec2 e = boreA[i].zw - boreA[i].xy; float t = clamp(dot(vW.xz - boreA[i].xy, e) / max(dot(e, e), 1e-3), 0.0, 1.0);
+          float fy = mix(boreB[i].x, boreB[i].y, t);
+          if (distance(vW.xz, boreA[i].xy + e * t) < boreB[i].z && vW.y > fy - 2.0 && vW.y < fy + boreB[i].w) discard;
+        }
         vec3 nW = normalize(vNw); float rk;
         vec3 c = jwGround(vW.xz, nW, vMk, vMk2, vCv, vW.y, rk);
         float dist = length(vViewPosition);
@@ -92,7 +101,7 @@ export function terrainMaterial({ detail = true } = {}) {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-2' + (detail ? 'd' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-3' + (detail ? 'd' : '');
   return m;
 }
 

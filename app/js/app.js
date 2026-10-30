@@ -56,12 +56,25 @@ async function loadSettings() {
     const j = await (await F('/api/settings')).json();
     garminOn = !!j.garmin;
     if (j.stored) Object.assign(settings, j.settings);
-    else saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'units'], false);  // first run: defaults never beat synced settings
+    else { saveSettings(['ftp', 'weight', 'beeps', 'autoGarmin', 'hrZones', 'hrMax', 'hrZonesSrc', 'cadRange', 'units'], false); welcome(); }  // first run: defaults never beat synced settings
     if (!garminOn) settings.autoGarmin = false;
     store.set('hw.settings', settings);
   } catch {}
   showSettings();
 }
+
+// the first run: where the numbers come from (Garmin, typed in, or the defaults); offered once
+function welcome() {
+  if (store.get('hw.welcome', false) || document.querySelectorAll('.modal.on').length) return;
+  store.set('hw.welcome', true); $('#welModal').classList.add('on'); track('welcome', { step: 'shown' });
+}
+function welcomeDone(how) {
+  $('#welModal').classList.remove('on'); track('welcome', { step: how });
+  if (how === 'garmin') conn.load().then(() => conn.openForm('garmin')).catch(() => {});
+  if (how === 'settings') { show('settings'); setTimeout(() => $('#sFtp').focus?.(), 50); }
+}
+$('#welClose').onclick = () => welcomeDone('closed');
+$('#welModal').onclick = e => { if (e.target?.id === 'welModal') return welcomeDone('closed'); const b = e.target?.closest?.('[data-w]'); if (b) welcomeDone(b.dataset.w); };
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), 2600); }
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -829,7 +842,7 @@ const KEYS = {
   KeyG: () => courses.map.toggleFog(), KeyM: () => courses.map.toggleSound(), KeyK: () => courses.map.cycleKit(),
 };
 function onKey(e) {
-  if (e.key === 'Escape') { if (conn.escape()) return; picker.close(); detail.close(); sheet(false); $('#keysModal').classList.remove('on'); return; }
+  if (e.key === 'Escape') { if (conn.escape()) return; picker.close(); detail.close(); sheet(false); $('#keysModal').classList.remove('on'); if ($('#welModal').classList.contains('on')) welcomeDone('closed'); return; }
   const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '');
   if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !typing && $('#v-workouts').classList.contains('on')) { e.preventDefault(); builder.undo(); return; }
   if (!V || typing) return;

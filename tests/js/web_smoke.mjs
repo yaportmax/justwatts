@@ -82,6 +82,10 @@ const out = {};
 let hw = await boot(1);
 out.mode = hw.mode; out.webClass = document.body.classList.contains('web');
 out.notice = $('#webNotice').style.display;            // no navigator.bluetooth in node
+// the first run: the welcome (Garmin, my own FTP, the defaults); the defaults close it, never shown again
+await until(() => $('#welModal').classList.contains('on'), 'welcome');
+$('#welModal').onclick({ target: { closest: () => ({ dataset: { w: 'defaults' } }) } });
+out.welcome = { closed: !$('#welModal').classList.contains('on'), seen: mem.get('hw.welcome') };
 hw.backend.updateSettings({ voiceMode: 'all', localCoach: { enabled: true } });  // keys from older versions are ignored
 out.oldKeys = ['voiceMode', 'localCoach'].filter(k => k in hw.backend.settings);
 await hw.backend.fetch('/api/devices', { method: 'POST', body: JSON.stringify({ action: 'sim', kind: 'trainer', on: true }) });

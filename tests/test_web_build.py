@@ -63,6 +63,7 @@ def test_web_mode_ride_with_reload(dist, node):
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
     assert out["mode"] == "web" and out["webClass"] and out["notice"] == ""   # Web Bluetooth notice shown in node
+    assert out["welcome"] == {"closed": True, "seen": "true"}                  # the first run's welcome, once
     assert out["before"]["samples"] == 47
     rs = out["resumed"]                                                      # the "reload": IndexedDB snapshot + journal
     assert rs["name"] == "Web ride" and rs["samples"] == 47 and rs["paused"] and rs["auto"]

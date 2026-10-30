@@ -1028,13 +1028,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     return false;
   }
-  // the tunnel a point is in: { y, k } (k: how far in, 0 at a portal .. 1 from 25 m in), null outside
-  function tunnelAt(x, z) {
+  // the tunnel a point is in: { y, k } (k: how far in, 0 at a portal .. 1 from 25 m in), null outside; h: the point's
+  // height if known (well over a bore it is on a road over the tunnel, not in it)
+  function tunnelAt(x, z, h = null) {
     for (const T of tun.list) {
       const { P, D, bb } = T; if (x < bb[0] || z < bb[1] || x > bb[2] || z > bb[3]) continue;
       for (let i = 1; i < P.length; i++) {
         const a = P[i - 1], b = P[i], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2)) : 0;
-        if (Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t) < T.w + 5) { const d = D[i - 1] + (D[i] - D[i - 1]) * t; if (d < T.port - 1 || d > T.L - T.port + 1) return null; return { y: T.h0 + (T.h1 - T.h0) * d / T.L, k: Math.max(0, Math.min(T.box ? 0.35 : 1, Math.min(d - T.port, T.L - T.port - d) / 25)), x: a[0] + ex * t, z: a[1] + ez * t }; }
+        if (Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t) < T.w + 5) {
+          const d = D[i - 1] + (D[i] - D[i - 1]) * t; if (d < T.port - 1 || d > T.L - T.port + 1) return null;
+          const y = T.h0 + (T.h1 - T.h0) * d / T.L; if (h != null && h > y + 4.5) break;  // on the road over it, not in it
+          return { y, k: Math.max(0, Math.min(T.box ? 0.35 : 1, Math.min(d - T.port, T.L - T.port - d) / 25)), x: a[0] + ex * t, z: a[1] + ez * t };
+        }
       }
     }
     return null;
@@ -1080,15 +1085,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const f = D[b] > D[a] ? (d - D[a]) / (D[b] - D[a]) : 0; return [P[a][0] + (P[b][0] - P[a][0]) * f, P[a][1] + (P[b][1] - P[a][1]) * f];
   }
   const eleAt = d => { if (!st.ele?.length) return null; const i = d / 10, a = Math.max(0, Math.min(st.ele.length - 1, Math.floor(i))), b = Math.min(st.ele.length - 1, a + 1); return st.ele[a] + (st.ele[b] - st.ele[a]) * (i - a); };
-  // the surface the rider is on: of what is drawn there (a deck, a bore, the ground) the one nearest the course's own
+  // the surface the rider is on: of what is drawn there (a deck, a bore, a road's top, the ground) the one nearest the course's own
   // height, so a road under a bridge stays under it and the bridge's course stays on the deck; never under the ground
   // (but in a bore), and floating on the course's height rather than sunk when nothing drawn is near it (a deck not
   // built yet). Others (no course height): a deck, else a bore, else the ground.
   function yAt(x, z, d) {
-    const k = deckAt(x, z), tn = tunnelAt(x, z), e = d == null ? null : eleAt(d), b = tn ? tn.y + 0.05 : null;
+    const e = d == null ? null : eleAt(d), k = deckAt(x, z), tn = tunnelAt(x, z, e), b = tn ? tn.y + 0.05 : null;
     let g = groundAt(x, z); const rd = g == null ? null : roadAt(x, z); if (rd != null && Math.abs(rd - g) < 1.5) g = rd;  // on a road: its top
     if (e == null) return k ?? b ?? g ?? 0;
-    let best = null; for (const h of [k, b, g]) if (h != null && (best == null || Math.abs(h - e) < Math.abs(best - e))) best = h;
+    // the drawn road's top too, wherever the ground is (a road over an underpass stands well above the ground cut down
+    // for the way under it: Alexander Avenue over East Road)
+    let best = null; for (const h of [k, b, g, rd]) if (h != null && (best == null || Math.abs(h - e) < Math.abs(best - e))) best = h;
     if (best == null) return e;
     if (best < e - 6 && best === g) return e;
     if (best === k && g != null && g > k && g - k < 2) return g;  // where a deck meets the land a little under it
@@ -1219,7 +1226,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (marks.ggb) { const k = onDeck(proj.lat(p[1]), proj.lon(p[0])), ds = k ? Math.abs(Math.abs(k.s) - GGB.towers) : 99;
         if (ds < 16 && Math.abs(k.t) > 7 && Math.abs(k.t) < 21.2) { const f = Math.min(1, (16 - ds) / 6), q = marks.lane(k.s, k.t + (Math.sign(k.t) * 21.2 - k.t) * f); p = [q.x, q.z]; } }
       // in a tunnel: on the bore's own line (the course can run a few metres off it), eased in from the portal
-      { const tn = tunnelAt(p[0], p[1]); if (tn) { const k = tn.k * tn.k * (3 - 2 * tn.k), sx = tn.x + rx * 1.4, sz = tn.z + rz * 1.4; p = [p[0] + (sx - p[0]) * k, p[1] + (sz - p[1]) * k]; } }
+      { const tn = tunnelAt(p[0], p[1], eleAt(d)); if (tn) { const k = tn.k * tn.k * (3 - 2 * tn.k), sx = tn.x + rx * 1.4, sz = tn.z + rz * 1.4; p = [p[0] + (sx - p[0]) * k, p[1] + (sz - p[1]) * k]; } }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);
@@ -1256,7 +1263,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const fx = Math.sin(camYaw), fz = -Math.cos(camYaw);
       if (mode === 'chase') {
         tmp.set(p[0] - fx * chase[0], y + chase[1], p[1] - fz * chase[0]);
-        const tn = tunnelAt(tmp.x, tmp.z) ?? tunnelAt(p[0], p[1]), g = tn ? null : groundAt(tmp.x, tmp.z); if (g != null && tmp.y < g + 1.4) tmp.y = g + 1.4;
+        const tn = tunnelAt(tmp.x, tmp.z, y) ?? tunnelAt(p[0], p[1], y), g = tn ? null : groundAt(tmp.x, tmp.z); if (g != null && tmp.y < g + 1.4) tmp.y = g + 1.4;
         if (tn) tmp.y = Math.min(tmp.y, y + 3.2);
         camPos.lerp(tmp, camInit ? Math.min(1, dt * 6) : 1); camInit = true;
         camLook.set(p[0] + fx * 10, (y + hd) / 2 + 1.1, p[1] + fz * 10);
@@ -1277,7 +1284,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         for (let i = 0; i < n; i++) { const g = segs[i][1]; BORES.a.value[i].set(g[0], g[1], g[2], g[3]); BORES.b.value[i].set(g[4], g[5], g[6], g[7]); }
         BORES.n.value = n; }
       // inside a tunnel: the daylight fades out
-      const tk = tunnelAt(camPos.x, camPos.z)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
+      const tk = tunnelAt(camPos.x, camPos.z, y)?.k ?? 0; dark += (tk - dark) * Math.min(1, dt * 3);
       // the cars' lamps: on with the sun low (under about 8 degrees) and in tunnels
       { const sy = sky.sunDir.y, k = Math.min(1, Math.max(0, (0.14 - sy) / 0.12)); life.setLamps(Math.max(k * k * (3 - 2 * k), dark), scene.fog.color); LAMPS.value = Math.min(1, Math.max(0, (0.07 - sy) / 0.08)); }
       sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.6 * dark);

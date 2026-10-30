@@ -110,7 +110,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22) * (1.0 - jwScrub * 0.8)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
   c = mix(c, rockC, rk);
-  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.92, hl) * mix(1.0, smoothstep(0.1, 0.3, slope) * mix(0.4, 1.0, smoothstep(0.1, 0.5, vg.b)), jwKnown);  // the Headlands' road cuts bare even where the grid softens them (where the imagery says what grows there: the steep cuts, fully where it shows bare earth)
+  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.92, hl) * mix(1.0, smoothstep(0.1, 0.3, slope) * mix(0.75, 1.0, smoothstep(0.1, 0.5, vg.b)), jwKnown);  // the Headlands' road cuts bare even where the grid softens them (where the imagery says what grows there: the steep cuts mostly, fully where it shows bare earth)
   c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), mix(srgb(vec3(0.50, 0.39, 0.34)), srgb(vec3(0.59, 0.45, 0.38)), smoothstep(0.3, 0.7, small)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: red chert, weathered (USDA NAIP's bare red earth, about #8e7a70)
   rk = max(rk, bare); jwPav = smoothstep(0.25, 0.65, pav) * known;
   // under the redwoods: red-brown needle litter, patches of sorrel

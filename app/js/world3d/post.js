@@ -1,12 +1,14 @@
 // World 3D post-processing: the scene renders to a multisampled half-float target, bright light blooms (three's
 // UnrealBloomPass), then one pass tone maps (ACES), grades for a warm Marin light (a little warmth in the highlights,
 // cooler shadows, gentle contrast and saturation), adds a soft vignette and dithers the sky's gradients. Low quality
-// renders straight to the screen with the same tone mapping and no bloom.
+// renders straight to the screen with the same tone mapping and no bloom. Edges: MSAA in the scene target, or FXAA
+// after the grade where MSAA on a half-float target costs too much.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { EffectComposer } from '../../vendor/three-0.180.0/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from '../../vendor/three-0.180.0/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from '../../vendor/three-0.180.0/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from '../../vendor/three-0.180.0/addons/postprocessing/UnrealBloomPass.js';
+import { FXAAShader } from '../../vendor/three-0.180.0/addons/shaders/FXAAShader.js';
 
 const GradeShader = {
   name: 'JwGrade',
@@ -36,7 +38,7 @@ const GradeShader = {
 
 // q: { bloom, msaa } or null (straight to the screen)
 export function createPost(renderer, scene, camera) {
-  let composer = null, grade = null, bloom = null, on = false, cfg = null, size = [1, 1, 1];
+  let composer = null, grade = null, bloom = null, fxaa = null, on = false, cfg = null, size = [1, 1, 1];
   function build(Q) {
     dispose();
     cfg = Q; on = !!Q.post;
@@ -45,14 +47,16 @@ export function createPost(renderer, scene, camera) {
     const rt = new THREE.WebGLRenderTarget(size[0] * size[2], size[1] * size[2], { type: THREE.HalfFloatType, samples: Q.msaa || 0 });
     composer = new EffectComposer(renderer, rt);
     composer.addPass(new RenderPass(scene, camera));
-    if (Q.bloom) { bloom = new UnrealBloomPass(new THREE.Vector2(size[0], size[1]), 0.32, 0.55, 1.05); composer.addPass(bloom); }
+    if (Q.bloom) { bloom = new UnrealBloomPass(new THREE.Vector2(size[0], size[1]), 0.22, 0.45, 1.15); composer.addPass(bloom); }
     grade = new ShaderPass(GradeShader); composer.addPass(grade);
-    composer.setPixelRatio(size[2]); composer.setSize(size[0], size[1]);
+    if (Q.fxaa) { fxaa = new ShaderPass(FXAAShader); composer.addPass(fxaa); }
+    composer.setPixelRatio(size[2]); composer.setSize(size[0], size[1]); fxRes();
   }
-  function dispose() { if (composer) { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); bloom?.dispose(); grade?.material.dispose(); } composer = null; bloom = null; grade = null; }
+  const fxRes = () => fxaa?.material.uniforms.resolution.value.set(1 / (size[0] * size[2]), 1 / (size[1] * size[2]));
+  function dispose() { if (composer) { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); bloom?.dispose(); grade?.material.dispose(); fxaa?.material.dispose(); } composer = null; bloom = null; grade = null; fxaa = null; }
   return {
     build,
-    setSize(w, h, pr) { size = [w, h, pr]; if (composer) { composer.setPixelRatio(pr); composer.setSize(w, h); } },
+    setSize(w, h, pr) { size = [w, h, pr]; if (composer) { composer.setPixelRatio(pr); composer.setSize(w, h); fxRes(); } },
     render(exposure = 1) {
       if (composer) { grade.uniforms.exposure.value = exposure; composer.render(); }
       else { renderer.toneMappingExposure = exposure; renderer.render(scene, camera); }

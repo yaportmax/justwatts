@@ -23,8 +23,8 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // (segs) and upsampling near the rider (up), draw distance, post-processing (bloom, MSAA samples), grass radius and
 // clumps per square metre, ground detail (bump, close-up noise)
 export const QUALITY = [
-  { name: 'high', shadow: 2048, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 4, grass: [64, 4], detail: true, treeNear: 300 },
-  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 2, grass: [44, 2.6], detail: true, treeNear: 200 },
+  { name: 'high', shadow: 2048, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, grass: [64, 4], detail: true, treeNear: 300 },
+  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, grass: [44, 2.6], detail: true, treeNear: 200 },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120 },
 ];
 const CAP = { 0: 6000, 1: 1600 };  // trees per tile at full share, by detail
@@ -250,7 +250,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   // split a tile's trees: within `near` metres of (x, z) the full models, the rest the simple ones (stones only near)
   function partTrees(c, x, z) {
     const R2 = QUALITY[q].treeNear ** 2, m4 = new THREE.Matrix4(), qt = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(), tint = new THREE.Color();
-    c.partAt = [x, z];
+    c.partAt = [x, z]; c.hiCount = 0;
     for (const { sp, list, hi, lo } of c.treeSets || []) {
       let a = 0, b = 0; const sm = sp === 'stone';
       for (const [px, y, pz, sc, r] of list) {
@@ -261,6 +261,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
         const k = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
         im.setColorAt(i, tint.setRGB(k * (1 + w), k, k * (1 - w)));
       }
+      c.hiCount += a;
       for (const [im, n] of [[hi, a], [lo, b]]) if (im) {
         im.count = n; im.visible = n > 0; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
         if (n) im.computeBoundingSphere();
@@ -455,6 +456,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const me = makeRider(THREE, { kit: kit ?? 0xf2c230, kit2: 0x1b1f25 }); scene.add(me.group);
   const others = new Map();  // id -> { r, tag, x, z, yaw, seen }
   let grade = 0, dark = 0, camOver = null, sea = 0, seaAt = 0;
+  const cpu = { js: 0, draw: 0, max: 0 };  // milliseconds a frame on the CPU: the world's own work, issuing the draws
   // how much of the ground round a point is sea (for the sound of the waves): 16 points at 250 and 700 m
   function seaShare(x, z) {
     let n = 0; for (let k = 0; k < 16; k++) { const a = k * 0.785 + (k > 7 ? 0.39 : 0), r = k > 7 ? 700 : 250, h = groundAt(x + Math.cos(a) * r, z + Math.sin(a) * r); if (h == null || h < 0.4) n++; }
@@ -558,7 +560,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     renderer.shadowMap.enabled = Q.shadow > 0; sky.sun.castShadow = Q.shadow > 0;
     if (Q.shadow) { sky.sun.shadow.mapSize.set(Q.shadow, Q.shadow); sky.sun.shadow.map?.dispose(); sky.sun.shadow.map = null; }
     camera.far = Q.view; camera.updateProjectionMatrix();
-    sky.set(sky.time); post.build(Q); grass.set(...Q.grass);
+    sky.set(sky.time); post.build({ ...Q, ...(globalThis.__w3?.post || {}) }); grass.set(...Q.grass);
     size = ''; poke();
     scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   }
@@ -574,7 +576,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   function frame(now) {
     raf = 0; if (dead) return;
     try {
-      const dt = Math.min(0.1, (now - last) / 1000); last = now;
+      const dt = Math.min(0.1, (now - last) / 1000); last = now; const c0 = performance.now();
       if (!resize() || !st?.P) { raf = requestAnimationFrame(frame); return; }
       // the rider: where the engine said plus speed since, eased so updates never jump
       const v = st.v || 0, target = Math.min(dAt + v * Math.min(2, (now - tAt) / 1000), st.D.at(-1));
@@ -593,13 +595,19 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       me.update(dt, st.cad || 0, v, grade);
       const lat = proj.lat(p[1]), lon = proj.lon(p[0]);
       stream(lat, lon, now);
-      jobs.run(q === 2 ? 3 : 5);
+      jobs.run(q === 2 ? 2.5 : 4);
       marks.update(camera, dt);
-      for (const c of near.values()) if (c.treeSets && c.lod === 0 && (!c.partAt || Math.hypot(c.partAt[0] - p[0], c.partAt[1] - p[1]) > 60)) { c.partAt = [p[0], p[1]]; jobs.add(c.k + '|p', 0.5, () => partTrees(c, p[0], p[1])); }
-      if (ready) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1.5 : 3);
+      // the full trees follow the rider: split a tile again after 60 m, unless it is all far away and already all simple
+      for (const c of near.values()) if (c.treeSets && c.lod === 0 && (!c.partAt || Math.hypot(c.partAt[0] - p[0], c.partAt[1] - p[1]) > 60)) {
+        const b = tileBox(c), far2 = b ? Math.hypot(Math.max(b[0] - p[0], 0, p[0] - b[2]), Math.max(b[1] - p[1], 0, p[1] - b[3])) > QUALITY[q].treeNear + 80 : false;
+        c.partAt = [p[0], p[1]]; if (far2 && !c.hiCount) continue;
+        jobs.add(c.k + '|p', 0.5, () => partTrees(c, p[0], p[1]));
+      }
+      const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noLife, noShadow }
+      if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2);
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
-      life.update(dt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt, roads: () => {
+      if (!dbg.noLife) life.update(dt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt, roads: () => {
         const out = []; for (const c of near.values()) if (c.lod === 0 && c.drive) for (const r of c.drive) if (Math.hypot(r.P[0][0] - p[0], r.P[0][2] - p[1]) < 900 || Math.hypot(r.P.at(-1)[0] - p[0], r.P.at(-1)[2] - p[1]) < 900) out.push(r);
         return out; } });
       // camera: behind and above, looking down the road; first person: at the eyes
@@ -634,7 +642,9 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
       if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
       audio.update({ dt, v, cad: st.cad || 0, sea, inside: dark });
       renderer.info.reset();
-      post.render(sky.exposure * (1 + dark * 0.6));
+      const c1 = performance.now();
+      if (dbg.noPost) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = sky.exposure; renderer.render(scene, camera); } else post.render(sky.exposure * (1 + dark * 0.6));
+      const c2 = performance.now(); cpu.js += (c1 - c0 - cpu.js) * 0.05; cpu.draw += (c2 - c1 - cpu.draw) * 0.05; cpu.max = Math.max(cpu.max * 0.995, c1 - c0);
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
       governor(dt, now);
     } catch (e) { fail(e); return; }
@@ -665,7 +675,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     setKit(kit, accent) { me.setKit?.(kit, accent); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, life: life.counts }),
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) } }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point

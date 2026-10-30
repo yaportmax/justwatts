@@ -181,7 +181,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
 {
   const a = cellPoints(3, -7, 20, 50), b = cellPoints(3, -7, 20, 50), c = cellPoints(4, -7, 20, 50);
   const inside = a.every(([x, z, r]) => x >= 60 && x < 80 && z >= -140 && z < -120 && r >= 0 && r < 1);
-  const near = cellsAround(5, 5, 30, 20), cg = clumpGeometry(11);
+  const near = cellsAround(5, 5, 30, 20), cg = clumpGeometry();
   out.scatter2 = { same: JSON.stringify(a) === JSON.stringify(b), differs: JSON.stringify(a) !== JSON.stringify(c), inside, n: a.length,
     cells: near.length, first: near[0].slice(0, 2), sorted: near.every((q, i) => !i || near[i - 1][2] <= q[2]), within: near.every(q => q[2] < 30),
     blades: cg.idx.length / 3, verts: cg.pos.length / 3 };

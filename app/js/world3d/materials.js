@@ -38,8 +38,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec3 g1 = srgb(vec3(0.50, 0.55, 0.29)), g2 = srgb(vec3(0.34, 0.42, 0.20));
   c = mix(c, mix(g1, g2, small), smoothstep(0.38, 0.8, moist));
   // coyote brush and coastal scrub: dark olive patches, more where it is damp
-  float scr = smoothstep(0.6, 0.85, small * 0.6 + mid * 0.3 + north * 0.22 + max(cv, 0.0) * 0.6 + wood * 0.25) * (1.0 - town) * (1.0 - green * 0.7);
-  c = mix(c, srgb(vec3(0.28, 0.32, 0.18)) * (0.85 + 0.3 * fine), scr * 0.7);
+  float scr = smoothstep(0.58, 0.92, small * 0.6 + mid * 0.3 + north * 0.22 + max(cv, 0.0) * 0.6 + wood * 0.25) * (1.0 - town) * (1.0 - green * 0.7);
+  c = mix(c, srgb(vec3(0.33, 0.36, 0.21)) * (0.88 + 0.24 * fine), scr * 0.6);
   // woods: dark under the canopy (and the canopy itself from far away)
   vec3 forest = mix(srgb(vec3(0.13, 0.19, 0.10)), srgb(vec3(0.21, 0.28, 0.14)), smoothstep(0.3, 0.7, small)) * (0.8 + 0.4 * fine);
   c = mix(c, forest, smoothstep(0.3, 0.7, wood + (small - 0.5) * 0.5));
@@ -54,7 +54,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * jwN(p / 13.0).r);
   c = mix(c, rockC, rk);
-  float bare = cut * smoothstep(0.15, 0.5, slope + (small - 0.5) * 0.2) * 0.8;
+  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(0.2, 0.5, slope + (small - 0.5) * 0.2) * 0.65;
   c = mix(c, srgb(vec3(0.55, 0.45, 0.33)) * (0.85 + 0.3 * fine), bare);
   rk = max(rk, bare);
   // the shore and the sea floor

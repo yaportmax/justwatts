@@ -22,7 +22,7 @@ export function merge(parts) {
       }
       pos.push(p[i], p[i + 1], p[i + 2]); nor.push(nx, ny, nz);
       let k = 0.9 + 0.2 * hash2(Math.round(p[i] * 31), Math.round(p[i + 2] * 17 + p[i + 1] * 7));
-      if (o.shade) k *= 0.62 + 0.45 * Math.max(0, Math.min(1, (p[i + 1] - o.shade[0]) / (o.shade[1] - o.shade[0])));
+      if (o.shade) k *= 0.7 + 0.42 * Math.max(0, Math.min(1, (p[i + 1] - o.shade[0]) / (o.shade[1] - o.shade[0])));
       cl.push(c[0] * k, c[1] * k, c[2] * k);
     }
     g.dispose();
@@ -85,7 +85,7 @@ export function treeGeometries(lo = false) {
     euc: merge([[trunkG(0.45, 0.25, 14, 4), pale, null], [bumpy(ico(1, 1), 0.3, 6), col(0x6c8768), M(0.4, 16, 0, 4, 5.5, 3.6), { soft: [0, 16, 0], shade: [11, 21] }]]),
     cypress: merge([[trunkG(0.6, 0.4, 3.5, 4), barkD, M(0, 0, 0, 1, 1, 1, 0, 0.15)], [bumpy(ico(1, 1), 0.2, 9), col(0x2c452a), M(0.6, 5.4, 0, 6, 2.2, 4.5), { soft: [0, 5, 0], shade: [3.5, 7] }]]),
     pine: merge([[trunkG(0.45, 0.3, 8, 4), barkD, null], [bumpy(ico(1, 1), 0.25, 14), col(0x2f4a2b), M(0, 11, 0, 4.2, 3.6, 4), { soft: [0, 11, 0], shade: [7.5, 14] }]]),
-    bush: merge([[bumpy(ico(1, 1), 0.2, 11), col(0x4f5f36), M(0, 0.6, 0, 1.5, 0.9, 1.3), { soft: [0, 0.4, 0], shade: [0, 1.4] }]]),
+    bush: merge([[bumpy(ico(1, 1), 0.25, 11), col(0x5c6b3c), M(0, 0.5, 0, 1.6, 0.7, 1.4), { soft: [0, 0.3, 0], shade: [0, 1.2] }]]),
   };
   return {
     stone: merge([[bumpy(ico(0.45, 1), 0.12, 21), col(0x8d867a), M(0, 0.12, 0, 1, 0.6, 1)]]),
@@ -112,8 +112,8 @@ export function treeGeometries(lo = false) {
     // Monterey / bishop pine: a rounded, irregular dark crown high on a bare trunk
     pine: merge([[trunkG(0.45, 0.28, 9, 6), barkD, null], limb(0, 7.5, 0, 2, 10, 0.5, 0.18, barkD), limb(0, 8, 0, -1.6, 10.6, -0.4, 0.16, barkD),
       ...crown(0, 11, 0, 3.6, 2.4, 3.4, 6, 14, col(0x2f4a2b), 0.55)]),
-    // coyote brush and other coastal scrub: low mounds
-    bush: merge([...crown(0, 0.7, 0, 1.3, 0.75, 1.15, 4, 11, col(0x4f5f36), 0.6, 1, col(0x5d6c3d))]),
+    // coyote brush and other coastal scrub: low, irregular mounds, sun-bleached on top
+    bush: merge([...crown(0, 0.55, 0, 1.5, 0.6, 1.3, 6, 11, col(0x5c6b3c), 0.55, 1, col(0x6b7845)), ...crown(0.9, 0.4, 0.5, 0.8, 0.45, 0.7, 3, 16, col(0x56653a), 0.6, 0)]),
     // toyon / manzanita: a taller shrub with a reddish base
     shrub: merge([limb(0, 0, 0, 0.3, 1.2, 0.1, 0.08, col(0x7a3e2c)), limb(0, 0, 0, -0.4, 1.1, 0.2, 0.07, col(0x7a3e2c)),
       ...crown(0, 1.7, 0, 1.4, 1.1, 1.3, 5, 15, col(0x3f5530), 0.6, 1, col(0x4a5f35))]),

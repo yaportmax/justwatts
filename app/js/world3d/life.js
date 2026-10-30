@@ -26,9 +26,16 @@ export function createLife({ THREE, scene, proj, marks, quality = 0 }) {
   /* cars: body (tinted per car), glass, wheels; faces -z */
   const white = col(0xffffff), glass = col(0x22282f), tyre = col(0x141414), lamp = col(0xfff2d8), red = col(0x9e1b1b);
   const wheel = (x, z) => [new THREE.CylinderGeometry(0.33, 0.33, 0.24, 10).rotateZ(Math.PI / 2).translate(x, 0.33, z), tyre];
-  const carGeo = merge([[B(1.82, 0.62, 4.4, 0, 0.62, 0), white], [B(1.62, 0.12, 4.2, 0, 0.98, 0.05), white], [B(1.56, 0.5, 2.3, 0, 1.25, 0.25), glass],
-    [B(1.5, 0.06, 2.1, 0, 1.52, 0.3), white], [B(1.5, 0.12, 0.05, 0, 0.78, -2.21), lamp], [B(1.5, 0.12, 0.05, 0, 0.8, 2.21), red],
-    wheel(-0.86, -1.35), wheel(0.86, -1.35), wheel(-0.86, 1.38), wheel(0.86, 1.38)]);
+  // a body with a sloping bonnet and boot, a glasshouse narrower than the body with raked screens, a roof, lights
+  const hull = (w, z0, z1, ys, yt, inset = 0) => {  // a box whose top edge runs from ys (front) to yt (back) heights, sides pulled in by inset at the top
+    const g = new THREE.BoxGeometry(w, 1, z1 - z0, 1, 1, 1), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) { const top = p.getY(i) > 0, front = p.getZ(i) < 0; p.setXYZ(i, p.getX(i) * (top ? 1 - inset : 1), top ? (front ? ys[1] : yt[1]) : (front ? ys[0] : yt[0]), p.getZ(i) + (z0 + z1) / 2); }
+    g.computeVertexNormals(); return g;
+  };
+  const carGeo = merge([[hull(1.8, -2.25, -1.0, [0.3, 0.86], [0.3, 0.98]), white], [hull(1.82, -1.0, 1.4, [0.28, 0.98], [0.28, 1.0]), white], [hull(1.8, 1.4, 2.25, [0.3, 0.98], [0.32, 0.9]), white],
+    [hull(1.7, -1.0, 1.25, [0.98, 1.0], [0.98, 1.0]), glass], [hull(1.62, -0.75, 1.0, [1.0, 1.46], [1.0, 1.48], 0.06), glass], [hull(1.54, -0.45, 0.75, [1.46, 1.52], [1.48, 1.52], 0.02), white],
+    [B(0.42, 0.12, 0.04, -0.6, 0.74, -2.25), lamp], [B(0.42, 0.12, 0.04, 0.6, 0.74, -2.25), lamp], [B(0.4, 0.12, 0.04, -0.62, 0.8, 2.25), red], [B(0.4, 0.12, 0.04, 0.62, 0.8, 2.25), red],
+    [B(1.84, 0.2, 4.5, 0, 0.36, 0), col(0x2a2c30)], wheel(-0.86, -1.35), wheel(0.86, -1.35), wheel(-0.86, 1.38), wheel(0.86, 1.38)]);
   const counts = [[44, 1, 1], [26, 1, 1], [10, 0.6, 0]][quality] ?? [26, 1, 1];
   const cars = new THREE.InstancedMesh(carGeo, lam(), counts[0]); cars.castShadow = quality === 0; cars.frustumCulled = false; scene.add(cars);
   for (let i = 0; i < counts[0]; i++) cars.setColorAt(i, C.set(CAR_COLOURS[i % CAR_COLOURS.length]));

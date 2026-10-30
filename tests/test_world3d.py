@@ -127,7 +127,7 @@ def test_grass_scatter_is_deterministic(out):
     g = out["scatter2"]
     assert g["same"] and g["differs"] and g["inside"] and g["n"] == 50         # the same cell gives the same clumps, inside it
     assert g["cells"] == 15 and g["first"] == [0, 0] and g["sorted"] and g["within"]  # cells round a point, nearest first
-    assert g["blades"] == 55 and g["verts"] == 77                              # 11 blades, 5 triangles each
+    assert g["blades"] == 45 and g["verts"] == 63                              # 9 blades, 5 triangles each
 
 
 def test_sky_colours_follow_the_sun(out):

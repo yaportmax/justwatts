@@ -10,7 +10,9 @@ const STYLE = {
   unclassified: [6.5, 2, 0], residential: [6.5, 0, 0], road: [6, 0, 0], living_street: [5, 0, 0], service: [3.8, 0, 0],
   cycleway: [3, 0, 1], path: [1.6, 0, 2], footway: [1.8, 0, 2], pedestrian: [3, 0, 1], bridleway: [1.8, 0, 2], track: [2.8, 0, 2],
 };
-const LANE_W = 3.4, BIKE_W = 1.6, PARK_W = 2.4;
+// US widths (Street View and the aerial imagery: lower Conzelman's three parts about 8.5 m): a travel lane 3.6 m, a bike
+// lane 1.8 m, a parking lane 2.8 m; a double yellow between a lane and a bike lane against it stands in 0.5 m of its own
+const LANE_W = 3.6, BIKE_W = 1.8, PARK_W = 2.8, YB = 0.5;
 // Style of a way { hw, ln: lanes, fl: flags (landuse.js: 4 unpaved, 8 oneway, 32/64 a bike lane left/right, 128/256 a
 // parking lane left/right, 512 no lane markings, 4096 the left bike lane against the oneway), wd: its tagged width (m) }:
 // { w, lm, surf, lanes, a, b, pL, pR }. Across the road from its right edge (as the way runs): parking, bike lane, the
@@ -26,7 +28,7 @@ export function roadStyle(hw, ln = 0, fl = 0, wd = 0) {
   if (lm === 3 && fl & 4096 && fl & 32) lm = 4;
   const sh = s[0] >= 8.5 ? 0.8 : 0.4, pR = fl & 256 ? PARK_W : 0, pL = fl & 128 ? PARK_W : 0, bR = fl & 64 ? BIKE_W : 0, bL = fl & 32 ? BIKE_W : 0;
   let w = lanes && lm ? lanes * LANE_W + 2 * sh : s[0], a = 0, b = 0;
-  if (lm && (pR || pL || bR || bL)) { a = pR + bR + (pR || bR ? 0 : sh); b = pL + bL + (pL || bL ? 0 : sh); w = lanes * LANE_W + a + b; }
+  if (lm && (pR || pL || bR || bL)) { a = pR + bR + (pR || bR ? 0 : sh); b = pL + bL + (pL || bL ? 0 : sh) + (lm === 4 ? YB : 0); w = lanes * LANE_W + a + b; }
   if (wd >= 3 && wd < 30 && lm) { const k = wd / w; w = wd; a *= k; b *= k; }  // the tagged width wins, the parts in proportion
   return { w, lm, surf, lanes, a, b, pL, pR };
 }
@@ -85,8 +87,11 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
 // Add one ribbon to builder B. pts: [[x, z], ...]; hAt(x, z): ground height (null: unknown, the last known is kept);
 // deck: [h0, h1] the heights at the two ends (a bridge), else the ground under each edge; joints: where it eases to
 // another way's width (tapers); drape: the edges on the ground however steep it is across (a trail on a hillside).
-// Returns the centre line [[x, y, z, half width], ...] (for pillars, arrows, the rails).
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false }) {
+// Returns the centre line [[x, y, z, half width, right edge x, y, z, left edge x, y, z], ...] (for pillars, arrows, the
+// road sides: banks.js).
+// rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
+// centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null }) {
   const P = resample(pts, step), n = P.length; if (n < 2) return [];
   let code = [lm, surf, lanes, w, a, b, pL, pR];
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
@@ -105,7 +110,9 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
     }
     const nx = -tz * half * k, nz = tx * half * k;  // to the right of travel (u = 0)
     let hl, hr, hc;
-    if (deck) { hc = deck[0] + (deck[1] - deck[0]) * L[i] / tot; hl = hr = hc; }
+    if (rail && (hc = rail(c[0], c[1])) != null) {
+      if (drape) { hl = hAt(c[0] + nx, c[1] + nz) ?? hc; hr = hAt(c[0] - nx, c[1] - nz) ?? hc; } else hl = hr = hc;
+    } else if (deck) { hc = deck[0] + (deck[1] - deck[0]) * L[i] / tot; hl = hr = hc; }
     else {
       hc = hAt(c[0], c[1]); hl = hAt(c[0] + nx, c[1] + nz); hr = hAt(c[0] - nx, c[1] - nz);
       if (hc == null) hc = last; if (hl == null) hl = hc; if (hr == null) hr = hc;
@@ -115,7 +122,7 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
     last = hc;
     B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);
     B.v(c[0] - nx, hr + lift, c[1] - nz, 1, v0 + L[i], code);
-    centre.push([c[0], hc + lift, c[1], half]);
+    centre.push([c[0], hc + lift, c[1], half, c[0] + nx, hl + lift, c[1] + nz, c[0] - nx, hr + lift, c[1] - nz]);
     if (i) { const p = base + 2 * (i - 1), q = base + 2 * i; B.tri(p, q, p + 1); B.tri(p + 1, q, q + 1); }  // facing up
   }
   return centre;
@@ -178,10 +185,12 @@ export function chainWays(roads, keyOf) {
   roads.forEach((r, i) => {
     if (used.has(i)) return; used.add(i);
     if (keyOf(r) == null) { out.push(r); return; }
-    let pts = r.pts.slice();
-    for (let o; (o = next(i, pts.at(-1), 0));) { used.add(o[0]); const q = roads[o[0]].pts; pts = pts.concat((o[1] ? q.slice().reverse() : q).slice(1)); }
-    for (let o; (o = next(i, pts[0], 1));) { used.add(o[0]); const q = roads[o[0]].pts; pts = (o[1] ? q : q.slice().reverse()).slice(0, -1).concat(pts); }
-    out.push({ ...r, pts });
+    // (their rails, rail.js, joined the same way: a rail's dense points split each segment on its own)
+    let pts = r.pts.slice(), h = r.h ? Array.from(r.h) : null;
+    const rev = (q, o) => o ? q.slice().reverse() : q, hOf = j => roads[j].h ? Array.from(roads[j].h) : null;
+    for (let o; (o = next(i, pts.at(-1), 0));) { used.add(o[0]); const q = roads[o[0]].pts, qh = hOf(o[0]); pts = pts.concat(rev(q, o[1]).slice(1)); h = h && qh ? h.concat(rev(qh, o[1]).slice(1)) : null; }
+    for (let o; (o = next(i, pts[0], 1));) { used.add(o[0]); const q = roads[o[0]].pts, qh = hOf(o[0]); pts = rev(q, !o[1]).slice(0, -1).concat(pts); h = h && qh ? rev(qh, !o[1]).slice(0, -1).concat(h) : null; }
+    out.push({ ...r, pts, h: h && Float32Array.from(h) });
   });
   return out;
 }

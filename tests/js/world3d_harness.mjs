@@ -1,7 +1,10 @@
 // The 3D world's pure parts (app/js/world3d): terrain grids from a synthetic Terrarium tile, the carve, ground classes,
 // road ribbons, landuse parsing and the compact forms, streaming bookkeeping, the baked tile format, the leg solver,
 // the view choice and the WebGL fallback, the open world's edge. stdout: JSON report for tests/test_world3d.py.
-import { heightsOf, makeSampler, makeGrid, gridHeight, carve, pushUnder, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks } from '../../app/js/world3d/terrain.js';
+import { heightsOf, makeSampler, makeGrid, gridHeight, carve, pushUnder, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from '../../app/js/world3d/terrain.js';
+import { ribbonEdge, sideKinds, sideRuns, bankGeometry, railLine, bands, CUT, FILL, LEVEL } from '../../app/js/world3d/banks.js';
+import { readFileSync, existsSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { cellPoints, cellsAround, clumpGeometry } from '../../app/js/world3d/grass.js';
 import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
@@ -16,7 +19,10 @@ import { packTile, unpackTile, gridAt } from '../../app/js/world3d/baked.js';
 import { makeProj, tileX, tileY, latOf, lonOf } from '../../app/js/world3d/geo.js';
 import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js';
 import { probeWebGL2, resetProbe, pickView } from '../../app/js/world3d/probe.js';
-import { RoadGraph, Plan } from '../../app/js/roads.js';
+import { RoadGraph, Plan, bridges, smoothFrom } from '../../app/js/roads.js';
+import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, smoothRail, isTrail } from '../../app/js/world3d/rail.js';
+import { onDeck, toST, GGB } from '../../app/js/ggb.js';
+import { readdirSync } from 'node:fs';
 import { inWorld, BOUNDS } from '../../app/js/world.js';
 import { draftShare } from '../../app/js/world3d/draft.js';
 import { speedStep } from '../../app/js/course.js';
@@ -301,4 +307,184 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     same: JSON.stringify(b1) === JSON.stringify(b2), westN: west.length, eastN: east.length, onScrub: west.every(([x, z]) => at(x, z) === SCRUB),
     perCell: SCRUB_CELL * SCRUB_CELL, scales: [r3(Math.min(...west.map(q => q[2]))), r3(Math.max(...west.map(q => q[2])))] };
 }
+
+/* ---------- road sides (banks.js) ---------- */
+// a straight road east along z = 0 at height 10, 6 m wide (its right edge z = +3): the ground falling away on the right
+// (2 m under the edge, then 1 in 3), a cut bank rising at 3 in 2 on the left
+{
+  const C = []; for (let x = 0; x <= 40; x += 5) C.push([x, 10, 0, 3, x, 10, 3, x, 10, -3]);
+  const ground = (x, z) => z > 3 ? 8 - (z - 3) / 3 : z < -3 ? 10 + (-3 - z) * 1.5 : 10, raw = ground;
+  const R = ribbonEdge(C, 1), Lf = ribbonEdge(C, -1), kr = sideKinds(R, ground, raw), kl = sideKinds(Lf, ground, raw), br = bands(R[4], kr[4], ground), bl = bands(Lf[4], kl[4], ground);
+  const geo = bankGeometry(sideRuns(R, kr, ground).concat(sideRuns(Lf, kl, ground)));
+  let up = 0; for (let k = 0; k < geo.idx.length; k += 3) { const [a, b, c] = [geo.idx[k], geo.idx[k + 1], geo.idx[k + 2]].map(v => geo.pos.slice(3 * v, 3 * v + 3)), ux = b[0] - a[0], uz = b[2] - a[2], vx = c[0] - a[0], vz = c[2] - a[2]; if (uz * vx - ux * vz > 0) up++; }
+  const rl = railLine(R, 0, R.length - 1), railed = sideKinds(R, (x, z) => 10, raw, () => true);
+  out.banks = { normals: [R[0][3], R[0][4], Lf[0][3], Lf[0][4]], right: kr.map(k => k.kind), left: kl.map(k => k.kind), cutH: r3(kl[4].h),
+    fill: br.map(b => b.map(r3)), cut: bl.map(b => b.map(r3)), tris: geo.idx.length / 3, up, cutVerts: geo.cut.filter(c => c === 1).length,
+    rail: { pts: rl.pts.length, z: r3(rl.pts[3][2]), posts: rl.posts.length, gap: r3(Math.hypot(rl.posts[1][0] - rl.posts[0][0], rl.posts[1][2] - rl.posts[0][2])), yaw: r3(rl.posts[0][3]) }, railed: railed[2] };
+}
+/* ---------- roads over tunnels ---------- */
+{
+  const road = [[-50, 0], [50, 0]];
+  out.over = { square: overTunnels(road, [{ pts: [[0, -20], [0, 20]], th: 3 }]).map(g => g.map(r3)), angled: overTunnels(road, [{ pts: [[-20, -20], [20, 20]], th: 3 }]).map(g => g.map(r3)),
+    end: overTunnels(road, [{ pts: [[50, 0], [90, 0]], th: 3 }]), climb: overTunnels(road, [{ pts: [[0, -20], [0, 20]], th: 3 }], 12, (x, z) => Math.abs(x) < 30 ? 2 : 10).map(g => g.map(r3)) };
+}
+// the Headlands' under-crossings in the baked tiles (USGS lidar, whose bare earth leaves out the overpasses): each road
+// over a tunnel finds the stretch over the lidar's gap, its deck there well over the road under it; the Baker-Barry
+// tunnel under its hill; the ground at each portal carved down to the road going in
+{
+  const APP = new URL('../../app/', import.meta.url), tiles = new Map(), proj = makeProj(37.84, -122.48);
+  const tile = (x, y) => { const k = `${x}_${y}`; if (!tiles.has(k)) { const f = new URL(`world/14/${k}.bin`, APP); tiles.set(k, existsSync(f) ? unpackTile(new Uint8Array(gunzipSync(readFileSync(f)))) : null); } return tiles.get(k); };
+  const raw = (x, z) => { const la = proj.lat(z), lo = proj.lon(x), X = tileX(lo, 14), Y = tileY(la, 14), t = tile(Math.floor(X), Math.floor(Y)); return t ? gridAt(t.hs, t.n, (X % 1) * (t.n - 1), (Y % 1) * (t.n - 1)) : null; };
+  const roadsNear = (la, lo) => { const X = Math.floor(tileX(lo, 14)), Y = Math.floor(tileY(la, 14)), all = []; for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) { const t = tile(X + dx, Y + dy); if (t) all.push(...decodeRoads(t.json.r || [])); } return all; };
+  const xz = ([la, lo]) => proj.xz(la, lo);
+  out.under = {};
+  for (const [name, a, b] of [['alexander101', [37.8357578, -122.4845255], [37.8355005, -122.484859]], ['bunker101', [37.838099, -122.48318], [37.8379019, -122.4828768]],
+    ['eastAlexander', [37.8434853, -122.4783654], [37.8433264, -122.4782486]], ['bakerBarry', [37.8418603, -122.4932478], [37.8390149, -122.4858974]]]) {
+    const all = roadsNear(...a), T = all.filter(r => r.fl & 2 && r.pts.some(p => Math.abs(p[0] - a[0]) < 2e-5 && Math.abs(p[1] - a[1]) < 2e-5)), tl = T.length ? T.sort((u, w) => w.pts.length - u.pts.length)[0].pts.map(xz) : [xz(a), xz(b)];
+    const th = 3.4, f0 = raw(...xz(a)), f1 = raw(...xz(b)), L = Math.hypot(xz(b)[0] - xz(a)[0], xz(b)[1] - xz(a)[1]);
+    const floorAt = p => { const t = Math.max(0, Math.min(1, ((p[0] - xz(a)[0]) * (xz(b)[0] - xz(a)[0]) + (p[1] - xz(a)[1]) * (xz(b)[1] - xz(a)[1])) / (L * L))); return f0 + (f1 - f0) * t; };
+    const decks = [];
+    for (const r of all) {
+      if (r.fl & 3 || /path|footway|track|steps|cycleway/.test(r.hw)) continue;
+      const P = r.pts.map(xz); for (const [s0, s1] of overTunnels(P, [{ pts: tl, th }], 12, raw)) {
+        const at = s => { let d = 0; for (let k = 1; k < P.length; k++) { const l = Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); if (s <= d + l || k === P.length - 1) { const f = Math.max(0, Math.min(1, (s - d) / (l || 1))); return [P[k - 1][0] + (P[k][0] - P[k - 1][0]) * f, P[k - 1][1] + (P[k][1] - P[k - 1][1]) * f]; } d += l; } };
+        const h0 = raw(...at(s0)), h1 = raw(...at(s1)); let low = 1e9, X = null; for (let s = s0; s <= s1; s += 2) { const p = at(s), h = raw(...p); if (h < low) { low = h; X = p; } }
+        decks.push({ hw: r.hw, deckOverFloor: r3(h0 + (h1 - h0) * 0.5 - floorAt(X)), gap: r3(Math.min(h0, h1) - low), span: r3(s1 - s0) });
+      }
+    }
+    // the portal: the way in carved level at the floor (as buildTerrain does: the ground under it no higher than it)
+    const c = tile(Math.floor(tileX(a[1], 14)), Math.floor(tileY(a[0], 14))), g = gridFromHeights({ z: 14, x: Math.floor(tileX(a[1], 14)), y: Math.floor(tileY(a[0], 14)), hs: c.hs, n: c.n, proj });
+    const pa = xz(a), dir = [pa[0] - xz(b)[0], pa[1] - xz(b)[1]].map(v => v / L), way = [0, 8, 16].map(o => [pa[0] + dir[0] * o, pa[1] + dir[1] * o, Math.min(f0, raw(pa[0] + dir[0] * 16, pa[1] + dir[1] * 16))]);
+    carve(g, [], 0, 1, [{ pts: way, r0: 6, r1: 12 }]);
+    let mid = 0; for (let k = 1; k < 10; k++) { const p = [pa[0] + (xz(b)[0] - pa[0]) * k / 10, pa[1] + (xz(b)[1] - pa[1]) * k / 10]; mid = Math.max(mid, raw(...p) - floorAt(p)); }
+    out.under[name] = { decks, cover: r3(mid), portal: r3(gridHeight(g, ...pa) - way[0][2]) };
+  }
+}
+
+/* ---------- streaming along the route: a queued job moves when the route turns round, a half done one kept ---------- */
+{
+  const J = jobQueue(() => 0), ran = [];
+  function* slow() { ran.push('a1'); yield; ran.push('a2'); }
+  J.add('a', 1, slow); J.add('b', 2, () => ran.push('b')); J.add('c', 3, () => ran.push('c'));
+  J.run(0); J.reprio('a', 9); J.reprio('c', 0.5); J.run(0); J.run(0); J.run(0);
+  out.reprio = ran;
+}
+/* ---------- rails (rail.js): the baked rails walked at light speed, every road and every open world start ---------- */
+{
+  // the format and the pure pieces
+  const pts = [[37.83, -122.5], [37.83, -122.4996], [37.8301, -122.4996]], idx = [], D = dense(pts, 5, idx);
+  const h = Float64Array.from(D, (_, i) => i % 2 ? 10.3 : 10), sm = smoothRail(h, 2, new Set([idx[1]]));
+  const T = track([[0, 0], [10, 0], [10, 10]], [0, 1, 3]), q = T.at(5, 2), qr = T.at(5, -2);
+  const r2 = { hw: 'unclassified', ln: 2, fl: 96, wd: 0 }, r0 = { hw: 'tertiary', ln: 0, fl: 0, wd: 0 }, rp = { hw: 'cycleway', ln: 0, fl: 0, wd: 0 }, rk = { hw: 'unclassified', ln: 1, fl: 4392 | 256, wd: 0 };
+  out.railBasics = { n: D.length, idx, step: r3(Math.max(...D.slice(1).map((p, i) => Math.hypot((p[0] - D[i][0]) * 111195, (p[1] - D[i][1]) * 111195 * Math.cos(37.83 * Math.PI / 180))))),
+    pinned: sm[idx[1]], ends: [sm[0], sm.at(-1)], pack: Array.from(unpackH(packH([10.004, 10.5, 9.99]))).map(r3), at: [r3(q.h), r3(q.d), r3(q.s), r3(qr.d)],
+    lanes: { bunker: [r3(laneOf(r2, true)), r3(laneOf(r2, false))], plain: r3(laneOf(r0, true)), path: laneOf(rp, true), conzUp: r3(laneOf(rk, false)), conzDown: r3(laneOf(rk, true)) } };
+
+  const APP = new URL('../../app/', import.meta.url), proj = makeProj(37.83, -122.5), xz = (la, lo) => proj.xz(la, lo);
+  const RJ = JSON.parse(gunzipSync(readFileSync(new URL('world/rails.bin', APP))).toString()), RI = railIndex(RJ, xz);
+  const tiles = new Map(), tile = (x, y) => { const k = `${x}_${y}`; if (!tiles.has(k)) { const f = new URL(`world/14/${k}.bin`, APP); tiles.set(k, existsSync(f) ? unpackTile(new Uint8Array(gunzipSync(readFileSync(f)))) : null); } return tiles.get(k); };
+  const ground = (x, z) => { const la = proj.lat(z), lo = proj.lon(x), X = tileX(lo, 14), Y = tileY(la, 14), t = tile(Math.floor(X), Math.floor(Y)); return t ? gridAt(t.hs, t.n, (X % 1) * (t.n - 1), (Y % 1) * (t.n - 1)) : null; };
+  // (a): every rail: its grade over 10 m, the bend from one 5 m step to the next (a jump), how far under the lidar's
+  // ground it runs (a cut; tunnels and bridges left out); each tile's piece of a rail the same as the area's
+  const portals = RI.rails.filter(q => q.r.fl & 2).flatMap(q => [q.T.P[0], q.T.P.at(-1)]);  // (a cut down to a portal is a cut)
+  let worstGrade = 0, worstBend = 0, worstCut = 0, cutAt = null, n = 0, km = 0, tileGap = 0, tilePts = 0;
+  for (const q of RI.rails) {
+    const { P, h, D } = q.T; n++; km += q.T.L / 1000;
+    for (let i = 2; i < P.length; i++) { if (D[i] - D[i - 2] > 4) worstGrade = Math.max(worstGrade, Math.abs(h[i] - h[i - 2]) / (D[i] - D[i - 2])); worstBend = Math.max(worstBend, Math.abs(h[i] - 2 * h[i - 1] + h[i - 2])); }
+    if (q.r.fl & 3) continue;
+    for (let i = 0; i < P.length; i++) { if (portals.some(([x, z]) => Math.hypot(P[i][0] - x, P[i][1] - z) < 30)) continue; const gr = ground(...P[i]); if (gr != null && gr - h[i] > worstCut) { worstCut = gr - h[i]; cutAt = [+proj.lat(P[i][1]).toFixed(5), +proj.lon(P[i][0]).toFixed(5), q.r.hw]; } }
+  }
+  for (const [x, y] of [[2618, 6329], [2619, 6329], [2620, 6330], [2617, 6330], [2618, 6330], [2619, 6330]]) {
+    const t = tile(x, y); if (!t?.json.rh) continue;
+    decodeRoads(t.json.r).forEach((r, i) => {
+      if (!t.json.rh[i] || r.fl & 16) return; const H = unpackH(t.json.rh[i]), P = dense(r.pts).map(p => xz(...p)), lift = RI.rails.find(q => q.r.hw === r.hw && q.r.fl === r.fl)?.lift ?? 0;
+      for (let k = 0; k < P.length; k += 2) { const top = RI.top(P[k][0], P[k][1], H[k] + lift); if (top != null) { tilePts++; tileGap = Math.max(tileGap, Math.abs(top - lift - H[k])); } }
+    });
+  }
+  out.rails = { n, km: r3(km), grade: r3(worstGrade), bend: r3(worstBend), cut: r3(worstCut), cutAt, tileGap: r3(tileGap), tilePts, file: readFileSync(new URL('world/rails.bin', APP)).length };
+
+  // every bridge in the Headlands' tiles: its deck (straight between its ends) never through the ground, and over the
+  // lidar's gap (a creek, a road, water), not a slab in the air over a culvert or a ridge
+  { let n = 0, through = 0, worst = 0;
+    for (let x = 2612; x <= 2622; x++) for (let y = 6325; y <= 6333; y++) { const t = tile(x, y); if (!t) continue;
+      for (const r of decodeRoads(t.json.r || [])) { if (!(r.fl & 1) || r.fl & 16 || !r.dk) continue; n++;
+        const P = r.pts.map(p => xz(...p)), S = [0]; for (let i = 1; i < P.length; i++) S.push(S[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+        let over = 0; for (let i = 0; i < P.length; i++) { const l = r.dk[0] + (r.dk[1] - r.dk[0]) * S[i] / (S.at(-1) || 1), gr = ground(...P[i]); if (gr == null) continue; over = Math.max(over, gr - l); }
+        worst = Math.max(worst, over); if (over > 1.2) through++; } }
+    out.bridges = { n, through, worst: r3(worst) }; }
+  // the under-crossings on the rails: the lower road's rail well under the upper one (or the ground over a tunnel)
+  const railNear = (la, lo, f) => { const [x, z] = xz(la, lo); let best = null; for (const id of RI.near(x, z)) { const q = RI.rails[id]; if (!f(q.r)) continue; const p = q.T.at(x, z); if (p && Math.abs(p.d) < q.half + 3 && (!best || Math.abs(p.d) < Math.abs(best.p.d))) best = { p, q }; } return best; };
+  const tun = r => r.fl & 2, notTun = r => !(r.fl & 3);
+  const lidarOver = (la, lo) => { const [x, z] = xz(la, lo); let top = -1e9; for (let a = 0; a < 6.3; a += 0.52) for (const rr of [14, 22, 30]) { const g2 = ground(x + Math.cos(a) * rr, z + Math.sin(a) * rr); if (g2 != null) top = Math.max(top, g2); } return top; };
+  const ux = {};
+  { const t = railNear(37.8434, -122.47833, tun), o = railNear(37.8434, -122.47833, notTun); ux.eastUnderAlexander = t && o ? r3(o.p.h - t.p.h) : null; }
+  { const t = railNear(37.8356, -122.48468, tun); ux.alexanderUnder101 = t ? r3(lidarOver(37.8356, -122.48468) - t.p.h) : null; }
+  { const t = railNear(37.83800, -122.48305, tun); ux.bunkerUnder101 = t ? r3(lidarOver(37.838, -122.48305) - t.p.h) : null; }
+  { const t = railNear(37.8405, -122.4897, tun), [x, z] = xz(37.8405, -122.4897); ux.bakerBarry = t ? r3(ground(x, z) - t.p.h) : null; }
+  out.railUnder = ux;
+
+  // (b): the open world's starts (world.js PRESETS and perfride's rides), each way, 3 km on: the course as world.js makes
+  // it (10 m points, heights from the baked tiles, straight over bridges and through tunnels, smoothed), its profile
+  // matched to the rails, ridden at a third of a metre a step (20 m/s at 60 frames a second)
+  const g = new RoadGraph({ inside: inWorld });
+  for (const f of readdirSync(new URL('roads/marin/', APP))) { const j = JSON.parse(readFileSync(new URL(`roads/marin/${f}`, APP), 'utf8')), byId = new Map(j.ways.map(w => [w.id, w])); for (const [k, ids] of Object.entries(j.cells)) g.addCell(k, ids.map(i => byId.get(i)).filter(Boolean)); }
+  const starts = [['ggb', 37.83234, -122.48061, 160], ['conzelman', 37.83300, -122.48341, 190], ['hawk', 37.82625, -122.49900, 250], ['rodeo', 37.83406, -122.53338, 122], ['fortbaker', 37.83658, -122.47779, 330],
+    ['hawkDown', 37.826611, -122.499231, 197], ['mccullough', 37.834121, -122.494207, 346], ['bunker', 37.835115, -122.480078, 247]];
+  const ggbOn = q => /^Golden Gate Bridge/.test(q.nm) ? onDeck(...q.ll) : null;
+  const courseOf = (la, lo, hd) => {
+    const s = g.snap(la, lo, hd); if (!s) return null; const p = Plan.at(g, s); p.extend(3000); const pts = p.points(0, 301), ll = pts.map(q => q.ll);
+    const R = pts.map(q => { const dk = ggbOn(q); if (dk) return dk.h; const [x, z] = xz(...q.ll); return ground(x, z) ?? 0; });
+    return { ll, nm: pts.map(q => q.nm), ele: smoothFrom(bridges(R, pts.map(q => ggbOn(q) ? 0 : q.br)), 0) };
+  };
+  const ride = c => {
+    const P = c.ll.map(p => xz(...p)), pr = profileOf(RI, P, c.ele), rows = [];
+    for (let d = 0; d <= (P.length - 1) * 10; d += 1 / 3) {
+      const i = Math.min(P.length - 2, Math.floor(d / 10)), f = d / 10 - i, x = P[i][0] + (P[i + 1][0] - P[i][0]) * f, z = P[i][1] + (P[i + 1][1] - P[i][1]) * f;
+      const dk0 = onDeck(proj.lat(z), proj.lon(x)), dk = dk0 && Math.abs(c.ele[i] - dk0.h) < 8 ? dk0 : null, hh = profileAt(RI, pr, i, f), hx = P[i + 1][0] - P[i][0], hz = P[i + 1][1] - P[i][1], L = Math.hypot(hx, hz) || 1, lane = pr.lane[i] + (pr.lane[i + 1] - pr.lane[i]) * f;
+      rows.push({ d, x: hh ? hh.x : x, z: hh ? hh.z : z, y: dk ? dk.h + 0.05 : hh ? hh.y : null, rail: hh?.rail ?? null, lane, rx: -hz / L, rz: hx / L, fw: pr.fw[i] > 0 });
+    }
+    return { P, pr, rows };
+  };
+  // the rider's height along it: no step from one frame to the next (jump), and its curvature (second difference
+  // over 5 m) no more than the road's own: a smooth line, no bounce
+  const bounce = rows => { let b = 0; for (let k = 15; k + 15 < rows.length; k += 3) { const a = rows[k - 15].y, m = rows[k].y, c = rows[k + 15].y; const A = rows[k - 15], C = rows[k + 15], M = rows[k], turn = (M.x - A.x) * (C.x - M.x) + (M.z - A.z) * (C.z - M.z) < 0.5 * Math.hypot(M.x - A.x, M.z - A.z) * Math.hypot(C.x - M.x, C.z - M.z) || Math.hypot(C.x - A.x, C.z - A.z) < 8;  // (not where the course turns round: a dead end)
+      if (!turn && a != null && m != null && c != null) b = Math.max(b, Math.abs(a - 2 * m + c)); } return b; };
+  out.courses = {};
+  for (const [name, la, lo, hd] of starts) for (const back of [0, 1]) {
+    const c = courseOf(la, lo, (hd + 180 * back) % 360), key = name + (back ? 'Back' : ''); if (!c) { out.courses[key] = null; continue; }
+    const { rows, pr } = ride(c); let jump = 0, none = 0, laneBad = 0, onRail = 0;
+    for (let k = 1; k < rows.length; k++) if (rows[k].y != null && rows[k - 1].y != null) jump = Math.max(jump, Math.abs(rows[k].y - rows[k - 1].y));
+    for (const r of rows) { if (r.y == null) none++; else onRail++; }
+    // a cyclist's line at each course point: the middle of a bike lane on their right where there is one, else 0.5 to
+    // 1.5 m in from the right edge of their travel lane (a path, a bike path: its middle)
+    for (let i = 0; i < pr.ri.length; i++) {
+      const q = RI.rails[pr.ri[i]]; if (!q) continue; const st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd), half = st.w / 2, fw = pr.fw[i] > 0, park = fw ? st.pR : st.pL, bike = q.r.fl & (fw ? 64 : 32), edge = half - park - pr.lane[i];
+      if (!isTrail(q.r) && !/cycleway|pedestrian/.test(q.r.hw) && half >= 2 && (bike ? Math.abs(edge - 0.9) > 0.05 : edge > 1.5 || edge < 0.5)) laneBad++;
+    }
+    const bn = bounce(rows); out.courses[key] = { pts: c.ll.length, jump: r3(jump), bounce: r3(bn), none, onRail, laneBad };
+  }
+  // both ways along one road: the rider on the other side of its centre, at the same height
+  { const c = courseOf(37.83300, -122.48341, 190), P = c.ll.map(p => xz(...p)), fwd = ride(c), rev = ride({ ll: c.ll.slice().reverse(), ele: c.ele.slice().reverse() }), L = (P.length - 1) * 10;
+    let dh = 0, sides = 0, n2 = 0;
+    for (let d = 20; d < L - 20; d += 10) {
+      const a = fwd.rows[Math.round(d * 3)], b = rev.rows[Math.round((L - d) * 3)]; if (!a?.rail || !b?.rail || a.y == null || b.y == null || a.rail !== b.rail) continue; n2++;
+      dh = Math.max(dh, Math.abs(a.y - b.y));
+      const pa = a.rail.T.at(a.x + a.rx * a.lane, a.z + a.rz * a.lane), pb = a.rail.T.at(b.x + b.rx * b.lane, b.z + b.rz * b.lane);
+      if (a.lane < 0.5 || (Math.sign(pa.d) !== Math.sign(pb.d) && Math.abs(pa.d) > 0.4 && Math.abs(pb.d) > 0.4)) sides++;
+    }
+    out.bothWays = { n: n2, dh: r3(dh), sides }; }
+  // the Golden Gate Bridge's sidewalks: every point of a ride along either outside the roadway's curb wall (10.15 m from
+  // the centre line, marin.js), on the sidewalk (to the outer railing; round the tower legs out to 23.6 m)
+  { const res = {};
+    for (const [nm, la, lo, hd] of [['east', 37.8245, -122.4790, 175], ['west', 37.8245, -122.4797, 355]]) {
+      const c = courseOf(la, lo, hd), rows = ride(c).rows; let inRoad = 0, off = 0, n3 = 0;
+      for (const r of rows) {
+        const px = r.x + r.rx * r.lane, pz = r.z + r.rz * r.lane, la2 = proj.lat(pz), lo2 = proj.lon(px), [s] = toST(la2, lo2), dk = onDeck(la2, lo2); if (!dk || s < -1130 || s > 1220) continue; n3++;
+        const t = Math.abs(dk.t), tw = Math.abs(Math.abs(s) - GGB.towers) < 22; if (t < 10.45) inRoad++; else if (t > (tw ? 23.6 : GGB.deckW / 2 - 0.3)) off++;
+      }
+      res[nm] = { n: n3, inRoad, off, road: c.nm.find(x => /Sidewalk/.test(x)) || c.nm[0] };
+    }
+    out.ggbWalks = res; }
+}
+
 console.log(JSON.stringify(out));

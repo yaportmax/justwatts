@@ -65,10 +65,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   c = mix(c, mix(hlg, srgb(vec3(0.66, 0.61, 0.43)), smoothstep(0.78, 0.95, small) * 0.5), hl * 0.9);
   // the scrub's clumps: bushes a few metres across, darker in their hollows
   if (hl * scrA > 0.02) { float bc = jwN(p / 4.3 + 0.17).g; c *= 1.0 - hl * scrA * (0.3 - 0.5 * bc); }
-  // San Francisco seen across the strait: the city's speckle of roofs, streets and gardens (its blocks are too small
-  // to survive into the distant tiles, which would leave it golden hills)
   float sf = step(sfBox.x, p.x) * step(p.x, sfBox.z) * step(sfBox.y, p.y) * step(p.y, sfBox.w);
-  c = mix(c, mix(srgb(vec3(0.56, 0.56, 0.54)), srgb(vec3(0.30, 0.36, 0.27)), step(0.5, fine * 0.7 + small * 0.3)), sf * 0.9);
   c *= 0.9 + 0.2 * fine;
   // green: shaded north slopes, hollows and gullies, parks and lawns, the damp coast
   float moist = north * 0.72 + max(cv, 0.0) * 1.3 - max(-cv, 0.0) * 0.5 + (big - 0.5) * 0.35 + (mid - 0.5) * 0.25 + green * 1.1 + town * 0.35;
@@ -85,6 +82,12 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   c = mix(c, field * (0.9 + 0.2 * fine), farm * 0.85);
   // town: lawns, gardens, paving
   c = mix(c, mix(srgb(vec3(0.42, 0.50, 0.27)), srgb(vec3(0.55, 0.54, 0.50)), smoothstep(0.45, 0.7, small)), town * 0.7);
+  // San Francisco seen across the strait (the Presidio, Sea Cliff, the Richmond, the Marina): the city's speckle of pale
+  // roofs and streets, grey-green gardens and woods, over whatever grows there (its blocks are too small to survive into
+  // the distant tiles, which would leave it golden hills and dark woods; Street View: blue-grey with pale houses)
+  // (houses, streets and gardens in the finest noise, no hard edges; its parks and woods dark grey green: Lincoln Park,
+  // the Presidio)
+  c = mix(c, mix(mix(srgb(vec3(0.68, 0.68, 0.66)), srgb(vec3(0.42, 0.45, 0.42)), smoothstep(0.3, 0.7, fine)), srgb(vec3(0.24, 0.29, 0.26)), smoothstep(0.3, 0.6, wood)), sf * 0.9);
   // the Headlands from the aerial imagery (veg.js; its colours from the same imagery, USDA NAIP): grass in the
   // openings, greener in the shade and the hollows; coastal scrub, coyote brush to sage, in clumps of bushes with shade
   // between them; bare red-brown earth; the litter under the groves
@@ -93,7 +96,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     float sc = smoothstep(0.25, 0.75, vg.r + (fine - 0.5) * 0.35), br = smoothstep(0.3, 0.7, vg.b + (fine - 0.5) * 0.3), tr = smoothstep(0.3, 0.7, vg.g);
     vec3 grassC = mix(srgb(vec3(0.41, 0.47, 0.31)), srgb(vec3(0.51, 0.52, 0.38)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
     grassC = mix(grassC, srgb(vec3(0.36, 0.45, 0.25)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
-    vec3 scrC = mix(srgb(vec3(0.27, 0.35, 0.26)), srgb(vec3(0.37, 0.42, 0.33)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));
+    vec3 scrC = mix(srgb(vec3(0.31, 0.36, 0.29)), srgb(vec3(0.42, 0.45, 0.38)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));  // grey olive to the sage's grey green
     float bush = jwN(p / 3.1 + 0.37).g;
     scrC *= 0.68 + 0.5 * smoothstep(0.25, 0.75, bush);
     scrC = mix(scrC, scrC * 0.72, jwNear);  // near the camera its bushes stand on it: the shade under them
@@ -119,10 +122,10 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   rw *= smoothstep(0.3, 0.65, wood);
   vec3 duff = mix(srgb(vec3(0.38, 0.27, 0.19)), srgb(vec3(0.33, 0.42, 0.18)), smoothstep(0.52, 0.68, small) * 0.85) * (0.85 + 0.3 * fine);
   c = mix(c, duff, rw * 0.9);
-  // the shore and the sea floor
-  if (lake < 0.5) c = mix(c, srgb(vec3(0.80, 0.74, 0.58)), smoothstep(3.0, 0.8, h) * (1.0 - smoothstep(0.3, 0.5, slope)));
+  // the shore and the sea floor (heights in the lidar's datum: mean sea level 0.9 m, sky.js SEA)
+  if (lake < 0.5) c = mix(c, srgb(vec3(0.80, 0.74, 0.58)), smoothstep(3.9, 1.7, h) * (1.0 - smoothstep(0.3, 0.5, slope)));
   c = mix(c, srgb(vec3(0.20, 0.34, 0.38)), lake);
-  c = mix(c, srgb(vec3(0.24, 0.30, 0.28)), smoothstep(-0.4, -3.0, h));
+  c = mix(c, srgb(vec3(0.24, 0.30, 0.28)), smoothstep(0.5, -2.1, h));
   return c;
 }
 `;
@@ -143,9 +146,10 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         bool inBore = false;
         ${bores ? `
         for (int i = 0; i < 12; i++) {
-          vec2 e = boreA[i].zw - boreA[i].xy; float t = clamp(dot(vW.xz - boreA[i].xy, e) / max(dot(e, e), 1e-3), 0.0, 1.0);
+          vec2 e = boreA[i].zw - boreA[i].xy; float tu = dot(vW.xz - boreA[i].xy, e) / max(dot(e, e), 1e-3), t = clamp(tu, 0.0, 1.0);
           float fy = mix(boreB[i].x, boreB[i].y, t);
-          inBore = inBore || (i < boreN && distance(vW.xz, boreA[i].xy + e * t) < boreB[i].z && vW.y > fy - 2.0 && vW.y < fy + boreB[i].w);
+          // (square ends at the portals: no round hole in the ground in front of one)
+          inBore = inBore || (i < boreN && tu > -0.002 && tu < 1.002 && distance(vW.xz, boreA[i].xy + e * t) < boreB[i].z && vW.y > fy - 2.0 && vW.y < fy + boreB[i].w);
         }
         if (inBore) discard;` : ''}
         vec3 nW = normalize(vNw); float rk;
@@ -173,7 +177,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-4' + (detail ? 'd' : '') + (bores ? 'b' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-5' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 
@@ -256,7 +260,7 @@ export function roadMaterial() {
         c *= 1.0 - 0.4 * (1.0 - smoothstep(0.0015, 0.005, abs(n5 - 0.5))) * step(0.62, n2);  // sealed cracks
         float lane = W / max(1.0, lanes), lx = mod(x + W * 0.5, max(lane, 1.0)) / max(lane, 1.0);
         c *= 1.0 - 0.07 * (smoothstep(0.12, 0.25, abs(lx - 0.28)) < 0.5 || smoothstep(0.12, 0.25, abs(lx - 0.72)) < 0.5 ? 1.0 : 0.0) * step(0.5, lanes);
-        c = mix(c, srgb(vec3(0.66, 0.62, 0.54)), smoothstep(W * 0.5 - 0.6, W * 0.5, ax) * 0.55 * n2);
+        c = mix(c, srgb(vec3(0.66, 0.62, 0.54)), smoothstep(W * 0.5 - 0.6, W * 0.5, ax) * 0.55 * n2 * step(lm, 0.5));  // dust on the edges of unmarked lanes only (marked ones are clean to their edge, Street View)
         if (surf == 1.0) c = mix(srgb(vec3(0.50, 0.50, 0.48)), srgb(vec3(0.60, 0.59, 0.56)), n1) * (0.92 + 0.16 * n3);
         if (surf == 2.0) {
           // a dirt trail: packed earth with two worn lines, ragged grassy edges
@@ -276,7 +280,7 @@ export function roadMaterial() {
           line = max(line, LN(rr, 0.06));
           if (vRd2.w > 0.5 && ta - vRd2.w > 0.5) line = max(line, LN(vRd2.w, 0.06));                 // parking, then a bike lane
           if (vRd2.z > 0.5 && vRd2.y - vRd2.z > 0.5) line = max(line, LN(W - vRd2.z, 0.06));
-          if (lm == 4.0) yel = max(yel, max(LN(ll - 0.11, 0.05), LN(ll + 0.11, 0.05)));              // against a contraflow bike lane
+          if (lm == 4.0) yel = max(yel, max(LN(ll + 0.14, 0.05), LN(ll + 0.36, 0.05)));              // against a contraflow bike lane (in its 0.5 m)
           else if (lm == 3.0) yel = max(yel, LN(ll, 0.06));                                          // a oneway's left edge
           else line = max(line, LN(ll, 0.06));
         }
@@ -291,6 +295,13 @@ export function roadMaterial() {
           for (int i = 1; i < 6; i++) { if (float(i) >= lanes) break; ln1 = max(ln1, LN(ta + lw * float(i), 0.06)); }
           line = max(line, ln1 * dash);
         }
+        // a parking lane beside a lane with a bike lane against it (lower Conzelman, Street View): a buffer 0.9 m wide on
+        // its inner side, a second line and bars across it every 6 m
+        if (lm == 4.0 && vRd2.w > 1.5) {
+          float b0 = vRd2.w - 0.9; line = max(line, LN(b0, 0.06));
+          float hz = step(b0, r) * step(r, vRd2.w), dg = fract((along + (r - b0) * 0.8) / 6.0) * 6.0;
+          line = max(line, hz * (1.0 - smoothstep(0.07, 0.07 + aa * 2.0, min(dg, 6.0 - dg))));
+        }
         // the bike lanes' symbols every 150 m, each pointing the way its lane runs (the right one with the way, the left
         // one against it)
         if (lm >= 1.0) {
@@ -303,7 +314,7 @@ export function roadMaterial() {
         c = mix(c, srgb(vec3(0.88, 0.88, 0.85)), line * 0.92 * fade);
         diffuseColor.rgb *= c;`);
   };
-  m.customProgramCacheKey = () => 'jw-road-4';
+  m.customProgramCacheKey = () => 'jw-road-5';
   return m;
 }
 

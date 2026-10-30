@@ -11,10 +11,11 @@ import { gridAt, sharedBaked } from './world3d/baked.js';
 
 export const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 // The open world is the Marin Headlands for now (one small area at a time, each dialled in against Street View before
-// the next opens): the Golden Gate Bridge from its south end, Vista Point, Conzelman, Field, Bunker (the Baker-Barry
-// tunnel), Mitchell, McCullough and Alexander, Fort Baker. Routes never leave BOUNDS (a way out is no option: the
-// default turns away or turns around); the land beyond stays as scenery.
-export const BOUNDS = [[37.806, -122.545, 37.848, -122.465]];
+// the next opens): the Golden Gate Bridge to its south end (the plaza and San Francisco's streets beyond it are not
+// ridden: a ride turns round at the deck's end), Vista Point, Conzelman, Field, Bunker (the Baker-Barry tunnel), Mitchell,
+// McCullough and Alexander, Fort Baker. Routes never leave BOUNDS (a way out is no option: the default turns away or
+// turns around); the land beyond stays as scenery.
+export const BOUNDS = [[37.8083, -122.545, 37.848, -122.465]];
 export const inWorld = (lat, lon) => BOUNDS.some(([s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e);
 export const PRESETS = [
   { id: 'ggb', name: 'Golden Gate Bridge', lat: 37.83234, lon: -122.48061, heading: 160 },

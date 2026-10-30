@@ -62,13 +62,14 @@ def test_road_ribbon_geometry(out):
     assert r["code"] == [2, 0, 2, 6] and r["v"] == [20, 20]                                 # markings, lanes, width; metres along
     assert r["deck"] == [40, 60, 50] and r["pillars"] == 3                                  # a bridge: straight between its ends
     s = out["styles"]
-    assert s["tertiary/0/0"] == {"w": 7.6, "lm": 2, "surf": 0, "lanes": 2, "a": 0, "b": 0, "pL": 0, "pR": 0}  # two lanes, double yellow line
-    assert s["primary/4/0"]["w"] == pytest.approx(15.2) and s["primary/4/0"]["lanes"] == 4
+    assert s["tertiary/0/0"] == {"w": 8, "lm": 2, "surf": 0, "lanes": 2, "a": 0, "b": 0, "pL": 0, "pR": 0}  # two 3.6 m lanes, double yellow line
+    assert s["primary/4/0"]["w"] == pytest.approx(16) and s["primary/4/0"]["lanes"] == 4
     assert s["trunk/2/8"]["lm"] == 3 and s["motorway/4/8"]["lanes"] == 4                    # oneways: lane lines, a yellow left edge
     c = s["unclassified/1/4392"]                                                            # lower Conzelman: one lane down, parking on
-    assert c["lm"] == 4 and c["w"] == pytest.approx(7.4) and c["a"] == pytest.approx(2.4) and c["b"] == pytest.approx(1.6)  # the right, a bike lane up on the left
+    assert c["lm"] == 4 and c["w"] == pytest.approx(8.7) and c["a"] == pytest.approx(2.8) and c["b"] == pytest.approx(2.3)  # the right, a bike lane up on the left
+                                                                                            # (and the double yellow's 0.5 m): 8.7 m, Street View 8.5
     b = s["unclassified/2/96"]                                                              # Bunker Road: a bike lane each side
-    assert b["lm"] == 2 and b["w"] == pytest.approx(10.0) and b["a"] == b["b"] == pytest.approx(1.6)
+    assert b["lm"] == 2 and b["w"] == pytest.approx(10.8) and b["a"] == b["b"] == pytest.approx(1.8)
     assert s["tertiary/0/0/9"]["w"] == 9                                                    # a tagged width wins
     assert s["residential/0/0"]["lm"] == 0 and s["path/0/0"]["surf"] == 2 and s["tertiary/0/4"]["surf"] == 2
     assert out["clip"] == [[[0, 5], [5, 5], [5, 10]]]
@@ -231,3 +232,95 @@ def test_rider_stands_on_steep_climbs_and_tucks_descending(out):
     assert s["level"] == 0 and s["still"] == 0                                 # coasting: cranks level and still
     assert s["tuck"] == {"tuck": True, "tb": 1}                                # fast downhill: tucked
     assert s["thigh"] == 0.46 and s["shin"] == 0.47 and s["forward"]           # the IK keeps bone lengths, knee forward
+
+
+def test_road_sides_embankments_cuts_and_rails(out):
+    b = out["banks"]
+    assert b["normals"] == [0, 1, 0, -1]                                          # each side's normal points away from the road
+    assert set(b["right"]) == {2} and set(b["left"]) == {1}                       # the ground under the edge: a fill; rising 3 in 2: a cut
+    f = b["fill"]
+    assert f[0][1] == pytest.approx(9.97) and f[1][2] == pytest.approx(6.15)      # from the edge down at 1 in 1.5 to the ground (1 in 3)
+    assert f[1][3] == pytest.approx(5.9, abs=0.02)                                # its toe on the ground 6 m out
+    c = b["cut"]
+    assert b["cutH"] == pytest.approx(6.75) and c[1][3] == pytest.approx(16.75)   # a face to the lidar's bank, 4.5 m out
+    assert c[1][2] - c[1][0] == pytest.approx(0.4 * 6.75) and c[1][4] == 1        # at 68 degrees, bare (a cut face); its verge not
+    assert c[0][4] == 0 and b["tris"] == b["up"] == 96                            # every face toward the sky (or out over the road)
+    r = b["rail"]
+    assert r["z"] == pytest.approx(3.45) and r["gap"] == pytest.approx(1.9)       # a rail's posts 0.45 m past the edge, 1.9 m apart
+    assert r["posts"] == 21 and r["yaw"] == pytest.approx(1.571, abs=0.01)        # by arc length; each post's front toward the road
+    assert b["railed"]["kind"] == 2 and b["railed"]["rail"]                       # a rail stands on its shoulder even on level ground
+
+
+def test_roads_over_tunnels_are_decks(out):
+    o = out["over"]
+    assert o["square"] == [[35, 65]]                                              # 12 m past the tunnel's road either side
+    assert o["angled"][0][1] - o["angled"][0][0] == pytest.approx(30 / 0.7071, abs=0.1)  # longer across it at an angle
+    assert o["end"] == []                                                         # a road going on into a tunnel is not over it
+    assert o["climb"][0][0] <= 22 and o["climb"][0][1] >= 78                      # on out across the lidar's whole gap
+    u = out["under"]
+    for name in ("alexander101",):                                                # US-101 over Alexander Avenue: the lidar's gap
+        d = u[name]["decks"]
+        assert len(d) >= 2 and all(x["gap"] > 2.5 and x["deckOverFloor"] > 4.5 for x in d)
+    assert u["bunker101"]["cover"] > 4.5                                          # Bunker Road under US-101: under its fill
+    assert u["eastAlexander"]["cover"] > 3                                        # East Road under Alexander Avenue
+    assert u["bakerBarry"]["cover"] > 50                                          # the Baker-Barry tunnel under its hill
+    for name in u:
+        assert u[name]["portal"] < 0.4                                            # the ground at each portal carved to the way in
+
+
+def test_rail_pieces(out):
+    b = out["railBasics"]
+    assert b["n"] == 12 and b["idx"] == [0, 8, 11] and b["step"] <= 5                  # split every 5 m or less, its own points kept
+    assert b["pinned"] == 10 and b["ends"] == [10, 10.3]                                 # a junction and the ends keep their height
+    assert b["pack"] == [10, 10.5, 9.99]                                                 # centimetres
+    assert b["at"] == [0.5, 2, 5, -2]                                                    # height, signed offset (+ right), metres along
+    assert b["lanes"]["bunker"] == [4.5, 4.5]                                            # Bunker Road: in the bike lane either way
+    assert b["lanes"]["plain"] == 3 and b["lanes"]["path"] == 0                          # no bike lane: a metre in from the edge; a path: its middle
+    assert b["lanes"]["conzUp"] == 3.45 and b["lanes"]["conzDown"] == 0.55              # lower Conzelman: up in the bike lane against the
+                                                                                         # oneway, down a metre left of the parking lane
+
+
+def test_rails_walked_at_light_speed(out):
+    r = out["rails"]
+    assert r["n"] > 300 and r["km"] > 50 and r["file"] < 60000                         # every road the rides reach, one small file
+    assert r["grade"] < 0.45                                                             # no stretch steeper than 45 % over 10 m (South
+                                                                                         # Sausalito's streets reach 40 %)
+    assert r["bend"] < 0.7                                                               # no step: the grade changes by under 14 % in 5 m
+    assert r["cut"] < 3.0, r["cutAt"]                                                    # never far under the lidar's ground (but in a
+                                                                                         # tunnel, over a deck, down to a portal)
+    assert r["tilePts"] > 500 and r["tileGap"] < 0.02                                    # the tiles' pieces are the area's rails
+    u = out["railUnder"]
+    assert u["eastUnderAlexander"] > 4.5                                                 # East Road's rail well under Alexander's
+    assert u["alexanderUnder101"] > 4.5 and u["bunkerUnder101"] > 4.5                    # under US-101's fill
+    assert u["bakerBarry"] > 50                                                          # the Baker-Barry bore under its hill
+
+
+def test_every_start_rides_its_rails(out):
+    for name, c in out["courses"].items():
+        assert c is not None, name
+        assert c["none"] == 0, name                                                     # on a rail (or the deck) every step
+        assert c["jump"] < 0.2, (name, c)                                                # no step over 0.2 m at 20 m/s and 60 frames
+        assert c["bounce"] < 0.8, (name, c)                                              # no bounce: the height's bend over 5 m small
+        assert c["laneBad"] == 0, (name, c)                                              # in the bike lane, else near the right edge
+
+
+def test_both_ways_on_one_road(out):
+    b = out["bothWays"]
+    assert b["n"] > 100 and b["dh"] <= 0.05 and b["sides"] == b["n"]                    # each way on its own side, the same height
+
+
+def test_bridge_riders_on_the_sidewalks(out):
+    for side, w in out["ggbWalks"].items():
+        assert "Sidewalk" in w["road"] and w["n"] > 1000, side
+        assert w["inRoad"] == 0 and w["off"] == 0, (side, w)                            # outside the curb wall, inside the railing
+
+
+def test_bridges_only_over_a_gap(out):
+    b = out["bridges"]
+    assert b["n"] > 0 and b["through"] == 0, b                                          # no deck through the ground (over a ridge):
+                                                                                         # a bridge only over the lidar's gap (bake)
+
+
+def test_queue_follows_the_route(out):
+    assert out["reprio"] == ["a1", "a2", "c", "b"]                                       # the half done job finishes first; then the
+                                                                                         # one moved up the route

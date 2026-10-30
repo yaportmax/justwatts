@@ -648,7 +648,7 @@ function renderRide() {
   $('#cStart').style.display = V.started ? 'none' : ''; $('#cPause').style.display = V.started ? '' : 'none';
   $('#cPause').textContent = V.paused && !V.auto ? 'Resume' : 'Pause';  // auto-paused: Pause makes it stick
   $('#cAdj').textContent = m === 'k' ? Math.round(V.k * 100) + '%' : m === 'w' ? V.jr.w + ' W' : valText(m).replace(/^\w/, c => c.toUpperCase());
-  $('#adjBox').style.display = V.test && m === 'k' ? 'none' : '';  // an FTP test keeps its targets
+  $('#adjBox').style.display = (V.test && m === 'k') || roadGrade() ? 'none' : '';  // an FTP test keeps its targets; a course sets the grade
   $$('#jrMode button').forEach(b => b.classList.toggle('on', b.dataset.m === V.jr.m));
   const kk = V.test ? 1 : V.k;
   if (V.cw) {
@@ -674,7 +674,7 @@ function renderRide() {
 }
 // on a course, grade mode follows the road; +/- adds an offset to it
 const gradeText = () => { const c = S?.ride?.course, g = +V.jr.g; return c ? `road ${c.grade.toFixed(1)}%${g ? ` ${g > 0 ? '+' : ''}${g.toFixed(1)}` : ''}` : `grade ${g.toFixed(1)}%`; };
-const valText = m => m === 'r' ? `level ${(+V.jr.r).toFixed(1)}` : m === 'w' ? `${V.jr.w} W` : gradeText();
+const valText = m => m === 'r' ? `resistance ${(+V.jr.r).toFixed(1)}` : m === 'w' ? `${V.jr.w} W` : gradeText();
 
 /* ---------- ride controls: change anything by hand, mid-ride ---------- */
 // Each control is one request; the engine applies it at once, logs it as a MANUAL line and echoes
@@ -703,8 +703,9 @@ function flash() { for (const id of ['#adjBox', '#tgtTile']) { const el = $(id);
 const R = () => S?.ride;
 const curStep = () => R()?.step?.index ?? null;
 // +/-: intensity in ERG, else the grade, watts or level the trainer follows
+const roadGrade = () => R()?.control === 'g' && !!S?.ride?.course;
 function plusMinus(dir, big) {
-  const r = R(); if (!r) return;
+  const r = R(); if (!r || roadGrade()) return;
   const m = r.control, d = dir * (big ? 5 : 1);
   if (m === 'k') { const k0 = r.intensity; return act('adjust', { dir, big }, 'intensity', () => control('intensity', { percent: Math.round(k0 * 100) })); }
   const v0 = r.jr[m]; return act('adjust', { dir: d > 0 ? 1 : -1, big }, m === 'w' ? 'watts' : m === 'r' ? 'level' : 'grade', () => control(m === 'w' ? 'target' : 'free', m === 'w' ? { w: v0 } : { m, value: v0 }));
@@ -778,9 +779,9 @@ function renderAdjust() {
   const cur = wk ? (V.jr.wm || 'e') : V.jr.m;
   $$('#aMode button').forEach(b => { const v = b.dataset.v; b.style.display = (wk ? v !== 'w' : v !== 'e') ? '' : 'none'; b.classList.toggle('on', v === cur); });
   $('#rowMode').style.display = wk ? 'none' : '';  // in a workout ERG follows the plan; free segments use + and −
-  $('#rowVal').style.display = m === 'k' || wk ? 'none' : '';
-  $('#aValL').textContent = { g: 'Grade', w: 'Watts', r: 'Level' }[m] || '';
-  $('#aVal').textContent = m === 'k' ? '' : valText(m).replace(/^(grade|level) /, '');
+  $('#rowVal').style.display = m === 'k' || wk || roadGrade() ? 'none' : '';  // on a course the road sets the grade
+  $('#aValL').textContent = { g: 'Grade', w: 'Watts', r: 'Resistance' }[m] || '';
+  $('#aVal').textContent = m === 'k' ? '' : valText(m).replace(/^(grade|resistance) /, '');
   if (!nextDirty) { const [txt, base] = nextText(); $('#aNext').value = txt; nextBase = base; $('#aNextErr').textContent = ''; nextBuilder.load(txt); nextBuilder.draw(); }
   else if (nextBase != null && curStep() !== nextBase) { $('#aNextErr').textContent = 'Segment changed. Reset to see the new plan.'; }
   const [lo, hi] = settings.cadRange || [85, 95];

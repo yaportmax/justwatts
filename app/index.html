@@ -178,7 +178,7 @@
         <button id="cStart" class="pri big">Start</button>
         <button id="cPause" class="big" title="Space">Pause</button>
         <span class="grp wk"><button id="cBack" title="Restart segment; in its first 10 s, previous segment (←)">Back</button><button id="cSkip" title="Next segment (→)">Skip</button></span>
-        <span class="seg" id="jrMode" style="display:none"><button data-m="g" class="on">Grade</button><button data-m="w">Watts</button><button data-m="r">Level</button></span>
+        <span class="seg" id="jrMode" style="display:none"><button data-m="g" class="on">Free ride</button><button data-m="w">ERG</button></span>
       </div>
       <div class="cgrp mid">
         <div class="adj" id="adjBox" title="↑ ↓, Shift ×5"><button id="cMinus" aria-label="Easier">−</button><span class="num" id="cAdj">100%</span><button id="cPlus" aria-label="Harder">+</button></div>
@@ -193,7 +193,7 @@
       </div>
     </div>
   </div>
-  <div class="sheet" id="adjPanel" role="dialog" aria-label="Adjust">
+  <div class="sheet fit" id="adjPanel" role="dialog" aria-label="Adjust">
     <div class="shead"><b>Adjust</b><span class="hint">Changes apply now</span><span class="grow"></span><button data-a="close" class="x" aria-label="Close" title="Close (Esc)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
     <div class="sgrid">
       <h3 class="sh wk">Coming up</h3>
@@ -204,9 +204,10 @@
         <details class="adv"><summary>Text</summary><textarea id="aNext" spellcheck="false" rows="2" placeholder="5m 55%, 3x(3m 110%, 2m 50%)"></textarea></details>
         <div class="row"><button data-a="next" class="pri">Apply</button><button data-a="nextReset">Reset</button><span class="err" id="aNextErr"></span></div></div></div>
       <h3 class="sh">Trainer</h3>
-      <div class="r" id="rowMode"><span class="l" title="ERG: the trainer holds the watts. Grade, Level: you set the resistance.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="w">Watts</button><button data-a="mode" data-v="g">Grade</button><button data-a="mode" data-v="r">Level</button></span></div></div>
+      <div class="r" id="rowMode"><span class="l" title="ERG: the trainer holds the watts. Free ride: you ride the grade.">Mode</span><div class="b"><span class="seg" id="aMode"><button data-a="mode" data-v="e">ERG</button><button data-a="mode" data-v="g">Free ride</button><button data-a="mode" data-v="w">ERG</button></span></div></div>
       <div class="r" id="rowVal"><span class="l" id="aValL">Grade</span><div class="b"><button data-a="adj" data-v="-5">−−</button><button data-a="adj" data-v="-1">−</button><b class="num" id="aVal">–</b><button data-a="adj" data-v="1">+</button><button data-a="adj" data-v="5">++</button></div></div>
-      <div class="r"><span class="l" title="Cadence readout is green in this range. Off: no cadence readout, target or cues.">Cadence</span><div class="b"><span class="seg" id="aCadOn"><button data-a="cadon" data-v="1">On</button><button data-a="cadon" data-v="0">Off</button></span><span class="b" id="aCadRange"><button data-a="cad" data-v="0,-5">−</button><b class="num" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></span></div></div>
+      <div class="r"><span class="l" title="Off: no cadence readout, target or cues.">Cadence</span><div class="b"><span class="seg" id="aCadOn"><button data-a="cadon" data-v="1">On</button><button data-a="cadon" data-v="0">Off</button></span></div></div>
+      <div class="r" id="aCadRange"><span class="l" title="Cadence readout is green in this range.">Target rpm</span><div class="b"><button data-a="cad" data-v="0,-5">−</button><b class="num sm" id="aCadLo">85</b><button data-a="cad" data-v="0,5">+</button><span class="hint">to</span><button data-a="cad" data-v="1,-5">−</button><b class="num sm" id="aCadHi">95</b><button data-a="cad" data-v="1,5">+</button></div></div>
     </div>
   </div>
 </section>

@@ -1,7 +1,10 @@
 // The 3D world's pure parts (app/js/world3d): terrain grids from a synthetic Terrarium tile, the carve, ground classes,
 // road ribbons, landuse parsing and the compact forms, streaming bookkeeping, the baked tile format, the leg solver,
 // the view choice and the WebGL fallback, the open world's edge. stdout: JSON report for tests/test_world3d.py.
-import { heightsOf, makeSampler, makeGrid, gridHeight, carve, pushUnder, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks } from '../../app/js/world3d/terrain.js';
+import { heightsOf, makeSampler, makeGrid, gridHeight, carve, pushUnder, rasterClasses, gridMesh, gridFromHeights, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from '../../app/js/world3d/terrain.js';
+import { ribbonEdge, sideKinds, sideRuns, bankGeometry, railLine, bands, CUT, FILL, LEVEL } from '../../app/js/world3d/banks.js';
+import { readFileSync, existsSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { cellPoints, cellsAround, clumpGeometry } from '../../app/js/world3d/grass.js';
 import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
@@ -301,4 +304,58 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     same: JSON.stringify(b1) === JSON.stringify(b2), westN: west.length, eastN: east.length, onScrub: west.every(([x, z]) => at(x, z) === SCRUB),
     perCell: SCRUB_CELL * SCRUB_CELL, scales: [r3(Math.min(...west.map(q => q[2]))), r3(Math.max(...west.map(q => q[2])))] };
 }
+
+/* ---------- road sides (banks.js) ---------- */
+// a straight road east along z = 0 at height 10, 6 m wide (its right edge z = +3): the ground falling away on the right
+// (2 m under the edge, then 1 in 3), a cut bank rising at 3 in 2 on the left
+{
+  const C = []; for (let x = 0; x <= 40; x += 5) C.push([x, 10, 0, 3, x, 10, 3, x, 10, -3]);
+  const ground = (x, z) => z > 3 ? 8 - (z - 3) / 3 : z < -3 ? 10 + (-3 - z) * 1.5 : 10, raw = ground;
+  const R = ribbonEdge(C, 1), Lf = ribbonEdge(C, -1), kr = sideKinds(R, ground, raw), kl = sideKinds(Lf, ground, raw), br = bands(R[4], kr[4], ground), bl = bands(Lf[4], kl[4], ground);
+  const geo = bankGeometry(sideRuns(R, kr, ground).concat(sideRuns(Lf, kl, ground)));
+  let up = 0; for (let k = 0; k < geo.idx.length; k += 3) { const [a, b, c] = [geo.idx[k], geo.idx[k + 1], geo.idx[k + 2]].map(v => geo.pos.slice(3 * v, 3 * v + 3)), ux = b[0] - a[0], uz = b[2] - a[2], vx = c[0] - a[0], vz = c[2] - a[2]; if (uz * vx - ux * vz > 0) up++; }
+  const rl = railLine(R, 0, R.length - 1), railed = sideKinds(R, (x, z) => 10, raw, () => true);
+  out.banks = { normals: [R[0][3], R[0][4], Lf[0][3], Lf[0][4]], right: kr.map(k => k.kind), left: kl.map(k => k.kind), cutH: r3(kl[4].h),
+    fill: br.map(b => b.map(r3)), cut: bl.map(b => b.map(r3)), tris: geo.idx.length / 3, up, cutVerts: geo.cut.filter(c => c === 1).length,
+    rail: { pts: rl.pts.length, z: r3(rl.pts[3][2]), posts: rl.posts.length, gap: r3(Math.hypot(rl.posts[1][0] - rl.posts[0][0], rl.posts[1][2] - rl.posts[0][2])), yaw: r3(rl.posts[0][3]) }, railed: railed[2] };
+}
+/* ---------- roads over tunnels ---------- */
+{
+  const road = [[-50, 0], [50, 0]];
+  out.over = { square: overTunnels(road, [{ pts: [[0, -20], [0, 20]], th: 3 }]).map(g => g.map(r3)), angled: overTunnels(road, [{ pts: [[-20, -20], [20, 20]], th: 3 }]).map(g => g.map(r3)),
+    end: overTunnels(road, [{ pts: [[50, 0], [90, 0]], th: 3 }]), climb: overTunnels(road, [{ pts: [[0, -20], [0, 20]], th: 3 }], 12, (x, z) => Math.abs(x) < 30 ? 2 : 10).map(g => g.map(r3)) };
+}
+// the Headlands' under-crossings in the baked tiles (USGS lidar, whose bare earth leaves out the overpasses): each road
+// over a tunnel finds the stretch over the lidar's gap, its deck there well over the road under it; the Baker-Barry
+// tunnel under its hill; the ground at each portal carved down to the road going in
+{
+  const APP = new URL('../../app/', import.meta.url), tiles = new Map(), proj = makeProj(37.84, -122.48);
+  const tile = (x, y) => { const k = `${x}_${y}`; if (!tiles.has(k)) { const f = new URL(`world/14/${k}.bin`, APP); tiles.set(k, existsSync(f) ? unpackTile(new Uint8Array(gunzipSync(readFileSync(f)))) : null); } return tiles.get(k); };
+  const raw = (x, z) => { const la = proj.lat(z), lo = proj.lon(x), X = tileX(lo, 14), Y = tileY(la, 14), t = tile(Math.floor(X), Math.floor(Y)); return t ? gridAt(t.hs, t.n, (X % 1) * (t.n - 1), (Y % 1) * (t.n - 1)) : null; };
+  const roadsNear = (la, lo) => { const X = Math.floor(tileX(lo, 14)), Y = Math.floor(tileY(la, 14)), all = []; for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) { const t = tile(X + dx, Y + dy); if (t) all.push(...decodeRoads(t.json.r || [])); } return all; };
+  const xz = ([la, lo]) => proj.xz(la, lo);
+  out.under = {};
+  for (const [name, a, b] of [['alexander101', [37.8357578, -122.4845255], [37.8355005, -122.484859]], ['bunker101', [37.838099, -122.48318], [37.8379019, -122.4828768]],
+    ['eastAlexander', [37.8434853, -122.4783654], [37.8433264, -122.4782486]], ['bakerBarry', [37.8418603, -122.4932478], [37.8390149, -122.4858974]]]) {
+    const all = roadsNear(...a), T = all.filter(r => r.fl & 2 && r.pts.some(p => Math.abs(p[0] - a[0]) < 2e-5 && Math.abs(p[1] - a[1]) < 2e-5)), tl = T.length ? T.sort((u, w) => w.pts.length - u.pts.length)[0].pts.map(xz) : [xz(a), xz(b)];
+    const th = 3.4, f0 = raw(...xz(a)), f1 = raw(...xz(b)), L = Math.hypot(xz(b)[0] - xz(a)[0], xz(b)[1] - xz(a)[1]);
+    const floorAt = p => { const t = Math.max(0, Math.min(1, ((p[0] - xz(a)[0]) * (xz(b)[0] - xz(a)[0]) + (p[1] - xz(a)[1]) * (xz(b)[1] - xz(a)[1])) / (L * L))); return f0 + (f1 - f0) * t; };
+    const decks = [];
+    for (const r of all) {
+      if (r.fl & 3 || /path|footway|track|steps|cycleway/.test(r.hw)) continue;
+      const P = r.pts.map(xz); for (const [s0, s1] of overTunnels(P, [{ pts: tl, th }], 12, raw)) {
+        const at = s => { let d = 0; for (let k = 1; k < P.length; k++) { const l = Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]); if (s <= d + l || k === P.length - 1) { const f = Math.max(0, Math.min(1, (s - d) / (l || 1))); return [P[k - 1][0] + (P[k][0] - P[k - 1][0]) * f, P[k - 1][1] + (P[k][1] - P[k - 1][1]) * f]; } d += l; } };
+        const h0 = raw(...at(s0)), h1 = raw(...at(s1)); let low = 1e9, X = null; for (let s = s0; s <= s1; s += 2) { const p = at(s), h = raw(...p); if (h < low) { low = h; X = p; } }
+        decks.push({ hw: r.hw, deckOverFloor: r3(h0 + (h1 - h0) * 0.5 - floorAt(X)), gap: r3(Math.min(h0, h1) - low), span: r3(s1 - s0) });
+      }
+    }
+    // the portal: the way in carved level at the floor (as buildTerrain does: the ground under it no higher than it)
+    const c = tile(Math.floor(tileX(a[1], 14)), Math.floor(tileY(a[0], 14))), g = gridFromHeights({ z: 14, x: Math.floor(tileX(a[1], 14)), y: Math.floor(tileY(a[0], 14)), hs: c.hs, n: c.n, proj });
+    const pa = xz(a), dir = [pa[0] - xz(b)[0], pa[1] - xz(b)[1]].map(v => v / L), way = [0, 8, 16].map(o => [pa[0] + dir[0] * o, pa[1] + dir[1] * o, Math.min(f0, raw(pa[0] + dir[0] * 16, pa[1] + dir[1] * 16))]);
+    carve(g, [], 0, 1, [{ pts: way, r0: 6, r1: 12 }]);
+    let mid = 0; for (let k = 1; k < 10; k++) { const p = [pa[0] + (xz(b)[0] - pa[0]) * k / 10, pa[1] + (xz(b)[1] - pa[1]) * k / 10]; mid = Math.max(mid, raw(...p) - floorAt(p)); }
+    out.under[name] = { decks, cover: r3(mid), portal: r3(gridHeight(g, ...pa) - way[0][2]) };
+  }
+}
+
 console.log(JSON.stringify(out));

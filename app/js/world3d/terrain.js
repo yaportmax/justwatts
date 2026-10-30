@@ -179,6 +179,51 @@ function* blend(g, from, lines, check) {
   return { hs, cut, touched };
 }
 
+// Roads over a tunnel: the lidar's bare earth leaves out what stands over a road (an overpass and its abutments), so a
+// road over a tunnel would dip down to the road under it. The stretches of a road (local metres [[x, z], ...]) over a
+// tunnel's line ([[x, z], ...], its half width th), `pad` metres either side of the tunnel's road (longer where it
+// crosses at an angle; with hAt(x, z), the ground, on out while it is still down in the lidar's gap): [[s0, s1], ...] in
+// metres along the road, merged where they overlap.
+export function overTunnels(pts, tunnels, pad = 12, hAt = null) {
+  const out = [];
+  const hit = (a, b, c, d) => {
+    const r = [b[0] - a[0], b[1] - a[1]], q = [d[0] - c[0], d[1] - c[1]], den = r[0] * q[1] - r[1] * q[0]; if (Math.abs(den) < 1e-9) return null;
+    const cp = [c[0] - a[0], c[1] - a[1]], t = (cp[0] * q[1] - cp[1] * q[0]) / den, u = (cp[0] * r[1] - cp[1] * r[0]) / den;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? [t, u] : null;
+  };
+  // (only the tunnels whose box meets the road's)
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const near = tunnels.filter(T => { const b = T.bb ??= T.pts.reduce((b, [x, z]) => [Math.min(b[0], x), Math.min(b[1], z), Math.max(b[2], x), Math.max(b[3], z)], [Infinity, Infinity, -Infinity, -Infinity]); return b[0] <= x1 && b[2] >= x0 && b[1] <= z1 && b[3] >= z0; });
+  if (!near.length) return out;
+  let d0 = 0;
+  for (let k = 0; k + 1 < pts.length; k++) {
+    const L = Math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]);
+    for (const { pts: T, th } of near) for (let j = 0, e0 = 0, tl = T.reduce((s, p, i) => i ? s + Math.hypot(p[0] - T[i - 1][0], p[1] - T[i - 1][1]) : 0, 0); j + 1 < T.length; e0 += Math.hypot(T[j + 1][0] - T[j][0], T[j + 1][1] - T[j][1]), j++) {
+      const h = hit(pts[k], pts[k + 1], T[j], T[j + 1]); if (h == null) continue;
+      // (not where it meets the tunnel at its end: the same road going on into it)
+      const [t, u] = h, at = e0 + u * Math.hypot(T[j + 1][0] - T[j][0], T[j + 1][1] - T[j][1]); if (at < 4 || at > tl - 4) continue;
+      // (across it at an angle: the stretch over it longer)
+      const ux = (pts[k + 1][0] - pts[k][0]) / (L || 1), uz = (pts[k + 1][1] - pts[k][1]) / (L || 1), M = Math.hypot(T[j + 1][0] - T[j][0], T[j + 1][1] - T[j][1]) || 1;
+      const sin = Math.abs(ux * (T[j + 1][1] - T[j][1]) / M - uz * (T[j + 1][0] - T[j][0]) / M), half = (th + pad) / Math.max(0.35, sin);
+      out.push([d0 + L * t - half, d0 + L * t + half]);
+    }
+    d0 += L;
+  }
+  // (out to where the ground stops climbing out of the lidar's gap: the bridge's whole span; hAt(x, z) the ground)
+  if (hAt) {
+    const D = [0]; for (let k = 1; k < pts.length; k++) D.push(D[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+    const at = s => { s = Math.max(0, Math.min(D.at(-1), s)); let k = 1; while (k < D.length - 1 && D[k] < s) k++; const f = (s - D[k - 1]) / ((D[k] - D[k - 1]) || 1); return hAt(pts[k - 1][0] + (pts[k][0] - pts[k - 1][0]) * f, pts[k - 1][1] + (pts[k][1] - pts[k - 1][1]) * f); };
+    for (const g of out) for (const [e, dir] of [[0, -1], [1, 1]]) for (let n = 0; n < 15; n++) {
+      // (on while the ground there is still half a metre under the highest within 40 m further out)
+      const a = at(g[e]); let top = -1e9; for (let o = 4; o <= 40; o += 4) { const v = at(g[e] + dir * o); if (v != null) top = Math.max(top, v); }
+      if (a == null || a > top - 0.5 || g[e] + dir * 2 < 0 || g[e] + dir * 2 > D.at(-1)) break; g[e] += dir * 2;
+    }
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  const merged = []; for (const g of out) { const m = merged.at(-1); if (m && g[0] <= m[1]) m[1] = Math.max(m[1], g[1]); else merged.push(g.slice()); }
+  return merged;
+}
+
 // Ground classes per vertex (0: none, else KINDS index + 1; the higher class wins) from features { k, rings: [[lat, lon]] }
 export function rasterClasses(g, features) { return rasterBy(g, features, f => f.k === 'building' ? 0 : KINDS.indexOf(f.k) + 1); }
 // Any value per vertex of a tile grid ({ z, x, y, segs }: no heights needed) from polygons: value(f) 1..255, the

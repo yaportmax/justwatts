@@ -31,6 +31,9 @@ export function mixTimes(a, b, f) {
   return out;
 }
 
+// the sea's surface: mean sea level in the lidar's datum (USGS 3DEP heights are NAVD88, on which San Francisco Bay's
+// mean sea level stands about 0.9 m up)
+export const SEA = 0.9;
 /* ---------- three's fog chunks: height fog + aerial haze, warmer toward the sun ---------- */
 // THREE.Fog carries two numbers: near = haze density (per million per metre, scale height 1.4 km), far = low marine
 // layer density (scale height 110 m). Lit materials add the sun's colour looking toward the sun. A material with the
@@ -185,7 +188,7 @@ export function createSky(scene, { far, quality = 0 }) {
         vec3 body = deep * (0.35 + 0.65 * clamp(sunD.y * 2.0, 0.0, 1.0)) * (0.9 + 0.2 * texture2D(waves, p / 41.0).z);
         vec3 c = mix(body, refl, fr) + sunC * (pow(sd, 900.0) * 30.0 + pow(sd, 90.0) * 0.6) * smoothstep(-0.02, 0.06, sunD.y);
         // the shallows: paler water over sand, then foam: lines of swash running in to the shore, a band at its edge
-        float hf = seaFloor(p), nz = texture2D(tNoise, p / 23.0 + time * 0.01).r, nz2 = texture2D(tNoise, p / 7.0 - time * 0.02).g;
+        float hf = seaFloor(p) - ${SEA.toFixed(2)}, nz = texture2D(tNoise, p / 23.0 + time * 0.01).r, nz2 = texture2D(tNoise, p / 7.0 - time * 0.02).g;
         c = mix(c, mix(c, vec3(0.16, 0.27, 0.25) * (0.4 + 0.6 * clamp(sunD.y * 3.0, 0.0, 1.0)), 0.5), smoothstep(-9.0, -1.0, hf) * (1.0 - fr));
         float swash = smoothstep(0.62, 0.95, sin(hf * 2.6 + time * 1.1 + nz * 4.0) * 0.5 + 0.5) * smoothstep(-4.0, -0.8, hf);
         float foam = max(swash * 0.55, smoothstep(-1.1, -0.15, hf)) * (0.55 + 0.6 * nz2) * smoothstep(1.2, 0.2, hf);
@@ -334,7 +337,7 @@ export function createSky(scene, { far, quality = 0 }) {
         return;
       }
       sky.position.copy(cam.position);
-      sea.position.set(cam.position.x, 0, cam.position.z);
+      sea.position.set(cam.position.x, SEA, cam.position.z);
       wu.time.value += dt; cu.cTime.value += dt; fog.u.fogTime.value += dt;
       if (move) { move.f = Math.min(1, move.f + dt / 4); const e = move.f * move.f * (3 - 2 * move.f); apply(mixTimes(move.from, move.to, e)); if (move.f >= 1) move = null; }
     },

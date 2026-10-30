@@ -204,7 +204,8 @@ export function treeGeometries() {
 // cards further out. Colours from the aerial imagery's scrub (USDA NAIP, about #50624b), the atlas's light on top.
 export function scrubGeometries() {
   // the bushes broad and low, their cores not much darker than their leaves (a cover with no black between the bushes)
-  const brush = col(0x5f7445, 1.3), sage = col(0x878f72, 1.3);
+  // (Street View: coyote brush a grey olive, the sage paler and greyer still; USDA NAIP's scrub about #6b7354)
+  const brush = col(0x667352, 1.3), sage = col(0x8f977c, 1.3);
   return {
     brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.55), M(0, 0.5, 0, 1.15, 0.45, 1.05), { soft: [0, 0.5, 0], shade: [0.3, 1.0] }], ...lumps(0, 0.62, 0, 1.6, 0.62, 1.5, 5, 12, 0.85, LEAF.scrub, 21, { lift: 0.45, lump: 0.7, out: 0.8 }).map(g => leaves(g, brush))]),
     brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.25, 23), brush.map(v => v * 0.72), M(0, 0.55, 0, 1.5, 0.6, 1.4), { soft: [0, 0.55, 0], shade: [0.3, 1.2] }],

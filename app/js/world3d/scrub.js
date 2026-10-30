@@ -15,9 +15,9 @@ export function cellBushes(ci, cj, cls) {
   const out = [], n = SIZE / STEP;
   for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
     const gi = ci * n + a, gj = cj * n + b, x = (gi + hash2(gi, gj * 3 + 1)) * STEP, z = (gj + hash2(gj + 5, gi * 7)) * STEP;
-    if (cls(x, z) !== SCRUB || hash2(gi * 5 + 3, gj) > 0.9) continue;  // a gap now and then
-    // patches of taller and lower scrub (about 60 m), sage on some (about 120 m)
-    const tall = hash2(Math.floor(x / 60), Math.floor(z / 60) + 17), sage = hash2(Math.floor(x / 120) + 9, Math.floor(z / 120)) < 0.22 && hash2(gi, gj + 11) < 0.7 ? 1 : 0;
+    if (cls(x, z) !== SCRUB || hash2(gi * 5 + 3, gj) > 0.96) continue;  // a gap now and then (few: Street View's cover is unbroken)
+    // patches of taller and lower scrub (about 60 m), sage on two in five (about 120 m)
+    const tall = hash2(Math.floor(x / 60), Math.floor(z / 60) + 17), sage = hash2(Math.floor(x / 120) + 9, Math.floor(z / 120)) < 0.4 && hash2(gi, gj + 11) < 0.7 ? 1 : 0;
     out.push([x, z, (0.6 + 0.8 * hash2(gj, gi + 3) ** 1.5) * (0.8 + 0.45 * tall), hash2(gi + 1, gj + 2) * 6.283, sage, hash2(gj * 3, gi + 5), 0.75 + 0.5 * hash2(gi * 7, gj + 13)]);
   }
   return out;

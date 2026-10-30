@@ -10,7 +10,8 @@ export { GGB };
 export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const root = new THREE.Group(); scene.add(root);
   const mat = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, ...o });
-  const orange = mat(0xc0452f), orangeDark = mat(0x8e3224), concrete = mat(0xb8b2a6), white = mat(0xf2f0ea), red = mat(0xb03026), median = mat(0xa9a69e);
+  // International Orange as it reads in daylight (softer than a red: Street View), a little darker in its shade
+  const orange = mat(0xbb5840), orangeDark = mat(0x94432f), concrete = mat(0xb8b2a6), white = mat(0xf2f0ea), red = mat(0xb03026), median = mat(0x4a4945), yellow = mat(0xd9a521);
 
   /* ---------- the Golden Gate Bridge ---------- */
   const A = proj.xz(...GGB.south), B = proj.xz(...GGB.north);
@@ -37,19 +38,51 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     o.position.set((a.x + b.x) / 2, (y0 + y1) / 2, (a.z + b.z) / 2); o.quaternion.setFromEuler(new THREE.Euler(-Math.atan2(y1 - y0, len), Math.atan2(b.x - a.x, b.z - a.z), 0, 'YXZ'));
     o.castShadow = true; o.receiveShadow = true; bridge.add(o); return o;
   };
-  // deck: a truss box in segments that follow the deck's rise and its curves; on top six lanes with their lines and a
-  // sidewalk each side (the road shader), thin railings at the edges; at the towers the sidewalks step out round the legs
-  const rail = [], legT = 14.6;
+  // deck: the floor (the roadway's slab, its stringers and floor beams) in segments that follow the deck's rise and its
+  // curves, an open steel truss under each edge (below: 7.6 m deep over the suspended spans, 4.6 m on the approach
+  // viaducts); on top six lanes with their lines and a sidewalk each side (the road shader), railings at the edges; at
+  // the towers the sidewalks step out round the legs
+  const rail = [], legT = 14.6, dpOf = (s0, s1) => s0 >= -1000 && s1 <= 1100 ? 7.6 : 4.6, inner = [];
   for (let i = 1; i < st.length; i++) {
     const s0 = st[i - 1], s1 = st[i], h0 = deckH(s0), h1 = deckH(s1);
-    const dp = s0 >= -1000 && s1 <= 1100 ? 7.6 : 2.4;  // the stiffening truss over the suspended spans, girders on the approaches
-    segBox(GGB.deckW, dp, orange, s0, s1, 0, h0 - 0.15 - dp / 2, h1 - 0.15 - dp / 2);
+    segBox(GGB.deckW - 1, 1.1, orange, s0, s1, 0, h0 - 0.7, h1 - 0.7);
     for (const t of [-1, 1]) for (const [y, th] of [[1.15, 0.09], [0.55, 0.05]]) segBox(0.07, th, orange, s0, s1, t * (GGB.deckW / 2 - 0.15), h0 + y, h1 + y);
-    // a low curb between the roadway and each sidewalk (a railing on it, below), the movable median barrier down the middle
-    for (const t of [-1, 1]) segBox(0.35, 0.3, concrete, s0, s1, t * 10.15, h0 + 0.15, h1 + 0.15);
+    // between the roadway and each sidewalk a riveted steel wall (a rail on posts over it, below); down the middle the
+    // movable median barrier, dark blocks with a yellow band (Street View)
+    for (const t of [-1, 1]) { segBox(0.3, 0.86, orange, s0, s1, t * 10.15, h0 + 0.43, h1 + 0.43); for (const y of [1.08, 1.38]) segBox(0.07, 0.07, orange, s0, s1, t * 10.15, h0 + y, h1 + y); }
     segBox(0.6, 0.82, median, s0, s1, 0, h0 + 0.41, h1 + 0.41);
+    segBox(0.68, 0.18, yellow, s0, s1, 0, h0 + 0.52, h1 + 0.52);
     for (let k = s0; k < s1; k += 4) if (Math.abs(Math.abs(k) - GGB.towers) > 12) for (const t of [-1, 1]) { const p = D(k, t * (GGB.deckW / 2 - 0.15), deckH(k) + 0.6); rail.push(new THREE.Vector3(p.x, p.y, p.z)); }
+    for (let k = s0; k < s1; k += 3) for (const t of [-1, 1]) { const p = D(k, t * 10.15, deckH(k) + 1.15); inner.push(new THREE.Vector3(p.x, p.y, p.z)); }
   }
+  // the trusses: a Warren truss with verticals under each edge, the lateral bracing across their bottom chords, one mesh
+  // with its members cut out in the shader (solid and darker where they are finer than a pixel)
+  { const pos = [], uv = [], tk = [], idx = [];
+    const quad = (P, Q, R, S, u0, u1, v1, H, kind) => { const b = pos.length / 3; for (const [p, u, v] of [[P, u0, 0], [Q, u1, 0], [R, u0, v1], [S, u1, v1]]) { pos.push(p.x, p.y, p.z); uv.push(u, v); tk.push(H, kind); } idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); };
+    for (let i = 1; i < st.length; i++) {
+      const s0 = st[i - 1], s1 = st[i], dp = dpOf(s0, s1), y0 = deckH(s0) - 0.15, y1 = deckH(s1) - 0.15, e = GGB.deckW / 2 - 0.4;
+      for (const t of [-e, e]) quad(D(s0, t, y0), D(s1, t, y1), D(s0, t, y0 - dp), D(s1, t, y1 - dp), s0 - S0, s1 - S0, dp, dp, 0);
+      quad(D(s0, -e, y0 - dp), D(s1, -e, y1 - dp), D(s0, e, y0 - dp), D(s1, e, y1 - dp), s0 - S0, s1 - S0, 2 * e, 2 * e, 1);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setAttribute('tk', new THREE.Float32BufferAttribute(tk, 2)); g.setIndex(idx); g.computeVertexNormals();
+    const m = mat(0xbb5840, { side: THREE.DoubleSide });
+    m.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 tk; varying vec2 vTr; varying vec2 vTk;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvTr = uv; vTk = tk;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vTr; varying vec2 vTk;').replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        // u metres along, v metres down from the top chord (across, in the bracing); panels square on the trusses, 15 m
+        // in the bracing (an X in each)
+        float H = vTk.x, lat = step(0.5, vTk.y), P = mix(H, 15.0, lat), u = vTr.x, v = vTr.y, k = floor(u / P), f = u - k * P;
+        float d = min(min(v, H - v) - mix(0.38, 0.3, lat), min(f, P - f) - 0.22);
+        float dg = abs(f * H - mix(mod(k, 2.0) < 0.5 ? v : H - v, v, lat) * P) / length(vec2(P, H)) - 0.26;
+        if (lat > 0.5) dg = min(dg, abs(f * H - (H - v) * P) / length(vec2(P, H)) - 0.22);
+        float shut = smoothstep(0.06, 0.3, max(fwidth(u), fwidth(v)));
+        if (min(d, dg) > shut * P * 0.5) discard;`).replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= 1.0 - 0.3 * shut;');
+    };
+    m.customProgramCacheKey = () => 'jw-ggb-truss-1';
+    const tr = new THREE.Mesh(g, m); tr.castShadow = true; tr.receiveShadow = true; bridge.add(tr); }
+  // the rail over each sidewalk's wall: a post every 3 m
+  { const im = new THREE.InstancedMesh(new THREE.BoxGeometry(0.09, 0.62, 0.09), orange, inner.length), m4 = new THREE.Matrix4();
+    inner.forEach((p, i) => im.setMatrixAt(i, m4.makeTranslation(p.x, p.y, p.z))); im.computeBoundingSphere(); bridge.add(im); }
   for (const s of [-GGB.towers, GGB.towers]) for (const t of [-1, 1]) {  // the walkways round the tower legs
     box(4.2, 1.2, 30, concrete, s, t * (legT + 6.9), deckH(s) - 0.62);
     box(0.08, 1.15, 30, orange, s, t * (legT + 8.95), deckH(s) + 0.6);
@@ -69,11 +102,11 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     rail.forEach((p, i) => post.setMatrixAt(i, m4.makeTranslation(p.x, p.y, p.z))); post.computeBoundingSphere(); bridge.add(post); }
   // the railings' bars: a strip along each edge, its balusters (19 cm apart) cut in the shader
   { const pos = [], uv = [], idx = [];
-    for (const [t, top] of [[-GGB.deckW / 2 + 0.15, 1.2], [GGB.deckW / 2 - 0.15, 1.2], [-10.15, 1.1], [10.15, 1.1]]) { const b = pos.length / 3; let n = 0;  // outer railings, the ones between road and sidewalk
+    for (const [t, top] of [[-GGB.deckW / 2 + 0.15, 1.2], [GGB.deckW / 2 - 0.15, 1.2]]) { const b = pos.length / 3; let n = 0;  // the outer railings
       for (let s = S0; s <= S1; s += 2, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 0.05, p.z, p.x, h + top, p.z); uv.push(s - S0, 0, s - S0, 1); }
       for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
-    const m = new THREE.MeshLambertMaterial({ color: 0xc0452f, side: THREE.DoubleSide });
+    const m = new THREE.MeshLambertMaterial({ color: 0xbb5840, side: THREE.DoubleSide });
     m.onBeforeCompile = sh => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vBar;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvBar = uv;');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vBar;').replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vBar.y > 0.06 && vBar.y < 0.93 && fract(vBar.x / 0.19) > 0.3) discard;');
@@ -139,7 +172,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     for (let s = -half + 15; s < half; s += 15) { const f = s / half, top = GGB.towerTop - 2, low = deckH(0) + 4, y = low + (top - low) * f * f, p = W(s, t, y); susp.push(p.x, y, p.z, p.x, deckH(s) + 0.5, p.z); }
   }
   const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(susp, 3));
-  bridge.add(new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0xa83a2e })));
+  bridge.add(new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0xa8513c })));
   // anchorages: massive blocks from the ground (or the sea floor) up under the deck; the north one carries the roadway
   // from the side span to the north approach (OpenStreetMap's road on it runs s 984 to 1092)
   box(42, deckH(-GGB.anchor) - 8.2 + 8, 56, concrete, -GGB.anchor, 0, (deckH(-GGB.anchor) - 8.2 - 8) / 2);
@@ -156,11 +189,21 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     for (let s = S0 + 25; s < S1 - 10; s += 50) if (Math.abs(Math.abs(s) - GGB.towers) > 30) for (const t of [-1, 1]) { const p = D(s, t * (GGB.deckW / 2 - 0.4), deckH(s)); lp.push([p.x, p.y, p.z, p.yaw + (t > 0 ? Math.PI / 2 : -Math.PI / 2)]); }
     const geo = mergeBoxes([lg, am, ln]), im = new THREE.InstancedMesh(geo, orange, lp.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1);
     lp.forEach(([x, y, z, ry], i) => im.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), q.setFromEuler(e.set(0, ry, 0)), one))); im.castShadow = true; im.computeBoundingSphere(); bridge.add(im); }
-  // the approaches' piers (concrete, to well below the ground) every 45 m where the deck curves off the axis
-  for (let s = S0 + 12; s < S1; s += 45) if (s < -1140 || s > 1100) {
+  // the approaches: concrete piers (to well below the ground) every 45 m where the deck curves off the axis at the San
+  // Francisco end; the Vista Point approach on steel towers every 32 m (Street View): two legs under the trusses from well
+  // below the ground, an X in every 9 m of them, a cap under the trusses
+  for (let s = S0 + 12; s < -1140; s += 45) {
     const p = D(s, 0, 0), h = deckH(s) - 2.6, o = new THREE.Mesh(new THREE.BoxGeometry(18, h + 40, 3.2), concrete);
     o.position.set(p.x, (h - 40) / 2, p.z); o.rotation.y = p.yaw; o.castShadow = true; o.receiveShadow = true; bridge.add(o);
   }
+  for (let s = 1112; s <= S1 - 8; s += 32) {
+    const top = deckH(s) - 4.75, e = GGB.deckW / 2 - 0.4, L = D(s, -e, 0), R = D(s, e, 0), at = (p, y) => new THREE.Vector3(p.x, y, p.z);
+    for (const p of [L, R]) { const o = new THREE.Mesh(new THREE.BoxGeometry(1.2, top + 20, 1.6), orange); o.position.set(p.x, (top - 20) / 2, p.z); o.rotation.y = p.yaw; o.castShadow = true; o.receiveShadow = true; bridge.add(o); }
+    strut(at(L, top - 0.6), at(R, top - 0.6), 1.2);
+    for (let y = top - 0.6; y - 9 > -20; y -= 9) { strut(at(L, y), at(R, y - 9), 0.45); strut(at(R, y), at(L, y - 9), 0.45); strut(at(L, y - 9), at(R, y - 9), 0.5); }
+  }
+  // a member from point p to point q, w thick
+  function strut(p, q, w) { const o = new THREE.Mesh(new THREE.BoxGeometry(w, w, p.distanceTo(q)), orange); o.position.copy(p).add(q).multiplyScalar(0.5); o.lookAt(q); o.castShadow = true; o.receiveShadow = true; bridge.add(o); return o; }
   // one draw per material for the boxes (towers, struts, deck truss, rails, piers): hundreds of meshes otherwise
   {
     bridge.updateMatrixWorld(true);
@@ -250,6 +293,14 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
       [37.7864, -122.3918, 188, 28, 0xbfc6cc], [37.7937, -122.3984, 160, 38, 0xd2ccc0], [37.7889, -122.4014, 180, 34, 0xa8b0b8]]) put(new THREE.BoxGeometry(w, h, w * 0.8).translate(0, h / 2, 0), col, la, lo, 0.3);
     put(new THREE.BoxGeometry(14, 75, 14).translate(0, 37.5, 0), 0xf0ead8, 37.7955, -122.3937, 0.3);
     put(new THREE.BoxGeometry(200, 14, 30).translate(0, 7, 0), 0xe8e0cc, 37.7953, -122.3930, 0.3);
+    // Sutro Tower on its hill (298 m over the hilltop, 254 m up): three legs in red and white bands, drawn in a third of
+    // the way up, spreading a little to the top; crossarms near the top carrying the antennas
+    { const [x, z] = proj.xz(37.75522, -122.45273), y0 = 254, parts = [[], []], m4 = new THREE.Matrix4(), up = new THREE.Vector3(0, 1, 0);
+      const leg = (k, y) => { const a = k * 2.094 + 0.35, r = y < 110 ? 27 - y / 110 * 18 : 9 + (y - 110) / 188 * 7; return new THREE.Vector3(x + Math.cos(a) * r, y0 + y, z + Math.sin(a) * r); };
+      const bar = (list, p, q, w) => { const g = new THREE.BoxGeometry(w, w, p.distanceTo(q)); m4.lookAt(p, q, up); m4.setPosition(p.clone().add(q).multiplyScalar(0.5)); list.push(g.applyMatrix4(m4)); };
+      for (let k = 0; k < 3; k++) for (let y = 0, i = 0; y < 298; y += 24, i++) bar(parts[i % 2], leg(k, y), leg(k, Math.min(298, y + 24)), 2.4);
+      for (const y of [150, 232, 288]) for (let k = 0; k < 3; k++) { const p = leg(k, y), q = leg((k + 1) % 3, y), o = p.clone().sub(new THREE.Vector3(x, p.y, z)).setLength(y > 200 ? 16 : 0); bar(parts[1], p, q, 1.6); if (o.length()) bar(parts[0], p, p.clone().add(o), 1.4); }
+      for (const [i, c] of [[0, 0xc9442f], [1, 0xe9e7e1]]) { const g = mergeBoxes(parts[i]), m = new THREE.Mesh(g, mat(c)); city.add(m); } }
   }
 
   /* ---------- lighthouses ---------- */

@@ -90,7 +90,8 @@ class FogPass extends Pass {
   }
   setSize(w, h) { this.rt.setSize(Math.max(1, w >> 1), Math.max(1, h >> 1)); }
   render(renderer, writeBuffer, readBuffer) {
-    if (this.u.fogAmount.value < 0.01 || !this.u.fogMap.value) return;
+    // only when the banks are on and one lies within 15 km
+    if (this.u.fogAmount.value < 0.01 || !this.u.fogMap.value || !this.fog.near(this.camera.position.x, this.camera.position.z, 15000)) return;
     const c = this.camera, u = this.u;
     u.tDepth.value = readBuffer.depthTexture; u.invProj.value.copy(c.projectionMatrixInverse); u.camWorld.value.copy(c.matrixWorld); u.camPos.value.setFromMatrixPosition(c.matrixWorld);
     u.logC.value = Math.log2(c.far + 1);
@@ -102,8 +103,8 @@ class FogPass extends Pass {
   dispose() { this.rt.dispose(); this.march.dispose(); this.blend.dispose(); this.quad.dispose(); }
 }
 
-// Q: { post, bloom, msaa, fxaa, vol: fog steps } (no post: straight to the screen); fog: sky.fog.u (the fog's map,
-// noise and light)
+// Q: { post, bloom, msaa, fxaa, vol: fog steps } (no post: straight to the screen); fog: sky.fog (u: the fog's map,
+// noise and light; near(x, z, r): any fog within r)
 export function createPost(renderer, scene, camera, fog = null) {
   let composer = null, grade = null, bloom = null, fxaa = null, fogp = null, on = false, cfg = null, size = [1, 1, 1];
   function build(Q) {
@@ -114,7 +115,7 @@ export function createPost(renderer, scene, camera, fog = null) {
     const rt = new THREE.WebGLRenderTarget(size[0] * size[2], size[1] * size[2], { type: THREE.HalfFloatType, samples: Q.msaa || 0, depthTexture: Q.vol && fog ? new THREE.DepthTexture(1, 1) : null });
     composer = new EffectComposer(renderer, rt);
     composer.addPass(new RenderPass(scene, camera));
-    if (Q.vol && fog) { fogp = new FogPass(camera, fog, Q.vol); composer.addPass(fogp); }
+    if (Q.vol && fog) { fogp = new FogPass(camera, fog.u, Q.vol); fogp.fog = fog; composer.addPass(fogp); }
     // the bloom at half size (its blurs start at a quarter): it is soft anyway, and costs half as much
     if (Q.bloom) { bloom = new UnrealBloomPass(new THREE.Vector2(size[0], size[1]), 0.22, 0.45, 1.15); const set = bloom.setSize.bind(bloom); bloom.setSize = (w, h) => set(Math.max(1, w >> 1), Math.max(1, h >> 1)); composer.addPass(bloom); }
     grade = new ShaderPass(GradeShader); composer.addPass(grade);

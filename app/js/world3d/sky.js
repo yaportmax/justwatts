@@ -33,16 +33,40 @@ export function mixTimes(a, b, f) {
 
 /* ---------- three's fog chunks: height fog + aerial haze, warmer toward the sun ---------- */
 // THREE.Fog carries two numbers: near = haze density (per million per metre, scale height 1.4 km), far = low marine
-// layer density (scale height 110 m). Lit materials add the sun's colour looking toward the sun.
+// layer density (scale height 110 m). Lit materials add the sun's colour looking toward the sun. A material with the
+// define JW_FOG_V works the haze out per vertex instead (the far tree cards: much cheaper, as smooth), the sun from
+// FOG_SUN (world direction and colour, kept up to date by the view).
+export const FOG_SUN = { d: { value: new THREE.Vector3(0, 1, 0) }, c: { value: new THREE.Color() } };
+const JW_FOG_I = `float jwFogI(float d0, float H, float y0, float ry, float dist) {
+  float k = ry * dist / H;
+  return d0 * exp(-y0 / H) * (abs(k) > 1e-3 ? (1.0 - exp(-k)) * H / ry : dist);
+}`;
 let patched = false;
 function patchFog() {
   if (patched) return; patched = true;
   const C = THREE.ShaderChunk;
   C.lights_pars_begin += '\n#define JW_LIT 1\n';
-  C.fog_pars_vertex = '#ifdef USE_FOG\nvarying float vFogDepth;\nvarying vec3 vFogW;\n#endif';
-  C.fog_vertex = '#ifdef USE_FOG\nvFogDepth = - mvPosition.z;\nvFogW = cameraPosition + transpose(mat3(viewMatrix)) * mvPosition.xyz;\n#endif';
+  C.fog_pars_vertex = `#ifdef USE_FOG
+varying float vFogDepth; varying vec3 vFogW;
+#ifdef JW_FOG_V
+uniform vec3 fogColor; uniform float fogNear; uniform float fogFar; uniform vec3 jwSunD, jwSunC; varying float vJwFog; varying vec3 vJwFogC;
+${JW_FOG_I}
+#endif
+#endif`;
+  C.fog_vertex = `#ifdef USE_FOG
+vFogDepth = - mvPosition.z;
+vFogW = cameraPosition + transpose(mat3(viewMatrix)) * mvPosition.xyz;
+#ifdef JW_FOG_V
+{ vec3 fd = vFogW - cameraPosition; float fdist = length(fd), ry = fd.y / max(fdist, 1e-3), y0 = clamp(cameraPosition.y, -20.0, 3000.0);
+  vJwFog = 1.0 - exp(-max(jwFogI(fogNear * 1e-6, 1400.0, y0, ry, fdist) + jwFogI(fogFar * 1e-6, 110.0, y0 + 8.0, ry, fdist), 0.0));
+  float sa = max(dot(fd / max(fdist, 1e-3), jwSunD), 0.0); vJwFogC = fogColor + jwSunC * (0.05 * pow(sa, 5.0) + 0.12 * pow(sa, 40.0)); }
+#endif
+#endif`;
   C.fog_pars_fragment = `#ifdef USE_FOG
 uniform vec3 fogColor; varying float vFogDepth; varying vec3 vFogW;
+#ifdef JW_FOG_V
+varying float vJwFog; varying vec3 vJwFogC;
+#endif
 #ifdef FOG_EXP2
 uniform float fogDensity;
 #else
@@ -53,7 +77,9 @@ float jwFogI(float d0, float H, float y0, float ry, float dist) {
   return d0 * exp(-y0 / H) * (abs(k) > 1e-3 ? (1.0 - exp(-k)) * H / ry : dist);
 }
 #endif`;
-  C.fog_fragment = `#ifdef USE_FOG
+  C.fog_fragment = `#if defined(USE_FOG) && defined(JW_FOG_V)
+gl_FragColor.rgb = mix(gl_FragColor.rgb, vJwFogC, vJwFog);
+#elif defined(USE_FOG)
 {
   vec3 fd = vFogW - cameraPosition; float fdist = length(fd), ry = fd.y / max(fdist, 1e-3), y0 = clamp(cameraPosition.y, -20.0, 3000.0);
   #ifdef FOG_EXP2
@@ -178,7 +204,7 @@ export function createSky(scene, { far, quality = 0 }) {
   const banks = { mesh: null, amount: 1, on: true };
   const n3 = new THREE.Data3DTexture(noise3Pixels(32), 32, 32, 32);
   n3.format = THREE.RedFormat; n3.wrapS = n3.wrapT = n3.wrapR = THREE.RepeatWrapping; n3.magFilter = n3.minFilter = THREE.LinearFilter; n3.unpackAlignment = 1; n3.needsUpdate = true;
-  const fog = { vol: false, u: { fogMap: { value: null }, fogNoise: { value: n3 }, fogBox: { value: new THREE.Vector4() }, fogTop: { value: 400 }, fogAmount: { value: 0 },
+  const fog = { vol: false, near: () => false, u: { fogMap: { value: null }, fogNoise: { value: n3 }, fogBox: { value: new THREE.Vector4() }, fogTop: { value: 400 }, fogAmount: { value: 0 },
     fogTime: { value: 0 }, sunD: { value: sunDir }, sunC: { value: new THREE.Color() }, ambC: { value: new THREE.Color() }, baseC: { value: new THREE.Color() } } };
   function bankMap(list) {
     // the top of the fog (metres, up to fogTop) on a 256 x 256 grid over the banks: each puff a smooth dome
@@ -196,6 +222,14 @@ export function createSky(scene, { far, quality = 0 }) {
     const px = new Uint16Array(S * S); for (let k = 0; k < S * S; k++) px[k] = THREE.DataUtils.toHalfFloat(Math.min(1, top[k] / M));
     const tex = new THREE.DataTexture(px, S, S, THREE.RedFormat, THREE.HalfFloatType); tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
     fog.u.fogMap.value?.dispose(); fog.u.fogMap.value = tex; fog.u.fogBox.value.set(x0, z0, 1 / (x1 - x0), 1 / (z1 - z0));
+    // where there is fog at all, in blocks of 16 x 16 cells (no fog within reach of the eye: no fog pass)
+    const B = 16, blk = new Uint8Array(B * B);
+    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) if (top[j * S + i] > 1) blk[Math.floor(j * B / S) * B + Math.floor(i * B / S)] = 1;
+    fog.near = (x, z, r) => {
+      const bw = (x1 - x0) / B, bh = (z1 - z0) / B;
+      for (let b = 0; b < B; b++) for (let a = 0; a < B; a++) if (blk[b * B + a] && Math.hypot(Math.max(x0 + a * bw - x, 0, x - x0 - (a + 1) * bw), Math.max(z0 + b * bh - z, 0, z - z0 - (b + 1) * bh)) < r) return true;
+      return false;
+    };
   }
   const bankMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: true, defines: { JW_FOG_SCALE: 0.3 },

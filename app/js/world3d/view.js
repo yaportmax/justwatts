@@ -13,7 +13,7 @@ import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS } from './props.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
-import { createSky } from './sky.js';
+import { createSky, FOG_SUN } from './sky.js';
 import { createPost } from './post.js';
 import { createGrass } from './grass.js';
 import { createLife } from './life.js';
@@ -77,7 +77,7 @@ uniform float lamps; varying vec2 vP; varying float vD; void main() {
 float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * a * lamps * 0.5 * (1.0 - smoothstep(200.0, 500.0, vD)), 1.0); }` });
   const FURN = furnitureGeometries(), trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
-  const post = createPost(renderer, scene, camera, sky.fog.u);
+  const post = createPost(renderer, scene, camera, sky.fog);
   const life = createLife({ THREE, scene, proj, marks, quality: q }), audio = createAudio({ on: sound });
   sky.setBanks(fog);
 
@@ -291,8 +291,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (const [sp, list] of Object.entries(out)) {
       const ci = SPECIES.indexOf(sp);
       // the ring of tiles further out (2 km and more) keeps four trees in ten, bigger, once and for all (thinning in the
-      // shader would still cost the GPU every one of them); in the dense groves of redwood and fir fewer too
-      const keep = c.lod > 0 ? 0.42 : sp === 'redwood' ? 0.6 : sp === 'fir' ? 0.8 : 1, grow = 1 / Math.sqrt(keep);
+      // shader would still cost the GPU every one of them); in the dense groves of redwood and fir fewer cards, no bigger:
+      // there a card mostly covers others, and every layer costs the GPU (the full trees fill the near view)
+      const keep = c.lod > 0 ? 0.42 : sp === 'redwood' ? 0.5 : sp === 'fir' ? 0.7 : 1, grow = c.lod > 0 ? 1 / Math.sqrt(keep) : 1;
       if (ci >= 0) for (const [x, y, z, s, r, nearOnly] of list) {
         const thin = c.lod > 0; if (nearOnly || (x * 0.1731 + z * 0.2917) - Math.floor(x * 0.1731 + z * 0.2917) > keep) continue;
         imp.push([x, y, z, s * grow, ci, (thin ? -1 : 1) * (0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
@@ -523,6 +524,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         u.set(proj.x(lonOf(X - R, NEAR_Z)), proj.z(latOf(Y - R, NEAR_Z)), proj.x(lonOf(X + R + 1, NEAR_Z)), proj.z(latOf(Y + R + 1, NEAR_Z))); }
     }
     farDirty = false;
+    // impostors after everything else that is opaque, nearest tile first: what is drawn before hides what is behind it
+    // (alpha tested cards cost the GPU for every layer it cannot skip)
+    { const imps = [...near.values()].filter(c => c.imp).map(c => [c.imp, Math.hypot(c.x + 0.5 - rx, c.y + 0.5 - ry)]);
+      for (const c of far.values()) if (c.farImp) imps.push([c.farImp, 100 + Math.hypot(c.x + 0.5 - tileX(lon, FAR_Z), c.y + 0.5 - tileY(lat, FAR_Z))]);
+      imps.sort((u, w) => u[1] - w[1]).forEach(([m], i) => { m.renderOrder = 1 + i; }); }
     if (tun.dirty) { tun.dirty = false; jobs.add('tunnels', 30, rebuildTunnels); }
     ready = [...near.values()].filter(c => c.lod === 0).every(c => c.built);
   }
@@ -848,6 +854,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         jobs.add(c.k + '|p', 0.5, () => partTrees(c, p[0], p[1]));
       }
       const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noLife, noImp, noHi, noSm, noTerrain, gpu }
+      if (dbg.noLife) life.show(false);
       if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain || dbg.noFurn) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.furn) c.parts.furn.visible = !dbg.noFurn; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) if (t.hi && dbg.noHi) t.hi.visible = false; } }
       if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2);
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
@@ -889,6 +896,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // the cars' lamps: on with the sun low (under about 8 degrees) and in tunnels
       { const sy = sky.sunDir.y, k = Math.min(1, Math.max(0, (0.14 - sy) / 0.12)); life.setLamps(Math.max(k * k * (3 - 2 * k), dark), scene.fog.color); LAMPS.value = Math.min(1, Math.max(0, (0.07 - sy) / 0.08)); }
       sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.6 * dark);
+      FOG_SUN.d.value.copy(sky.sunDir); FOG_SUN.c.value.copy(sky.sun.color).multiplyScalar(sky.sun.intensity);
       // the tunnel's own lamps: warm light all round inside it
       if (hemiKey !== sky.time) { hemiKey = sky.time; hemiBase[0].copy(sky.hemi.color); hemiBase[1].copy(sky.hemi.groundColor); }
       sky.hemi.color.copy(hemiBase[0]).lerp(TUN_LIGHT, dark * 0.9); sky.hemi.groundColor.copy(hemiBase[1]).lerp(TUN_LIGHT, dark * 0.7);
@@ -937,7 +945,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
-    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, gpuMs: gpuTime.ms, me: me.group.position.toArray(), probe: (x, z) => ({ tunnel: tunnelAt(x, z), ground: groundAt(x, z) }), tunnels: tun.list.map(T => ({ h0: T.h0, h1: T.h1, L: T.L })) }),
+    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, gpuMs: gpuTime.ms, me: me.group.position.toArray(), probe: (x, z) => ({ tunnel: tunnelAt(x, z), ground: groundAt(x, z), deck: deckAt(x, z) }), tunnels: tun.list.map(T => ({ h0: T.h0, h1: T.h1, L: T.L })) }),
     // a fixed camera for screenshots and checks: [lat, lon, height m, heading deg, pitch deg], null to follow the rider
     viewFrom(v) { camOver = v; },
   };

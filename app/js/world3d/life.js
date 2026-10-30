@@ -257,6 +257,8 @@ float a = max(0.0, 1.0 - length(vP / vec2(2.2, 7.0))); a = a * a * smoothstep(0.
     // the car bodies (for checks), the cars' lamps: 0 off .. 1 full (dusk, tunnels); the sky's colour on their paint
     models: carGeos, carMaterial: carMat,
     setLamps(k, sky) { lamps.value = k; if (sky) sheen.value.copy(sky); },
+    // shown or not (a dev switch, to measure what it costs)
+    show(on) { for (const m of [...carSets, pools, bodies, rests, birds]) m.visible = on; },
     dispose() { for (const m of [...carSets, pools, bodies, rests, birds]) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); m.dispose(); } },
   };
 }

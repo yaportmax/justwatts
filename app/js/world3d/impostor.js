@@ -3,7 +3,8 @@
 // it: one instanced draw a tile, every tree in it, the near ones (the full models' circle) left out in the vertex
 // shader, so moving the circle costs nothing on the CPU. Far away they thin out, the ones left a little bigger.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
-import { withSun } from './materials.js';
+import { withSun, HORIZON } from './materials.js';
+import { FOG_SUN } from './sky.js';
 
 const CW = 256, CH = 512, TOP = 50 * Math.PI / 180;
 
@@ -59,9 +60,12 @@ export function impostorMaterial(imp) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff }), u = m.userData.u = { nearC: { value: new THREE.Vector2(0, 0) }, nearR: { value: 0 }, nearBox: { value: new THREE.Vector4(1e9, 1e9, -1e9, -1e9) } };
   imp.cellU ??= { value: Array.from({ length: 16 }, (_, i) => new THREE.Vector4(...(imp.cells[i] || [1, 1, 0, 0]))) };
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { impColor: { value: imp.color }, impNormal: { value: imp.normal }, impCell: imp.cellU, impN: { value: imp.n }, nearC: u.nearC, nearR: u.nearR, nearBox: u.nearBox });
-    sh.vertexShader = sh.vertexShader
+    // the haze and the hills' shadow worked out per vertex (a far tree card is small: as smooth, much cheaper)
+    Object.assign(sh.uniforms, { impColor: { value: imp.color }, impNormal: { value: imp.normal }, impCell: imp.cellU, impN: { value: imp.n }, nearC: u.nearC, nearR: u.nearR, nearBox: u.nearBox,
+      jwSunD: FOG_SUN.d, jwSunC: FOG_SUN.c, hzMap: HORIZON.map, hzBox: HORIZON.box });
+    sh.vertexShader = '#define JW_FOG_V\n' + sh.vertexShader
       .replace('#include <common>', `#include <common>
+        uniform sampler2D hzMap; uniform vec4 hzBox; varying float vJwVis;
         attribute vec4 ia; attribute vec4 ib; uniform vec4 impCell[16]; uniform float impN; uniform vec2 nearC; uniform float nearR; uniform vec4 nearBox;
         varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);')
@@ -82,8 +86,10 @@ export function impostorMaterial(imp) {
         float top = step(fract(ia.x * 0.37 + ia.z * 0.61), smoothstep(0.31, 0.6, asin(clamp(F.y, -1.0, 1.0))));
         vIR = R; vIU = U; vIF = F;
         vIu = vec2((ib.x + quv.x) / impN, quv.y * 0.5 + (1.0 - top) * 0.5);
-        vItint = ib.z * vec3(1.0 + ib.w, 1.0, 1.0 - ib.w);`);
-    sh.fragmentShader = sh.fragmentShader
+        vItint = ib.z * vec3(1.0 + ib.w, 1.0, 1.0 - ib.w);
+        vec2 hzu = vec2(ia.x - hzBox.x, hzBox.y - ia.z) * hzBox.z;
+        vJwVis = hzBox.z > 0.0 && hzu.x > 0.0 && hzu.y > 0.0 && hzu.x < 1.0 && hzu.y < 1.0 ? texture2D(hzMap, hzu).r : 1.0;`);
+    sh.fragmentShader = '#define JW_FOG_V\n#define JW_VIS_V\n' + sh.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D impColor, impNormal; varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
       .replace('#include <map_fragment>', /* glsl */`
@@ -98,7 +104,7 @@ export function impostorMaterial(imp) {
         vec3 jwImpN = normalize(vIR * inrm.x + vIU * inrm.y + vIF * inrm.z);`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(jwImpN, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-imp-1';
+  m.customProgramCacheKey = () => 'jw-imp-2';
   return withSun(m);
 }
 

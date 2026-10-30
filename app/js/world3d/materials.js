@@ -28,7 +28,9 @@ vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
   float north = clamp(-n.z * 1.9, 0.0, 1.0) * smoothstep(0.03, 0.22, slope);
-  float big = jwN(p / 4100.0 + 0.31).a, mid = jwN(mat2(0.8, -0.6, 0.6, 0.8) * p / 1150.0).b, small = jwN(p / 330.0 + 0.7).g, fine = jwN(mat2(0.6, 0.8, -0.8, 0.6) * p / 47.0).r;
+  // two looks at the noise give every scale (its four channels are four sizes): about 2 km, 250 m, 160 m, 80 m, 40 m, 20 m
+  vec4 nA = jwN(p / 4100.0 + 0.31), nB = jwN(mat2(0.8, -0.6, 0.6, 0.8) * p / 330.0 + 0.7);
+  float big = nA.a, mid = nA.r, small = nB.g, fine = nB.r, patch80 = nB.b, patch160 = nB.a;
   float wood = m.x, green = m.y, sand = m.z, town = m.w, cut = m2.x, rockc = m2.y, lake = m2.z, farm = m2.w;
   // the open hills: straw, gold and tawny patches
   vec3 straw = srgb(vec3(0.85, 0.75, 0.52)), gold = srgb(vec3(0.76, 0.62, 0.37)), tawny = srgb(vec3(0.62, 0.49, 0.31));
@@ -46,7 +48,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec3 forest = mix(srgb(vec3(0.13, 0.19, 0.10)), srgb(vec3(0.21, 0.28, 0.14)), smoothstep(0.3, 0.7, small)) * (0.8 + 0.4 * fine);
   c = mix(c, forest, smoothstep(0.3, 0.7, wood + (small - 0.5) * 0.5));
   // farms: pasture and hay in long fields
-  vec3 field = mix(srgb(vec3(0.70, 0.64, 0.40)), srgb(vec3(0.46, 0.54, 0.28)), step(0.5, jwN(p / 900.0).g));
+  vec3 field = mix(srgb(vec3(0.70, 0.64, 0.40)), srgb(vec3(0.46, 0.54, 0.28)), step(0.5, patch160));
   c = mix(c, field * (0.9 + 0.2 * fine), farm * 0.85);
   // town: lawns, gardens, paving
   c = mix(c, mix(srgb(vec3(0.42, 0.50, 0.27)), srgb(vec3(0.55, 0.54, 0.50)), smoothstep(0.45, 0.7, small)), town * 0.7);
@@ -54,7 +56,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   c = mix(c, srgb(vec3(0.84, 0.77, 0.61)) * (0.94 + 0.12 * fine), sand);
   // rock: cliffs and bluffs; bare earth on road banks and steep grass
   rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
-  vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * jwN(p / 13.0).r);
+  vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
   c = mix(c, rockC, rk);
   float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(0.2, 0.5, slope + (small - 0.5) * 0.2) * 0.65;
   c = mix(c, srgb(vec3(0.55, 0.45, 0.33)) * (0.85 + 0.3 * fine), bare);
@@ -101,7 +103,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         c *= 1.0 - clamp(vCv, 0.0, 1.0) * 0.25;
         // past the grass: the hills mottled, dots of scrub and their shade, drier and greener patches
         { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk);
-          vec4 ms = jwN(vW.xz / 19.0 + 0.21); float sp = ms.g, sp2 = ms.r, pt = jwN(vW.xz / 140.0 + 0.53).b;
+          vec4 ms = jwN(vW.xz / 19.0 + 0.21); float sp = ms.g, sp2 = ms.r, pt = jwN(vW.xz / 2400.0 + 0.53).r;
           c *= 1.0 - far * open * (0.22 * smoothstep(0.6, 0.78, sp) + 0.12 * smoothstep(0.58, 0.8, sp2));
           c = mix(c, c * vec3(0.9, 1.0, 0.82), far * open * 0.6 * smoothstep(0.5, 0.75, pt));
           c = mix(c, c * vec3(1.08, 1.02, 0.94), far * open * 0.5 * (1.0 - smoothstep(0.3, 0.55, pt))); }
@@ -365,13 +367,18 @@ export function withSun(m) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <fog_pars_fragment>', `#include <fog_pars_fragment>
         uniform sampler2D hzMap; uniform vec4 hzBox;
+        #ifdef JW_VIS_V
+        varying float vJwVis;
+        float jwSunVis() { return vJwVis; }
+        #else
         float jwSunVis() {
           #ifdef USE_FOG
           vec2 u = vec2(vFogW.x - hzBox.x, hzBox.y - vFogW.z) * hzBox.z;
           if (hzBox.z > 0.0 && u.x > 0.0 && u.y > 0.0 && u.x < 1.0 && u.y < 1.0) return texture2D(hzMap, u).r;
           #endif
           return 1.0;
-        }`)
+        }
+        #endif`)
       .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= jwSunVis();'));
   };
   m.customProgramCacheKey = () => key;

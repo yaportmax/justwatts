@@ -166,18 +166,18 @@ export function treeGeometries() {
     // coast live oak: a short leaning trunk forking into limbs, a broad dome of leafy lumps
     oak: merge([bark(trunkG(0.42, 0.3, 2.4, 7), brown, M(0, 0, 0, 1, 1, 1, 0, 0.08)),
       limb(0.15, 2.2, 0, 2.2, 4.4, 0.6, 0.26, brown), limb(0.1, 2.2, 0, -1.8, 4.6, -0.8, 0.24, brown), limb(0.1, 2.3, 0, 0.2, 5.2, 1.6, 0.2, brown),
-      core(0.2, 5.5, 0, 2.9, 1.5, 2.6, F.oak, 2), ...lumps(0.2, 5.4, 0, 3.7, 2.1, 3.4, 7, 17, 2.5, LEAF.oak, 1).map(g => leaves(g, F.oak))]),
+      core(0.2, 5.5, 0, 2.9, 1.5, 2.6, F.oak, 2), ...lumps(0.2, 5.4, 0, 3.7, 2.1, 3.4, 7, 12, 2.9, LEAF.oak, 1).map(g => leaves(g, F.oak))]),
     // California bay laurel: dense, taller than wide, glossy dark
     bay: merge([bark(trunkG(0.36, 0.26, 3.5, 6), brownD), limb(0, 3, 0, 1.2, 6, 0.4, 0.2, brownD), limb(0, 3, 0, -1, 6.4, -0.3, 0.18, brownD),
-      core(0, 7.2, 0, 2.1, 2.8, 2.0, F.bay, 5), ...lumps(0, 7, 0, 2.8, 3.6, 2.7, 7, 15, 2.2, LEAF.bay, 4, { lump: 0.6 }).map(g => leaves(g, F.bay))]),
+      core(0, 7.2, 0, 2.1, 2.8, 2.0, F.bay, 5), ...lumps(0, 7, 0, 2.8, 3.6, 2.7, 7, 11, 2.6, LEAF.bay, 4, { lump: 0.6 }).map(g => leaves(g, F.bay))]),
     // Douglas fir: a straight trunk, drooping boughs in tiers to a spire
-    fir: merge([bark(trunkG(0.5, 0.12, 25, 7), brownD), cone(4, 25.5, 1.8, F.fir, 31), leaves(boughs(3.5, 24.2, 14, 8, 4.6, 0.8, 1.35, 0.3, LEAF.fir, 30), F.fir),
+    fir: merge([bark(trunkG(0.5, 0.12, 25, 7), brownD), cone(4, 25.5, 1.8, F.fir, 31), leaves(boughs(3.5, 24.2, 11, 7, 4.8, 0.8, 1.6, 0.3, LEAF.fir, 30), F.fir),
       leaves(crownCards(0, 24.6, 0, 0.35, 1.2, 0.35, 3, 1.0, LEAF.fir, 33, { out: 0.2, hang: 1 }), F.fir)]),
     // coast redwood: a tall fluted red trunk flaring at the foot, bare to near half its height, short drooping boughs of
     // flat feathery sprays in a narrow, ragged spire
     redwood: merge([bark(trunkG(1.25, 0.32, 46, 10), red), bark(new THREE.CylinderGeometry(1.2, 1.9, 3, 10, 1).translate(0, 1.5, 0), red),
       ...[[13, 0.5], [15, 2.6], [17.5, 4.4], [19, 1.2]].map(([y, a]) => limb(Math.cos(a) * 0.6, y, Math.sin(a) * 0.6, Math.cos(a) * 2.6, y - 0.8, Math.sin(a) * 2.6, 0.09, brownD)),
-      cone(20, 47, 1.6, F.red, 41), leaves(boughs(18.5, 45.5, 13, 6, 4.9, 1.1, 1.6, 0.36, LEAF.redwood, 40, LEAF.redwood2), F.red),
+      cone(20, 47, 1.6, F.red, 41), leaves(boughs(18.5, 45.5, 11, 5, 5.1, 1.1, 1.85, 0.36, LEAF.redwood, 40, LEAF.redwood2), F.red),
       leaves(crownCards(0, 46, 0, 0.5, 1.6, 0.5, 4, 1.3, LEAF.redwood, 44, { out: 0.2, hang: 1 }), F.red)]),
     // blue gum eucalyptus: a tall pale trunk leaning a little, loose blue-grey clumps of hanging leaves off high limbs
     euc: merge([bark(trunkG(0.5, 0.22, 17, 7), pale, M(0, 0, 0, 1, 1, 1, 0, 0.05)),
@@ -186,10 +186,10 @@ export function treeGeometries() {
     // Monterey cypress: wind-flattened tables on a crooked trunk, wide and dark
     cypress: merge([bark(trunkG(0.6, 0.4, 3.2, 7), brownD, M(0, 0, 0, 1, 1, 1, 0, 0.18)), limb(0.4, 2.8, 0, 3.0, 4.6, 0.3, 0.26, brownD), limb(0.3, 2.9, 0, -2.6, 4.0, 0.5, 0.24, brownD),
       ...[[2.6, 5.0, 0.2, 3.4, 1.2, 2.6, 9], [-2.4, 4.4, 0.4, 3.0, 1.1, 2.4, 10], [0.2, 6.0, -0.3, 2.6, 1.0, 2.2, 12]].flatMap(([x, y, z, rx, ry, rz, s]) =>
-        [core(x, y, z, rx * 0.75, ry * 0.7, rz * 0.75, F.cyp, s), leaves(crownCards(x, y, z, rx, ry, rz, 24, 2.5, LEAF.cypress, s, { out: 0.35, lift: 0.9, centre: [0, 5, 0] }), F.cyp)])]),
+        [core(x, y, z, rx * 0.75, ry * 0.7, rz * 0.75, F.cyp, s), leaves(crownCards(x, y, z, rx, ry, rz, 17, 2.9, LEAF.cypress, s, { out: 0.35, lift: 0.9, centre: [0, 5, 0] }), F.cyp)])]),
     // Monterey / bishop pine: a rounded, irregular dark crown high on a bare trunk
     pine: merge([bark(trunkG(0.45, 0.28, 9, 7), brownD), limb(0, 7.5, 0, 2, 10, 0.5, 0.18, brownD), limb(0, 8, 0, -1.6, 10.6, -0.4, 0.16, brownD),
-      core(0, 11, 0, 2.8, 1.8, 2.6, F.pine, 15), ...lumps(0, 11, 0, 3.8, 2.6, 3.6, 6, 14, 2.5, LEAF.pine, 14).map(g => leaves(g, F.pine))]),
+      core(0, 11, 0, 2.8, 1.8, 2.6, F.pine, 15), ...lumps(0, 11, 0, 3.8, 2.6, 3.6, 6, 10, 2.9, LEAF.pine, 14).map(g => leaves(g, F.pine))]),
     // coyote brush and other coastal scrub: low, irregular mounds
     bush: merge([core(0, 0.5, 0, 1.3, 0.55, 1.1, F.bush, 12), ...lumps(0, 0.6, 0, 1.7, 0.75, 1.5, 3, 12, 1.3, LEAF.scrub, 11, { lift: 0.5 }).map(g => leaves(g, F.bush))]),
     // toyon / manzanita: a taller shrub with a reddish base

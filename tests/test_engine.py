@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from conftest import free_port
 from justwatts.config import Config
 from justwatts.server import make_server
 
@@ -177,7 +178,7 @@ def test_edits_survive_restart(srv, tmp_path):
     srv.client.control("target", w=170)
     edit(srv, op="insert", steps="3m 200w")
     eng.save()
-    cfg = Config(port=srv.port + 50, data=srv.cfg.data)
+    cfg = Config(port=free_port(), data=srv.cfg.data)
     s2 = make_server(cfg, quiet=True, ticker=False, devices=False)
     try:
         r = s2.engine.ride
@@ -200,7 +201,7 @@ def test_stale_unfinished_ride_is_archived(srv):
     for x in payload["samples"]:
         x[0] -= 7 * 3600 * 1000
     eng.current_file.write_text(json.dumps(payload))
-    s2 = make_server(Config(port=srv.port + 51, data=srv.cfg.data), quiet=True, ticker=False, devices=False)
+    s2 = make_server(Config(port=free_port(), data=srv.cfg.data), quiet=True, ticker=False, devices=False)
     try:
         assert s2.engine.ride is None and "old unfinished ride" in s2.engine.notice
         assert any(m["name"].endswith("(recovered)") for m in s2.list_rides())
@@ -263,7 +264,7 @@ def test_old_files_with_removed_fields_still_load(srv, tmp_path):
     (data / "coach" / "engine.json").write_text(json.dumps({**old, "id": "r-1", "start": now - 60000,
                                                             "samples": [[now - 60000 + i * 1000, i + 1, 100, 90, 0, 30, 100] for i in range(60)]}))
     (data / "settings.json").write_text(json.dumps({"ftp": 230, "voiceMode": "silent", "localCoach": {"enabled": True}, "agentGate": {}}))
-    s2 = make_server(Config(port=srv.port + 51, data=data), quiet=True, ticker=False, devices=False)
+    s2 = make_server(Config(port=free_port(), data=data), quiet=True, ticker=False, devices=False)
     try:
         assert s2.engine.ride and len(s2.engine.ride.samples) == 60 and s2.settings["ftp"] == 230
         assert "voiceMode" not in s2.settings and (data / "live" / "engine.json").exists()

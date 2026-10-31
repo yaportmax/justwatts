@@ -4,6 +4,7 @@ import time
 import pytest
 
 from justwatts import events as E
+from conftest import free_port
 from justwatts.config import Config
 from justwatts.server import make_server
 
@@ -280,7 +281,7 @@ def test_every_manual_change_survives_a_restart(srv):
     ctl(srv, "mode", m="g")
     ctl(srv, "free", m="g", value=2)
     before = st(srv)
-    cfg = Config(port=srv.port + 52, data=srv.cfg.data)
+    cfg = Config(port=free_port(), data=srv.cfg.data)
     s2 = make_server(cfg, quiet=True, ticker=False, devices=False)
     try:
         after = s2.engine.state({"ftp": 200})["ride"]

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from conftest import REPO, run_node
+from conftest import REPO, free_port, run_node
 from test_js_core import _ride
 from justwatts import ftms
 from justwatts import history as H
@@ -117,7 +117,7 @@ def test_journal_recovers_samples_after_crash(srv):
     assert len(eng.journal_file.read_text().splitlines()) == 17
     with eng.journal_file.open("a") as f:
         f.write('[1, 2, 3')  # a torn line from a crash mid-write
-    s2 = make_server(Config(port=srv.port + 60, data=srv.cfg.data), quiet=True, ticker=False, devices=False)
+    s2 = make_server(Config(port=free_port(), data=srv.cfg.data), quiet=True, ticker=False, devices=False)  # (a free port: srv.port + 60 was sometimes taken)
     try:
         r = s2.engine.ride
         assert len(r.samples) == 47 and r.el == pytest.approx(47, abs=0.2)

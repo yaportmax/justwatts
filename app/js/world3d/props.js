@@ -236,7 +236,11 @@ export function furnitureGeometries() {
     return out;
   };
   return {
-    post: merge([[B(0.1, 0.78, 0.15, 0, 0.39, 0), steel], [B(0.07, 0.3, 0.15, 0.06, 0.66, 0), steel]]),
+    // barrier posts 1 m tall (scaled to their height), from their foot: a W-beam's or a fence's square dark timber post (6 by
+    // 8 in, Caltrans A77; Street View: every one in the Headlands dark timber), a concrete rail's block, a chain-link's steel (rusty)
+    tpost: merge([[B(0.15, 1, 0.2, 0, 0.5, 0), wood]]),
+    cpost: merge([[B(0.3, 1, 0.3, 0, 0.5, 0), col(0xd9d6cc)]]),
+    spost: merge([[C(0.04, 0.04, 1, 6), col(0x7a5340)]]),
     pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),
     lamp: merge([[C(0.1, 0.07, 6.6), dark], [B(1.9, 0.08, 0.1, 0.95, 6.5, 0), dark], [B(0.6, 0.14, 0.26, 1.85, 6.42, 0), dark], [B(0.5, 0.03, 0.2, 1.85, 6.34, 0), lampC, null, { tag: 2 }]]),
     // painted on a stop's way in (flat on the road, the driver's right +x, toward the junction -z): the stop bar across a

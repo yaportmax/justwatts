@@ -88,7 +88,7 @@ export function sideRuns(E, kinds, ground, opt = {}) {
     let j = i; while (j + 1 < E.length && kinds[j + 1].kind === kinds[i].kind) j++;
     const run = [];
     for (let k = i; k <= Math.min(E.length - 1, j + 1); k++) {
-      const K = kinds[Math.min(k, j)], b = bands(E[k], K, ground, { ...opt, sh: K.rail ? 0.85 : opt.sh ?? 0.15 }); if (b) run.push({ p: E[k], b });
+      const K = kinds[Math.min(k, j)], b = bands(E[k], K, ground, { ...opt, sh: K.rail ? 0.75 : opt.sh ?? 0.15 }); if (b) run.push({ p: E[k], b });
     }
     if (run.length > 1) runs.push(run);
     i = j + 1;
@@ -120,7 +120,7 @@ export function bankGeometry(runs, out = { pos: [], cut: [], idx: [] }) {
 // A rail along an edge's points i0..i1: its posts 0.45 m out from the paved edge (the beam's face 0.25 m), every 2 m by arc length, eased along (its line
 // and its heights), each point [x, y, z, nx, nz] with the outward normal of the eased line; posts every 1.9 m by arc
 // length [x, y, z, yaw] (yaw: the post's +x toward the road).
-export function railLine(E, i0, i1, off = 0.45) {
+export function railLine(E, i0, i1, off = 0.45, gap = 1.9) {
   const P = []; for (let i = i0; i <= i1; i++) P.push([E[i][0] + E[i][3] * off, E[i][1], E[i][2] + E[i][4] * off, E[i][3], E[i][4]]);
   if (P.length < 2) return null;
   const D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][2] - P[i - 1][2]));
@@ -138,9 +138,9 @@ export function railLine(E, i0, i1, off = 0.45) {
     const s = Math.sign(-tz * Q[k][3] + tx * Q[k][4]) || 1; Q[k][3] = -tz * s; Q[k][4] = tx * s;
   }
   const posts = []; let d = 0;
-  for (let k = 1, next = 0.95; k < Q.length; k++) {
+  for (let k = 1, next = gap / 2; k < Q.length; k++) {
     const a = Q[k - 1], b = Q[k], l = Math.hypot(b[0] - a[0], b[2] - a[2]);
-    for (; next <= d + l; next += 1.9) { const f = (next - d) / (l || 1); posts.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, Math.atan2(b[3] * 0 + a[4], -a[3])]); }
+    for (; next <= d + l; next += gap) { const f = (next - d) / (l || 1); posts.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, Math.atan2(b[3] * 0 + a[4], -a[3])]); }
     d += l;
   }
   return { pts: Q, posts, len: L };

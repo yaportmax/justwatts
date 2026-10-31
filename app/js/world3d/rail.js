@@ -181,3 +181,44 @@ export function profileAt(idx, pr, i, f) {
   const sg = A.tx * B.tx + A.tz * B.tz < 0 ? -1 : 1, tx = A.tx + (B.tx * sg - A.tx) * f, tz = A.tz + (B.tz * sg - A.tz) * f, tl = Math.hypot(tx, tz) || 1;
   return { y: A.y + (B.y - A.y) * f, x: A.x + (B.x - A.x) * f, z: A.z + (B.z - A.z) * f, tx: tx / tl, tz: tz / tl, rail: f < 0.5 ? A.rail : B.rail };
 }
+
+// The hand list's barriers (handlist.js) on the rails: each entry's pano matched to the rail it looks along (its heading),
+// its stretch [from, to] metres along it from there, carried on onto the rail going on from an end (a way's end node), on
+// its side. -> { pieces: [{ id, s0, s1, sd (+1: the rail's right as it runs), kind }], surveyed: Set of rail ids (a
+// survey pano on it), at(x, z, half, cx, cz): the kinds whose stretch covers a road edge's point (its rail's |d| within
+// 2.5 m of half) of the road whose centre point is (cx, cz) (that rail's own: not a side road's edge by it), [] none }
+export function handBarriers(idx, list, survey, xz) {
+  const pieces = [], surveyed = new Set(), ends = new Map(), ek = p => `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`;
+  idx.rails.forEach((q, id) => { for (const e of [0, 1]) { const p = e ? q.T.P.at(-1) : q.T.P[0]; (ends.get(ek(p)) ?? ends.set(ek(p), []).get(ek(p))).push([id, e]); } });
+  const pano = (la, lo, hd) => { const [x, z] = xz(la, lo), r = hd * Math.PI / 180, dir = [1], id = idx.match(x, z, Math.sin(r), -Math.cos(r), null, -1, dir); return id < 0 ? null : { id, s: idx.rails[id].T.at(x, z).s, dir: dir[0] }; };
+  for (const [la, lo, hd] of survey) { const m = pano(la, lo, hd); if (m) surveyed.add(m.id); }
+  // a stretch on rail id from s along dir for len metres, side sd; on past its end onto the next rail (a few at most)
+  const lay = (id, s, dir, len, sd, kind, hop = 0) => {
+    const q = idx.rails[id], L = q.T.L, e = dir > 0 ? L : 0, here = Math.min(len, Math.abs(e - s));
+    if (here > 0) pieces.push({ id, s0: Math.min(s, s + dir * here), s1: Math.max(s, s + dir * here), sd, kind });
+    if (len - here < 1 || hop > 3) return;
+    // (the one going on straightest, where a junction has several)
+    const P = q.T.P, n = P.length, ux = dir > 0 ? P[n - 1][0] - P[n - 2][0] : P[0][0] - P[1][0], uz = dir > 0 ? P[n - 1][1] - P[n - 2][1] : P[0][1] - P[1][1];
+    let best = null, bc = 0.85;  // (within about 30 degrees: not round a corner onto a side road)
+    for (const [j, je] of ends.get(ek(dir > 0 ? P[n - 1] : P[0])) || []) {
+      if (j === id || idx.rails[j].r.fl & 16) continue; const Q = idx.rails[j].T.P, m = Q.length, vx = je ? Q[m - 2][0] - Q[m - 1][0] : Q[1][0] - Q[0][0], vz = je ? Q[m - 2][1] - Q[m - 1][1] : Q[1][1] - Q[0][1];
+      const c = (ux * vx + uz * vz) / ((Math.hypot(ux, uz) * Math.hypot(vx, vz)) || 1); if (c > bc) { bc = c; best = [j, je]; }
+    }
+    if (best) { const [j, je] = best, nd = je ? -1 : 1; lay(j, je ? idx.rails[j].T.L : 0, nd, len - here, sd * nd * dir, kind, hop + 1); }
+  };
+  for (const [la, lo, hd, side, from, to, kind] of list) {
+    const m = pano(la, lo, hd); if (!m) continue; const sd = (side === 'R' ? 1 : -1) * m.dir;
+    if (from < 0) lay(m.id, m.s, -m.dir, -from, sd, kind);
+    lay(m.id, m.s + m.dir * Math.max(0, from), m.dir, to - Math.max(0, from), sd, kind);
+  }
+  const byId = new Map(); for (const p of pieces) (byId.get(p.id) ?? byId.set(p.id, []).get(p.id)).push(p);
+  function at(x, z, half, cx = null, cz = null) {
+    const out = [];
+    for (const id of idx.near(x, z)) { const P = byId.get(id); if (!P) continue; const T = idx.rails[id].T, t = T.at(x, z); if (!t || Math.abs(Math.abs(t.d) - half) > 2.5 || (cx != null && Math.abs(T.at(cx, cz).d) > 1.5)) continue;
+      for (const p of P) if (t.s >= p.s0 && t.s <= p.s1 && Math.sign(t.d) === p.sd && !out.includes(p.kind)) out.push(p.kind); }
+    return out;
+  }
+  // a point on a surveyed road (within its paved width and 8 m beyond)
+  const onSurveyed = (x, z) => { for (const id of idx.near(x, z)) if (surveyed.has(id)) { const t = idx.rails[id].T.at(x, z); if (t && Math.abs(t.d) < idx.rails[id].half + 8) return true; } return false; };
+  return { pieces, surveyed, at, onSurveyed };
+}

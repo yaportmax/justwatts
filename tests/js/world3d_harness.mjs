@@ -20,7 +20,8 @@ import { makeProj, tileX, tileY, latOf, lonOf } from '../../app/js/world3d/geo.j
 import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js';
 import { probeWebGL2, resetProbe, pickView } from '../../app/js/world3d/probe.js';
 import { RoadGraph, Plan, bridges, smoothFrom } from '../../app/js/roads.js';
-import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, smoothRail, isTrail } from '../../app/js/world3d/rail.js';
+import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, smoothRail, isTrail, handBarriers } from '../../app/js/world3d/rail.js';
+import { BARRIERS, SURVEY } from '../../app/js/world3d/handlist.js';
 import { onDeck, toST, GGB } from '../../app/js/ggb.js';
 import { readdirSync } from 'node:fs';
 import { inWorld, BOUNDS } from '../../app/js/world.js';
@@ -428,6 +429,12 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   { const t = railNear(37.83800, -122.48305, tun); ux.bunkerUnder101 = t ? r3(lidarOver(37.838, -122.48305) - t.p.h) : null; }
   { const t = railNear(37.8405, -122.4897, tun), [x, z] = xz(37.8405, -122.4897); ux.bakerBarry = t ? r3(ground(x, z) - t.p.h) : null; }
   out.railUnder = ux;
+  // the hand list's barriers (A4): every entry on a rail, its pieces as long as listed (on past a way's end), each survey
+  // pano on a rail; a W-beam listed on Conzelman Road's outer edge at Hawk Hill's bend is found there on its side
+  { const HB = handBarriers(RI, BARRIERS, SURVEY, xz), want = BARRIERS.reduce((a, e) => a + e[5] - e[4], 0), got = HB.pieces.reduce((a, p) => a + p.s1 - p.s0, 0);
+    const [hx, hz] = xz(37.830207, -122.498459), q = RI.rails[RI.match(hx, hz, Math.sin(16 * Math.PI / 180), -Math.cos(16 * Math.PI / 180))], t = q.T.at(hx, hz), r = (16 + 90) * Math.PI / 180;
+    const ex = hx + Math.sin(r) * (q.half + 0.3), ez = hz - Math.cos(r) * (q.half + 0.3), lx = hx - Math.sin(r) * (q.half + 0.3), lz = hz + Math.cos(r) * (q.half + 0.3);
+    out.hand = { n: BARRIERS.length, pieces: HB.pieces.length, want: r3(want), got: r3(got), surveyed: HB.surveyed.size, right: HB.at(ex, ez, q.half, hx, hz), left: HB.at(lx, lz, q.half, hx, hz), t: r3(t.d) }; }
   // every portal: the road going on from it meets the bore at its floor's height and heads into its opening (within
   // 35 degrees of the bore's line at the portal: not past its side)
   { const res = [];

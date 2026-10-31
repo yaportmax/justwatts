@@ -24,7 +24,8 @@ export function cellBushes(ci, cj, cls) {
 }
 
 // geos: { brush, brushLo, sage, sageLo } (props.js scrubGeometries); mat: propMaterial({ fade }) with fade = { centre,
-// radius }; cls(x, z): the cover's class; ground(x, z) -> { h, skip } | null (null: not loaded yet, tried again later)
+// radius }; cls(x, z): the cover's class; ground(x, z, scale) -> { h, skip } | null (null: not loaded yet, tried again
+// later; scale: the bush's widest scale, for its clearance)
 export function createScrub({ THREE, scene, geos, mat, fade, cls, ground }) {
   const cells = new Map(), pend = new Map();
   let R = 150, NEAR = 45, gen = 0, dirty = true, at = [1e9, 1e9], cast = 0, merged = 0;
@@ -42,7 +43,7 @@ export function createScrub({ THREE, scene, geos, mat, fade, cls, ground }) {
     const list = cellBushes(ci, cj, cls), out = [];
     for (let k = 0; k < list.length; k++) {
       if ((k & 63) === 63) yield;
-      const [x, z, sc, turn, sage, t, st] = list[k], g = ground(x, z);
+      const [x, z, sc, turn, sage, t, st] = list[k], g = ground(x, z, sc * Math.max(st, 1 / Math.sqrt(st)));
       if (g === null) return null;  // the ground is not there yet
       if (g.skip) continue;
       out.push([x, g.h - 0.15 * sc, z, sc, turn, sage, t, st]);

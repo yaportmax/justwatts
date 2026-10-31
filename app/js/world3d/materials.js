@@ -113,8 +113,17 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22) * (1.0 - jwScrub * 0.8)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
   c = mix(c, rockC, rk);
-  float bare = smoothstep(0.45, 0.95, cut + (fine - 0.5) * 0.6) * smoothstep(mix(0.2, 0.07, hl), mix(0.5, 0.28, hl), slope + (small - 0.5) * 0.2) * mix(0.65, 0.92, hl) * mix(1.0, smoothstep(0.1, 0.3, slope) * mix(0.75, 1.0, smoothstep(0.1, 0.5, vg.b)), jwKnown);  // the Headlands' road cuts bare even where the grid softens them (where the imagery says what grows there: the steep cuts mostly, fully where it shows bare earth)
-  c = mix(c, mix(srgb(vec3(0.55, 0.45, 0.33)), mix(srgb(vec3(0.50, 0.39, 0.34)), srgb(vec3(0.59, 0.45, 0.38)), smoothstep(0.3, 0.7, small)), hl) * (0.85 + 0.3 * fine), bare);  // the Headlands' road cuts: red chert, weathered (USDA NAIP's bare red earth, about #8e7a70)
+  // the road cuts (the banks' steep faces, the grid's carved ground): the ground's own cover on them where they are not
+  // steep (Street View: Conzelman's and Bunker's cuts mostly grass and scrub to the road), bare where steep or where the
+  // imagery shows bare earth. Bare: red-brown earth and chert in soft bedding bands, low contrast, two scales of world
+  // space noise sheared by height (a face varies up it as along it; no tiling at riding distance). Colours: Street View
+  // (Conzelman Road 0a_1030, 2025-03, a bare face's 15th to 85th percentile, sRGB #3c2c1a to #8f6d50, median #675037)
+  float bare = cut * max(smoothstep(0.42, 0.66, slope + (mid - 0.5) * 0.3), smoothstep(0.3, 0.7, vg.b) * known);
+  { vec2 q = p + vec2(h * 0.8, h * 0.6); float b1 = jwN(q / 11.0 + 0.4).r, b2 = jwN(q / 3.7 + 0.9).g;
+    float bed = 0.5 + 0.5 * sin(h * 3.0 + (b1 - 0.5) * 6.0);
+    vec3 earth = mix(srgb(vec3(0.40, 0.31, 0.22)), srgb(vec3(0.54, 0.42, 0.31)), smoothstep(0.25, 0.75, b1 * 0.6 + b2 * 0.4));
+    earth = mix(earth, srgb(vec3(0.47, 0.44, 0.38)), smoothstep(0.62, 0.8, b1) * 0.45);  // chert, grey
+    c = mix(c, earth * (0.95 + 0.1 * bed), bare); }
   rk = max(rk, bare); jwPav = smoothstep(0.25, 0.65, pav) * known;
   // under the redwoods: red-brown needle litter, patches of sorrel
   float rw = 0.0;
@@ -169,15 +178,15 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         float near = 1.0 - smoothstep(40.0, 260.0, dist);
         float f1 = jwN(vW.xz / 9.0).r, f2 = jwN(mat2(0.8, 0.6, -0.6, 0.8) * vW.xz / 2.3).g;
         c *= 1.0 + near * ((f1 - 0.5) * 0.16 + (f2 - 0.5) * 0.1 * (1.0 - rk * 0.5));
-        float hb = (f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * jwN(vW.xz / 1.1).b * 0.6 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
+        float hb = (f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * jwN((vW.xz + vW.y * vec2(0.8, 0.6)) / 3.5).b * 0.25 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
         vec3 dpx = dFdx(vW), dpy = dFdy(vW); float dhx = dFdx(hb), dhy = dFdy(hb);
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
-        vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.55 + rk) * near;
+        vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.55 + rk * 0.25) * near;
         if (abs(det) > 1e-9 && dot(bumpV, bumpV) > 1e-18) nW = normalize(bumpV);  // never a NaN (bloom would smear it)` : ''}
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-5' + (detail ? 'd' : '') + (bores ? 'b' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-6' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 

@@ -311,16 +311,22 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
 
 /* ---------- road sides (banks.js) ---------- */
 // a straight road east along z = 0 at height 10, 6 m wide (its right edge z = +3): the ground falling away on the right
-// (2 m under the edge, then 1 in 3), a cut bank rising at 3 in 2 on the left
+// (2 m under the edge, then 1 in 3); on the left the lidar's bank rising at 3 in 2, the drawn ground carved level to the
+// road for 2.5 m and back onto the lidar by 7 m out
 {
   const C = []; for (let x = 0; x <= 40; x += 5) C.push([x, 10, 0, 3, x, 10, 3, x, 10, -3]);
-  const ground = (x, z) => z > 3 ? 8 - (z - 3) / 3 : z < -3 ? 10 + (-3 - z) * 1.5 : 10, raw = ground;
-  const R = ribbonEdge(C, 1), Lf = ribbonEdge(C, -1), kr = sideKinds(R, ground, raw), kl = sideKinds(Lf, ground, raw), br = bands(R[4], kr[4], ground), bl = bands(Lf[4], kl[4], ground);
-  const geo = bankGeometry(sideRuns(R, kr, ground).concat(sideRuns(Lf, kl, ground)));
+  const rawL = o => 10 + o * 1.5, carved = o => o < 2.5 ? 10 : o < 7 ? 10 + (rawL(o) - 10) * (o - 2.5) / 4.5 : rawL(o);
+  const ground = (x, z) => z > 3 ? 8 - (z - 3) / 3 : z < -3 ? carved(-3 - z) : 10, raw = (x, z) => z < -3 ? rawL(-3 - z) : ground(x, z);
+  const R = ribbonEdge(C, 1), Lf = ribbonEdge(C, -1), kr = sideKinds(R, ground, raw), kl = sideKinds(Lf, ground, raw), br = bands(R[4], kr[4], ground, { raw }), bl = bands(Lf[4], kl[4], ground, { raw });
+  const runs = sideRuns(R, kr, ground, { raw }).concat(sideRuns(Lf, kl, ground, { raw })), geo = bankGeometry(runs);
   let up = 0; for (let k = 0; k < geo.idx.length; k += 3) { const [a, b, c] = [geo.idx[k], geo.idx[k + 1], geo.idx[k + 2]].map(v => geo.pos.slice(3 * v, 3 * v + 3)), ux = b[0] - a[0], uz = b[2] - a[2], vx = c[0] - a[0], vz = c[2] - a[2]; if (uz * vx - ux * vz > 0) up++; }
+  // every strip point on or over the ground, and over the edge's height never over the lidar's (or the drawn) ground by more than 3 cm
+  let under = 0, over = 0; for (let i = 0; i < geo.pos.length; i += 3) { const x = geo.pos[i], y = geo.pos[i + 1], z = geo.pos[i + 2]; if (Math.abs(z) <= 3.001) continue; const g = ground(x, z); if (y < g - 0.001) under++; if (y > 10 && y > Math.max(g, raw(x, z)) + 0.031) over++; }
+  // a side with the ground at the edge: no strip; one with another road 3 m out: it ends short of it
+  const level = bands(R[4], { kind: 0 }, () => 9.97, { raw: () => 9.97 }), blocked = bands(Lf[4], kl[4], ground, { raw, block: (x, z) => z < -6 });
   const rl = railLine(R, 0, R.length - 1), railed = sideKinds(R, (x, z) => 10, raw, () => true);
   out.banks = { normals: [R[0][3], R[0][4], Lf[0][3], Lf[0][4]], right: kr.map(k => k.kind), left: kl.map(k => k.kind), cutH: r3(kl[4].h),
-    fill: br.map(b => b.map(r3)), cut: bl.map(b => b.map(r3)), tris: geo.idx.length / 3, up, cutVerts: geo.cut.filter(c => c === 1).length,
+    fill: br.map(b => b.map(r3)), cut: bl.map(b => b.map(r3)), tris: geo.idx.length / 3, up, under, over, runs: runs.length, level, blockedTo: r3(blocked.at(-1)[2]),
     rail: { pts: rl.pts.length, z: r3(rl.pts[3][2]), posts: rl.posts.length, gap: r3(Math.hypot(rl.posts[1][0] - rl.posts[0][0], rl.posts[1][2] - rl.posts[0][2])), yaw: r3(rl.posts[0][3]) }, railed: railed[2] };
 }
 /* ---------- roads over tunnels ---------- */

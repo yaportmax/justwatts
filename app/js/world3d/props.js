@@ -147,7 +147,9 @@ const bark = (g, c, m = null, shade = null) => [g, c, m, { cell: LEAF.bark, shad
 const leaves = (g, c, soft = null) => [g, c, null, { card: true, soft }];
 // the dense heart of a crown: an opaque lumpy blob under the cards (a cone round a conifer's trunk), darker, so a crown
 // never shows the sky through its middle
-const core = (cx, cy, cz, rx, ry, rz, c, seed) => [bumpy(new THREE.IcosahedronGeometry(1, 1), 0.3, seed), c.map(v => v * 0.5), M(cx, cy, cz, rx, ry, rz, seed), { soft: [cx, cy, cz], shade: [cy - ry, cy + ry] }];
+// (a crown's solid core: a little inside its leaves and not much darker than them, its facets never showing as black
+// spikes through the cards)
+const core = (cx, cy, cz, rx, ry, rz, c, seed) => [bumpy(new THREE.IcosahedronGeometry(1, 1), 0.2, seed), c.map(v => v * 0.68), M(cx, cy, cz, rx * 0.85, ry * 0.85, rz * 0.85, seed), { soft: [cx, cy, cz], shade: [cy - ry, cy + ry] }];
 const cone = (y0, y1, r, c, seed) => [bumpy(new THREE.ConeGeometry(r, y1 - y0, 8, 6), r * 0.3, seed), c.map(v => v * 0.45), M(0, (y0 + y1) / 2, 0), { soft: [0, (y0 + y1) / 2, 0], shade: [y0, y1] }];
 
 // trees at a typical size in metres (scaled per instance). Names: oak, bay, fir, redwood, euc, cypress, pine (trees),
@@ -207,12 +209,12 @@ export function scrubGeometries() {
   // (Street View: coyote brush a grey olive, the sage paler and greyer still; USDA NAIP's scrub about #6b7354)
   const brush = col(0x667352, 1.3), sage = col(0x8f977c, 1.3);
   return {
-    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.55), M(0, 0.5, 0, 1.15, 0.45, 1.05), { soft: [0, 0.5, 0], shade: [0.3, 1.0] }], ...lumps(0, 0.62, 0, 1.6, 0.62, 1.5, 5, 12, 0.85, LEAF.scrub, 21, { lift: 0.45, lump: 0.7, out: 0.8 }).map(g => leaves(g, brush))]),
-    brushLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.25, 23), brush.map(v => v * 0.72), M(0, 0.55, 0, 1.5, 0.6, 1.4), { soft: [0, 0.55, 0], shade: [0.3, 1.2] }],
-      ...lumps(0, 0.66, 0, 1.6, 0.62, 1.5, 3, 6, 1.35, LEAF.scrub, 21, { lift: 0.45, lump: 0.7 }).map(g => leaves(g, brush))]),
-    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.6), M(0, 0.38, 0, 0.95, 0.33, 0.88), { soft: [0, 0.38, 0], shade: [0.3, 0.8] }], ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 4, 12, 0.8, LEAF.scrub, 25, { lift: 0.65, lump: 0.7, out: 0.8 }).map(g => leaves(g, sage))]),
-    sageLo: merge([[bumpy(new THREE.IcosahedronGeometry(1, 0), 0.2, 27), sage.map(v => v * 0.72), M(0, 0.42, 0, 1.25, 0.47, 1.15), { soft: [0, 0.42, 0], shade: [0.3, 0.95] }],
-      ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 3, 5, 1.2, LEAF.scrub, 25, { lift: 0.65, lump: 0.7 }).map(g => leaves(g, sage))]),
+    // (no solid core past a small dark one deep inside: a smooth mound read as a pillow from any distance; the bush is
+    // its leaf clumps, rough and open at the edge, Street View's coyote brush and sage)
+    brush: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.45, 23), brush.map(v => v * 0.5), M(0, 0.45, 0, 0.7, 0.3, 0.65), { soft: [0, 0.5, 0], shade: [0.3, 1.0] }], ...lumps(0, 0.62, 0, 1.6, 0.62, 1.5, 7, 12, 0.8, LEAF.scrub, 21, { lift: 0.45, lump: 0.7, out: 0.8 }).map(g => leaves(g, brush))]),
+    brushLo: merge(lumps(0, 0.66, 0, 1.6, 0.62, 1.5, 5, 7, 1.15, LEAF.scrub, 21, { lift: 0.45, lump: 0.7 }).map(g => leaves(g, brush))),
+    sage: merge([[bumpy(new THREE.IcosahedronGeometry(1, 1), 0.4, 27), sage.map(v => v * 0.55), M(0, 0.32, 0, 0.6, 0.22, 0.55), { soft: [0, 0.38, 0], shade: [0.3, 0.8] }], ...lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 6, 12, 0.75, LEAF.scrub, 25, { lift: 0.65, lump: 0.7, out: 0.8 }).map(g => leaves(g, sage))]),
+    sageLo: merge(lumps(0, 0.45, 0, 1.35, 0.48, 1.25, 4, 7, 1.05, LEAF.scrub, 25, { lift: 0.65, lump: 0.7 }).map(g => leaves(g, sage))),
   };
 }
 

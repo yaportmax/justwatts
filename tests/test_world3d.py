@@ -238,14 +238,19 @@ def test_rider_stands_on_steep_climbs_and_tucks_descending(out):
 def test_road_sides_embankments_cuts_and_rails(out):
     b = out["banks"]
     assert b["normals"] == [0, 1, 0, -1]                                          # each side's normal points away from the road
-    assert set(b["right"]) == {2} and set(b["left"]) == {1}                       # the ground under the edge: a fill; rising 3 in 2: a cut
+    assert set(b["right"]) == {2} and set(b["left"]) == {1}                       # the ground under the edge: a fill; the lidar rising 3 in 2: a cut
     f = b["fill"]
-    assert f[0][1] == pytest.approx(9.97) and f[1][2] == pytest.approx(6.15)      # from the edge down at 1 in 1.5 to the ground (1 in 3)
-    assert f[1][3] == pytest.approx(5.9, abs=0.02)                                # its toe on the ground 6 m out
+    assert f[0][0] == 0 and f[0][1] == pytest.approx(9.97)                        # from just under the paved edge
+    assert 5.5 <= f[-1][2] <= 7 and f[-1][3] == pytest.approx(8 - f[-1][2] / 3, abs=0.01)  # down to the ground (1 in 3), its end on it
+    assert all(q[1] - q[3] <= (q[2] - q[0]) / 1.2 for q in f)                    # 1 in 1.5 down (its toe onto the ground a little steeper)
     c = b["cut"]
-    assert b["cutH"] == pytest.approx(6.75) and c[1][3] == pytest.approx(16.75)   # a face to the lidar's bank, 4.5 m out
-    assert c[1][2] - c[1][0] == pytest.approx(0.4 * 6.75) and c[1][4] == 1        # at 68 degrees, bare (a cut face); its verge not
-    assert c[0][4] == 0 and b["tris"] == b["up"] == 112                           # every face toward the sky (or out over the road)
+    assert b["cutH"] == pytest.approx(6.75)
+    assert 7 <= c[-1][2] <= 7.5 and c[-1][3] == pytest.approx(10 + 1.5 * c[-1][2])  # up the lidar's bank to where the carved ground meets it
+    assert all(q[2] > q[0] for q in c) and any(q[4] == 1 for q in c)              # never leaning toward the road; a steep face (cut)
+    assert all(q[3] - q[1] <= 2.5 * (q[2] - q[0]) + 0.01 for q in c)              # at 68 degrees at most
+    assert b["under"] == 0 and b["over"] == 0                                     # on or over the ground, never over the lidar
+    assert b["tris"] == b["up"] > 0 and b["runs"] == 2                            # every face toward the sky; one strip a side
+    assert b["level"] is None and b["blockedTo"] <= 3                             # the ground at the edge: no strip; short of another road
     r = b["rail"]
     assert r["z"] == pytest.approx(3.45) and r["gap"] == pytest.approx(1.9)       # a rail's posts 0.45 m past the edge, 1.9 m apart
     assert r["posts"] == 21 and r["yaw"] == pytest.approx(1.571, abs=0.01)        # by arc length; each post's front toward the road

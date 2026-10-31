@@ -58,7 +58,8 @@ export const isTrail = r => !(r.fl & 1) && (roadStyle(r.hw, r.ln, r.fl, r.wd).su
 export const railLift = r => r.fl & 16 || /cycleway|pedestrian|footway|path/.test(r.hw) ? 0.05 : isTrail(r) ? 0.15 : roadLift(r.hw);  // (a path under every road where they cross; on the bridge's sidewalks as on its deck, marin.js)  // (the Golden Gate Bridge's: as on its deck, marin.js)
 // where a cyclist rides, in metres right of the rail as they go (fwd: along the way as it runs): in the middle of the
 // bike lane on their right if there is one, else about a metre in from the right edge of their travel lane (from the
-// paved edge, or the parking lane's inner side); on a path its middle
+// paved edge, or the parking lane's inner side); on a path its middle; on the Golden Gate Bridge's sidewalks keep right
+// (C:/Dev/justwatts-private/streetview/where_riders_ride.md)
 export const BIKE_LANE = 1.8;
 // a one-lane bore both ways in turn (the Baker-Barry tunnel: one lane, signals at both ends, NPS and Street View;
 // OpenStreetMap's lanes=1): its lane's width, the rider 1.4 m right of its line; the road narrows to it over the last
@@ -67,6 +68,8 @@ export const ONE_LANE = 4.4, ONE_OFF = 1.4;
 export const oneLane = r => !!(r.fl & 2) && r.ln === 1 && !(r.fl & 8);
 export function laneOf(r, fwd = true) {
   const st = roadStyle(r.hw, r.ln, r.fl, r.wd), half = st.w / 2, park = fwd ? st.pR : st.pL, bike = r.fl & (fwd ? 64 : 32);
+  // (the Golden Gate Bridge's sidewalks, two way for bikes: keep right, the middle of its right half; goldengate.org)
+  if (r.fl & 16 && /cycleway|footway|path|pedestrian/.test(r.hw)) return half / 2;
   if (isTrail(r) || /cycleway|pedestrian/.test(r.hw) || half < 2) return 0;
   if (oneLane(r)) return ONE_OFF;
   return Math.max(0, Math.min(6.5, bike ? half - park - BIKE_LANE / 2 : half - park - 1));
@@ -218,7 +221,17 @@ export function handBarriers(idx, list, survey, xz) {
       for (const p of P) if (t.s >= p.s0 && t.s <= p.s1 && Math.sign(t.d) === p.sd && !out.includes(p.kind)) out.push(p.kind); }
     return out;
   }
+  // the kinds whose stretch covers a point on a road's paved width (its rail's |d| within half and 0.5 m), each [kind,
+  // side]: side +1 the right of the way (tx, tz) runs there, -1 its left (the lane markings, handlist.js MARKINGS)
+  const hint = new Map();
+  function across(x, z, tx, tz) {
+    const out = [];
+    for (const id of idx.near(x, z)) { const P = byId.get(id); if (!P) continue; const q = idx.rails[id], t = q.T.at(x, z, hint.get(id) ?? -1); if (!t) continue; hint.set(id, t.k); if (Math.abs(t.d) > q.half + 0.5) continue;
+      const a = q.T.P[t.k], b = q.T.P[t.k + 1], rel = (b[0] - a[0]) * tx + (b[1] - a[1]) * tz < 0 ? -1 : 1;
+      for (const p of P) if (t.s >= p.s0 && t.s <= p.s1) out.push([p.kind, p.sd * rel]); }
+    return out;
+  }
   // a point on a surveyed road (within its paved width and 8 m beyond)
   const onSurveyed = (x, z) => { for (const id of idx.near(x, z)) if (surveyed.has(id)) { const t = idx.rails[id].T.at(x, z); if (t && Math.abs(t.d) < idx.rails[id].half + 8) return true; } return false; };
-  return { pieces, surveyed, at, onSurveyed };
+  return { pieces, surveyed, at, across, onSurveyed };
 }

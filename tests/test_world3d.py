@@ -66,8 +66,9 @@ def test_road_ribbon_geometry(out):
     assert s["primary/4/0"]["w"] == pytest.approx(16) and s["primary/4/0"]["lanes"] == 4
     assert s["trunk/2/8"]["lm"] == 3 and s["motorway/4/8"]["lanes"] == 4                    # oneways: lane lines, a yellow left edge
     c = s["unclassified/1/4392"]                                                            # lower Conzelman: one lane down, parking on
-    assert c["lm"] == 4 and c["w"] == pytest.approx(8.7) and c["a"] == pytest.approx(2.8) and c["b"] == pytest.approx(2.3)  # the right, a bike lane up on the left
-                                                                                            # (and the double yellow's 0.5 m): 8.7 m, Street View 8.5
+    assert c["lm"] == 4 and c["w"] == pytest.approx(9.1) and c["a"] == pytest.approx(2.8) and c["b"] == pytest.approx(2.7)  # the right, a bike lane up on the left
+                                                                                            # (and its buffer's 0.9 m): 9.1 m, NAIP 8.5 (the
+                                                                                            # travel lane there nearer 3 m than 3.6)
     b = s["unclassified/2/96"]                                                              # Bunker Road: a bike lane each side
     assert b["lm"] == 2 and b["w"] == pytest.approx(10.8) and b["a"] == b["b"] == pytest.approx(1.8)
     assert s["tertiary/0/0/9"]["w"] == 9                                                    # a tagged width wins
@@ -276,7 +277,7 @@ def test_rail_pieces(out):
     assert b["at"] == [0.5, 2, 5, -2]                                                    # height, signed offset (+ right), metres along
     assert b["lanes"]["bunker"] == [4.5, 4.5]                                            # Bunker Road: in the bike lane either way
     assert b["lanes"]["plain"] == 3 and b["lanes"]["path"] == 0                          # no bike lane: a metre in from the edge; a path: its middle
-    assert b["lanes"]["conzUp"] == 3.45 and b["lanes"]["conzDown"] == 0.55              # lower Conzelman: up in the bike lane against the
+    assert b["lanes"]["conzUp"] == 3.65 and b["lanes"]["conzDown"] == 0.75              # lower Conzelman: up in the bike lane against the
                                                                                          # oneway, down a metre left of the parking lane
 
 
@@ -341,3 +342,23 @@ def test_roads_go_through_the_portals(out):
     assert len(p) >= 6                                                                    # the underpasses' and the tunnel's portals
     for x in p:
         assert x["dh"] < 0.05 and x["ang"] < 35, x                                         # at the floor's height, into the opening
+
+
+def test_riders_where_cyclists_ride(out):
+    t = out["riderTable"]
+    assert not t["bad"], t["bad"]                                                       # every road as where_riders_ride.md has it
+    c = t["by"]["Conzelman Road"]
+    assert c["up"] > 300 and c["upBike"] == c["up"], c                                    # uphill against the oneway: in the buffered lane
+    assert t["by"]["Golden Gate Bridge East Sidewalk"]["n"] > 100                       # the bridge's sidewalk: keep right
+    for road in ("East Road", "Bunker Road"):
+        b = t["by"][road]
+        assert b["bike"] > 0.8 * b["n"], (road, b)                                      # in the bike lane (Bunker Road's shoulders)
+
+
+def test_lane_markings_from_the_hand_list(out):
+    m = out["marks"]
+    assert m["pieces"] >= m["n"] and abs(m["got"] - m["want"]) < 0.02 * m["want"], m  # every listed stretch on its road, as long
+    assert "dash" in m["bunkerDash"] and "white2" in m["cronkhite"], m                   # Bunker Road: the passing zone, Fort Cronkhite
+    assert "passR" in m["bunkerPass"] and "passL" in m["bunkerPassBack"], m             # the broken line on the eastbound side
+    assert "hatch" in m["conzTop"] and "stallsR" in m["conzTop"] and "ladder" in m["conzMid"], m  # upper Conzelman Road
+    assert "words" in m["center"] and m["hawk"] == [], m                                # Center Road's BIKE LANE; none at Hawk Hill

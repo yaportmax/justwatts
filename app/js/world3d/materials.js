@@ -237,6 +237,25 @@ float jwBike(vec2 q, float aa) {
   d = min(d, min(jwSeg(q, vec2(0.25, 2.15), vec2(0.0, 1.8)), jwSeg(q, vec2(0.25, 2.15), vec2(0.5, 1.8))));
   return 1.0 - smoothstep(0.045, 0.045 + aa / 0.75, d);
 }
+// BIKE LANE in words (Center Road at Fort Baker, Street View; MUTCD 9C.04): q in metres, x across the lane to the
+// reader's right from its middle, y along from the legend's near end; letters 1.8 m long, 0.36 m wide, strokes 0.1 m,
+// BIKE nearest, LANE 1.2 m beyond it
+#define JW_SG(ax, ay, bx, by) d = min(d, jwSeg(pm, vec2(ax, ay) * S, vec2(bx, by) * S))
+float jwWords(vec2 q, float aa) {
+  float cw = 0.36, gp = 0.06, h = 1.8, tot = 4.0 * cw + 3.0 * gp, y = q.y < h + 0.6 ? q.y : q.y - h - 1.2;
+  if (y < -0.1 || y > h + 0.1 || abs(q.x) > tot * 0.5 + 0.1 || q.y > 2.0 * h + 1.3) return 0.0;
+  float x = q.x + tot * 0.5; int i = int(clamp(floor(x / (cw + gp)), 0.0, 3.0)), ch = (q.y < h + 0.6 ? 0 : 4) + i;
+  vec2 S = vec2(cw, h), pm = vec2(x - float(i) * (cw + gp), y); float d = 1e3;
+  if (ch == 0) { JW_SG(0., 0., 0., 1.); JW_SG(0., 1., .75, 1.); JW_SG(.75, 1., 1., .85); JW_SG(1., .85, 1., .62); JW_SG(1., .62, .75, .5); JW_SG(0., .5, .75, .5);
+    JW_SG(.75, .5, 1., .38); JW_SG(1., .38, 1., .15); JW_SG(1., .15, .75, 0.); JW_SG(.75, 0., 0., 0.); }
+  else if (ch == 1) { JW_SG(.5, 0., .5, 1.); JW_SG(.15, 0., .85, 0.); JW_SG(.15, 1., .85, 1.); }
+  else if (ch == 2) { JW_SG(0., 0., 0., 1.); JW_SG(0., .42, 1., 1.); JW_SG(.32, .6, 1., 0.); }
+  else if (ch == 3 || ch == 7) { JW_SG(0., 0., 0., 1.); JW_SG(0., 1., 1., 1.); JW_SG(0., .5, .8, .5); JW_SG(0., 0., 1., 0.); }
+  else if (ch == 4) { JW_SG(0., 0., 0., 1.); JW_SG(0., 0., 1., 0.); }
+  else if (ch == 5) { JW_SG(0., 0., .5, 1.); JW_SG(.5, 1., 1., 0.); JW_SG(.22, .4, .78, .4); }
+  else { JW_SG(0., 0., 0., 1.); JW_SG(0., 1., 1., 0.); JW_SG(1., 0., 1., 1.); }
+  return 1.0 - smoothstep(0.05, 0.05 + aa, d);
+}
 `;
 export function roadMaterial() {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
@@ -244,10 +263,10 @@ export function roadMaterial() {
   m.onBeforeCompile = sh => {
     sh.uniforms.tNoise = { value: T.noise };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec4 rd2;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec4 rd2;\nattribute vec4 rd3;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying vec2 vRuv;\nvarying vec3 vW;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vRd3 = rd3; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_BIKE)
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_BIKE)
       .replace('#include <color_fragment>', /* glsl */`
         float lm = floor(vRd.x + 0.5), surf = floor(vRd.y + 0.5), lanes = floor(vRd.z + 0.5), W = vRd.w;
         float along = vRuv.y, x = vRuv.x - W * 0.5, ax = abs(x);
@@ -274,19 +293,35 @@ export function roadMaterial() {
         // parking outside them (their lines solid white), 12 cm lines; yellow: the double centre line, a oneway's left edge
         float aa = max(fwidth(x) * 0.8, 0.02), line = 0.0, yel = 0.0, wear = 0.75 + 0.25 * smoothstep(0.2, 0.6, n2);
         float r = x + W * 0.5, ta = vRd2.x, tb = W - vRd2.y, ln1 = 0.0;
+        // the hand list's markings (ribbon.js markCode): mc the centre line, mb bits
+        int mc = int(vRd3.x + 0.5), mb = int(vRd3.y + 0.5); bool noEdge = (mb & 1) != 0;
         #define LN(at, hw) (1.0 - smoothstep(hw, hw + aa, abs(r - (at))))
         if (lm >= 1.0) {
           float rr = ta > 0.5 ? ta : 0.3, ll = W - (vRd2.y > 0.5 ? vRd2.y : 0.3);
-          line = max(line, LN(rr, 0.06));
+          if (!noEdge || ta > 0.5) line = max(line, LN(rr, 0.06));
           if (vRd2.w > 0.5 && ta - vRd2.w > 0.5) line = max(line, LN(vRd2.w, 0.06));                 // parking, then a bike lane
           if (vRd2.z > 0.5 && vRd2.y - vRd2.z > 0.5) line = max(line, LN(W - vRd2.z, 0.06));
-          if (lm == 4.0) yel = max(yel, max(LN(ll + 0.14, 0.05), LN(ll + 0.36, 0.05)));              // against a contraflow bike lane (in its 0.5 m)
-          else if (lm == 3.0) yel = max(yel, LN(ll, 0.06));                                          // a oneway's left edge
-          else line = max(line, LN(ll, 0.06));
+          if (lm == 4.0) {
+            // the buffer against a contraflow bike lane (YB, ribbon.js: 0.9 m): a yellow line at each side, ticks across it
+            // every 6 m, or cross hatched
+            yel = max(yel, max(LN(ll + 0.08, 0.05), LN(ll + 0.82, 0.05)));
+            float inb = step(ll + 0.08, r) * step(r, ll + 0.82);
+            if ((mb & 8) != 0) { float tk = fract(along / 6.0) * 6.0; yel = max(yel, inb * (1.0 - smoothstep(0.08, 0.08 + aa * 2.0, min(tk, 6.0 - tk)))); }
+            if ((mb & 16) != 0) { float dg = fract((along + (r - ll) * 1.5) / 2.0) * 2.0; yel = max(yel, inb * (1.0 - smoothstep(0.1, 0.1 + aa * 2.0, min(dg, 2.0 - dg)))); }
+          }
+          else if (lm == 3.0) { if (mc != 1) yel = max(yel, LN(ll, 0.06)); }                       // a oneway's left edge
+          else if (!noEdge || vRd2.y > 0.5) line = max(line, LN(ll, 0.06));
         }
         if (lm == 2.0) {
           float mid = (ta + tb) * 0.5, per = max(1.0, floor(lanes * 0.5)), lw = (tb - ta) * 0.5 / per, dash = step(fract(along / 12.0), 0.3);
-          yel = max(yel, max(LN(mid - 0.11, 0.05), LN(mid + 0.11, 0.05)));
+          // the centre line: double yellow, or as the hand list has it (c1 the one of the pair nearer the right edge)
+          float c1 = LN(mid - 0.11, 0.05), c2 = LN(mid + 0.11, 0.05);
+          if (mc == 0) yel = max(yel, max(c1, c2));
+          else if (mc == 2) yel = max(yel, LN(mid, 0.05) * dash);
+          else if (mc == 3) yel = max(yel, max(c1 * dash, c2));
+          else if (mc == 4) yel = max(yel, max(c1, c2 * dash));
+          else if (mc == 5) line = max(line, max(c1, c2));
+          else if (mc == 6) { float dd = fract(along / 2.5) * 2.5 - 1.25; yel = max(yel, 1.0 - smoothstep(0.05, 0.05 + aa, length(vec2(abs(r - mid) - 0.11, dd)))); }
           for (int i = 1; i < 4; i++) { if (float(i) >= per) break; ln1 = max(ln1, max(LN(mid - lw * float(i), 0.06), LN(mid + lw * float(i), 0.06))); }
           line = max(line, ln1 * dash);
         }
@@ -297,24 +332,28 @@ export function roadMaterial() {
         }
         // a parking lane beside a lane with a bike lane against it (lower Conzelman, Street View): a buffer 0.9 m wide on
         // its inner side, a second line and bars across it every 6 m
-        if (lm == 4.0 && vRd2.w > 1.5) {
+        if (lm == 4.0 && vRd2.w > 1.5 && (mb & 32) == 0) {
           float b0 = vRd2.w - 0.9; line = max(line, LN(b0, 0.06));
           float hz = step(b0, r) * step(r, vRd2.w), dg = fract((along + (r - b0) * 0.8) / 6.0) * 6.0;
           line = max(line, hz * (1.0 - smoothstep(0.07, 0.07 + aa * 2.0, min(dg, 6.0 - dg))));
         }
         // the bike lanes' symbols every 150 m, each pointing the way its lane runs (the right one with the way, the left
         // one against it)
-        if (lm >= 1.0) {
-          float pr = vRd2.w, pl = vRd2.z, rl = W - pl;
-          if (ta - pr > 1.2 && r > pr && r < ta) line = max(line, jwBike(vec2(r - (pr + ta) * 0.5, mod(along, 150.0) - 75.0), aa));
-          if (rl - tb > 1.2 && r > tb && r < rl) line = max(line, jwBike(vec2((tb + rl) * 0.5 - r, 75.0 - mod(along + 40.0, 150.0)), aa));
+        // (none where the hand list says; BIKE LANE in words where it says so)
+        if (lm >= 1.0 && (mb & 2) == 0) {
+          float pr = vRd2.w, pl = vRd2.z, rl = W - pl; bool wd = (mb & 4) != 0;
+          if (ta - pr > 1.2 && r > pr && r < ta) line = max(line, wd ? jwWords(vec2((pr + ta) * 0.5 - r, mod(along, 150.0) - 75.0), aa) : jwBike(vec2(r - (pr + ta) * 0.5, mod(along, 150.0) - 75.0), aa));
+          if (rl - tb > 1.2 && r > tb && r < rl) line = max(line, wd ? jwWords(vec2(r - (tb + rl) * 0.5, 75.0 - mod(along + 40.0, 150.0)), aa) : jwBike(vec2((tb + rl) * 0.5 - r, 75.0 - mod(along + 40.0, 150.0)), aa));
         }
+        // stall ticks across a parking lane every 6.7 m (22 ft, a parallel stall), the hand list's
+        if ((mb & 32) != 0 && vRd2.w > 1.5 && r < vRd2.w) { float sl = fract(along / 6.7) * 6.7; line = max(line, 1.0 - smoothstep(0.06, 0.06 + aa * 2.0, min(sl, 6.7 - sl))); }
+        if ((mb & 64) != 0 && vRd2.z > 1.5 && r > W - vRd2.z) { float sl = fract(along / 6.7) * 6.7; line = max(line, 1.0 - smoothstep(0.06, 0.06 + aa * 2.0, min(sl, 6.7 - sl))); }
         float fade = wear * (1.0 - smoothstep(0.25, 0.6, aa));  // lines fade where they would shimmer
         c = mix(c, srgb(vec3(0.86, 0.68, 0.22)), yel * 0.92 * fade);
         c = mix(c, srgb(vec3(0.88, 0.88, 0.85)), line * 0.92 * fade);
         diffuseColor.rgb *= c;`);
   };
-  m.customProgramCacheKey = () => 'jw-road-6';
+  m.customProgramCacheKey = () => 'jw-road-7';
   return m;
 }
 

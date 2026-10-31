@@ -11,8 +11,10 @@ const STYLE = {
   cycleway: [3, 0, 1], path: [1.6, 0, 2], footway: [1.8, 0, 2], pedestrian: [3, 0, 1], bridleway: [1.8, 0, 2], track: [2.8, 0, 2],
 };
 // US widths (Street View and the aerial imagery: lower Conzelman's three parts about 8.5 m): a travel lane 3.6 m, a bike
-// lane 1.8 m, a parking lane 2.8 m; a double yellow between a lane and a bike lane against it stands in 0.5 m of its own
-const LANE_W = 3.6, BIKE_W = 1.8, PARK_W = 2.8, YB = 0.5;
+// lane 1.8 m, a parking lane 2.8 m; the buffer between a lane and a bike lane against it (upper Conzelman Road: two
+// yellow lines and ticks across, USDA NAIP and Street View about 0.9 m) stands in YB of its own
+const LANE_W = 3.6, BIKE_W = 1.8, PARK_W = 2.8;
+export const YB = 0.9;
 // Style of a way { hw, ln: lanes, fl: flags (landuse.js: 4 unpaved, 8 oneway, 32/64 a bike lane left/right, 128/256 a
 // parking lane left/right, 512 no lane markings, 4096 the left bike lane against the oneway), wd: its tagged width (m) }:
 // { w, lm, surf, lanes, a, b, pL, pR }. Across the road from its right edge (as the way runs): parking, bike lane, the
@@ -32,6 +34,19 @@ export function roadStyle(hw, ln = 0, fl = 0, wd = 0) {
   if (wd >= 3 && wd < 30 && lm) { const k = wd / w; w = wd; a *= k; b *= k; }  // the tagged width wins, the parts in proportion
   return { w, lm, surf, lanes, a, b, pL, pR };
 }
+// The hand list's lane markings (handlist.js MARKINGS) as the road shader reads them, per vertex [centre, bits]: centre
+// 0 as the style has it, 1 none, 2 a single broken yellow, 3 solid and broken with the broken line on the right (as the
+// ribbon runs), 4 on the left, 5 double white, 6 yellow raised markers; bits 1 no edge lines, 2 no bike symbols, 4 BIKE
+// LANE in words, 8 ticks across the contraflow buffer, 16 that buffer cross hatched, 32 / 64 stall ticks in the
+// right / left parking lane (no buffer before it)
+export function markCode(kinds) {
+  let c = 0, b = 0;
+  for (const [k, sd] of kinds) {
+    if (k === 'nocentre') c = 1; else if (k === 'dash') c = 2; else if (k === 'pass') c = sd > 0 ? 3 : 4; else if (k === 'white2') c = 5; else if (k === 'dots') c = 6;
+    else b |= { noedge: 1, nosym: 2, words: 4, ladder: 8, hatch: 16 }[k] || (k === 'stalls' ? (sd > 0 ? 32 : 64) : 0);
+  }
+  return [c, b];
+}
 // the order roads draw in where they overlap (bigger roads on top)
 export const roadLift = hw => 0.22 + 0.02 * Math.min(4, ['service', 'residential', 'unclassified', 'tertiary', 'secondary'].indexOf(hw) + 1 || (STYLE[hw]?.[0] > 9 ? 5 : 0));
 
@@ -47,18 +62,18 @@ export function resample(pts, step) {
 }
 
 // A growing geometry: positions, uvs (u across 0..1 from the right edge, v metres along), per vertex the road
-// [marking, surface, lanes, width] and its parts across [a, b, pL, pR] (roadStyle) the shader draws (marking -1: a
-// bridge's side). u is kept as metres from the right edge (u times the width): where the width changes along a road (a
+// [marking, surface, lanes, width], its parts across [a, b, pL, pR] (roadStyle) the shader draws (marking -1: a
+// bridge's side) and the hand list's markings there [centre, bits, 0, 0] (MARK). u is kept as metres from the right edge (u times the width): where the width changes along a road (a
 // taper) a quad is a trapezoid, and a fraction across it does not interpolate straight over its two triangles (the lines
 // zigzagged at each diagonal); metres from either edge do
 export function builder() {
-  const pos = [], uv = [], code = [], code2 = [], idx = [];
+  const pos = [], uv = [], code = [], code2 = [], code3 = [], idx = [];
   return {
     pos, uv, code, idx,
     get n() { return pos.length / 3; },
-    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u * c[3], w); code.push(c[0], c[1], c[2], c[3]); code2.push(c[4] || 0, c[5] || 0, c[6] || 0, c[7] || 0); return pos.length / 3 - 1; },
+    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u * c[3], w); code.push(c[0], c[1], c[2], c[3]); code2.push(c[4] || 0, c[5] || 0, c[6] || 0, c[7] || 0); code3.push(c[8] || 0, c[9] || 0, 0, 0); return pos.length / 3 - 1; },
     tri(a, b, c) { idx.push(a, b, c); },
-    done() { return { pos: new Float32Array(pos), uv: new Float32Array(uv), code: new Float32Array(code), code2: new Float32Array(code2), idx: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) }; },
+    done() { return { pos: new Float32Array(pos), uv: new Float32Array(uv), code: new Float32Array(code), code2: new Float32Array(code2), code3: new Float32Array(code3), idx: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) }; },
   };
 }
 
@@ -91,9 +106,10 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
 // another way's width (tapers); drape: the edges on the ground however steep it is across (a trail on a hillside).
 // Returns the centre line [[x, y, z, half width, right edge x, y, z, left edge x, y, z], ...] (for pillars, arrows, the
 // road sides: banks.js).
+// mk(x, z, tx, tz): the hand list's markings at a centre point, the way running (tx, tz): [centre, bits] (MARK).
 // rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
 // centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null }) {
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null, mk = null }) {
   let P = resample(pts, step);
   // (within a taper's reach of a joint a point every 1.5 m: the edges follow the width's curve, not a corner every step)
   if (joints?.length) { const by = q => joints.some(([x, z]) => Math.hypot(q[0] - x, q[1] - z) < TAPER + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 1.5).slice(1)); }
@@ -125,6 +141,7 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
       const cf = drape ? Infinity : Math.max(0.25, half * 0.07); hl = Math.max(hc - cf, Math.min(hc + cf, hl)); hr = Math.max(hc - cf, Math.min(hc + cf, hr));
     }
     last = hc;
+    if (mk) { const m = mk(c[0], c[1], tx, tz); code = code.slice(0, 8); code.push(m[0], m[1]); }
     B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);
     B.v(c[0] - nx, hr + lift, c[1] - nz, 1, v0 + L[i], code);
     centre.push([c[0], hc + lift, c[1], half, c[0] + nx, hl + lift, c[1] + nz, c[0] - nx, hr + lift, c[1] - nz]);

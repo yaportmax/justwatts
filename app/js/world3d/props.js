@@ -252,6 +252,8 @@ export function furnitureGeometries() {
     xlines: merge([-1.5, 1.5].map(z => [B(1, 0.012, 0.3, 0, 0, z), white])),
     // a flexible delineator post on the centre line: yellow, two white reflective bands
     delin: merge([[C(0.045, 0.04, 0.95, 8), col(0xd9b21c)], ...[0.72, 0.84].map(y => [new THREE.CylinderGeometry(0.047, 0.047, 0.06, 8).translate(0, y, 0), white])]),
+    // a white one (upper Conzelman Road's bike lane buffer, Street View), its two bands silver
+    wdelin: merge([[C(0.045, 0.04, 0.95, 8), white], ...[0.72, 0.84].map(y => [new THREE.CylinderGeometry(0.047, 0.047, 0.06, 8).translate(0, y, 0), col(0xa9adb0)])]),
     // a stop sign (MUTCD R1-1, 30 inches across its flats): a red octagon, a narrow white border, STOP in white letters
     // 10 inches high; its back grey
     stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [oct(0.412, 0.02, 0.01), white], [oct(0.392, 0.02, 0.03), red], [oct(0.412, 0.008, -0.004), grey], ...stopLetters().map(g => [g, white])]),

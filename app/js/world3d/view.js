@@ -7,10 +7,10 @@ import { makeProj, tileX, tileY, lonOf, latOf, key, unkey, headingOf, angDiff } 
 import { GRID, gridAt } from './baked.js';
 import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSteps, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from './terrain.js';
 import { ribbonEdge, sideKinds, sideRuns, bankGeometry, railLine } from './banks.js';
-import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers } from './ribbon.js';
+import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers } from './rail.js';
-import { BARRIERS, CURBS, SURVEY } from './handlist.js';
+import { BARRIERS, CURBS, SURVEY, MARKINGS } from './handlist.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -144,8 +144,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
 
   // the rails of every road the rides reach (rail.js): the rider's heights, read before any tile; a course's profile is
   // matched to them when both are here
-  let RI = null, HB = null;  // (HB: the hand list's barriers on the rails, rail.js handBarriers)
-  baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS), SURVEY, proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
+  let RI = null, HB = null, HM = null;  // (HB, HM: the hand list's barriers and lane markings on the rails, rail.js handBarriers)
+  baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS), SURVEY, proj.xz); HM = handBarriers(RI, MARKINGS, [], proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
   // a tunnel's rail at a point (its floor, baked), null off every tunnel's
   // the drawn top of the road at a point nearest the height e, of the rails it is on, not past one's end (rail.js top
   // counts a rail's end out to its half width past it: a bore's floor carried on level out of its portal)
@@ -365,7 +365,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // a trail lies on the hillside (each edge on the ground); the ground goes under it only where it would cover it
       const trail = !dk && (st.surf === 2 || /path|footway|track|bridleway|steps/.test(r.hw));
       const lift = rail ? railLift(r) : trail ? 0.15 : roadLift(r.hw), hint = new Map(), hOn = rail || dk || trail ? hAt : (x, z) => onto(x, z, hAt(x, z), lift, hint);
-      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail, step: minor ? 12 : trail ? 3 : 5, joints: t.joints.get(ri), drape: trail });
+      const mk = HM && !trail && st.lm ? (x, z, tx, tz) => markCode(HM.across(x, z, tx, tz)) : null;  // (the hand list's markings)
+      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail, step: minor ? 12 : trail ? 3 : 5, joints: t.joints.get(ri), drape: trail, mk });
       tops.push([i0, B.idx.length, trail]);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
       if (!minor && !st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk, lm: st.lm, b: st.b, park: !!(r.fl & 256), st });
@@ -450,7 +451,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (!B.n) return setPart(c, 'roads', null);
     const d = B.done(), geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); geo.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2));
-    geo.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); geo.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4)); geo.setIndex(new THREE.BufferAttribute(d.idx, 1)); geo.computeVertexNormals(); geo.computeBoundingSphere();
+    geo.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); geo.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4)); geo.setAttribute('rd3', new THREE.BufferAttribute(d.code3, 4)); geo.setIndex(new THREE.BufferAttribute(d.idx, 1)); geo.computeVertexNormals(); geo.computeBoundingSphere();
     const grp = new THREE.Group(), mesh = new THREE.Mesh(geo, mats.road); mesh.receiveShadow = c.lod === 0; grp.add(mesh);
     // the banks: the ground's own material and classes (the nearest grid point's), cut faces bare (cut bank class)
     if (bk.idx.length && c.mask) {
@@ -641,7 +642,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], stopbar: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
@@ -690,12 +691,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           else if (k === 3 && small && blk < 0.3) put('picket', x + nx * s * (half + 2.4), hAt(x + nx * s * (half + 2.4), z + nz * s * (half + 2.4)) ?? road, z + nz * s * (half + 2.4), Math.atan2(-dz, dx));
         }
       }
-      // yellow posts on the double yellow line beside a bike lane against a oneway with parking on its right (Conzelman
-      // Road by Battery Spencer, Street View), every 9 m
-      if (L.lm === 4 && L.park && !L.br) { let run2 = 4.5;
+      // flexible posts in the middle of the buffer beside a bike lane against a oneway (upper Conzelman Road), every 9 m:
+      // white or yellow where the hand list has them (handlist.js MARKINGS, Street View), none elsewhere
+      if (L.lm === 4 && !L.br && HM) { let run2 = 4.5;
         for (let i = 1; i < n; i++) {
-          run2 += Math.hypot(P[i][0] - P[i - 1][0], P[i][2] - P[i - 1][2]); if (run2 < 9) continue; run2 = 0;
-          const [dx, dz] = dir(i), o = hw(i) - (L.b - 0.25) * hw(i) * 2 / L.w; put('delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
+          run2 += Math.hypot(P[i][0] - P[i - 1][0], P[i][2] - P[i - 1][2]); if (run2 < 9) continue;
+          const [dx, dz] = dir(i), k = HM.across(P[i][0], P[i][2], dx, dz).find(([k]) => k === 'wposts' || k === 'yposts'); if (!k) continue; run2 = 0;
+          const o = hw(i) - (L.b - YB / 2) * hw(i) * 2 / L.w; put(k[0] === 'wposts' ? 'wdelin' : 'delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
         } }
     }
     // OpenStreetMap's power lines: a wooden pole with a crossarm at each node in the tile (across the line), two wires
@@ -1085,7 +1087,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         for (let k = 0; k < T.length; k += 9) if (T[k] > bx[0] - 12 && T[k] < bx[2] + 12 && T[k + 2] > bx[1] - 12 && T[k + 2] < bx[3] + 12) Tc.push(...T.slice(k, k + 9));
         groundUnder(c, Tc); yield; } }
     const d = B.done(), rg = new THREE.BufferGeometry();
-    rg.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); rg.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); rg.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); rg.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4));
+    rg.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); rg.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); rg.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); rg.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4)); rg.setAttribute('rd3', new THREE.BufferAttribute(d.code3, 4));
     rg.setIndex(new THREE.BufferAttribute(d.idx, 1)); rg.computeVertexNormals(); grp.add(new THREE.Mesh(rg, mats.road));
     if (pos.length) {
       const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); bg.setAttribute('tl', new THREE.Float32BufferAttribute(tl, 3)); bg.setIndex(idx); bg.computeVertexNormals();

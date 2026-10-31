@@ -21,7 +21,7 @@ import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js
 import { probeWebGL2, resetProbe, pickView } from '../../app/js/world3d/probe.js';
 import { RoadGraph, Plan, bridges, smoothFrom } from '../../app/js/roads.js';
 import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, smoothRail, isTrail, handBarriers } from '../../app/js/world3d/rail.js';
-import { BARRIERS, SURVEY } from '../../app/js/world3d/handlist.js';
+import { BARRIERS, SURVEY, MARKINGS } from '../../app/js/world3d/handlist.js';
 import { onDeck, toST, GGB } from '../../app/js/ggb.js';
 import { readdirSync } from 'node:fs';
 import { inWorld, BOUNDS } from '../../app/js/world.js';
@@ -490,6 +490,31 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     }
     const bn = bounce(rows); out.courses[key] = { pts: c.ll.length, jump: r3(jump), bounce: r3(bn), none, onRail, laneBad };
   }
+  // the rider's line against where_riders_ride.md (C:/Dev/justwatts-private/streetview), road by road, every start each
+  // way: bike the middle of the bike lane on their side, edge 0.5 to 1.5 m in from their travel lane's right edge, right
+  // right of a sidewalk's middle (keep right)
+  // (a bike lane, or a shoulder OpenStreetMap or the bake's patch tags as one, where the way has one on the rider's side:
+  // Conzelman Road's contraflow lane uphill, Bunker Road's shoulders, Alexander Avenue's northbound shoulder, the bike
+  // lanes of East Road, Center Road, Mitchell Road, Danes Drive and Bridgeway; else sharrows: near the right edge)
+  { const lane = (q, fw) => q.r.fl & (fw ? 64 : 32) ? 'bike' : 'edge';
+    const TABLE = [[/^(Conzelman Road|East Road|Center Road|Mitchell Road|Danes Drive|Bridgeway|Bunker Road|Alexander Avenue|McCullough Road|Field Road)$/, lane], [/Sidewalk/, 'right']];
+    const by = {}, bad = [];
+    for (const [name, la, lo, hd] of starts) for (const back of [0, 1]) {
+      const c = courseOf(la, lo, (hd + 180 * back) % 360); if (!c) continue; const P = c.ll.map(p => xz(...p)), pr = profileOf(RI, P, c.ele);
+      for (let i = 0; i < pr.ri.length; i++) {
+        const q = RI.rails[pr.ri[i]], row = q && TABLE.find(([re]) => re.test(c.nm[i] || '')); if (!row || RI.narrows.some(([x, z]) => Math.hypot(P[i][0] - x, P[i][1] - z) < 25)) continue;
+        const fw = pr.fw[i] > 0, want = typeof row[1] === 'function' ? row[1](q, fw) : row[1], st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd), half = st.w / 2, park = fw ? st.pR : st.pL, lane = pr.lane[i];
+        if (!(q.r.fl & 16) && (isTrail(q.r) || /cycleway|pedestrian/.test(q.r.hw) || half < 2)) continue;  // (a path the course's name runs onto: its middle)
+        const got = q.r.fl & 16 ? (lane > 0.3 ? 'right' : 'mid') : q.r.fl & (fw ? 64 : 32) && Math.abs(half - park - lane - 0.9) < 0.05 ? 'bike' : half - park - lane >= 0.5 && half - park - lane <= 1.5 ? 'edge' : 'off';
+        const b = by[c.nm[i]] ??= { n: 0, bad: 0, bike: 0, up: 0, upBike: 0 }; b.n++; if (got === 'bike') b.bike++; if (q.r.fl & 4096 && !fw) { b.up++; if (got === 'bike') b.upBike++; } if (got !== want) { b.bad++; if (bad.length < 12) bad.push([c.nm[i], name + (back ? 'Back' : ''), i, want, got, ...c.ll[i].map(v => +v.toFixed(5))]); }
+      }
+    }
+    out.riderTable = { by, bad }; }
+  // the hand list's lane markings (A6): every entry on a rail at its length; the kinds found where Street View has them
+  { const HM = handBarriers(RI, MARKINGS, [], xz), want = MARKINGS.reduce((a, e) => a + e[5] - e[4], 0), got = HM.pieces.reduce((a, p) => a + p.s1 - p.s0, 0);
+    const at = (la, lo, hd) => { const [x, z] = xz(la, lo), r = hd * Math.PI / 180; return HM.across(x, z, Math.sin(r), -Math.cos(r)).map(([k, sd]) => k === 'pass' || k === 'stalls' ? k + (sd > 0 ? 'R' : 'L') : k).sort(); };
+    out.marks = { n: MARKINGS.length, pieces: HM.pieces.length, want: r3(want), got: r3(got), bunkerDash: at(37.832461, -122.510236, 65), bunkerPass: at(37.833229, -122.508168, 65), bunkerPassBack: at(37.833229, -122.508168, 245),
+      cronkhite: at(37.833930, -122.533105, 122), conzTop: at(37.833236, -122.492124, 144), conzMid: at(37.832673, -122.489632, 66), center: at(37.834933, -122.477937, 206), hawk: at(37.826250, -122.499000, 250) }; }
   // both ways along one road: the rider on the other side of its centre, at the same height
   { const c = courseOf(37.83300, -122.48341, 190), P = c.ll.map(p => xz(...p)), fwd = ride(c), rev = ride({ ll: c.ll.slice().reverse(), ele: c.ele.slice().reverse() }), L = (P.length - 1) * 10;
     let dh = 0, sides = 0, n2 = 0;

@@ -165,3 +165,54 @@ export const SURVEY = [
   [37.83192, -122.53698, 101], [37.83172, -122.53587, 108], [37.83158, -122.53476, 83], [37.83171, -122.53363, 83],
   [37.83179, -122.53250, 85], [37.83188, -122.53136, 85],
 ];
+
+// MARKINGS: the lane markings that differ from what the roads' OpenStreetMap tags give (ribbon.js roadStyle), from the
+// same Street View survey and the sweep pairs (sources.md, A6). Each: [lat, lon, heading] a pano and the way it looks,
+// the side ('R' or 'L' as it looks; 'C' none), [from, to] metres along the road from it, the kind:
+//   nocentre  no centre line (nor a oneway's yellow left edge)
+//   noedge    no edge lines
+//   dash      a single broken yellow centre line (a passing zone both ways)
+//   pass      a solid and a broken yellow line, the broken one on the side given (that way may pass)
+//   white2    a double white centre line
+//   dots      no paint, yellow raised markers in pairs along the centre (Alexander Avenue in Sausalito)
+//   ladder    a contraflow bike lane's buffer (upper Conzelman Road) with transverse ticks between its two lines
+//   hatch     that buffer cross hatched
+//   stalls    a parking lane's stall ticks, no buffer before it (on the side given)
+//   wposts    white flexible posts on the contraflow buffer; yposts yellow ones
+//   nosym     no bike lane symbols (Bunker Road's shoulders: cycleway=lane in OpenStreetMap, never a symbol in Street View)
+//   words     BIKE LANE in words in the bike lanes, not the symbol (Center Road at Fort Baker)
+const each = (pts, side, from, to, ...kinds) => pts.flatMap(([la, lo, h]) => kinds.map(k => [la, lo, h, side, from, to, k]));
+export const MARKINGS = [
+  // Bunker Road: a double white line at Fort Cronkhite; a passing zone east of the Rodeo Valley crossing, single broken,
+  // then solid and broken (broken on the eastbound side); Fort Baker: no edge lines; never a bike symbol in Rodeo Valley
+  [37.833930, -122.533105, 122, 'C', -15, 70, 'white2'],
+  [37.831763, -122.512240, 74, 'C', 40, 100, 'dash'], [37.832075, -122.511282, 65, 'C', 0, 100, 'dash'], [37.832461, -122.510236, 65, 'C', 0, 100, 'dash'],
+  [37.832846, -122.509204, 65, 'C', 0, 80, 'dash'], [37.833229, -122.508168, 65, 'R', -20, 60, 'pass'],
+  [37.838519, -122.483765, 128, 'C', -30, 100, 'noedge'],
+  ...each([[37.837923, -122.482908, 129], [37.837315, -122.482056, 138], [37.836631, -122.481311, 139], [37.835885, -122.480916, 183],
+    [37.835194, -122.481595, 201], [37.834605, -122.480996, 75], [37.835137, -122.480076, 57]], 'C', 0, 100, 'noedge'),
+  ...each([[37.833930, -122.533105, 122], [37.832123, -122.528736, 66], [37.831238, -122.524057, 81], [37.833169, -122.519772, 97],
+    [37.831713, -122.514512, 97], [37.832846, -122.509204, 65], [37.834756, -122.504301, 21], [37.837628, -122.500278, 47],
+    [37.840855, -122.496419, 60]], 'C', -10, 520, 'nosym'),
+  // Mitchell Road at the Rodeo Beach lot: no lines at all
+  [37.832205, -122.539175, 98, 'C', -15, 60, 'nocentre'], [37.832205, -122.539175, 98, 'C', -15, 60, 'noedge'],
+  // lower Conzelman Road past Field Road to Point Bonita (oneway): no yellow line
+  ...each([[37.825830, -122.526653, 226], [37.825433, -122.527603, 269], [37.824810, -122.527783, 153]], 'C', -20, 100, 'nocentre'),
+  // Alexander Avenue from East Road down to Bunker Road: its northbound shoulder (a bike lane in OpenStreetMap) never has a
+  // bike symbol
+  [37.843408, -122.478309, 190, 'C', -80, 520, 'nosym'], [37.839849, -122.479378, 272, 'C', 0, 420, 'nosym'],
+  // Alexander Avenue at the Sausalito end: yellow raised markers, no paint
+  [37.846762, -122.478700, 141, 'C', -40, 200, 'dots'],
+  // Center Road at Fort Baker: BIKE LANE in words
+  ...each([[37.835728, -122.477456, 208], [37.834933, -122.477937, 206]], 'C', -10, 100, 'words'),
+  // upper Conzelman Road (one way down for cars, the bike lane up against it on the cut side): at the McCullough Road
+  // end the buffer cross hatched and a parking lane with stall ticks on the right; then the buffer's ticks all the way
+  // down; white posts on it at the top and above the Battery Spencer lot's east end, yellow ones below that
+  [37.833528, -122.493192, 101, 'C', 0, 170, 'hatch'], [37.833528, -122.493192, 101, 'R', 0, 170, 'stalls'],
+  ...each([[37.832546, -122.491606, 126], [37.832842, -122.490672, 62], [37.832673, -122.489632, 66], [37.832784, -122.488582, 130],
+    [37.832170, -122.487897, 131], [37.831368, -122.487339, 157], [37.830529, -122.486957, 180], [37.829618, -122.486927, 181],
+    [37.829287, -122.485422, 43], [37.829508, -122.484477, 93], [37.829780, -122.483441, 10], [37.830505, -122.484072, 341],
+    [37.831332, -122.483982, 15], [37.832178, -122.483554, 27]], 'C', 0, 100, 'ladder'),
+  [37.83283, -122.49187, 337, 'C', -30, 80, 'wposts'], [37.82952, -122.48493, 265, 'C', 0, 200, 'wposts'],
+  [37.829508, -122.484477, 93, 'C', 10, 80, 'yposts'],
+];

@@ -184,17 +184,20 @@ export const HW = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'mot
 // on the left/right (as the way runs), 128/256 a parking lane left/right, 512 no lane markings, 1024/2048 a sidewalk
 // left/right, 4096 the left bike lane runs against the oneway. ln: lanes (0..15) and the tagged width in decimetres
 // (wd, x 16)
+// a road's points in millionths of a degree (about 0.1 m; a hundred-thousandth, about a metre, zigzagged a curve's
+// lines): flagged in its flags (RQ6), so a row without it reads as before
+const RQ = 1e6, RQ6 = 32768;
 export function encodeRoads(roads) {
   return roads.map(r => {
-    const o = [HW.indexOf(r.hw), r.fl | 0, (r.ln | 0) + 16 * Math.round((r.wd || 0) * 10), r.dk ? Math.round(r.dk[0] * 10) : 0, r.dk ? Math.round(r.dk[1] * 10) : 0];
-    let a = 0, b = 0; for (const [la, lo] of r.pts) { const x = Math.round(la * Q), y = Math.round(lo * Q); o.push(x - a, y - b); a = x; b = y; }
+    const o = [HW.indexOf(r.hw), (r.fl | 0) | RQ6, (r.ln | 0) + 16 * Math.round((r.wd || 0) * 10), r.dk ? Math.round(r.dk[0] * 10) : 0, r.dk ? Math.round(r.dk[1] * 10) : 0];
+    let a = 0, b = 0; for (const [la, lo] of r.pts) { const x = Math.round(la * RQ), y = Math.round(lo * RQ); o.push(x - a, y - b); a = x; b = y; }
     return o;
   });
 }
 export function decodeRoads(rows) {
   return rows.map(o => {
-    const pts = []; let a = 0, b = 0; for (let j = 5; j + 1 < o.length; j += 2) { a += o[j]; b += o[j + 1]; pts.push([a / Q, b / Q]); }
-    const r = { hw: HW[o[0]] || 'road', fl: o[1], ln: o[2] & 15, wd: (o[2] >> 4) / 10, pts };
+    const q = o[1] & RQ6 ? RQ : Q, pts = []; let a = 0, b = 0; for (let j = 5; j + 1 < o.length; j += 2) { a += o[j]; b += o[j + 1]; pts.push([a / q, b / q]); }
+    const r = { hw: HW[o[0]] || 'road', fl: o[1] & ~RQ6, ln: o[2] & 15, wd: (o[2] >> 4) / 10, pts };
     if (o[1] & 1) r.dk = [o[3] / 10, o[4] / 10];
     return r;
   });

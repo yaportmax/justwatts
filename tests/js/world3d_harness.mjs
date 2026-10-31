@@ -401,7 +401,13 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
       for (let k = 0; k < P.length; k += 2) { const top = RI.top(P[k][0], P[k][1], H[k] + lift); if (top != null) { tilePts++; tileGap = Math.max(tileGap, Math.abs(top - lift - H[k])); } }
     });
   }
-  out.rails = { n, km: r3(km), grade: r3(worstGrade), bend: r3(worstBend), cut: r3(worstCut), cutAt, tileGap: r3(tileGap), tilePts, file: readFileSync(new URL('world/rails.bin', APP)).length };
+  // the roads' plan (A2): S-jogs, a turn over 3 degrees with one the other way within 10 m (OpenStreetMap's nodes, smoothed
+  // in the bake), on the roads (not paths, driveways or the bridge's ways); the worst the smaller turn of a pair
+  let jogs = 0, jogWorst = 0;
+  for (const q of RI.rails) { if (q.r.fl & 16 || isTrail(q.r) || /service|cycleway|pedestrian/.test(q.r.hw)) continue; const { P, D } = q.T, turn = [];
+    for (let i = 1; i + 1 < P.length; i++) { let t = Math.atan2(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]) - Math.atan2(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); while (t > Math.PI) t -= 2 * Math.PI; while (t < -Math.PI) t += 2 * Math.PI; turn.push([i, t * 180 / Math.PI]); }
+    for (let k = 0; k < turn.length; k++) { const [i, t] = turn[k]; if (Math.abs(t) < 3) continue; for (let m = k + 1; m < turn.length && D[turn[m][0]] - D[i] < 10; m++) if (Math.abs(turn[m][1]) >= 3 && Math.sign(turn[m][1]) !== Math.sign(t)) { jogs++; jogWorst = Math.max(jogWorst, Math.min(Math.abs(t), Math.abs(turn[m][1]))); break; } } }
+  out.rails = { jogs, jogWorst: r3(jogWorst), n, km: r3(km), grade: r3(worstGrade), bend: r3(worstBend), cut: r3(worstCut), cutAt, tileGap: r3(tileGap), tilePts, file: readFileSync(new URL('world/rails.bin', APP)).length };
 
   // every bridge in the Headlands' tiles: its deck (straight between its ends) never through the ground, and over the
   // lidar's gap (a creek, a road, water), not a slab in the air over a culvert or a ridge

@@ -289,6 +289,8 @@ def test_rails_walked_at_light_speed(out):
     assert r["cut"] < 3.2, r["cutAt"]                                                    # never far under the lidar's ground (but in a
                                                                                          # tunnel, over a deck, down to a portal)
     assert r["tilePts"] > 500 and r["tileGap"] < 0.02                                    # the tiles' pieces are the area's rails
+    assert r["jogs"] < 60 and r["jogWorst"] < 10                                         # the roads smooth curves: OpenStreetMap's nodes
+                                                                                         # zigzagged them (400 S-jogs, the worst 38 degrees)
     u = out["railUnder"]
     assert u["eastUnderAlexander"] > 4.5                                                 # East Road's rail well under Alexander's
     assert u["alexanderUnder101"] > 4.5 and u["bunkerUnder101"] > 4.5                    # under US-101's fill

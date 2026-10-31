@@ -15,14 +15,17 @@ export function bakeImpostors(renderer, geos, names, leaves, near = {}) {
   const n = names.length, W = n * CW, H = 2 * CH;
   const rt = fill => { const t = new THREE.WebGLRenderTarget(W, H, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true });
     t.texture.anisotropy = 4; t.fill = fill; return t; };
-  const color = rt([0.035, 0.05, 0.025, 0]), normal = rt([0.5, 0.5, 1, 0]);
+  // (the colour's fill a mid foliage green: a dark one bled into the cards' edges in the mipmaps, black fringes round
+  // every far crown)
+  const color = rt([0.09, 0.12, 0.065, 0]), normal = rt([0.5, 0.5, 1, 0]);
   const vs = `attribute vec3 color; varying vec3 vC; varying vec3 vN; varying vec2 vUv;
     void main() { vC = color; vUv = uv; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
   const mk = out => new THREE.ShaderMaterial({ uniforms: { leaves: { value: leaves } }, side: THREE.DoubleSide, vertexShader: vs,
     fragmentShader: `uniform sampler2D leaves; varying vec3 vC; varying vec3 vN; varying vec2 vUv;
       void main() { vec4 t = texture2D(leaves, vUv); if (t.a < 0.5) discard; ${out} }` });
-  // albedo in linear light (the atlas is sRGB, decoded when sampled); normals in the camera's frame
-  const mats = [[color, mk('gl_FragColor = vec4(vC * t.rgb, 1.0);')], [normal, mk('vec3 n = normalize(vN); gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);')]];
+  // albedo in linear light (the atlas is sRGB, decoded when sampled); normals in the camera's frame, a leaf's leaning up
+  // as the full models' do (materials.js propMaterial)
+  const mats = [[color, mk('gl_FragColor = vec4(vC * t.rgb, 1.0);')], [normal, mk('vec3 n = normalize(normalize(vN) + (viewMatrix * vec4(0.0, 0.55, 0.0, 0.0)).xyz * step(vUv.y, 0.74)); gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);')]];
   const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400), cells = [];
   const prev = renderer.getRenderTarget(), pc = renderer.getClearColor(new THREE.Color()), pa = renderer.getClearAlpha(), pt = renderer.toneMapping, pac = renderer.autoClear;
   renderer.toneMapping = THREE.NoToneMapping; renderer.autoClear = true;

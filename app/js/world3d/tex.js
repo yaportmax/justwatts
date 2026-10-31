@@ -85,7 +85,7 @@ function puff() {
 // The leaf atlas: 4 x 4 cells of 256 px (LEAF names them). Leaves are near white with a little hue and light
 // variation (the tree's vertex colour tints them), clear between; sprays run left to right along a card's length, a
 // frond bottom to top. Bark and the plain cell are opaque. Mipmaps keep the leaves' coverage (texgen.js).
-export const LEAF = { oak: 0, bay: 1, fir: 2, redwood: 3, euc: 4, pine: 5, cypress: 6, scrub: 7, fern: 8, redwood2: 9, bark: 12, plain: 15 };
+export const LEAF = { oak: 0, bay: 1, fir: 2, redwood: 3, euc: 4, pine: 5, cypress: 6, scrub: 7, fern: 8, redwood2: 9, willow: 10, bark: 12, plain: 15 };
 function leafAtlas() {
   const S = 256, N = 4, c = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(S * N, S * N) : Object.assign(document.createElement('canvas'), { width: S * N, height: S * N }), g = c.getContext('2d', { willReadFrequently: true });
   let seed = 1; const rnd = () => hash2(seed++, 7919);
@@ -150,6 +150,14 @@ function leafAtlas() {
     }
   });
   clip(LEAF.cypress, () => clump(1600, 7, 4.5, 0.5, 5, r => tone(0.56 - r * 0.1, 0.92, 80, 115, 18)));
+  // arroyo willow: slender twigs fanning up, narrow lance-shaped leaves along them, olive above and paler beneath
+  clip(LEAF.willow, () => {
+    for (let t = 0; t < 9; t++) {
+      const a = -Math.PI / 2 + (t - 4) * 0.22 + (rnd() - 0.5) * 0.15, L = 170 + rnd() * 70, x1 = 128 + Math.cos(a) * L, y1 = 252 + Math.sin(a) * L;
+      stroke([[128, 252], [x1, y1]], 1.8, '#6a5a40');
+      for (let s = 20; s < L; s += 7) { const px = 128 + Math.cos(a) * s, py = 252 + Math.sin(a) * s; for (const side of [-1, 1]) leaf(px, py, a + side * (0.35 + rnd() * 0.35), 30 + rnd() * 16, 3 + rnd() * 1.5, tone(0.58, 0.95, 70, 100, 20), 0.45); }
+    }
+  });
   clip(LEAF.scrub, () => clump(1300, 10, 4.5, 0.4, 7, r => tone(0.6 - r * 0.1, 0.95, 60, 95, 18)));
   clip(LEAF.fern, () => {
     const mid = t => [128 + Math.sin(t * 2.6) * 10 * t, 252 - t * 244];

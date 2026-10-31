@@ -416,14 +416,16 @@ export function propMaterial({ fade = null } = {}) {
         ${fade ? 'transformed *= 1.0 - smoothstep(fadeR * 0.75, fadeR, distance(jwRoot.xz, fadeC));' : ''}
         #endif`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <normal_fragment_begin>', 'float faceDirection = 1.0;\nvec3 normal = normalize(vNormal);\nvec3 nonPerturbedNormal = normal;')
+      // (a leaf's normal leans up: the light through and between the leaves reaches a crown's underside, Street View's
+      // undersides a darker green, never black)
+      .replace('#include <normal_fragment_begin>', 'float faceDirection = 1.0;\nvec3 normal = normalize(normalize(vNormal) + (viewMatrix * vec4(0.0, 0.55, 0.0, 0.0)).xyz * step(vMapUv.y, 0.74));\nvec3 nonPerturbedNormal = normal;')
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
         #if NUM_DIR_LIGHTS > 0
         float jwBack = pow(max(dot(normalize(-vViewPosition), directionalLights[0].direction), 0.0), 4.0) * step(vMapUv.y, 0.74);
         reflectedLight.indirectDiffuse += diffuseColor.rgb * directionalLights[0].color * jwBack * 0.16;
         #endif`);
   };
-  m.customProgramCacheKey = () => 'jw-prop-3' + (fade ? 'f' : '');
+  m.customProgramCacheKey = () => 'jw-prop-4' + (fade ? 'f' : '');
   // the shadow: the same wind, the cards a third of them (attribute sk), alpha tested
   const d = m.userData.depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: T.leaves, alphaTest: 0.5, side: THREE.DoubleSide });
   d.onBeforeCompile = sh => {

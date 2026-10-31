@@ -154,14 +154,16 @@ const cone = (y0, y1, r, c, seed) => [bumpy(new THREE.ConeGeometry(r, y1 - y0, 8
 
 // trees at a typical size in metres (scaled per instance). Names: oak, bay, fir, redwood, euc, cypress, pine (trees),
 // bush, shrub (low), fern, stone (near the rider only)
-export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub'];
+export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub', 'willow', 'eucS'];
+// a blue gum the lidar has under this height (metres) is a young or cut-back one, leafy nearly to the ground (eucS)
+export const EUC_YOUNG = 22;
 // the share of the full models' radius each is drawn in full (the tall dense ones cost the most; impostors past it)
-export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, stone: 0.45, fern: 0.25 };
+export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, willow: 0.8, eucS: 0.8, stone: 0.45, fern: 0.25 };
 export function treeGeometries() {
   const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15);
   // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
   const F = { oak: col(0x51693a, 1.2), bay: col(0x3e5838, 1.12), fir: col(0x34552f, 1.35), red: col(0x264a32, 1.2),
-    euc: col(0x7c9a7a, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), fern: col(0x4f7a2c, 1.4) };
+    euc: col(0x7c9a7a, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), willow: col(0x6d7d48, 1.25), fern: col(0x4f7a2c, 1.4) };
   const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
   return {
     stone: merge([[bumpy(ico(0.45, 1), 0.12, 21), col(0x8d867a), M(0, 0.12, 0, 1, 0.6, 1)]]),
@@ -192,6 +194,13 @@ export function treeGeometries() {
     // Monterey / bishop pine: a rounded, irregular dark crown high on a bare trunk
     pine: merge([bark(trunkG(0.45, 0.28, 9, 7), brownD), limb(0, 7.5, 0, 2, 10, 0.5, 0.18, brownD), limb(0, 8, 0, -1.6, 10.6, -0.4, 0.16, brownD),
       core(0, 11, 0, 2.8, 1.8, 2.6, F.pine, 15), ...lumps(0, 11, 0, 3.8, 2.6, 3.6, 6, 10, 2.9, LEAF.pine, 14).map(g => leaves(g, F.pine))]),
+    // arroyo willow: many slender stems from the ground fanning out, a dense rounded thicket about 6 m tall and as wide
+    willow: merge([...[[1.6, 0.3], [-1.4, 0.6], [0.4, -1.5], [-0.5, 1.5], [1.2, -1.0]].map(([x, z], i) => limb(x * 0.15, 0, z * 0.15, x, 3.6 + 0.3 * i, z, 0.11, brownD)),
+      core(0, 3.8, 0, 2.5, 1.9, 2.4, F.willow, 19), ...lumps(0, 3.7, 0, 3.0, 2.3, 2.9, 8, 11, 2.2, LEAF.willow, 18, { lift: 0.4 }).map(g => leaves(g, F.willow))]),
+    // a young or cut-back blue gum (Street View: Alexander Avenue's cut, Center Road's avenue): a short pale leaning trunk
+    // forking low into stems, blue-grey hanging leaves in a tall oval from about 2.5 m, about 13 m tall
+    eucS: merge([bark(trunkG(0.3, 0.24, 1.9, 6), pale, M(0, 0, 0, 1, 1, 1, 0, 0.1)), ...[[1.2, 0.4], [-1.0, 0.7], [0.3, -1.2], [-0.4, -0.6]].map(([x, z], i) => limb(0.15 + x * 0.1, 1.7, z * 0.1, x, 6.5 + 0.6 * i, z, 0.15, pale)),
+      core(0, 7.6, 0, 2.3, 3.2, 2.2, F.euc, 23), ...lumps(0, 7.6, 0, 3.1, 4.3, 3.0, 9, 13, 2.4, LEAF.euc, 22, { lump: 0.62, lift: 0.2 }).map(g => leaves(g, F.euc))]),
     // coyote brush and other coastal scrub: low, irregular mounds
     bush: merge([core(0, 0.5, 0, 1.3, 0.55, 1.1, F.bush, 12), ...lumps(0, 0.6, 0, 1.7, 0.75, 1.5, 3, 12, 1.3, LEAF.scrub, 11, { lift: 0.5 }).map(g => leaves(g, F.bush))]),
     // toyon / manzanita: a taller shrub with a reddish base
@@ -200,6 +209,20 @@ export function treeGeometries() {
     // sword fern under the redwoods
     fern: merge([leaves(fronds(12, 1.7, 5), F.fern)]),
   };
+}
+// each model's size at scale 1 (veg.js fitTree): { H: its top, R: its crown's radius (half its mean width), base: its
+// lowest leaves (the lowest point a metre and more out from the trunk) }
+export function treeDims(geos) {
+  const out = {};
+  for (const [sp, g] of Object.entries(geos)) {
+    const p = g.attributes.position.array; let x0 = 0, x1 = 0, z0 = 0, z1 = 0, top = 0, base = Infinity;
+    for (let i = 0; i < p.length; i += 3) {
+      x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); z0 = Math.min(z0, p[i + 2]); z1 = Math.max(z1, p[i + 2]); top = Math.max(top, p[i + 1]);
+      if (Math.hypot(p[i], p[i + 2]) > 1) base = Math.min(base, p[i + 1]);
+    }
+    out[sp] = { H: top, R: (x1 - x0 + z1 - z0) / 4, base: Math.max(0, Math.min(base, top)) };
+  }
+  return out;
 }
 // The Headlands' coastal scrub (scrub.js), about 2.6 m across at scale 1: coyote brush, a dense lumpy mound about
 // 1.4 m tall, and California sage, lower, softer and grey-green; each in full near the camera and with fewer, bigger

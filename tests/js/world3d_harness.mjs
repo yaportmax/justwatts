@@ -11,7 +11,7 @@ import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texg
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan, carStep } from '../../app/js/world3d/life.js';
 import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, TAPER } from '../../app/js/world3d/ribbon.js';
-import { parseVeg, makeVeg, SCRUB, GRASS, PAVED } from '../../app/js/world3d/veg.js';
+import { parseVeg, makeVeg, parseTrees, fitTree, CLEAR, SCRUB, GRASS, PAVED } from '../../app/js/world3d/veg.js';
 import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
@@ -310,6 +310,23 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   out.veg = { west: v.at(37.805, -122.598), east: v.at(37.805, -122.591), outside: v.at(37.9, -122.598), rgba: [...rgba.slice(0, 4)], rgbaEast: [...rgba.slice(4 * (n - 1), 4 * n)], paved: [...paved],
     same: JSON.stringify(b1) === JSON.stringify(b2), westN: west.length, eastN: east.length, onScrub: west.every(([x, z]) => at(x, z) === SCRUB),
     perCell: SCRUB_CELL * SCRUB_CELL, scales: [r3(Math.min(...west.map(q => q[2]))), r3(Math.max(...west.map(q => q[2])))] };
+}
+{
+  // the lidar's trees (trees.bin): records, the coverage raster, a box query; a model fitted to a tree's height and crown,
+  // clear of a road; the shipped file's trees against the vegetation map's species
+  const box = [37.8, -122.6, 37.81, -122.59], C = 4, head = new TextEncoder().encode(JSON.stringify({ box, n: 3, species: ['oak', 'euc', 'willow'], cov: C }));
+  let off = 4 + head.length; off += (4 - off % 4) % 4;
+  const buf = new Uint8Array(off + 3 * 8 + C * C), dv = new DataView(buf.buffer); dv.setUint32(0, head.length, true); buf.set(head, 4);
+  [[0.25, 0.25, 40, 30, 0], [0.75, 0.25, 160, 80, 1], [0.6, 0.9, 24, 20, 2]].forEach(([x, y, h, r, sp], i) => { const o = off + 8 * i; dv.setUint16(o, Math.round(x * 65535), true); dv.setUint16(o + 2, Math.round(y * 65535), true); buf[o + 4] = h; buf[o + 5] = r; buf[o + 6] = sp; });
+  buf[off + 24] = 1;  // (the north-west cell covered)
+  const T = parseTrees(buf), all = [], west = []; T.each(37.8, -122.6, 37.81, -122.59, (...a) => all.push(a)); T.each(37.8, -122.6, 37.81, -122.595, (...a) => west.push(a));
+  const dim = { H: 10, R: 4, base: 3 }, open = fitTree(dim, 20, 8), thin = fitTree(dim, 20, 1), wide = fitTree(dim, 10, 12);
+  const byRoad = fitTree(dim, 10, 6, 3), tall = fitTree({ H: 10, R: 4, base: 6 }, 10, 6, 3), atEdge = fitTree(dim, 10, 6, 0.5);
+  out.trees = { n: T.n, all: all.map(a => [r3(a[2]), r3(a[3]), a[4]]), west: west.length, cov: [T.covered(37.809, -122.599), T.covered(37.801, -122.591)], open: [r3(open.s), r3(open.hf)], thin: [r3(thin.s), r3(thin.hf)], wide: [r3(wide.s), r3(wide.hf)],
+    byRoad: [r3(byRoad.s * dim.R), r3(byRoad.s * byRoad.hf * dim.H)], tall: [r3(tall.s * 4)], atEdge, clear: CLEAR };
+  const f = new URL('../../app/world/trees.bin', import.meta.url);
+  if (existsSync(f)) { const S = parseTrees(new Uint8Array(gunzipSync(readFileSync(f)))), n = {}, hs = {}; S.each(...[S.box[0], S.box[1], S.box[2], S.box[3]], (la, lo, h, r, sp) => { n[sp] = (n[sp] || 0) + 1; (hs[sp] ??= []).push(h); });
+    const med = a => a.sort((p, q) => p - q)[a.length >> 1]; out.trees.file = { n: S.n, species: n, median: Object.fromEntries(Object.entries(hs).map(([k, a]) => [k, med(a)])), covered: S.covered(37.8357, -122.4775), bytes: readFileSync(f).length }; }
 }
 
 /* ---------- road sides (banks.js) ---------- */

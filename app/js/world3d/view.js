@@ -14,8 +14,8 @@ import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS } from './handlist.j
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
-import { loadVeg, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
+import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, EUC_YOUNG, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
+import { loadVeg, loadTrees, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
 import { createScrub, REACH, TOP } from './scrub.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
@@ -129,7 +129,7 @@ uniform float lamps; varying vec2 vP; varying float vD; void main() {
 #include <logdepthbuf_fragment>
 float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * a * lamps * 0.5 * (1.0 - smoothstep(200.0, 500.0, vD)), 1.0); }` });
   const wireMat = new THREE.LineBasicMaterial({ color: 0x2c2d2e }), tunLampMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4.3, 3.2) });  // a tunnel's lamps
-  const FURN = furnitureGeometries(), trees = treeGeometries(), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
+  const FURN = furnitureGeometries(), trees = treeGeometries(), DIMS = treeDims(trees), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog);
   const life = lifeOn ? createLife({ THREE, scene, proj, marks, quality: q }) : { update() {}, show() {}, setLamps() {}, dispose() {}, counts: null }, audio = createAudio({ on: sound });
@@ -149,6 +149,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (const c of [...near.values(), ...far.values()]) c.sig.trees = null;
     grass.invalidate(); scrub.invalidate(); poke();
   });
+  // the Headlands' trees one by one from the lidar and the vegetation map (veg.js parseTrees); where they cover, the
+  // imagery's groves are not drawn
+  let lidarTrees = null;
+  loadTrees().then(t => { if (dead || !t) return; lidarTrees = t; for (const c of [...near.values(), ...far.values()]) c.sig.trees = null; poke(); });
 
   // the rails of every road the rides reach (rail.js): the rider's heights, read before any tile; a course's profile is
   // matched to them when both are here
@@ -670,7 +674,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c), fine = c.lod === 0, box = tileBox(c);
     const out = {}; let n = 0, ferns = 0;
     // [x, y, z, scale, random, near only: a full model, no impostor] (on a road side's strip where one is, none on a steep face)
-    const add = (sp, x, z, s, r, nearOnly = 0) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) || nearDeck(x, z)) return; (out[sp] ??= []).push([x, y - 0.3, z, s, r, nearOnly]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
+    // (hf: the height over the width scale, else a little either way at random; foot: the ground's lowest round the trunk;
+    // a lidar tree (hf) by a road's coarse cells too: its own gap to the paving decided, fitTree)
+    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - 0.3, z, s, r, nearOnly, hf]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
@@ -699,14 +705,34 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
     }
     yield;
-    // the Headlands' groves where the aerial imagery has them (veg.js): Monterey cypress and pine, blue gum eucalyptus,
-    // a tree every 10 m or so, tall (the planted groves are 15 to 40 m)
+    // the Headlands' trees from the lidar where it and the vegetation map cover (veg.js): each at its own spot, height
+    // and crown (the model scaled to them, fitTree), clear of the roads; its trunk on the lowest ground round its foot
+    if (lidarTrees) {
+      const T = [];
+      lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp) => T.push([la, lo, h, r, sp]));
+      for (let i = 0; i < T.length; i++) {
+        if (i % 400 === 399) yield;
+        const [la, lo, h, r, sp0] = T[i], sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0, dim = DIMS[sp]; if (!dim) continue;
+        let [x, z] = proj.xz(la, lo);
+        // (a trunk on a road bank's steep face: moved out from the road till it is off it, up to 8 m; else none)
+        if (c.bankH?.size && c.bankH.get(bkey(x, z)) < -1e8) {
+          const g0 = roadGap(x, z) ?? 0, gx = (roadGap(x + 1, z) ?? g0) - (roadGap(x - 1, z) ?? g0), gz = (roadGap(x, z + 1) ?? g0) - (roadGap(x, z - 1) ?? g0), L = Math.hypot(gx, gz);
+          let moved = false; if (L > 0.2) for (const d of [2, 4, 6, 8]) { const nx = x + gx / L * d, nz = z + gz / L * d; if (!(c.bankH.get(bkey(nx, nz)) < -1e8)) { x = nx; z = nz; moved = true; break; } }
+          if (!moved) continue;
+        }
+        const f = fitTree(dim, h, r, roadGap(x, z)); if (!f) continue;
+        const tr = 0.5 * f.s; let lo2 = Infinity; for (const [dx, dz] of [[tr, 0], [-tr, 0], [0, tr], [0, -tr]]) { const q = hAt(x + dx, z + dz); if (q != null) lo2 = Math.min(lo2, q); }
+        add(sp, x, z, f.s, hash2(Math.round(x * 3), Math.round(z * 3)), 0, f.hf, lo2);
+      }
+    }
+    // the groves where the aerial imagery has them and the lidar does not cover (veg.js): Monterey cypress and pine, blue
+    // gum eucalyptus, a tree every 10 m or so, tall (the planted groves are 15 to 40 m)
     if (veg) { const st = 8.5, [s0, w0, n0, e0] = veg.box, bx0 = Math.max(box[0], proj.x(w0)), bx1 = Math.min(box[2], proj.x(e0)), bz0 = Math.max(box[1], proj.z(n0)), bz1 = Math.min(box[3], proj.z(s0));
       for (let x = Math.ceil(bx0 / st) * st; x < bx1; x += st) {
         if (Math.round(x / st) % 4 === 0) yield;
         for (let z = Math.ceil(bz0 / st) * st; z < bz1; z += st) {
           const ix = Math.round(x / st), iz = Math.round(z / st), px = x + (hash2(ix, iz + 3) - 0.5) * st * 0.8, pz = z + (hash2(iz + 5, ix) - 0.5) * st * 0.8, k = vcls(px, pz);
-          if ((k !== CYPRESS && k !== EUC) || hash2(ix * 3, iz * 7) > 0.75) continue;
+          if ((k !== CYPRESS && k !== EUC) || hash2(ix * 3, iz * 7) > 0.75 || lidarTrees?.covered(proj.lat(pz), proj.lon(px))) continue;
           const r = hash2(ix + 9, iz * 3), sc = 0.8 + 0.5 * hash2(iz, ix + 1);
           if (k === EUC) add('euc', px, pz, 1.45 * sc, r); else add(r < 0.72 ? 'cypress' : 'pine', px, pz, (r < 0.72 ? 2.1 : 1.6) * sc, r);
         }
@@ -764,9 +790,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // shader would still cost the GPU every one of them); in the dense groves of redwood and fir fewer cards, no bigger:
       // there a card mostly covers others, and every layer costs the GPU (the full trees fill the near view)
       const keep = c.lod > 0 ? 0.42 : sp === 'redwood' ? 0.5 : sp === 'fir' ? 0.7 : 1, grow = c.lod > 0 ? 1 / Math.sqrt(keep) : 1;
-      if (ci >= 0) for (const [x, y, z, s, r, nearOnly] of list) {
+      if (ci >= 0) for (const [x, y, z, s, r, nearOnly, hf] of list) {
         const thin = c.lod > 0; if (nearOnly || (x * 0.1731 + z * 0.2917) - Math.floor(x * 0.1731 + z * 0.2917) > keep) continue;
-        imp.push([x, y, z, s * grow, ci, (thin ? -1 : 1) * (0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
+        imp.push([x, y, z, s * grow, ci, (thin ? -1 : 1) * (hf ?? 0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
         y0 = Math.min(y0, y); y1 = Math.max(y1, y + 50 * s);
       }
       list.sort((u, w) => u[0] - w[0]);  // by x: a split looks at the strip round the rider only
@@ -804,8 +830,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
       if (!m) return;
       let a = 0; const sm = set.sp === 'stone';
-      for (const [, [px, y, pz, sc, r]] of items) {
-        e.set((r - 0.5) * 0.08, r * 6.283, 0); m.setMatrixAt(a, m4.compose(v.set(px, sm ? y + 0.25 : y, pz), qt.setFromEuler(e), s.set(sc, sc * (0.85 + 0.3 * r), sc)));
+      for (const [, [px, y, pz, sc, r, , hf]] of items) {
+        e.set((r - 0.5) * 0.08, r * 6.283, 0); m.setMatrixAt(a, m4.compose(v.set(px, sm ? y + 0.25 : y, pz), qt.setFromEuler(e), s.set(sc, sc * (hf ?? 0.85 + 0.3 * r), sc)));
         const kk = 0.86 + 0.28 * hash2(Math.round(px), Math.round(pz)), w = (hash2(Math.round(pz), Math.round(px)) - 0.5) * 0.12;
         m.setColorAt(a++, tint.setRGB(kk * (1 + w), kk, kk * (1 - w)));
       }
@@ -1020,12 +1046,21 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -(0.85 + 0.3 * r), 0.86 + 0.28 * hash2(m, i + j), (hash2(j, i) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + 50 * s);
       }
     }
-    // the Headlands' groves (veg.js), a tree every 16 m
+    // the Headlands' trees from the lidar (every other one: impostors 2 km and more away), and the imagery's groves
+    // where it does not cover, a tree every 16 m
+    if (lidarTrees) { const b = tileBox(c); let i = 0;
+      lidarTrees.each(proj.lat(b[3]), proj.lon(b[0]), proj.lat(b[1]), proj.lon(b[2]), (la, lo, hh, rr, sp) => {
+        if (sp === 'euc' && hh < EUC_YOUNG) sp = 'eucS';
+        if (i++ % 2 || !DIMS[sp]) return; const [x, z] = proj.xz(la, lo), h = gridHeight(c.grid, x, z); if (h == null || h < 2) return;
+        const f = fitTree(DIMS[sp], hh, rr), s = f.s * 1.41;
+        list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -f.hf, 0.86 + 0.28 * hash2(Math.round(x * 3), 7), (hash2(7, Math.round(z * 3)) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + hh);
+      });
+      yield; }
     if (veg) { const st = 16, [s0, w0, n0, e0] = veg.box, b = tileBox(c), bx0 = Math.max(b[0], proj.x(w0)), bx1 = Math.min(b[2], proj.x(e0)), bz0 = Math.max(b[1], proj.z(n0)), bz1 = Math.min(b[3], proj.z(s0));
       for (let x = Math.ceil(bx0 / st) * st; x < bx1; x += st) {
         if (Math.round(x / st) % 5 === 0) yield;
         for (let z = Math.ceil(bz0 / st) * st; z < bz1; z += st) {
-          const k = vcls(x, z); if (k !== CYPRESS && k !== EUC) continue;
+          const k = vcls(x, z); if ((k !== CYPRESS && k !== EUC) || lidarTrees?.covered(proj.lat(z), proj.lon(x))) continue;
           const h = gridHeight(c.grid, x, z); if (h == null || h < 2) continue;
           const r = hash2(Math.round(x), Math.round(z)), sp = k === EUC ? 'euc' : r < 0.72 ? 'cypress' : 'pine', s = (k === EUC ? 1.45 : sp === 'cypress' ? 2.1 : 1.6) * (0.85 + 0.4 * hash2(Math.round(z), Math.round(x))) * 1.15;
           list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -(0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x * 3), 7), (hash2(7, Math.round(z * 3)) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + 50 * s);

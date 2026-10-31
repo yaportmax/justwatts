@@ -97,6 +97,20 @@ def test_ground_cover_and_scrub(out):
     assert 0.6 * 164 < v["westN"] <= 169 and 0.45 <= v["scales"][0] < v["scales"][1] <= 1.75  # about a bush every 2.5 m
 
 
+def test_lidar_trees(out):
+    t = out["trees"]
+    assert t["n"] == 3 and t["all"] == [[10, 3, "oak"], [40, 8, "euc"], [6, 2, "willow"]] and t["west"] == 1   # by the box
+    assert t["cov"] == [True, False]
+    assert t["open"] == [2, 1] and t["thin"] == [1.25, 1.6] and t["wide"] == [1.667, 0.6]   # the lidar's shape within 0.6..1.6
+    assert t["byRoad"] == [2.8, 10] and t["tall"] == [6]          # a low crown ends 0.2 m short of the paving; a high one may overhang
+    assert t["atEdge"] is None and t["clear"] == 4.5
+    f = t.get("file")
+    if f:  # the shipped trees: the lidar's 41,000 or so, every species the vegetation map names, heights as the lidar has them
+        assert 35000 < f["n"] < 60000 and f["bytes"] < 400000 and f["covered"]
+        assert {"oak", "bay", "euc", "cypress", "pine", "willow"} <= set(f["species"])
+        assert f["median"]["euc"] > f["median"]["cypress"] and f["median"]["willow"] < 10 and f["median"]["oak"] < 15
+
+
 def test_road_ways_join_and_corners_round(out):
     c = out["chain"]
     assert c["joined"] and c["rest"] == [3, 2, 2, 2]                          # a-b-c one ribbon; the side road and c-d meet a third

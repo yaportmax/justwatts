@@ -1114,7 +1114,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   function scrubGround(x, z, sc = 1) {
     const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid || !c.mask || !c.occ) return null;
     // (a verge of spring grass along the roads, Street View)
-    if ((roadGap(x, z) ?? 9) < 1.6) return { skip: true };
+    // (a bush clear of the road by its own half width (about 1.5 m at scale 1): none through a rail at the edge, Street View
+    // Alexander Avenue 0a_1230)
+    if ((roadGap(x, z) ?? 9) < Math.max(1.6, 0.4 + 1.5 * sc)) return { skip: true };
     if (occAt(c.occ, x, z) === 2) return { skip: true };  // (a car park, a building: the road itself by its gap above, not its coarse cells (bushes were cleared 5 m out, A11: Conzelman 0a_2030, 3a_0430))
     const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), v = Math.round(fj) * n + Math.round(fi), h0 = gridHeight(g, x, z);
     if (h0 == null || !(v >= 0 && v < n * n)) return null;

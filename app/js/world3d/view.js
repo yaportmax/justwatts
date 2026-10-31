@@ -10,7 +10,7 @@ import { ribbonEdge, sideKinds, sideRuns, bankGeometry, railLine } from './banks
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers } from './rail.js';
-import { BARRIERS, SURVEY } from './handlist.js';
+import { BARRIERS, CURBS, SURVEY } from './handlist.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -53,6 +53,8 @@ const PORT = 12;  // metres of open cut before a tunnel's portal
 const BARRIER = [
   { k: 'wbeam', off: 0.5, gap: 1.905, sh: true }, { k: 'beam', off: 0.45, gap: 2.5, sh: true }, { k: 'krail', off: 0.4, gap: 6, sh: true },
   { k: 'cable', off: 0.8, gap: 2.4 }, { k: 'fence', off: 1, gap: 2.4 }, { k: 'chain', off: 1.6, gap: 3 },
+  // (a curb along the paved edge, its face there: 6 in tall, 6 in across, A5)
+  { k: 'curb', off: 0.075, gap: 1e9 }, { k: 'red', off: 0.075, gap: 1e9 },
 ];
 // the tyres' contact over the rail's line: the drawn road's flat cross-sections turn at its points, so on a bend's outside
 // the triangles between them lie up to a few centimetres over the line (Hawk Hill: 3.4 cm at 26 m/s); a road tyre's own
@@ -96,7 +98,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
     tunnel: tunnelMaterial(), portal: portalMaterial(),
     // the W-beams galvanised (Street View: a mid grey, lit a little on their shaded side); kerbs concrete
-    furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xb4b9bc, emissive: 0x1e2022, side: THREE.DoubleSide }), curb: new THREE.MeshLambertMaterial({ color: 0xa9a69e }),
+    furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xb4b9bc, emissive: 0x1e2022, side: THREE.DoubleSide }), curb: new THREE.MeshLambertMaterial({ color: 0xa9a69e }), redCurb: new THREE.MeshLambertMaterial({ color: 0xa2453a }),
     // the other barriers (handlist.js): white painted concrete (Alexander Avenue's rails and K-rails), timber rails, a wire,
     // chain-link's mesh seen through (rusty brown: Alexander Avenue, Field Road)
     wcon: new THREE.MeshLambertMaterial({ color: 0xd9d6cc, side: THREE.DoubleSide }), wood: new THREE.MeshLambertMaterial({ color: 0x5e4a36, side: THREE.DoubleSide }), wire: new THREE.MeshLambertMaterial({ color: 0x55524c, side: THREE.DoubleSide }),
@@ -143,7 +145,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // the rails of every road the rides reach (rail.js): the rider's heights, read before any tile; a course's profile is
   // matched to them when both are here
   let RI = null, HB = null;  // (HB: the hand list's barriers on the rails, rail.js handBarriers)
-  baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); HB = handBarriers(RI, BARRIERS, SURVEY, proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
+  baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS), SURVEY, proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
   // a tunnel's rail at a point (its floor, baked), null off every tunnel's
   // the drawn top of the road at a point nearest the height e, of the rails it is on, not past one's end (rail.js top
   // counts a rail's end out to its half width past it: a bore's floor carried on level out of its portal)
@@ -749,6 +751,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         fence: [mats.wood, [[0.45, 0.06], [0.6, 0.06], [0.6, -0.02], [0.45, -0.02]], true, [[0.95, 0.06], [1.1, 0.06], [1.1, -0.02], [0.95, -0.02]]],
         chain: [mats.wire, [[2.05, 0.03], [2.1, 0.03], [2.1, -0.03], [2.05, -0.03]], true],
         mesh: [mats.mesh, [[0.05, 0], [2.05, 0]], false],
+        curb: [mats.curb, [[-0.06, 0.075], [0.15, 0.075], [0.15, -0.075], [-0.06, -0.075]], true], red: [mats.redCurb, [[-0.06, 0.075], [0.15, 0.075], [0.15, -0.075], [-0.06, -0.075]], true],
       };
       const sweep = new Map(), add = (key, pts, S, closed) => {
         const g = sweep.get(key) ?? sweep.set(key, { pos: [], idx: [] }).get(key), b0 = g.pos.length / 3, N = S.length;

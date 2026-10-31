@@ -61,6 +61,9 @@ def test_road_ribbon_geometry(out):
     assert r["xs"] == [-3, 3] and r["edgeY"] == [10.5, 10.0] and r["centre"] == [10.25] * 5  # edges on the ground, a crossfall of 0.25 m at most
     assert r["code"] == [2, 0, 2, 6] and r["v"] == [20, 20]                                 # markings, lanes, width; metres along
     assert r["deck"] == [40, 60, 50] and r["pillars"] == 3                                  # a bridge: straight between its ends
+    fl = out["flare"]
+    assert fl["mouth"] == pytest.approx(15) and fl["past"] == pytest.approx(5)            # a side road's mouth: corners rounded 5 m, its own width on
+    assert 5 < fl["at2"] < 7.5                                                            # a quarter circle each side (2.25 m on: 5 + 2 x 0.53)
     s = out["styles"]
     assert s["tertiary/0/0"] == {"w": 8, "lm": 2, "surf": 0, "lanes": 2, "a": 0, "b": 0, "pL": 0, "pR": 0}  # two 3.6 m lanes, double yellow line
     assert s["primary/4/0"]["w"] == pytest.approx(16) and s["primary/4/0"]["lanes"] == 4
@@ -257,6 +260,11 @@ def test_road_sides_embankments_cuts_and_rails(out):
     assert r["z"] == pytest.approx(3.45) and r["gap"] == pytest.approx(1.9)       # a rail's posts 0.45 m past the edge, 1.9 m apart
     assert r["posts"] == 21 and r["yaw"] == pytest.approx(1.571, abs=0.01)        # by arc length; each post's front toward the road
     assert b["railed"]["kind"] == 2 and b["railed"]["rail"]                       # a rail stands on its shoulder even on level ground
+    assert c[1][3] - c[1][1] <= 0.7 * (c[1][2] - c[1][0])                         # a cut's foot past the verge: about 1 in 2 (Street View), not 68 degrees
+    assert c[0][5] == 1 and f[0][5] == 1 and not any(q[5] for q in c if q[4])     # the verge and the shoulder grass; never a steep face
+    k = b["curb"]
+    assert k[0][2] == pytest.approx(0.6) and k[0][3] == pytest.approx(10.12)      # behind a curb its shoulder at the curb's top
+    assert k[-1][3] < 10                                                          # then down to the ground
 
 
 def test_roads_over_tunnels_are_decks(out):

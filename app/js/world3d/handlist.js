@@ -218,3 +218,11 @@ export const MARKINGS = [
   [37.83283, -122.49187, 337, 'C', -30, 80, 'wposts'], [37.82952, -122.48493, 265, 'C', 0, 200, 'wposts'],
   [37.829508, -122.484477, 93, 'C', 10, 80, 'yposts'],
 ];
+
+// BUILDINGS: heights Street View shows where OpenStreetMap has none (its building=yes is drawn 6 m, two storeys):
+// [lat, lon, metres]: the building whose footprint holds the point. East Road 0a_0130 (2025-03, pano uF61_2uaEXaygeqwcKO5qA,
+// heading 141 to 171): left of the road at about 60 m, low single storey service buildings behind the fence, a white van
+// in front about two thirds of their height (OpenStreetMap relations 965737005 and 965737006)
+export const BUILDINGS = [
+  [37.842694, -122.477684, 4], [37.842778, -122.477657, 4],
+];

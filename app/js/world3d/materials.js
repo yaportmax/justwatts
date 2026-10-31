@@ -100,6 +100,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   jwScrub = 0.0; jwKnown = known;
   if (known > 0.0) {
     float sc = smoothstep(0.25, 0.75, vg.r + (fine - 0.5) * 0.35), br = smoothstep(0.3, 0.7, vg.b + (fine - 0.5) * 0.3), tr = smoothstep(0.3, 0.7, vg.g);
+    // (green: OpenStreetMap's lawns, a road's verge (banks.js): grass whatever the imagery's class)
+    float lg = smoothstep(0.3, 0.8, green); sc *= 1.0 - lg * 0.9; br *= 1.0 - lg; tr *= 1.0 - lg;
     vec3 grassC = mix(srgb(vec3(0.41, 0.47, 0.31)), srgb(vec3(0.51, 0.52, 0.38)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
     grassC = mix(grassC, srgb(vec3(0.36, 0.45, 0.25)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
     vec3 scrC = mix(srgb(vec3(0.31, 0.36, 0.29)), srgb(vec3(0.42, 0.45, 0.38)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));  // grey olive to the sage's grey green
@@ -107,7 +109,9 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     scrC *= 0.68 + 0.5 * smoothstep(0.25, 0.75, bush);
     scrC = mix(scrC, scrC * 0.72, jwNear);  // near the camera its bushes stand on it: the shade under them
     vec3 bareC = mix(srgb(vec3(0.49, 0.43, 0.37)), srgb(vec3(0.57, 0.46, 0.37)), smoothstep(0.3, 0.7, fine));
-    vec3 d = mix(grassC, scrC, sc); d = mix(d, bareC, br); d = mix(d, srgb(vec3(0.24, 0.22, 0.17)), tr);
+    // (the litter under the groves; in a fort's mown ground and OpenStreetMap's lawns grass under the trees, Street View
+    // Fort Baker: the parade ground's lawn up to the eucalyptus' trunks)
+    vec3 d = mix(grassC, scrC, sc); d = mix(d, bareC, br); d = mix(d, srgb(vec3(0.24, 0.22, 0.17)), tr * (1.0 - smoothstep(0.2, 0.6, max(town, green))));
     // the pullouts, car parks and gravel shoulders: pale grey, a little warm, mottled
     vec3 pavC = mix(srgb(vec3(0.47, 0.46, 0.43)), srgb(vec3(0.58, 0.56, 0.51)), smoothstep(0.3, 0.7, fine * 0.7 + small * 0.3));
     d = mix(d, pavC, smoothstep(0.25, 0.65, pav));
@@ -126,7 +130,10 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // imagery shows bare earth. Bare: red-brown earth and chert in soft bedding bands, low contrast, two scales of world
   // space noise sheared by height (a face varies up it as along it; no tiling at riding distance). Colours: Street View
   // (Conzelman Road 0a_1030, 2025-03, a bare face's 15th to 85th percentile, sRGB #3c2c1a to #8f6d50, median #675037)
-  float bare = cut * max(smoothstep(0.42, 0.66, slope + (mid - 0.5) * 0.3), smoothstep(0.3, 0.7, vg.b) * known);
+  // (A11: and wherever the imagery shows bare earth on a slope of about 35 degrees or more, carved or not: the cuts above
+  // and below the roads as the lidar's grid has them, Street View: the red cut across Conzelman 3a_0430's bend, the scar
+  // over Alexander Avenue's cut, upper Conzelman's left cut toward McCullough; texture on the ground, no face of its own)
+  float bare = max(cut * max(smoothstep(0.42, 0.66, slope + (mid - 0.5) * 0.3), smoothstep(0.3, 0.7, vg.b) * known), smoothstep(0.3, 0.7, vg.b) * known * smoothstep(0.14, 0.26, slope + (mid - 0.5) * 0.08));
   // (on a face its noise is laid across the face, along it and up it: no streaks slanting up a cut)
   if (bare > 0.001) { float b1 = JWS(11.0, 0.4).r, b2 = JWS(3.7, 0.9).g;
     float bed = 0.5 + 0.5 * sin(h * 3.0 + (b1 - 0.5) * 6.0);
@@ -309,6 +316,10 @@ export function roadMaterial() {
           c = mix(srgb(vec3(0.60, 0.51, 0.38)), srgb(vec3(0.52, 0.43, 0.31)), n1) * (0.85 + 0.3 * n3);
           c = mix(c, srgb(vec3(0.62, 0.56, 0.38)), smoothstep(0.55, 0.95, edge) * 0.7);
         }
+        // a traced pad's gravel (pale grey-tan, speckled) or dirt (packed tan earth), Street View: Conzelman 0a_2030's
+        // turnout, Field Road 0a_0130's path
+        if (surf == 3.0) c = mix(srgb(vec3(0.55, 0.52, 0.46)), srgb(vec3(0.66, 0.62, 0.55)), n1 * 0.6 + n3 * 0.4) * (0.9 + 0.2 * n2);
+        if (surf == 4.0) c = mix(srgb(vec3(0.50, 0.46, 0.39)), srgb(vec3(0.60, 0.55, 0.46)), n1 * 0.7 + n3 * 0.3) * (0.9 + 0.2 * n2);
         if (lm < 0.0) c = srgb(vec3(0.62, 0.61, 0.58));
         // the markings across the road, r metres from its right edge: the travel lanes from a to W - b, bike lanes and
         // parking outside them (their lines solid white), 12 cm lines; yellow: the double centre line, a oneway's left edge

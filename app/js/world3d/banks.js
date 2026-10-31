@@ -58,8 +58,14 @@ export function profile(p, K, ground, { sh = 0.15, verge = 0.6, raw = null, bloc
   // the road dug out beside it; at 68 degrees at most from the verge)
   // (behind a retaining wall (K.wall, its back 0.5 m out) the bank rises from the wall's back)
   if (K.wall) verge = 0.5;
-  const up = o => Math.min(rw(o), y + Math.max(0, o - verge) * 2.5);
-  const down = o => y - 0.03 - Math.max(0, o - sh) / 1.5;
+  // (behind a curb (K.curb) its shoulder at the curb's top, 0.6 m, then down)
+  const top = K.curb ? 0.12 : -0.03; if (K.curb) sh = 0.6;
+  // (up a cut: a grassy foot first, 1 in 2 for its first 1.5 m out from the verge, then at 68 degrees at most (Street View,
+  // Alexander Avenue 0a_0530, McCullough Road 0a_0530: grass and low growth at the bank's foot before it steepens; the
+  // lidar's 7.5 m grid cannot place the foot itself))
+  const toe = d => d <= 0 ? 0 : d <= 1.5 ? d * 0.5 : 0.75 + (d - 1.5) * 2.5;
+  const up = o => Math.min(rw(o), y + toe(o - verge));
+  const down = o => y + top - Math.max(0, o - sh) / 1.5;
   const STEP = 0.75, MAX = 10.5, T = [];
   let lim = MAX;
   // (the flat strip's outer side, where it turns up a cut or down a fill: a point of its own, so the strip keeps it)
@@ -95,7 +101,10 @@ export function strip(p, P, R, ground, flat = false) {
   const d = R / (ACROSS - 1) / 2, over = o => Math.max(g(o), (g(Math.max(0, o - d)) + g(o + d)) / 2) + 0.03;
   for (let k = 0; k < ACROSS; k++) { const o = oAt(k); pts.push([o, k === 0 ? y - 0.03 : k === ACROSS - 1 || flat ? g(o) : Math.max(hAt(o), over(o))]); }
   const out = [];
-  for (let k = 1; k < ACROSS; k++) { const [o0, h0] = pts[k - 1], [o1, h1] = pts[k]; out.push([o0, h0, o1, h1, (h1 - h0) > 1.0 * (o1 - o0) && h1 > y + 0.3 ? 1 : 0]); }
+  // (v: 1 within 2 m of the edge where not steep (the verge, a rail's or a curb's shoulder, a cut's foot): grass whatever the
+  // ground's cover beyond (Street View: Alexander Avenue 0a_1230's rail feet and fence base, Bunker Road 0a_0430's rail
+  // posts, McCullough Road 0a_0530's margin))
+  for (let k = 1; k < ACROSS; k++) { const [o0, h0] = pts[k - 1], [o1, h1] = pts[k], c = (h1 - h0) > 1.0 * (o1 - o0) && h1 > y + 0.3 ? 1 : 0; out.push([o0, h0, o1, h1, c, !c && o0 < 2.0 ? 1 : 0]); }
   return out;
 }
 // (one point's strip on its own: tests)
@@ -138,14 +147,14 @@ export function* sideRunsSteps(E, kinds, ground, opt = {}, every = 24) {
 
 // The runs' geometry: per band a strip of quads between neighbouring points, each band its own vertices (a cut face's
 // colour does not bleed onto its neighbour). -> { pos: [x, y, z, ...], cut: [0 or 1 per vertex], idx }
-export function bankGeometry(runs, out = { pos: [], cut: [], idx: [] }) {
+export function bankGeometry(runs, out = { pos: [], cut: [], vg: [], idx: [] }) {
   for (const run of runs) {
     const nb = run[0].b.length;
     for (let k = 0; k < nb; k++) {
       const base = out.pos.length / 3;
       for (const { p, b } of run) {
-        const [o0, h0, o1, h1, c] = b[k];
-        out.pos.push(p[0] + p[3] * o0, h0, p[2] + p[4] * o0, p[0] + p[3] * o1, h1, p[2] + p[4] * o1); out.cut.push(c, c);
+        const [o0, h0, o1, h1, c, v = 0] = b[k];
+        out.pos.push(p[0] + p[3] * o0, h0, p[2] + p[4] * o0, p[0] + p[3] * o1, h1, p[2] + p[4] * o1); out.cut.push(c, c); out.vg?.push(v, v);
       }
       // facing up and out, whichever side of the road (the edge's outward normal says which way round)
       for (let i = 1; i < run.length; i++) {

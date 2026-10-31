@@ -91,6 +91,9 @@ out.coarse = { segs: gf.segs, n: gf.hs.length, corner: r3(gf.hs[4]), same: r3(g.
 /* ---------- roads ---------- */
 const B = builder();
 const centre = ribbon(B, [[0, 0], [0, -20]], { w: 6, lm: 2, lanes: 2, hAt: (x, z) => 10 + x * 0.1, lift: 0.25, step: 5 });
+// a side road's mouth at its start: rounded corners 5 m (its width 2 R more there, back to its own 5 m along)
+{ const F = builder(), cf = ribbon(F, [[0, 0], [0, -20]], { w: 5, hAt: () => 0, lift: 0, step: 5, flares: [[0, 0, 5]] });
+  out.flare = { mouth: r3(2 * cf[0][3]), at2: r3(2 * cf.reduce((m, q) => Math.abs(q[2] + 2.25) < Math.abs(m[2] + 2.25) ? q : m)[3]), past: r3(2 * cf.at(-1)[3]) }; }
 // a trail across a 1 in 1 hillside: draped, its edges on the ground; a road there stays level across within its crossfall
 { const T1 = builder(), T2 = builder(), hill = (x, z) => 10 + x;
   ribbon(T1, [[0, 0], [0, -20]], { w: 2, surf: 2, hAt: hill, lift: 0.15, drape: true }); ribbon(T2, [[0, 0], [0, -20]], { w: 2, hAt: hill, lift: 0.15 });
@@ -328,6 +331,9 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   out.banks = { normals: [R[0][3], R[0][4], Lf[0][3], Lf[0][4]], right: kr.map(k => k.kind), left: kl.map(k => k.kind), cutH: r3(kl[4].h),
     fill: br.map(b => b.map(r3)), cut: bl.map(b => b.map(r3)), tris: geo.idx.length / 3, up, under, over, runs: runs.length, level, blockedTo: r3(blocked.at(-1)[2]),
     rail: { pts: rl.pts.length, z: r3(rl.pts[3][2]), posts: rl.posts.length, gap: r3(Math.hypot(rl.posts[1][0] - rl.posts[0][0], rl.posts[1][2] - rl.posts[0][2])), yaw: r3(rl.posts[0][3]) }, railed: railed[2] };
+  // behind a curb: its shoulder at the curb's top, then down to the ground
+  const cb = bands(R[4], { kind: FILL, h: 0, rail: true, curb: true }, ground, { raw });
+  out.banks.curb = cb.map(b => b.map(r3));
 }
 /* ---------- roads over tunnels ---------- */
 {

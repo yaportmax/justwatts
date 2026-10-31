@@ -109,8 +109,11 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
 // mk(x, z, tx, tz): the hand list's markings at a centre point, the way running (tx, tz): [centre, bits] (MARK).
 // rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
 // centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null, mk = null }) {
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null, mk = null, flares = null }) {
   let P = resample(pts, step);
+  // (flares [[x, z, R], ...]: a side road's mouth, its corners rounded R metres: the width there 2 R more, a quarter
+  // circle each side out to R along it; a point every 0.75 m within its reach)
+  if (flares?.length) { const by = q => flares.some(([x, z, R]) => Math.hypot(q[0] - x, q[1] - z) < R + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 0.75).slice(1)); }
   // (within a taper's reach of a joint a point every 1.5 m: the edges follow the width's curve, not a corner every step)
   if (joints?.length) { const by = q => joints.some(([x, z]) => Math.hypot(q[0] - x, q[1] - z) < TAPER + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 1.5).slice(1)); }
   const n = P.length; if (n < 2) return [];
@@ -120,7 +123,8 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
   let last = 0, base = B.n, half = w / 2;
   const ins = [a, b, pL, pR];
   for (let i = 0; i < n; i++) {
-    if (joints?.length) { const wi = taperedWidth(w, joints, P[i][0], P[i][1]), s = wi / w; half = wi / 2; code = [lm, surf, lanes, wi, ...ins.map(v => v * s)]; }
+    if (joints?.length || flares?.length) { let wi = taperedWidth(w, joints, P[i][0], P[i][1]); for (const [x, z, R] of flares || []) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < R) wi += 2 * (R - Math.sqrt(R * R - (R - d) * (R - d))); }
+      const s = wi / w; half = wi / 2; code = [lm, surf, lanes, wi, ...ins.map(v => v * s)]; }
     // the join: the average of the two segments' normals, stretched to keep the width (capped at sharp turns)
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], c = P[i];
     let tx = b[0] - a[0], tz = b[1] - a[1]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;

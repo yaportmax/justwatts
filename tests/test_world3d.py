@@ -111,6 +111,14 @@ def test_lidar_trees(out):
         assert f["median"]["euc"] > f["median"]["cypress"] and f["median"]["willow"] < 10 and f["median"]["oak"] < 15
 
 
+def test_painted_lines_never_step_sideways(out):
+    # A13 (user report, upper Conzelman: the yellow buffer lines broke with a sideways jump at the way joins): every road's
+    # lines, along each ribbon and across each joint of two ways (tests/js/world3d_harness.mjs)
+    L = out["lines"]
+    assert L["roads"] > 5000 and L["joints"] > 3000
+    assert L["hl"]["along"] == 0 and L["hl"]["joint"] == 0, L["hl"]
+
+
 def test_road_ways_join_and_corners_round(out):
     c = out["chain"]
     assert c["joined"] and c["rest"] == [3, 2, 2, 2]                          # a-b-c one ribbon; the side road and c-d meet a third

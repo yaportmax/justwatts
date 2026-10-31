@@ -10,7 +10,7 @@ import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan, carStep } from '../../app/js/world3d/life.js';
-import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, TAPER } from '../../app/js/world3d/ribbon.js';
+import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, taperedParts, TAPER, YB } from '../../app/js/world3d/ribbon.js';
 import { parseVeg, makeVeg, parseTrees, fitTree, CLEAR, SCRUB, GRASS, PAVED } from '../../app/js/world3d/veg.js';
 import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
@@ -329,6 +329,48 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     const med = a => a.sort((p, q) => p - q)[a.length >> 1]; out.trees.file = { n: S.n, species: n, median: Object.fromEntries(Object.entries(hs).map(([k, a]) => [k, med(a)])), covered: S.covered(37.8357, -122.4775), bytes: readFileSync(f).length }; }
 }
 
+{
+  // every baked road's painted lines (the shader's: a ribbon's parts per vertex, ribbon.js) as the app builds them (ways
+  // chained, joints tapered, view.js buildRoads): no line steps sideways. Along a ribbon a line moves no more than 0.1 m
+  // plus 0.25 m a metre (a taper; two joints close together ease between their layouts over the way between them); where
+  // two ways meet end to end each travel lane's or buffer's line of the one ends within 0.1 m of one of the other (a
+  // parking lane's may end there). Over every z14 tile; counted apart in the Headlands (the rides' roads) and the rest.
+  const dir = new URL('../../app/world/14/', import.meta.url), proj = makeProj(37.83, -122.5);
+  const key = r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`, okW = r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw);
+  const lineOffs = (c, c2) => { const [lm, , , w] = c, [a, b, pL, pR] = c2, h = w / 2, o = []; if (!lm) return o;
+    o.push(['R', h - a], ['L', -(h - b)]); if (lm === 4) o.push(['L4', -(h - b + YB)]); if (pR) o.push(['PR', h - pR]); if (pL) o.push(['PL', -(h - pL)]); return o; };
+  const inHL = (x, z) => { const la = proj.lat(z), lo = proj.lon(x); return la > 37.812 && la < 37.872 && lo > -122.565 && lo < -122.455; };
+  const S = { hl: { along: 0, joint: 0, worst: 0, at: null }, rest: { along: 0, joint: 0, worst: 0, at: null } };
+  const fail = (x, z, e, what) => { const g = S[inHL(x, z) ? 'hl' : 'rest']; g[what]++; if (e > g.worst) { g.worst = r3(e); g.at = [what, +proj.lat(z).toFixed(6), +proj.lon(x).toFixed(6)]; } };
+  let joints = 0, roads = 0;
+  for (const f of readdirSync(dir)) {
+    const t = unpackTile(new Uint8Array(gunzipSync(readFileSync(new URL(f, dir))))), all = decodeRoads(t.json.r || []).filter(r => r.pts.length > 1);
+    const ch = chainWays(all, key), J = tapers(ch, { width: r => roadStyle(r.hw, r.ln, r.fl, r.wd).w, parts: r => { const q = roadStyle(r.hw, r.ln, r.fl, r.wd); return [q.a, q.b, q.pL, q.pR]; }, rigid: r => r.fl & 19, ok: okW, xz: proj.xz });
+    const ends = new Map();
+    ch.forEach((r, ri) => {
+      if (!okW(r) || r.fl & 3) return; const st = roadStyle(r.hw, r.ln, r.fl, r.wd); if (!st.lm) return; roads++;
+      const B = builder(), cen = ribbon(B, r.pts.map(p => proj.xz(...p)), { ...st, hAt: () => 0, joints: J.get(ri), step: 5 }), d = B.done(), n = cen.length;
+      const at = i => lineOffs(Array.from(d.code.slice(8 * i, 8 * i + 4)), Array.from(d.code2.slice(8 * i, 8 * i + 4)));
+      for (let i = 1; i < n; i++) {
+        const p = at(i - 1), q = at(i), ds = Math.hypot(cen[i][0] - cen[i - 1][0], cen[i][2] - cen[i - 1][2]);
+        for (const [k, v] of q) { const u = p.find(e => e[0] === k); if (!u) continue; const e = Math.abs(v - u[1]) - 0.25 * ds; if (e > 0.1) fail(cen[i][0], cen[i][2], e, 'along'); }
+      }
+      // (the world points of each end's lines at a joint, by the joint)
+      for (const i of [0, n - 1]) {
+        const c = cen[i], nx = (c[4] - c[0]) / c[3], nz = (c[6] - c[2]) / c[3], j = (J.get(ri) || []).find(([x, z]) => Math.hypot(x - c[0], z - c[2]) < 0.5); if (!j) continue;
+        const k = `${j[0]},${j[1]}`; (ends.get(k) ?? ends.set(k, []).get(k)).push({ lm: st.lm, pts: at(i).map(([kk, o]) => [kk, c[0] + nx * o, c[2] + nz * o]), x: c[0], z: c[2] });
+      }
+    });
+    // (a parking lane's line may end at a joint: the lane ends; the travel lanes' and the buffer's lines run on)
+    const run = P => P.filter(([k]) => k === 'R' || k === 'L' || k === 'L4');
+    for (const E of ends.values()) {
+      if (E.length !== 2 || E[0].lm !== E[1].lm || Math.hypot(E[0].x - E[1].x, E[0].z - E[1].z) > 0.5) continue; joints++;
+      for (const [A, B] of [[E[0], E[1]], [E[1], E[0]]]) for (const [, x, z] of run(A.pts)) { const m = Math.min(...run(B.pts).map(([, x2, z2]) => Math.hypot(x - x2, z - z2))); if (m > 0.1) fail(x, z, m, 'joint'); }
+    }
+  }
+  out.lines = { roads, joints, ...S };
+}
+
 /* ---------- road sides (banks.js) ---------- */
 // a straight road east along z = 0 at height 10, 6 m wide (its right edge z = +3): the ground falling away on the right
 // (2 m under the edge, then 1 in 3); on the left the lidar's bank rising at 3 in 2, the drawn ground carved level to the
@@ -503,6 +545,10 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   // over 5 m) no more than the road's own: a smooth line, no bounce
   const bounce = rows => { let b = 0; for (let k = 15; k + 15 < rows.length; k += 3) { const a = rows[k - 15].y, m = rows[k].y, c = rows[k + 15].y; const A = rows[k - 15], C = rows[k + 15], M = rows[k], turn = (M.x - A.x) * (C.x - M.x) + (M.z - A.z) * (C.z - M.z) < 0.5 * Math.hypot(M.x - A.x, M.z - A.z) * Math.hypot(C.x - M.x, C.z - M.z) || Math.hypot(C.x - A.x, C.z - A.z) < 8;  // (not where the course turns round: a dead end)
       if (!turn && a != null && m != null && c != null) b = Math.max(b, Math.abs(a - 2 * m + c)); } return b; };
+  // (a rail's road as drawn at (x, z): its half width and the parking on the rider's side, eased at a joint with another
+  // way as the ribbon is, ribbon.js taperedWidth / taperedParts)
+  const drawn = (q, x, z, fw) => { const st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd); if (!q.joints?.length || (q.r.fl & 2 && q.r.ln === 1)) return { st, half: st.w / 2, park: fw ? st.pR : st.pL };
+    const w = taperedWidth(st.w, q.joints, x, z), tp = taperedParts([st.a, st.b, st.pL, st.pR], q.joints, x, z); return { st, half: w / 2, park: tp ? tp[fw ? 3 : 2] : (fw ? st.pR : st.pL) * w / st.w }; };
   out.courses = {};
   for (const [name, la, lo, hd] of starts) for (const back of [0, 1]) {
     const c = courseOf(la, lo, (hd + 180 * back) % 360), key = name + (back ? 'Back' : ''); if (!c) { out.courses[key] = null; continue; }
@@ -514,7 +560,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     const CP = c.ll.map(p => xz(...p));
     for (let i = 0; i < pr.ri.length; i++) {
       if (RI.narrows.some(([x, z]) => Math.hypot(CP[i][0] - x, CP[i][1] - z) < 25)) continue;  // (into a one-lane bore: onto its lane)
-      const q = RI.rails[pr.ri[i]]; if (!q) continue; const st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd), half = st.w / 2, fw = pr.fw[i] > 0, park = fw ? st.pR : st.pL, bike = q.r.fl & (fw ? 64 : 32), edge = half - park - pr.lane[i];
+      const q = RI.rails[pr.ri[i]]; if (!q) continue; const fw = pr.fw[i] > 0, { half, park } = drawn(q, CP[i][0], CP[i][1], fw), bike = q.r.fl & (fw ? 64 : 32), edge = half - park - pr.lane[i];
       if (!isTrail(q.r) && !/cycleway|pedestrian/.test(q.r.hw) && half >= 2 && !(q.r.fl & 2 && q.r.ln === 1) && (bike ? Math.abs(edge - 0.9) > 0.05 : edge > 1.5 || edge < 0.5)) laneBad++;
     }
     const bn = bounce(rows); out.courses[key] = { pts: c.ll.length, jump: r3(jump), bounce: r3(bn), none, onRail, laneBad };
@@ -532,7 +578,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
       const c = courseOf(la, lo, (hd + 180 * back) % 360); if (!c) continue; const P = c.ll.map(p => xz(...p)), pr = profileOf(RI, P, c.ele);
       for (let i = 0; i < pr.ri.length; i++) {
         const q = RI.rails[pr.ri[i]], row = q && TABLE.find(([re]) => re.test(c.nm[i] || '')); if (!row || RI.narrows.some(([x, z]) => Math.hypot(P[i][0] - x, P[i][1] - z) < 25)) continue;
-        const fw = pr.fw[i] > 0, want = typeof row[1] === 'function' ? row[1](q, fw) : row[1], st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd), half = st.w / 2, park = fw ? st.pR : st.pL, lane = pr.lane[i];
+        const fw = pr.fw[i] > 0, want = typeof row[1] === 'function' ? row[1](q, fw) : row[1], { half, park } = drawn(q, P[i][0], P[i][1], fw), lane = pr.lane[i];
         if (!(q.r.fl & 16) && (isTrail(q.r) || /cycleway|pedestrian/.test(q.r.hw) || half < 2)) continue;  // (a path the course's name runs onto: its middle)
         const got = q.r.fl & 16 ? (lane > 0.3 ? 'right' : 'mid') : q.r.fl & (fw ? 64 : 32) && Math.abs(half - park - lane - 0.9) < 0.05 ? 'bike' : half - park - lane >= 0.5 && half - park - lane <= 1.5 ? 'edge' : 'off';
         const b = by[c.nm[i]] ??= { n: 0, bad: 0, bike: 0, up: 0, upBike: 0 }; b.n++; if (got === 'bike') b.bike++; if (q.r.fl & 4096 && !fw) { b.up++; if (got === 'bike') b.upBike++; } if (got !== want) { b.bad++; if (bad.length < 12) bad.push([c.nm[i], name + (back ? 'Back' : ''), i, want, got, ...c.ll[i].map(v => +v.toFixed(5))]); }

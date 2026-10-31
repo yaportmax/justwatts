@@ -80,10 +80,22 @@ export function builder() {
 // The width at (x, z) of a road `w` wide that eases to the joint's width within TAPER metres of each joint [[x, z,
 // width], ...] (tapers): no step where two ways of different layouts meet
 export const TAPER = 25;
-export function taperedWidth(w, joints, x, z) {
-  for (const [jx, jz, wj] of joints || []) { if (wj == null) continue; const d = Math.hypot(x - jx, z - jz); if (d < TAPER) { const f = d / TAPER; w = wj + (w - wj) * f * f * (3 - 2 * f); } }
-  return w;
+// (several joints within reach blend by weights that sum to one: each joint's 1 - S times the others' S, the road's own
+// the product of every S (S the smoothstep of the distance over TAPER): at a joint its value exactly, a second joint
+// within TAPER never moves it, continuous between them (A13: one after the other had stepped the width at short ways))
+function blend(own, joints, x, z, val) {
+  const J = []; for (const j of joints || []) { const v = val(j); if (v == null) continue; const d = Math.hypot(x - j[0], z - j[1]); if (d < TAPER) { const f = d / TAPER; J.push([f * f * (3 - 2 * f), v]); } }
+  if (!J.length) return null;
+  const all = J.reduce((p, [S]) => p * S, 1); let sw = all, acc = own.map(v => v * all);
+  J.forEach(([S, v], i) => { const g = (1 - S) * J.reduce((p, [T], k) => k === i ? p : p * T, 1); sw += g; acc = acc.map((a, k) => a + g * v[k]); });
+  return acc.map(a => a / sw);
 }
+export function taperedWidth(w, joints, x, z) { return blend([w], joints, x, z, j => j[2] == null ? null : [j[2]])?.[0] ?? w; }
+// The parts across a road [a, b, pL, pR] (roadStyle) at (x, z), each easing to the joint's (its sixth entry, tapers)
+// within TAPER metres of it, as the width does: the lines between them run on across the joint (A13: upper Conzelman's
+// ways with and without the parking lane, one lane or two, the contraflow buffer's yellow lines had stepped sideways up
+// to 1.2 m at each joint, the flexible posts off it), or null where no joint near has parts
+export function taperedParts(ins, joints, x, z) { return blend(ins, joints, x, z, j => j[5] || null); }
 // Where two ways meet end to end (OpenStreetMap splits a road where its tags change): per road index its joints [[x, z,
 // width, tx, tz], ...]. width: where theirs are more than 0.3 m apart, halfway between the two (the other's own where that
 // one is rigid(road): a bridge or a tunnel drawn at its own width), else null (no taper); (tx, tz): the two ways' mean
@@ -91,8 +103,10 @@ export function taperedWidth(w, joints, x, z) {
 // meeting at an angle, nor an overlap). At a node where a third way meets (a side road, a slip road), the two that run on
 // most nearly straight through it (within 40 degrees) are the joint (Street View East Road 0a_0130: East Road wider with
 // its bike lanes south of the slip road's node, a step and a green wedge across the lane were drawn there). pts in
-// [lat, lon], xz(lat, lon) to local metres; ok(road): a road that takes part.
-export function tapers(roads, { width, rigid = () => false, ok = () => true, xz }) {
+// [lat, lon], xz(lat, lon) to local metres; ok(road): a road that takes part. parts(road): its [a, b, pL, pR] (roadStyle,
+// as the way runs): where the two differ the joint has their mean as a sixth entry (in that road's own sense; a way
+// meeting it head on has its right and left swapped) and a width even where the two are within 0.3 m (taperedParts).
+export function tapers(roads, { width, parts = null, rigid = () => false, ok = () => true, xz }) {
   const k = p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`, ends = new Map(), out = new Map();
   roads.forEach((r, i) => { if (r.pts.length < 2 || !ok(r)) return; for (const e of [0, 1]) { const q = k(e ? r.pts.at(-1) : r.pts[0]); (ends.get(q) ?? ends.set(q, []).get(q)).push([i, e]); } });
   // (a way's direction out of the node, over its first 6 m)
@@ -107,9 +121,14 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
     if (!pair) continue;
     const [[i, e], [j, f]] = pair, wa = width(roads[i]), wb = width(roads[j]), ra = rigid(roads[i]), rb = rigid(roads[j]);
     if (ra && rb) continue;
-    const wj = Math.abs(wa - wb) < 0.3 ? null : ra ? wa : rb ? wb : (wa + wb) / 2, [x, z] = xz(...(e ? roads[i].pts.at(-1) : roads[i].pts[0]));
+    // (parts in road i's sense; road j's swapped side for side when the two run head to head or tail to tail)
+    const sw = q => [q[1], q[0], q[3], q[2]], pa = parts?.(roads[i]), pb0 = parts?.(roads[j]), pb = pb0 && (e === f ? sw(pb0) : pb0);
+    // (with parts, the width's change goes to the travel lanes: the parts eased to the joint's, never scaled with the width)
+    // (a width at every joint, the same each side or not: a joint's own width holds there against another within TAPER)
+    const wj = ra ? wa : rb ? wb : (wa + wb) / 2, [x, z] = xz(...(e ? roads[i].pts.at(-1) : roads[i].pts[0]));
+    const pj = pa && pb ? (ra ? pa : rb ? pb : pa.map((v, k) => (v + pb[k]) / 2)) : null;
     const u = out1(i, e), v = out1(j, f); let tx = u[0] - v[0], tz = u[1] - v[1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
-    for (const [n, rg] of [[i, ra], [j, rb]]) if (!rg) (out.get(n) ?? out.set(n, []).get(n)).push([x, z, wj, tx, tz]);
+    for (const [n, rg] of [[i, ra], [j, rb]]) if (!rg) (out.get(n) ?? out.set(n, []).get(n)).push([x, z, wj, tx, tz, pj && (n === j && e === f ? sw(pj) : pj)]);
   }
   return out;
 }
@@ -117,8 +136,8 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
 // Add one ribbon to builder B. pts: [[x, z], ...]; hAt(x, z): ground height (null: unknown, the last known is kept);
 // deck: [h0, h1] the heights at the two ends (a bridge), else the ground under each edge; joints: where it eases to
 // another way's width (tapers); drape: the edges on the ground however steep it is across (a trail on a hillside).
-// Returns the centre line [[x, y, z, half width, right edge x, y, z, left edge x, y, z], ...] (for pillars, arrows, the
-// road sides: banks.js).
+// Returns the centre line [[x, y, z, half width, right edge x, y, z, left edge x, y, z, b (the left part's width as
+// drawn there)], ...] (for pillars, arrows, the road sides: banks.js; the flexible posts on a buffer).
 // mk(x, z, tx, tz): the hand list's markings at a centre point, the way running (tx, tz): [centre, bits] (MARK).
 // rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
 // centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
@@ -136,8 +155,9 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
   let last = 0, base = B.n, half = w / 2;
   const ins = [a, b, pL, pR];
   for (let i = 0; i < n; i++) {
-    if (joints?.length || flares?.length) { let wi = taperedWidth(w, joints, P[i][0], P[i][1]); for (const [x, z, R] of flares || []) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < R) wi += 2 * (R - Math.sqrt(R * R - (R - d) * (R - d))); }
-      const s = wi / w; half = wi / 2; code = [lm, surf, lanes, wi, ...ins.map(v => v * s)]; }
+    if (joints?.length || flares?.length) { const wt = taperedWidth(w, joints, P[i][0], P[i][1]); let wi = wt; for (const [x, z, R] of flares || []) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < R) wi += 2 * (R - Math.sqrt(R * R - (R - d) * (R - d))); }
+      // (the parts eased to a joint's where it has them, else in proportion to the width; a side road's mouth widens them)
+      const tp = taperedParts(ins, joints, P[i][0], P[i][1]), s = wi / (tp ? wt : w); half = wi / 2; code = [lm, surf, lanes, wi, ...(tp || ins).map(v => v * s)]; }
     // the join: the average of the two segments' normals, stretched to keep the width (capped at sharp turns)
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], c = P[i];
     let tx = b[0] - a[0], tz = b[1] - a[1]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
@@ -167,7 +187,7 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
     if (mk) { const m = mk(c[0], c[1], tx, tz); code = code.slice(0, 8); code.push(m[0], m[1]); }
     B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);
     B.v(c[0] - nx, hr + lift, c[1] - nz, 1, v0 + L[i], code);
-    centre.push([c[0], hc + lift, c[1], half, c[0] + nx, hl + lift, c[1] + nz, c[0] - nx, hr + lift, c[1] - nz]);
+    centre.push([c[0], hc + lift, c[1], half, c[0] + nx, hl + lift, c[1] + nz, c[0] - nx, hr + lift, c[1] - nz, code[5]]);
     if (i) { const p = base + 2 * (i - 1), q = base + 2 * i; B.tri(p, q, p + 1); B.tri(p + 1, q, q + 1); }  // facing up
   }
   return centre;

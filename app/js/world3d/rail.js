@@ -3,7 +3,7 @@
 // fitted to it; none of it depends on which tiles have loaded or the quality. A rail: the way's points split every
 // RAIL_STEP metres or less (dense: the same split in the bake and here), a height at each. A lane is a signed offset
 // from the rail, at the rail's height (the road flat across). Pure.
-import { roadStyle, roadLift, TAPER } from './ribbon.js';
+import { roadStyle, roadLift, TAPER, tapers, taperedWidth, taperedParts } from './ribbon.js';
 import { decodeRoads } from './landuse.js';
 
 export const RAIL_STEP = 5;
@@ -66,8 +66,13 @@ export const BIKE_LANE = 1.8;
 // TAPER (ribbon.js) metres before each portal
 export const ONE_LANE = 4.4, ONE_OFF = 1.4;
 export const oneLane = r => !!(r.fl & 2) && r.ln === 1 && !(r.fl & 8);
-export function laneOf(r, fwd = true) {
-  const st = roadStyle(r.hw, r.ln, r.fl, r.wd), half = st.w / 2, park = fwd ? st.pR : st.pL, bike = r.fl & (fwd ? 64 : 32);
+// (x, z, joints: where it meets another way end to end, tapers: the width and the parts there as the road is drawn,
+// ribbon.js: in the bike lane's paint through the joint (A13: upper Conzelman's contraflow lane, the rider on the
+// buffer's hatching near each joint, its way's half width 0.9 m off the drawn one))
+export function laneOf(r, fwd = true, x = 0, z = 0, joints = null) {
+  const st = roadStyle(r.hw, r.ln, r.fl, r.wd), bike = r.fl & (fwd ? 64 : 32);
+  let half = st.w / 2, park = fwd ? st.pR : st.pL;
+  if (joints?.length && !oneLane(r)) { const w = taperedWidth(st.w, joints, x, z), tp = taperedParts([st.a, st.b, st.pL, st.pR], joints, x, z); half = w / 2; park = tp ? tp[fwd ? 3 : 2] : park * w / st.w; }
   // (the Golden Gate Bridge's sidewalks, two way for bikes: keep right, the middle of its right half; goldengate.org)
   if (r.fl & 16 && /cycleway|footway|path|pedestrian/.test(r.hw)) return half / 2;
   if (isTrail(r) || /cycleway|pedestrian/.test(r.hw) || half < 2) return 0;
@@ -83,10 +88,12 @@ export function laneOf(r, fwd = true) {
 const CELL = 20;
 export function railIndex(json, xz) {
   const roads = decodeRoads(json.r || []), out = [], cells = new Map(), ck = (i, j) => i * 100003 + j;
+  // (the joints where ways meet end to end, as the drawn roads have them: the rider's lane follows the drawn width)
+  const J = tapers(roads, { width: r => oneLane(r) ? ONE_LANE : roadStyle(r.hw, r.ln, r.fl, r.wd).w, parts: r => { if (oneLane(r)) return null; const q = roadStyle(r.hw, r.ln, r.fl, r.wd); return [q.a, q.b, q.pL, q.pR]; }, rigid: r => r.fl & 19, ok: r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw), xz });
   roads.forEach((r, id) => {
     const H = unpackH(json.h[id] || []), P = dense(r.pts).map(([la, lo]) => xz(la, lo));
     if (P.length !== H.length || P.length < 2) return;
-    const st = roadStyle(r.hw, r.ln, r.fl, r.wd), T = track(P, H), rail = { id: out.length, r, half: st.w / 2, lift: railLift(r), T };
+    const st = roadStyle(r.hw, r.ln, r.fl, r.wd), T = track(P, H), rail = { id: out.length, r, half: st.w / 2, lift: railLift(r), T, joints: J.get(id) || null };
     out.push(rail);
     for (let k = 0; k + 1 < P.length; k++) {
       const a = P[k], b = P[k + 1], m = rail.half + 4;
@@ -145,7 +152,7 @@ export function profileOf(idx, P, ele = null, old = null, k = 0) {
   for (let i = k; i < n; i++) {
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)];
     ri[i] = prev = idx.match(P[i][0], P[i][1], b[0] - a[0], b[1] - a[1], ele ? ele[i] : null, prev, dir);
-    if (prev >= 0) { fw[i] = dir[0]; lane[i] = laneOf(idx.rails[prev].r, dir[0] > 0); }
+    if (prev >= 0) { fw[i] = dir[0]; lane[i] = laneOf(idx.rails[prev].r, dir[0] > 0, P[i][0], P[i][1], idx.rails[prev].joints); }
     // (into a one-lane bore: the lane narrows with the road, onto the bore's)
     for (const [x, z] of idx.narrows) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < TAPER) { const f = d / TAPER; lane[i] = ONE_OFF + (lane[i] - ONE_OFF) * f * f * (3 - 2 * f); } }
   }

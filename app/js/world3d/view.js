@@ -315,7 +315,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`);
     // where one road's ways of different layouts meet, the width eases from one to the other (no step)
     // (a one-lane bore's way its lane's width: the road narrows to it before each portal)
-    t.joints ??= tapers(t.chained, { width: r => oneLane(r) ? ONE_LANE : roadStyle(r.hw, r.ln, r.fl, r.wd).w, rigid: r => r.fl & 19, ok: r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw), xz: proj.xz });
+    t.joints ??= tapers(t.chained, { width: r => oneLane(r) ? ONE_LANE : roadStyle(r.hw, r.ln, r.fl, r.wd).w, parts: r => { if (oneLane(r)) return null; const q = roadStyle(r.hw, r.ln, r.fl, r.wd); return [q.a, q.b, q.pL, q.pR]; }, rigid: r => r.fl & 19, ok: r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw), xz: proj.xz });
     let nr = 0;
     const tunnels = ridden(g) ? tunnelLines(t) : [];
     // the lidar's ground anywhere the baked tiles are loaded (before any carving): a deck's ends in the next tile
@@ -912,7 +912,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         for (let i = 1; i < n; i++) {
           run2 += Math.hypot(P[i][0] - P[i - 1][0], P[i][2] - P[i - 1][2]); if (run2 < 9) continue;
           const [dx, dz] = dir(i), k = HM.across(P[i][0], P[i][2], dx, dz).find(([k]) => k === 'wposts' || k === 'yposts'); if (!k) continue; run2 = 0;
-          const o = hw(i) - (L.b - YB / 2) * hw(i) * 2 / L.w; put(k[0] === 'wposts' ? 'wdelin' : 'delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
+          const o = hw(i) - ((P[i][10] ?? L.b * hw(i) * 2 / L.w) - YB / 2);  // (the buffer's middle as drawn there, ribbon.js) put(k[0] === 'wposts' ? 'wdelin' : 'delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
         } }
     }
     // OpenStreetMap's power lines: a wooden pole with a crossarm at each node in the tile (across the line), two wires

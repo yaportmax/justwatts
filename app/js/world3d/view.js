@@ -14,7 +14,7 @@ import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS } 
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, EUC_YOUNG, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
+import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { loadVeg, loadTrees, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
 import { createScrub, REACH, TOP } from './scrub.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
@@ -785,7 +785,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp) => T.push([la, lo, h, r, sp]));
       for (let i = 0; i < T.length; i++) {
         if (i % 400 === 399) yield;
-        const [la, lo, h, r, sp0] = T[i], sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0, dim = DIMS[sp]; if (!dim) continue;
+        const [la, lo, h, r, sp0] = T[i], sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0 === 'cypress' && h >= CYP_TALL ? 'cypressT' : sp0, dim = DIMS[sp]; if (!dim) continue;
         let [x, z] = proj.xz(la, lo);
         // (a trunk on a road bank's steep face: moved out from the road till it is off it, up to 8 m; else none)
         if (c.bankH?.size && c.bankH.get(bkey(x, z)) < -1e8) {
@@ -1130,7 +1130,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // where it does not cover, a tree every 16 m
     if (lidarTrees) { const b = tileBox(c); let i = 0;
       lidarTrees.each(proj.lat(b[3]), proj.lon(b[0]), proj.lat(b[1]), proj.lon(b[2]), (la, lo, hh, rr, sp) => {
-        if (sp === 'euc' && hh < EUC_YOUNG) sp = 'eucS';
+        if (sp === 'euc' && hh < EUC_YOUNG) sp = 'eucS'; else if (sp === 'cypress' && hh >= CYP_TALL) sp = 'cypressT';
         if (i++ % 2 || !DIMS[sp]) return; const [x, z] = proj.xz(la, lo), h = gridHeight(c.grid, x, z); if (h == null || h < 2) return;
         const f = fitTree(DIMS[sp], hh, rr), s = f.s * 1.41;
         list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -f.hf, 0.86 + 0.28 * hash2(Math.round(x * 3), 7), (hash2(7, Math.round(z * 3)) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + hh);
@@ -1777,7 +1777,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       im.frustumCulled = false; im.castShadow = !!depth || m === mats.pillar; im.receiveShadow = true; if (depth) im.customDepthMaterial = depth; warm.add(im);
     }
     // the tunnels' parts (a tile with a tunnel may first load mid-ride), roads, buildings, rails as they are drawn
-    for (const [m, cast, receive] of [[mats.underpass, false, true], [mats.tunnel, false, false], [mats.portal, true, true], [mats.walk, false, true], [mats.road, false, false], [mats.road, false, true], [mats.bldg, true, true], [mats.bldg, false, false], [mats.rail, true, true], [mats.curb, false, true]]) {
+    for (const [m, cast, receive] of [[mats.underpass, false, true], [mats.tunnel, false, false], [mats.portal, true, true], [mats.walk, false, true], [mats.road, false, false], [mats.road, false, true], [mats.bldg, true, true], [mats.bldg, false, false], [mats.rail, true, true], [mats.curb, false, true],
+      // (the hand list's other barriers too, every way they are drawn: plain Lambert with the sun, a program first built on
+      // Conzelman about 320 m into the ride, a half to one second's stall, on main as well)
+      ...[mats.wood, mats.wire, mats.wcon, mats.redCurb, mats.mesh, mats.rail, mats.curb].flatMap(m => [[m, true, true], [m, false, true], [m, false, false]])]) {
       const o = new THREE.Mesh(geo, m); o.applyMatrix4(under); o.frustumCulled = false; o.castShadow = cast; o.receiveShadow = receive; warm.add(o);
     }
     // a near tile easing in (easePart): its ground, banks, roads and buildings with a morph target

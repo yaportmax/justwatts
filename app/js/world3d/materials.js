@@ -143,7 +143,13 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     float bed = 0.5 + 0.5 * sin(h * 3.0 + (b1 - 0.5) * 6.0);
     vec3 earth = mix(srgb(vec3(0.40, 0.31, 0.22)), srgb(vec3(0.54, 0.42, 0.31)), smoothstep(0.25, 0.75, b1 * 0.6 + b2 * 0.4));
     earth = mix(earth, srgb(vec3(0.47, 0.44, 0.38)), smoothstep(0.62, 0.8, b1) * 0.45);  // chert, grey
-    c = mix(c, earth * (0.95 + 0.1 * bed), bare); }
+    // (A13: red-brown patches, the weathered Franciscan soil, and the face broken by the ground's own cover in patches, more
+    // where it is scrub: Street View user_alexander_cut, 2025-03: a red-brown scar broken by scrub, not one flat brown face)
+    earth = mix(earth, srgb(vec3(0.53, 0.36, 0.28)), smoothstep(0.35, 0.65, b1) * 0.6);
+    // (Street View 3a_0430's cut too: scrub in strips across it; the scrub's own grey olive, coyote brush, props.js)
+    float sp = smoothstep(0.42, 0.55, b2) * max(jwScrub * 0.9, 0.75);
+    c = mix(c, earth * (0.95 + 0.1 * bed), bare);
+    c = mix(c, srgb(vec3(0.36, 0.42, 0.28)) * (0.8 + 0.35 * b1), sp * bare * 0.9); bare *= 1.0 - sp; }
   rk = max(rk, bare); jwPav = smoothstep(0.25, 0.65, pav) * known;
   // under the redwoods: red-brown needle litter, patches of sorrel
   float rw = 0.0;

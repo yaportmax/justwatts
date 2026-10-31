@@ -154,11 +154,14 @@ const cone = (y0, y1, r, c, seed) => [bumpy(new THREE.ConeGeometry(r, y1 - y0, 8
 
 // trees at a typical size in metres (scaled per instance). Names: oak, bay, fir, redwood, euc, cypress, pine (trees),
 // bush, shrub (low), fern, stone (near the rider only)
-export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub', 'willow', 'eucS'];
+export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub', 'willow', 'eucS', 'cypressT'];
 // a blue gum the lidar has under this height (metres) is a young or cut-back one, leafy nearly to the ground (eucS)
 export const EUC_YOUNG = 22;
+// a Monterey cypress the lidar has this tall or more grew sheltered in a stand or an old planting: a big full crown to near
+// the ground (cypressT), not the wind-cut coastal table (Street View user_fortbaker_stop: the cypress right of the stop)
+export const CYP_TALL = 15;
 // the share of the full models' radius each is drawn in full (the tall dense ones cost the most; impostors past it)
-export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, willow: 0.8, eucS: 0.8, stone: 0.45, fern: 0.25 };
+export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, willow: 0.8, eucS: 0.8, cypressT: 0.8, stone: 0.45, fern: 0.25 };
 export function treeGeometries() {
   const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15);
   // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
@@ -201,6 +204,10 @@ export function treeGeometries() {
     // forking low into stems, blue-grey hanging leaves in a tall oval from about 2.5 m, about 13 m tall
     eucS: merge([bark(trunkG(0.3, 0.24, 1.9, 6), pale, M(0, 0, 0, 1, 1, 1, 0, 0.1)), ...[[1.2, 0.4], [-1.0, 0.7], [0.3, -1.2], [-0.4, -0.6]].map(([x, z], i) => limb(0.15 + x * 0.1, 1.7, z * 0.1, x, 6.5 + 0.6 * i, z, 0.15, pale)),
       core(0, 7.6, 0, 2.3, 3.2, 2.2, F.euc, 23), ...lumps(0, 7.6, 0, 3.1, 4.3, 3.0, 9, 13, 2.4, LEAF.euc, 22, { lump: 0.62, lift: 0.2 }).map(g => leaves(g, F.euc))]),
+    // a big sheltered Monterey cypress: a short thick dark trunk forking low, a dense dark irregular crown from about 2.5 m,
+    // about 22 m tall and 13 m across (Street View user_fortbaker_stop, 2025-03: right of the stop)
+    cypressT: merge([bark(trunkG(0.9, 0.45, 9, 7), brownD), limb(0.3, 3.5, 0, 3.2, 8, 0.6, 0.3, brownD), limb(0.2, 4, 0, -2.8, 9, -0.5, 0.28, brownD), limb(0, 5, 0.2, 0.4, 12, 2.8, 0.24, brownD),
+      core(0, 11.5, 0, 5.0, 7.8, 4.8, F.cyp, 31), ...lumps(0, 11.5, 0, 6.4, 9.2, 6.1, 12, 14, 3.4, LEAF.cypress, 30, { lump: 0.55 }).map(g => leaves(g, F.cyp))]),
     // coyote brush and other coastal scrub: low, irregular mounds
     bush: merge([core(0, 0.5, 0, 1.3, 0.55, 1.1, F.bush, 12), ...lumps(0, 0.6, 0, 1.7, 0.75, 1.5, 3, 12, 1.3, LEAF.scrub, 11, { lift: 0.5 }).map(g => leaves(g, F.bush))]),
     // toyon / manzanita: a taller shrub with a reddish base

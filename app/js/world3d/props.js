@@ -223,36 +223,40 @@ export function scrubGeometries() {
 export function furnitureGeometries() {
   const B = (w, h, d, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z), C = (r0, r1, h, s = 8) => new THREE.CylinderGeometry(r1, r0, h, s).translate(0, h / 2, 0);
   const grey = col(0x8c8f92), steel = col(0x9da3a6), dark = col(0x3b3d40), wood = col(0x6f5a44), pole = col(0x6a5e50), white = col(0xeeeeea), red = col(0xb3241c), lampC = col(0xfff1d0);
-  const octagon = new THREE.CylinderGeometry(0.38, 0.38, 0.03, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.03);
+  // an octagon facing +z at the sign's height: its circumradius, thickness, z
+  const oct = (r, d, z) => new THREE.CylinderGeometry(r, r, d, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, z);
+  // STOP on the sign's face (+z): block strokes, letters 0.254 m high, 0.12 m wide, 0.035 m apart, strokes 0.035 m
+  const stopLetters = () => {
+    const L = { S: [[0, 1, 1, 1], [0, 0.5, 0, 1], [0, 0.5, 1, 0.5], [1, 0, 1, 0.5], [0, 0, 1, 0]], T: [[0, 1, 1, 1], [0.5, 0, 0.5, 1]],
+      O: [[0, 1, 1, 1], [1, 0, 1, 1], [0, 0, 1, 0], [0, 0, 0, 1]], P: [[0, 1, 1, 1], [1, 0.5, 1, 1], [0, 0.5, 1, 0.5], [0, 0, 0, 1]] };
+    const w = 0.12, h = 0.254, t = 0.035, out = [];
+    [...'STOP'].forEach((ch, k) => { const x0 = (k - 1.5) * (w + 0.035) - w / 2;
+      for (const [a, b, c, d] of L[ch]) { const xa = x0 + a * w, xb = x0 + c * w, ya = 2.2 - h / 2 + b * h, yb = 2.2 - h / 2 + d * h;
+        out.push(B(Math.abs(xb - xa) + t, Math.abs(yb - ya) + t, 0.004, (xa + xb) / 2, (ya + yb) / 2, 0.047)); } });
+    return out;
+  };
   return {
     post: merge([[B(0.1, 0.78, 0.15, 0, 0.39, 0), steel], [B(0.07, 0.3, 0.15, 0.06, 0.66, 0), steel]]),
     pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),
     lamp: merge([[C(0.1, 0.07, 6.6), dark], [B(1.9, 0.08, 0.1, 0.95, 6.5, 0), dark], [B(0.6, 0.14, 0.26, 1.85, 6.42, 0), dark], [B(0.5, 0.03, 0.2, 1.85, 6.34, 0), lampC, null, { tag: 2 }]]),
     // painted on a stop's way in (flat on the road, the driver's right +x, toward the junction -z): the stop bar across a
-    // lane, and STOP in block letters 2.4 m long
+    // lane, 3.2 m (scaled across to the lane)
     stopbar: merge([[B(3.2, 0.012, 0.45), white]]),
-    stopword: merge(stopWord().map(g => [g, white])),
-    // a marked crossing: bars 0.5 m wide along the road (+z), 2.8 m long, 1.1 m apart across a road of up to 8 m
+    // a marked crossing (scaled across to the road): bars 0.5 m wide along the road (+z), 2.8 m long, 1.1 m apart across
+    // 7.2 m; or two lines across it 0.3 m wide, 3 m apart, 1 m (MUTCD 3B.18: lines 6 to 24 inches wide, 6 feet apart or more)
     xwalk: merge(Array.from({ length: 7 }, (_, i) => [B(0.5, 0.012, 2.8, (i - 3) * 1.1, 0, 0), white])),
+    xlines: merge([-1.5, 1.5].map(z => [B(1, 0.012, 0.3, 0, 0, z), white])),
     // a flexible delineator post on the centre line: yellow, two white reflective bands
     delin: merge([[C(0.045, 0.04, 0.95, 8), col(0xd9b21c)], ...[0.72, 0.84].map(y => [new THREE.CylinderGeometry(0.047, 0.047, 0.06, 8).translate(0, y, 0), white])]),
-    stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [octagon, red], [new THREE.CylinderGeometry(0.33, 0.33, 0.035, 8).rotateX(Math.PI / 2).rotateZ(Math.PI / 8).translate(0, 2.2, 0.04), white], [B(0.5, 0.12, 0.04, 0, 2.2, 0.06), red]]),
+    // a stop sign (MUTCD R1-1, 30 inches across its flats): a red octagon, a narrow white border, STOP in white letters
+    // 10 inches high; its back grey
+    stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [oct(0.412, 0.02, 0.01), white], [oct(0.392, 0.02, 0.03), red], [oct(0.412, 0.008, -0.004), grey], ...stopLetters().map(g => [g, white])]),
     limit: merge([[C(0.035, 0.035, 2.4, 6), grey], [B(0.6, 0.76, 0.03, 0, 2.15, 0.03), white], [B(0.5, 0.06, 0.035, 0, 2.38, 0.04), dark], [B(0.3, 0.26, 0.035, 0, 2.05, 0.04), dark]]),
     fence: merge([[B(0.12, 1.25, 0.12, 0, 0.62, 0), wood], [B(0.12, 1.25, 0.12, 3, 0.62, 0), wood], ...[0.45, 0.8, 1.12].map(y => [B(3, 0.1, 0.04, 1.5, y, 0.06), wood])]),
     picket: merge([...Array.from({ length: 12 }, (_, i) => [B(0.09, 0.95, 0.025, 0.12 + i * 0.25, 0.47, 0), white]), [B(3, 0.07, 0.04, 1.5, 0.3, -0.03), white], [B(3, 0.07, 0.04, 1.5, 0.75, -0.03), white]]),
     signal: merge([[C(0.1, 0.08, 4.4), grey], ...signalHead(3.55)]),
     signalHead: merge(signalHead(0)),
   };
-  // STOP in block strokes: each letter 0.55 m wide and 2.4 m long (its top toward -z), 0.12 m strokes, 0.2 m apart
-  function stopWord() {
-    const L = { S: [[0, 0, 1, 0], [0, 0, 0, 0.5], [0, 0.5, 1, 0.5], [1, 0.5, 1, 1], [0, 1, 1, 1]], T: [[0, 0, 1, 0], [0.5, 0, 0.5, 1]],
-      O: [[0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 0, 1]], P: [[0, 0, 1, 0], [1, 0, 1, 0.5], [0, 0.5, 1, 0.5], [0, 0, 0, 1]] };
-    const w = 0.55, h = 2.4, t = 0.12, out = [];
-    [...'STOP'].forEach((ch, k) => { const x0 = (k - 1.5) * (w + 0.2) - w / 2;
-      for (const [a, b, c, d] of L[ch]) { const xa = x0 + a * w, xb = x0 + c * w, za = -h / 2 + b * h, zb = -h / 2 + d * h;
-        out.push(B(Math.abs(xb - xa) + t, 0.012, Math.abs(zb - za) + t, (xa + xb) / 2, 0, (za + zb) / 2)); } });
-    return out;
-  }
   // a signal head centred at height y: backplate, the housing, red, amber and green lamps under their visors
   function signalHead(y0) {
     return [[B(0.62, 1.32, 0.03, 0, y0, -0.02), dark], [B(0.38, 1.1, 0.28, 0, y0, 0.13), col(0x2a2c2e)],

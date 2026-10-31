@@ -1,6 +1,6 @@
 // The baked Marin world (tools/bake_world.mjs): per Web Mercator tile a gzip file app/world/<z>/<x>_<y>.bin with the
 // tile's ground features (landuse, nature, water, buildings; landuse.js compact form), its power lines ([[lat, lon], ...]), guard rails (lines)
-// car parks (rings) and marked crossings (points) from OpenStreetMap, and a height grid at the mesh's
+// car parks (rings), marked crossings (points, as tagged marked) and stop signs (each way in) from OpenStreetMap, and a height grid at the mesh's
 // vertices (z14: 257 x 257 from USGS 3DEP lidar, about 7.5 m apart, or 129 x 129 from Terrarium; z11: 65 x 65). index.json
 // lists the tiles there are (the rest is sea). rails.bin: the rails of every road the rides reach (rail.js), the roads in
 // the tiles carrying theirs (rh).
@@ -50,7 +50,7 @@ export function createBaked({ fetch = globalThis.fetch?.bind(globalThis), base =
           const r = await fetch(`${base}${z}/${x}_${y}.bin`); if (!r.ok) return null;
           const { json, hs, n } = unpackTile(await unzip(r));
           const roads = decodeRoads(json.r || []); if (json.rh) roads.forEach((r, i) => { if (json.rh[i]) r.h = unpackH(json.rh[i]); });  // the roads' rails (rail.js)
-          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), roads, places: json.p || [], power: json.w || [], rails: json.g || [], lots: json.pk || [], xings: json.x || [] };
+          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), roads, places: json.p || [], power: json.w || [], rails: json.g || [], lots: json.pk || [], xings: json.x || [], stops: json.s || [] };
         } catch { await new Promise(ok => setTimeout(ok, 500 * 2 ** i)); }
       }
       return null;

@@ -312,6 +312,20 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const isTrail = r => /path|footway|track|bridleway|steps/.test(r.hw), side = new Map(), sk = (x, z) => `${Math.floor(x / 8)},${Math.floor(z / 8)}`;
     if (!minor) for (const r of t.chained) if (!(r.fl & 3) && !isTrail(r)) { const h = roadStyle(r.hw, r.ln, r.fl, r.wd).w / 2; for (const [x, z] of resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 4)) (side.get(sk(x, z)) ?? side.set(sk(x, z), []).get(sk(x, z))).push([x, z, h]); }
     const byRoad = (x, z) => { for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const [u, w, h] of side.get(`${Math.floor(x / 8) + a},${Math.floor(z / 8) + b}`) || []) if (Math.hypot(u - x, w - z) < h + 3) return true; return false; };
+    // a road with no rail (a motorway and its ramps, a street past the rides' area) where it runs onto a railed one, a
+    // node shared or not (OpenStreetMap draws a ramp's or a side road's end on top of the bigger road): one surface, its
+    // ground (g at x, z) eased onto that road's rail within its paved width and back over 6 m, or 15 m a metre between them,
+    // as the bake levels the railed roads' junctions; drawn under it (its lift); left where they are 1.2 m or more apart
+    // (one over the other). hint: per rail the last segment (a Map per road)
+    const onto = (x, z, g, lift, hint) => {
+      if (!RI || g == null) return g; let best = 0, dh = 0;
+      for (const id of RI.near(x, z)) {
+        const m = RI.rails[id]; if (m.r.fl & 3 || isTrail(m.r)) continue; const p = m.T.at(x, z, hint.get(id) ?? -1); if (!p) continue; hint.set(id, p.k);
+        const d = p.h + Math.min(0, m.lift - lift - 0.02) - g, F = Math.min(25, Math.max(6, 15 * Math.abs(d))), o = Math.abs(p.d) - m.half, w0 = o <= 0 ? 1 : o >= F ? 0 : 1 - o / F;
+        const w = w0 * w0 * (3 - 2 * w0) * Math.max(0, Math.min(1, (1.2 - Math.abs(d)) / 0.4)); if (w > best) { best = w; dh = d; }
+      }
+      return g + dh * best;
+    };
     for (const [ri, r] of t.chained.entries()) {
       if (++nr % 6 === 0) yield;
       if (r.fl & 2) continue;                          // tunnels: under the hill
@@ -335,7 +349,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const dk = pts.line ?? (r.fl & 16 && r.dk ? [marks.deckLine(...pts[0]), marks.deckLine(...pts.at(-1))] : r.dk);  // the approaches meet the deck
       // a trail lies on the hillside (each edge on the ground); the ground goes under it only where it would cover it
       const trail = !dk && (st.surf === 2 || /path|footway|track|bridleway|steps/.test(r.hw));
-      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt, lift: rail ? railLift(r) : trail ? 0.15 : roadLift(r.hw), deck: rail ? null : dk || null, rail, step: minor ? 12 : trail ? 3 : 5, joints: t.joints.get(ri), drape: trail });
+      const lift = rail ? railLift(r) : trail ? 0.15 : roadLift(r.hw), hint = new Map(), hOn = rail || dk || trail ? hAt : (x, z) => onto(x, z, hAt(x, z), lift, hint);
+      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail, step: minor ? 12 : trail ? 3 : 5, joints: t.joints.get(ri), drape: trail });
       tops.push([i0, B.idx.length, trail]);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
       if (!minor && !st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk, lm: st.lm, b: st.b, park: !!(r.fl & 256), st });
@@ -605,30 +620,35 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { post: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], stopbar: [], stopword: [], xwalk: [] }, wires = [];
+    const items = { post: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], stopbar: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
-    const put = (k, x, y, z, yaw) => items[k].push([x, y, z, yaw]);
-    // a spatial hash of the lines' points (10 m), to find where a road ends on another
+    const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
+    // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
     const cell = new Map(), ck = (x, z) => `${Math.floor(x / 10)},${Math.floor(z / 10)}`;
     c.lines.forEach((L, li) => L.P.forEach(p => { const k = ck(p[0], p[2]); (cell.get(k) ?? cell.set(k, []).get(k)).push(li); }));
-    const meets = (x, z, self) => {
-      const seen = new Set(); let ends = 0;
-      for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const li of cell.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
-        if (li === self || seen.has(li)) continue; seen.add(li);
-        const Q = c.lines[li].P; let best = 1e9, bi = -1; Q.forEach((p, i) => { const d = Math.hypot(p[0] - x, p[2] - z); if (d < best) { best = d; bi = i; } });
-        if (best > c.lines[li].w / 2 + 3) continue;
-        if (bi > 1 && bi < Q.length - 2) return true;  // another road passes: a T
-        ends++;
-      }
-      return ends >= 2;  // three ways meet (one road going on is only a joint)
-    };
-    // OpenStreetMap's marked crossings: the bars across the road at its nearest centre point (within 4 m)
-    for (const [la, lo] of t.xings || []) {
-      const [x, z] = proj.xz(la, lo); let best = null, bd = 16, dir2 = null;
+    // the nearest point of a drawn road's centre to (x, z) within r metres: [point [x, y, z, half width, ...], its line,
+    // its direction (dx, dz)], or null
+    const nearLine = (x, z, r) => { let best = null, bd = r * r;
       for (let u = -1; u <= 1; u++) for (let w = -1; w <= 1; w++) for (const li of cell.get(`${Math.floor(x / 10) + u},${Math.floor(z / 10) + w}`) || []) {
-        const Q = c.lines[li].P; for (let k = 0; k < Q.length; k++) { const d = (Q[k][0] - x) ** 2 + (Q[k][2] - z) ** 2; if (d < bd) { bd = d; best = Q[k]; const a = Q[Math.max(0, k - 1)], b = Q[Math.min(Q.length - 1, k + 1)]; dir2 = [b[0] - a[0], b[2] - a[2]]; } }
+        const Q = c.lines[li].P; for (let k = 0; k < Q.length; k++) { const d = (Q[k][0] - x) ** 2 + (Q[k][2] - z) ** 2; if (d < bd) { bd = d; const a = Q[Math.max(0, k - 1)], b = Q[Math.min(Q.length - 1, k + 1)]; best = [Q[k], c.lines[li], [b[0] - a[0], b[2] - a[2]]]; } }
       }
-      if (best) put('xwalk', best[0], best[1] + 0.03, best[2], Math.atan2(dir2[0], dir2[1]));
+      return best; };
+    // OpenStreetMap's marked crossings (only where it tags them marked, bake_world.mjs): across the road at its nearest
+    // centre point (within 4 m), the bars along it (zebra, ladder) or two lines across (crossing:markings=lines), the
+    // road's width
+    for (const [la, lo, k] of t.xings || []) {
+      const [x, z] = proj.xz(la, lo), hit = nearLine(x, z, 4); if (!hit) continue;
+      const [q, L, d] = hit, w = 2 * (q[3] ?? L.w / 2);
+      put(k ? 'xlines' : 'xwalk', q[0], q[1] + 0.03, q[2], Math.atan2(d[0], d[1]), k ? w : w / 7.2);
+    }
+    // OpenStreetMap's stop signs (highway=stop, bake_world.mjs: each way in [lat, lon, heading, set back]): the sign on
+    // the right, the stop line across the lane in (a two way road's right half) at the node, or set back from a junction
+    // the node is; no STOP legend (none tagged)
+    for (const [la, lo, hd, back] of t.stops || []) {
+      const r = hd * Math.PI / 180, fx = Math.sin(r), fz = -Math.cos(r), [x0, z0] = proj.xz(la, lo), x = x0 - fx * back, z = z0 - fz * back, hit = nearLine(x, z, 4); if (!hit) continue;
+      const [q, L] = hit, half = q[3] ?? L.w / 2, nx = -fz, nz = fx, two = L.lm === 2, yaw = Math.atan2(-fx, -fz);
+      put('stop', x + nx * (half + 0.8), q[1] - 0.25, z + nz * (half + 0.8), yaw);
+      put('stopbar', x + nx * (two ? half / 2 : 0), q[1] + 0.03, z + nz * (two ? half / 2 : 0), yaw, (two ? half : 2 * half) / 3.2);
     }
     for (const [li, L] of c.lines.entries()) {
       if (li % 4 === 3) yield;
@@ -656,21 +676,6 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           run2 += Math.hypot(P[i][0] - P[i - 1][0], P[i][2] - P[i - 1][2]); if (run2 < 9) continue; run2 = 0;
           const [dx, dz] = dir(i), o = hw(i) - (L.b - 0.25) * hw(i) * 2 / L.w; put('delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
         } }
-      // stop signs where a small road ends on another (only from OpenStreetMap's highway=stop, t.stops, not baked yet:
-      // none invented; the speed limits the same, t.limits)
-      if (t.stops && small && n > 3) for (const [i, sgn] of [[0, -1], [n - 1, 1]]) {
-        const [x, y, z] = P[i], half = hw(i); if (!meets(x, z, li)) continue;
-        const [dx, dz] = dir(i), fx = dx * sgn, fz = dz * sgn, nx = -fz, nz = fx;  // toward the junction, and right of it
-        put('stop', x - fx * (half + 4) + nx * (half + 0.8), y - 0.25, z - fz * (half + 4) + nz * (half + 0.8), Math.atan2(-fx, -fz));
-        // painted on the way in: the stop bar 5 m short of the crossing road's centre, STOP 3 m before it, across the
-        // lane in (the right half of a two-way road)
-        const lane = L.lm === 2 ? half / 2 : 0, yaw = Math.atan2(-fx, -fz);
-        for (const [k, back] of [['stopbar', 5], ['stopword', 8.5]]) {
-          let j = i, d = 0; while (j - sgn >= 0 && j - sgn < n && d < back) { d += Math.hypot(P[j][0] - P[j - sgn][0], P[j][2] - P[j - sgn][2]); j -= sgn; }
-          if (d < back - 2) continue;
-          put(k, P[j][0] + nx * lane, P[j][1] + 0.03, P[j][2] + nz * lane, yaw);
-        }
-      }
     }
     // OpenStreetMap's power lines: a wooden pole with a crossarm at each node in the tile (across the line), two wires
     // from it to the next node
@@ -692,7 +697,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const kinds = Object.keys(items).filter(k => items[k].length), count = kinds.reduce((n, k) => n + items[k].length, 0);
     if (count) {
       const bm = new THREE.BatchedMesh(count, kinds.reduce((n, k) => n + FURN[k].attributes.position.count, 0), 0, mats.furn);
-      for (const k of kinds) { const gi = bm.addGeometry(FURN[k]); for (const [x, y, z, yaw, sy = 1] of items[k]) bm.setMatrixAt(bm.addInstance(gi), m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), sc.set(1, sy, 1))); }
+      for (const k of kinds) { const gi = bm.addGeometry(FURN[k]); for (const [x, y, z, yaw, sy = 1, sx = 1] of items[k]) bm.setMatrixAt(bm.addInstance(gi), m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), sc.set(sx, sy, 1))); }
       bm.castShadow = QUALITY[q].shadow > 0; bm.receiveShadow = true; bm.computeBoundingSphere(); grp.add(bm);
     }
     // the wires: hanging a little between the poles (three straight pieces each)

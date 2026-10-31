@@ -469,7 +469,9 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     for (const r of rows) { if (r.y == null) none++; else onRail++; }
     // a cyclist's line at each course point: the middle of a bike lane on their right where there is one, else 0.5 to
     // 1.5 m in from the right edge of their travel lane (a path, a bike path: its middle)
+    const CP = c.ll.map(p => xz(...p));
     for (let i = 0; i < pr.ri.length; i++) {
+      if (RI.narrows.some(([x, z]) => Math.hypot(CP[i][0] - x, CP[i][1] - z) < 25)) continue;  // (into a one-lane bore: onto its lane)
       const q = RI.rails[pr.ri[i]]; if (!q) continue; const st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd), half = st.w / 2, fw = pr.fw[i] > 0, park = fw ? st.pR : st.pL, bike = q.r.fl & (fw ? 64 : 32), edge = half - park - pr.lane[i];
       if (!isTrail(q.r) && !/cycleway|pedestrian/.test(q.r.hw) && half >= 2 && !(q.r.fl & 2 && q.r.ln === 1) && (bike ? Math.abs(edge - 0.9) > 0.05 : edge > 1.5 || edge < 0.5)) laneBad++;
     }

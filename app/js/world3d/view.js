@@ -9,7 +9,7 @@ import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSt
 import { ribbonEdge, sideKinds, sideRuns, bankGeometry, railLine } from './banks.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
-import { dense, track, railIndex, profileOf, profileAt, railLift } from './rail.js';
+import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE } from './rail.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -210,9 +210,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           const out = [P[a][0] * 2 - P[a + dir][0], P[a][1] * 2 - P[a + dir][1]], h = r.h ? (a ? r.h.at(-1) : r.h[0]) : Math.min(gridHeight(G, ...P[a], G.raw) ?? 1e9, gridHeight(G, ...out, G.raw) ?? 1e9);
           if (h > 1e8) continue;
           const pts = [];
-          if (short) { const ux = (P[a][0] - P[a + dir][0]), uz = (P[a][1] - P[a + dir][1]), ul = Math.hypot(ux, uz) || 1; for (let o = -3; o <= 10; o += 1) pts.push([P[a][0] + ux / ul * o, P[a][1] + uz / ul * o, h]); }
+          if (short) { const ux = (P[a][0] - P[a + dir][0]), uz = (P[a][1] - P[a + dir][1]), ul = Math.hypot(ux, uz) || 1; for (let o = -3; o <= 12; o += 1) pts.push([P[a][0] + ux / ul * o, P[a][1] + uz / ul * o, h]); }
           else for (let i = a; i >= 0 && i < P.length && Math.abs(D[i] - D[a]) <= PORT + 1; i += dir) pts.push([P[i][0], P[i][1], h]);
-          if (pts.length > 1) under.push(short ? { pts, r0: w / 2 + 1.5, r1: w / 2 + 6 } : { pts, r0: w / 2 + 2.5, r1: w / 2 + 9 });
+          // (an underpass's cut level out past its headwall's wing walls, the opening clear down to the road: the fill
+          // meets the wings, not the opening; its half width w / 2 + 1 and the wings 2.6 m past it, as rebuildTunnels draws)
+          if (pts.length > 1) under.push(short ? { pts, r0: w / 2 + 9, r1: w / 2 + 12 } : { pts, r0: w / 2 + 2.5, r1: w / 2 + 9 });
         }
       }
       yield; if (!globalThis.__w3?.noCarve) yield* carveSteps(G, [], 0, 1, under); yield;  // (__w3.noCarve, noPush: checks)
@@ -270,7 +272,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // ways that go on as one road drawn as one ribbon (no seam where OpenStreetMap splits a road), corners rounded
     t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`);
     // where one road's ways of different layouts meet, the width eases from one to the other (no step)
-    t.joints ??= tapers(t.chained, { width: r => roadStyle(r.hw, r.ln, r.fl, r.wd).w, rigid: r => r.fl & 19, ok: r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw), xz: proj.xz });
+    // (a one-lane bore's way its lane's width: the road narrows to it before each portal)
+    t.joints ??= tapers(t.chained, { width: r => oneLane(r) ? ONE_LANE : roadStyle(r.hw, r.ln, r.fl, r.wd).w, rigid: r => r.fl & 19, ok: r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw), xz: proj.xz });
     let nr = 0;
     const tunnels = ridden(g) ? tunnelLines(t) : [];
     // the lidar's ground anywhere the baked tiles are loaded (before any carving): a deck's ends in the next tile
@@ -970,7 +973,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // line each side, a raised walk along its north wall, a narrow round-arched bore, its portals at the way's ends
       // (and a bike lane along its south wall, the walk's other side: Street View)
       const ns = P[Math.min(P.length - 1, (P.length >> 1) + 1)][0] - P[Math.max(0, (P.length >> 1) - 1)][0] < 0 ? 1 : -1;
-      const one = r.ln === 1 && !(r.fl & 8), st = one ? { w: 4.4, lm: 1, surf: 0, lanes: 1, a: ns > 0 ? 0.3 : 1.5, b: ns > 0 ? 1.5 : 0.3, pL: 0, pR: 0 } : roadStyle(r.hw, r.ln, r.fl, r.wd);
+      const one = oneLane(r), st = one ? { w: ONE_LANE, lm: 1, surf: 0, lanes: 1, a: ns > 0 ? 0.3 : 1.5, b: ns > 0 ? 1.5 : 0.3, pL: 0, pR: 0 } : roadStyle(r.hw, r.ln, r.fl, r.wd);
       // at grade (hardly any ground over it) or very short: ride it on the surface, no bore. Under a road or a little
       // ground (US-101 over Alexander Avenue and Bunker Road): an underpass, its headwalls right at its ends: a concrete
       // box with a flat roof, or a barrel arch (ARCHED). Deeper and longer: a bored tunnel, arched, lit, its portals at
@@ -1067,7 +1070,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         hole.lineTo(-R, -0.5); sh.holes.push(hole);
         const parts = [new THREE.ExtrudeGeometry(sh, { depth: 0.8, bevelEnabled: false }).translate(0, 0, -0.8), new THREE.BoxGeometry(2 * half + 0.5, 0.35, 1.1).translate(0, top + 0.15, -0.4)];
         // (a one-lane tunnel's wings long and close along its way in: the retaining walls of its cut, the road between them)
-        const wl = one ? 17 : 7, wa = one ? 0.22 : 0.6;
+        // (an arch under a fill: its wings 14 m along the way in, close to it, holding the fill back from the opening)
+        const wl = one ? 17 : 14, wa = one ? 0.22 : 0.3;
         for (const s of [-1, 1]) {
           const ws = new THREE.Shape(); ws.moveTo(0, -1); ws.lineTo(wl, -1); ws.lineTo(wl, 0.9); ws.lineTo(0, top - 0.4); ws.lineTo(0, -1);
           parts.push(new THREE.ExtrudeGeometry(ws, { depth: 0.6, bevelEnabled: false }).translate(0, 0, -0.3).rotateY(Math.atan2(Math.cos(wa), s * Math.sin(wa))).translate(s * (half - 0.3), 0, -0.8));
@@ -1108,11 +1112,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     if (tun.group) disposeObj(tun.group);
     tun.group = grp; tun.list = list; scene.add(grp);
+    grass.invalidate(); scrub.invalidate();  // (none in the bores and their cuts: onTunnel)
   }
   // is ground at height h on a tunnel's way at its floor's level (its open cuts, its portals): nothing grows there
   function onTunnel(x, z, h) {
     for (const T of tun.list) {
-      const { P, D, bb } = T; if (x < bb[0] || z < bb[1] || x > bb[2] || z > bb[3]) continue;
+      // (and 18 m out from each portal along its line, between its wing walls: the road's cut, kept clear)
+      const { P, bb } = T, n = P.length;
+      for (const [e, f, y] of [[P[0], P[1], T.Y[0]], [P[n - 1], P[n - 2], T.Y[n - 1]]]) {
+        const ux = e[0] - f[0], uz = e[1] - f[1], ul = Math.hypot(ux, uz) || 1, s = ((x - e[0]) * ux + (z - e[1]) * uz) / ul;
+        if (s >= 0 && s <= 18 && Math.abs((x - e[0]) * uz - (z - e[1]) * ux) / ul < T.w + 3 && Math.abs(h - y) < 4) return true;
+      }
+      if (x < bb[0] || z < bb[1] || x > bb[2] || z > bb[3]) continue;
       for (let i = 1; i < P.length; i++) {
         const a = P[i - 1], b = P[i], ex = b[0] - a[0], ez = b[1] - a[1], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[1]) * ez) / L2)) : 0;
         if (Math.hypot(x - a[0] - ex * t, z - a[1] - ez * t) < T.w + 1.5 && Math.abs(h - (T.Y[i - 1] + (T.Y[i] - T.Y[i - 1]) * t)) < 7) return true;

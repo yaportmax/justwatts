@@ -3,7 +3,7 @@
 // fitted to it; none of it depends on which tiles have loaded or the quality. A rail: the way's points split every
 // RAIL_STEP metres or less (dense: the same split in the bake and here), a height at each. A lane is a signed offset
 // from the rail, at the rail's height (the road flat across). Pure.
-import { roadStyle, roadLift } from './ribbon.js';
+import { roadStyle, roadLift, TAPER } from './ribbon.js';
 import { decodeRoads } from './landuse.js';
 
 export const RAIL_STEP = 5;
@@ -60,12 +60,15 @@ export const railLift = r => r.fl & 16 || /cycleway|pedestrian|footway|path/.tes
 // bike lane on their right if there is one, else about a metre in from the right edge of their travel lane (from the
 // paved edge, or the parking lane's inner side); on a path its middle
 export const BIKE_LANE = 1.8;
+// a one-lane bore both ways in turn (the Baker-Barry tunnel: one lane, signals at both ends, NPS and Street View;
+// OpenStreetMap's lanes=1): its lane's width, the rider 1.4 m right of its line; the road narrows to it over the last
+// TAPER (ribbon.js) metres before each portal
+export const ONE_LANE = 4.4, ONE_OFF = 1.4;
+export const oneLane = r => !!(r.fl & 2) && r.ln === 1 && !(r.fl & 8);
 export function laneOf(r, fwd = true) {
   const st = roadStyle(r.hw, r.ln, r.fl, r.wd), half = st.w / 2, park = fwd ? st.pR : st.pL, bike = r.fl & (fwd ? 64 : 32);
   if (isTrail(r) || /cycleway|pedestrian/.test(r.hw) || half < 2) return 0;
-  // a one-lane bore both ways in turn (the Baker-Barry tunnel: OpenStreetMap's lanes=1, Street View): 1.4 m right of its
-  // line, inside its 4.4 m lane (view.js draws the bore that wide)
-  if (r.fl & 2 && r.ln === 1 && !(r.fl & 8)) return 1.4;
+  if (oneLane(r)) return ONE_OFF;
   return Math.max(0, Math.min(6.5, bike ? half - park - BIKE_LANE / 2 : half - park - 1));
 }
 
@@ -121,7 +124,9 @@ export function railIndex(json, xz) {
     }
     return best;
   }
-  return { rails: out, top, topMax, match, on, near };
+  // the portals of the one-lane bores ([x, z]): the roads narrow to them
+  const narrows = out.filter(q => oneLane(q.r)).flatMap(q => [q.T.P[0], q.T.P.at(-1)]);
+  return { rails: out, top, topMax, match, on, near, narrows };
 }
 
 // A course's profile: the rail each of its points rides (P: [[x, z], ...] its points, ele: its heights or null),
@@ -138,6 +143,8 @@ export function profileOf(idx, P, ele = null, old = null, k = 0) {
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)];
     ri[i] = prev = idx.match(P[i][0], P[i][1], b[0] - a[0], b[1] - a[1], ele ? ele[i] : null, prev, dir);
     if (prev >= 0) { fw[i] = dir[0]; lane[i] = laneOf(idx.rails[prev].r, dir[0] > 0); }
+    // (into a one-lane bore: the lane narrows with the road, onto the bore's)
+    for (const [x, z] of idx.narrows) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < TAPER) { const f = d / TAPER; lane[i] = ONE_OFF + (lane[i] - ONE_OFF) * f * f * (3 - 2 * f); } }
   }
   for (let i = Math.max(0, k - 1); i + 1 < n; i++) {
     const sOn = (r, p) => r >= 0 ? idx.rails[r].T.at(p[0], p[1]).s : 0;

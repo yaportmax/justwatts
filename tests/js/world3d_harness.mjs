@@ -10,7 +10,7 @@ import { skyRadiance, sunTint } from '../../app/js/world3d/skymath.js';
 import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texgen.js';
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan, carStep } from '../../app/js/world3d/life.js';
-import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, taperedParts, TAPER, YB } from '../../app/js/world3d/ribbon.js';
+import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, taperedParts, TAPER, YB, markCode } from '../../app/js/world3d/ribbon.js';
 import { parseVeg, makeVeg, parseTrees, fitTree, CLEAR, SCRUB, GRASS, PAVED } from '../../app/js/world3d/veg.js';
 import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
@@ -21,7 +21,7 @@ import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js
 import { probeWebGL2, resetProbe, pickView } from '../../app/js/world3d/probe.js';
 import { RoadGraph, Plan, bridges, smoothFrom } from '../../app/js/roads.js';
 import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, smoothRail, isTrail, handBarriers } from '../../app/js/world3d/rail.js';
-import { BARRIERS, SURVEY, MARKINGS } from '../../app/js/world3d/handlist.js';
+import { BARRIERS, SURVEY, MARKINGS, STOPS, CROSSINGS } from '../../app/js/world3d/handlist.js';
 import { onDeck, toST, GGB } from '../../app/js/ggb.js';
 import { readdirSync } from 'node:fs';
 import { inWorld, BOUNDS } from '../../app/js/world.js';
@@ -589,7 +589,8 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   { const HM = handBarriers(RI, MARKINGS, [], xz), want = MARKINGS.reduce((a, e) => a + e[5] - e[4], 0), got = HM.pieces.reduce((a, p) => a + p.s1 - p.s0, 0);
     const at = (la, lo, hd) => { const [x, z] = xz(la, lo), r = hd * Math.PI / 180; return HM.across(x, z, Math.sin(r), -Math.cos(r)).map(([k, sd]) => k === 'pass' || k === 'stalls' ? k + (sd > 0 ? 'R' : 'L') : k).sort(); };
     out.marks = { n: MARKINGS.length, pieces: HM.pieces.length, want: r3(want), got: r3(got), bunkerDash: at(37.832461, -122.510236, 65), bunkerPass: at(37.833229, -122.508168, 65), bunkerPassBack: at(37.833229, -122.508168, 245),
-      cronkhite: at(37.833930, -122.533105, 122), conzTop: at(37.833236, -122.492124, 144), conzMid: at(37.832673, -122.489632, 66), center: at(37.834933, -122.477937, 206), hawk: at(37.826250, -122.499000, 250) }; }
+      cronkhite: at(37.833930, -122.533105, 122), conzTop: at(37.833236, -122.492124, 144), conzMid: at(37.832673, -122.489632, 66), center: at(37.834933, -122.477937, 206), hawk: at(37.826250, -122.499000, 250), fortBaker: at(37.835160, -122.479916, 83),
+      stops: STOPS.length, crossings: CROSSINGS.length, code: markCode([['yellow2', 0]]) }; }
   // both ways along one road: the rider on the other side of its centre, at the same height
   { const c = courseOf(37.83300, -122.48341, 190), P = c.ll.map(p => xz(...p)), fwd = ride(c), rev = ride({ ll: c.ll.slice().reverse(), ele: c.ele.slice().reverse() }), L = (P.length - 1) * 10;
     let dh = 0, sides = 0, n2 = 0;

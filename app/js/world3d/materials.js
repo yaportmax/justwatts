@@ -348,6 +348,7 @@ export function roadMaterial() {
           else if (lm == 3.0) { if (mc != 1) yel = max(yel, LN(ll, 0.06)); }                       // a oneway's left edge
           else if (!noEdge || vRd2.y > 0.5) line = max(line, LN(ll, 0.06));
         }
+        if (lm == 0.0 && mc == 7) yel = max(yel, max(LN(W * 0.5 - 0.11, 0.05), LN(W * 0.5 + 0.11, 0.05)));  // (the hand list's double yellow, A13)
         if (lm == 2.0) {
           float mid = (ta + tb) * 0.5, per = max(1.0, floor(lanes * 0.5)), lw = (tb - ta) * 0.5 / per, dash = step(fract(along / 12.0), 0.3);
           // the centre line: double yellow, or as the hand list has it (c1 the one of the pair nearer the right edge)

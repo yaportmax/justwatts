@@ -260,6 +260,16 @@ export function furnitureGeometries() {
         out.push(B(Math.abs(xb - xa) + t, Math.abs(yb - ya) + t, 0.004, (xa + xb) / 2, (ya + yb) / 2, 0.047)); } });
     return out;
   };
+  // STOP in block strokes: each letter 0.55 m wide and 2.4 m long (its top toward -z), 0.12 m strokes, 0.2 m apart
+  function stopWord() {
+    const L = { S: [[0, 0, 1, 0], [0, 0, 0, 0.5], [0, 0.5, 1, 0.5], [1, 0.5, 1, 1], [0, 1, 1, 1]], T: [[0, 0, 1, 0], [0.5, 0, 0.5, 1]],
+      O: [[0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 0, 1]], P: [[0, 0, 1, 0], [1, 0, 1, 0.5], [0, 0.5, 1, 0.5], [0, 0, 0, 1]] };
+    const w = 0.55, h = 2.4, t = 0.12, out = [];
+    [...'STOP'].forEach((ch, k) => { const x0 = (k - 1.5) * (w + 0.2) - w / 2;
+      for (const [a, b, c, d] of L[ch]) { const xa = x0 + a * w, xb = x0 + c * w, za = -h / 2 + b * h, zb = -h / 2 + d * h;
+        out.push(B(Math.abs(xb - xa) + t, 0.012, Math.abs(zb - za) + t, (xa + xb) / 2, 0, (za + zb) / 2)); } });
+    return out;
+  }
   return {
     // barrier posts 1 m tall (scaled to their height), from their foot: a W-beam's or a fence's square dark timber post (6 by
     // 8 in, Caltrans A77; Street View: every one in the Headlands dark timber), a concrete rail's block, a chain-link's steel (rusty)
@@ -271,6 +281,8 @@ export function furnitureGeometries() {
     // painted on a stop's way in (flat on the road, the driver's right +x, toward the junction -z): the stop bar across a
     // lane, 3.2 m (scaled across to the lane)
     stopbar: merge([[B(3.2, 0.012, 0.45), white]]),
+    // STOP painted in the lane before it (MUTCD 3B.20: letters 6 to 8 feet long; Street View Fort Baker), its top toward -z
+    stopword: merge(stopWord().map(g => [g, white])),
     // a marked crossing (scaled across to the road): bars 0.5 m wide along the road (+z), 2.8 m long, 1.1 m apart across
     // 7.2 m; or two lines across it 0.3 m wide, 3 m apart, 1 m (MUTCD 3B.18: lines 6 to 24 inches wide, 6 feet apart or more)
     xwalk: merge(Array.from({ length: 7 }, (_, i) => [B(0.5, 0.012, 2.8, (i - 3) * 1.1, 0, 0), white])),

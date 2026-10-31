@@ -36,13 +36,13 @@ export function roadStyle(hw, ln = 0, fl = 0, wd = 0) {
 }
 // The hand list's lane markings (handlist.js MARKINGS) as the road shader reads them, per vertex [centre, bits]: centre
 // 0 as the style has it, 1 none, 2 a single broken yellow, 3 solid and broken with the broken line on the right (as the
-// ribbon runs), 4 on the left, 5 double white, 6 yellow raised markers; bits 1 no edge lines, 2 no bike symbols, 4 BIKE
+// ribbon runs), 4 on the left, 5 double white, 6 yellow raised markers, 7 double yellow on a road with no lines; bits 1 no edge lines, 2 no bike symbols, 4 BIKE
 // LANE in words, 8 ticks across the contraflow buffer, 16 that buffer cross hatched, 32 / 64 stall ticks in the
 // right / left parking lane (no buffer before it)
 export function markCode(kinds) {
   let c = 0, b = 0;
   for (const [k, sd] of kinds) {
-    if (k === 'nocentre') c = 1; else if (k === 'dash') c = 2; else if (k === 'pass') c = sd > 0 ? 3 : 4; else if (k === 'white2') c = 5; else if (k === 'dots') c = 6;
+    if (k === 'nocentre') c = 1; else if (k === 'dash') c = 2; else if (k === 'pass') c = sd > 0 ? 3 : 4; else if (k === 'white2') c = 5; else if (k === 'dots') c = 6; else if (k === 'yellow2') c = 7;
     else b |= { noedge: 1, nosym: 2, words: 4, ladder: 8, hatch: 16 }[k] || (k === 'stalls' ? (sd > 0 ? 32 : 64) : 0);
   }
   return [c, b];

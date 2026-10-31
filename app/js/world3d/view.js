@@ -10,7 +10,7 @@ import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } fro
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers } from './rail.js';
-import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS } from './handlist.js';
+import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS } from './handlist.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -413,7 +413,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // a trail lies on the hillside (each edge on the ground); the ground goes under it only where it would cover it
       const trail = !dk && (st.surf === 2 || /path|footway|track|bridleway|steps/.test(r.hw));
       const lift = rail ? railLift(r) : trail ? 0.15 : roadLift(r.hw), hint = new Map(), hOn = rail || dk || trail ? hAt : (x, z) => onto(x, z, hAt(x, z), lift, hint);
-      const mk = HM && !trail && st.lm ? (x, z, tx, tz) => markCode(HM.across(x, z, tx, tz)) : null;  // (the hand list's markings)
+      const mk = HM && !trail && (st.lm || !st.surf) ? (x, z, tx, tz) => markCode(HM.across(x, z, tx, tz)) : null;  // (the hand list's markings)
       // (a railed service way drawn eased onto the wider road it leaves, as an unrailed one: flush at its edge, Street View
       // Bunker Road 1a_1030; the rider's line is its rail all the same, a few centimetres off it within the paved width)
       const rl = rail && r.hw === 'service' ? (x, z) => onto(x, z, rail(x, z), lift, hint, st.w / 2) : rail;
@@ -857,7 +857,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
@@ -873,7 +873,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // OpenStreetMap's marked crossings (only where it tags them marked, bake_world.mjs): across the road at its nearest
     // centre point (within 4 m), the bars along it (zebra, ladder) or two lines across (crossing:markings=lines), the
     // road's width
-    for (const [la, lo, k] of t.xings || []) {
+    // (and the hand list's, Street View: those in the tile)
+    const inTile = ([la, lo]) => { const [x, z] = proj.xz(la, lo), b = tileBox(c); return x >= b[0] && x < b[2] && z >= b[1] && z < b[3]; };
+    for (const [la, lo, k] of (t.xings || []).concat(CROSSINGS.filter(inTile))) {
       const [x, z] = proj.xz(la, lo), hit = nearLine(x, z, 4); if (!hit) continue;
       const [q, L, d] = hit, w = 2 * (q[3] ?? L.w / 2);
       put(k ? 'xlines' : 'xwalk', q[0], q[1] + 0.03, q[2], Math.atan2(d[0], d[1]), k ? w : w / 7.2);
@@ -881,9 +883,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // OpenStreetMap's stop signs (highway=stop, bake_world.mjs: each way in [lat, lon, heading, set back]): the sign on
     // the right, the stop line across the lane in (a two way road's right half) at the node, or set back from a junction
     // the node is; no STOP legend (none tagged)
-    for (const [la, lo, hd, back] of t.stops || []) {
+    // (and the hand list's, Street View: { legend, half }: STOP painted that far before the bar in the right lane, the bar
+    // across the right half)
+    for (const [la, lo, hd, back, o = {}] of (t.stops || []).concat(STOPS.filter(inTile).map(([la, lo, hd, o]) => [la, lo, hd, 0, o]))) {
       const r = hd * Math.PI / 180, fx = Math.sin(r), fz = -Math.cos(r), [x0, z0] = proj.xz(la, lo), x = x0 - fx * back, z = z0 - fz * back, hit = nearLine(x, z, 4); if (!hit) continue;
-      const [q, L] = hit, half = q[3] ?? L.w / 2, nx = -fz, nz = fx, two = L.lm === 2, yaw = Math.atan2(-fx, -fz);
+      const [q, L] = hit, half = q[3] ?? L.w / 2, nx = -fz, nz = fx, two = L.lm === 2 || !!o.half, yaw = Math.atan2(-fx, -fz);
+      // (on the road's centre line that far back, the right half's middle, along it: the approach may curve)
+      if (o.legend) { const d = o.legend + 1.4, h2 = nearLine(x - fx * d, z - fz * d, 6); if (h2) { const [p2, L2, e2] = h2, el = Math.hypot(e2[0], e2[1]) || 1, ex = e2[0] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), ez = e2[1] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), hf2 = (p2[3] ?? L2.w / 2) / 2;
+        put('stopword', p2[0] - ez * hf2, p2[1] + 0.03, p2[2] + ex * hf2, Math.atan2(-ex, -ez)); } }
       { const sx = x + nx * (half + 0.8), sz = z + nz * (half + 0.8); put('stop', sx, Math.min(q[1] - 0.25, (hAt(sx, sz) ?? q[1]) - 0.1), sz, yaw); }  // (its foot in the ground: never over a fill's slope)
       put('stopbar', x + nx * (two ? half / 2 : 0), q[1] + 0.03, z + nz * (two ? half / 2 : 0), yaw, (two ? half : 2 * half) / 3.2);
     }

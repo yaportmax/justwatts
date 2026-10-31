@@ -183,6 +183,7 @@ export const SURVEY = [
 //   wposts    white flexible posts on the contraflow buffer; yposts yellow ones
 //   nosym     no bike lane symbols (Bunker Road's shoulders: cycleway=lane in OpenStreetMap, never a symbol in Street View)
 //   words     BIKE LANE in words in the bike lanes, not the symbol (Center Road at Fort Baker)
+//   yellow2   a double yellow centre line on a road whose tags give none (a residential way, Fort Baker's stop approach)
 const each = (pts, side, from, to, ...kinds) => pts.flatMap(([la, lo, h]) => kinds.map(k => [la, lo, h, side, from, to, k]));
 export const MARKINGS = [
   // Bunker Road: a double white line at Fort Cronkhite; a passing zone east of the Rodeo Valley crossing, single broken,
@@ -205,6 +206,10 @@ export const MARKINGS = [
   [37.843408, -122.478309, 190, 'C', -80, 520, 'nosym'], [37.839849, -122.479378, 272, 'C', 0, 420, 'nosym'],
   // Alexander Avenue at the Sausalito end: yellow raised markers, no paint
   [37.846762, -122.478700, 141, 'C', -40, 200, 'dots'],
+  // Fort Baker: the way from Bunker Road's end round to the stop at Murray Circle, a double yellow centre line (Street View
+  // user_fortbaker_stop, 2025-03, heading 57: two solid yellow lines curving right to the crosswalk; OpenStreetMap
+  // highway=residential, no lane tags)
+  [37.8351540, -122.4799560, 77, 'C', -6, 25, 'yellow2'],
   // Center Road at Fort Baker: BIKE LANE in words
   ...each([[37.835728, -122.477456, 208], [37.834933, -122.477937, 206]], 'C', -10, 100, 'words'),
   // upper Conzelman Road (one way down for cars, the bike lane up against it on the cut side): at the McCullough Road
@@ -223,6 +228,17 @@ export const MARKINGS = [
   [37.83283, -122.49187, 337, 'C', -30, 80, 'wposts'], [37.82952, -122.48493, 265, 'C', 0, 200, 'wposts'],
   [37.829508, -122.484477, 93, 'C', 10, 80, 'yposts'],
 ];
+
+// STOPS: stop signs Street View shows that OpenStreetMap lacks (no highway=stop there): [lat, lon, heading] the stop
+// bar's point on the road's centre and the way traffic runs into it, { legend: STOP painted that many metres before the
+// bar in the right lane, half: the bar across the right half (a two way road) }. CROSSINGS: marked crossings it lacks
+// (no highway=crossing there): [lat, lon, 0 bars along the road (continental), 1 two lines across].
+// Fort Baker, Bunker Road's end at Murray Circle (Street View user_fortbaker_stop, 2025-03, pano at 37.835137,
+// -122.480076 heading 57): STOP in the right lane about 11 m on, the bar across the right half at about 15 m, the
+// crosswalk's bars across the road just past it, the R1-1 sign on the right corner; placed along OpenStreetMap's way
+// (37.835138,-122.480035 to Murray Circle) 15 and 17.5 m from its start.
+export const STOPS = [[37.8351608, -122.4798678, 96, { legend: 4, half: true }]];
+export const CROSSINGS = [[37.8351572, -122.4798392, 0]];
 
 // BUILDINGS: heights Street View shows where OpenStreetMap has none (its building=yes is drawn 6 m, two storeys):
 // [lat, lon, metres]: the building whose footprint holds the point. East Road 0a_0130 (2025-03, pano uF61_2uaEXaygeqwcKO5qA,

@@ -399,3 +399,5 @@ def test_lane_markings_from_the_hand_list(out):
     assert "passR" in m["bunkerPass"] and "passL" in m["bunkerPassBack"], m             # the broken line on the eastbound side
     assert "hatch" in m["conzTop"] and "stallsR" in m["conzTop"] and "ladder" in m["conzMid"], m  # upper Conzelman Road
     assert "words" in m["center"] and m["hawk"] == [], m                                # Center Road's BIKE LANE; none at Hawk Hill
+    assert "yellow2" in m["fortBaker"] and m["code"] == [7, 0], m                      # Fort Baker's stop approach: double yellow
+    assert m["stops"] >= 1 and m["crossings"] >= 1                                     # its STOP, bar and crosswalk (Street View)

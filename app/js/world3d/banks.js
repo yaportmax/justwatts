@@ -45,7 +45,7 @@ export function sideKinds(E, ground, raw, rail = () => false, skip = () => false
   return out;
 }
 
-const STEP0 = 0.75;
+const STEP0 = 0.75, FOOT = 1.5;
 export const ACROSS = 7;  // a strip's points across (six bands: the verge or shoulder by the edge where there is one, five out to its end)
 // The profile out from edge point p for kind K: { prof: [[o, h], ...] from the edge (0, just under it) to where it meets
 // the ground as drawn, O: that offset, need: anywhere 5 cm or more over the ground } (null: NONE). ground(x, z): as drawn;
@@ -58,19 +58,21 @@ export function profile(p, K, ground, { sh = 0.15, verge = 0.6, raw = null, bloc
   // the road dug out beside it; at 68 degrees at most from the verge)
   // (behind a retaining wall (K.wall, its back 0.5 m out) the bank rises from the wall's back)
   if (K.wall) verge = 0.5;
-  // (behind a curb (K.curb) its shoulder at the curb's top, 0.6 m, then down)
-  const top = K.curb ? 0.12 : -0.03; if (K.curb) sh = 0.6;
-  // (up a cut: a grassy foot first, 1 in 2 for its first 1.5 m out from the verge, then at 68 degrees at most (Street View,
-  // Alexander Avenue 0a_0530, McCullough Road 0a_0530: grass and low growth at the bank's foot before it steepens; the
-  // lidar's 7.5 m grid cannot place the foot itself))
-  const toe = d => d <= 0 ? 0 : d <= 1.5 ? d * 0.5 : 0.75 + (d - 1.5) * 2.5;
+  // (behind a curb (K.curb) its shoulder 0.1 m under the curb's top for 0.6 m, then down (A12: at its top the curb read flush,
+  // Street View Center Road 0a_0030: a raised curb, the lawn behind a little under its top; its foot buried, no underside))
+  const top = K.curb ? 0.05 : -0.03; if (K.curb) sh = 0.6;
+  // (up a cut: a grassy foot first, 1 in 4 for its first 1.5 m out from the verge, then at 68 degrees at most (Street View,
+  // Alexander Avenue 0a_0530, McCullough Road 0a_0530: a near level grass margin about 2 m wide at the bank's foot before it
+  // steepens; the lidar's 7.5 m grid cannot place the foot itself. A11's 1 in 2 never showed: the strip's points across
+  // skipped it, a straight ramp from the verge)
+  const toe = d => d <= 0 ? 0 : d <= FOOT ? d * 0.25 : FOOT * 0.25 + (d - FOOT) * 2.5;
   const up = o => Math.min(rw(o), y + toe(o - verge));
   const down = o => y + top - Math.max(0, o - sh) / 1.5;
   const STEP = 0.75, MAX = 10.5, T = [];
   let lim = MAX;
   // (the flat strip's outer side, where it turns up a cut or down a fill: a point of its own, so the strip keeps it)
-  const rises = rw(STEP) > y + 0.05, kink = rises ? verge : sh, OS = [];
-  for (let o = STEP; o <= MAX + 1e-9; o += STEP) { if (kink > o - STEP + 0.05 && kink < o - 0.05) OS.push(kink); OS.push(o); }
+  const rises = rw(STEP) > y + 0.05, kink = rises ? verge : sh, foot = rises ? verge + FOOT : null, OS = [];
+  for (let o = STEP; o <= MAX + 1e-9; o += STEP) { for (const q of [kink, foot]) if (q != null && q > o - STEP + 0.05 && q < o - 0.05) OS.push(q); OS.push(o); }
   // out to MAX or short of another road; the strip ends a step past the last point it stands 5 cm or more over the
   // ground (the lidar may rise past a level verge the carve made: the strip goes on over it); lim: how far it may reach
   for (const o of OS) {
@@ -80,10 +82,10 @@ export function profile(p, K, ground, { sh = 0.15, verge = 0.6, raw = null, bloc
   // (needed where it stands 5 cm over the ground, or where the ground just past the edge is 15 cm under it: a step down
   // off the edge shows under the road's paving)
   let L = -1; T.forEach(([, t, gg], k) => { if (t > gg + 0.05 || (k === 0 && gg < y - 0.15)) L = k; });
-  if (L < 0 || !T.length) return { prof: [[0, y - 0.03], [STEP, g(STEP)]], O: STEP, need: false, lim, kink };
+  if (L < 0 || !T.length) return { prof: [[0, y - 0.03], [STEP, g(STEP)]], O: STEP, need: false, lim, kink, foot };
   const end = Math.min(L + 1, T.length - 1), prof = [[0, y - 0.03], ...T.slice(0, end).map(([o, t, gg]) => [o, Math.max(t, gg)]), [T[end][0], T[end][2]]];
   const need = true;
-  return { prof, O: prof.at(-1)[0], need, lim, kink };
+  return { prof, O: prof.at(-1)[0], need, lim, kink, foot };
 }
 // The strip across p out to offset R (R >= the profile's O: past it on the ground): [[o0, h0, o1, h1, cut], ...] (each
 // band's inner and outer offset and height; cut 1: a steep face, else the ground's own cover). Every point on or over
@@ -96,8 +98,9 @@ export function strip(p, P, R, ground, flat = false) {
   // bulges between two points)
   // (the first band the flat strip by the edge where it turns up or down within the strip's first half (the verge before
   // a cut, the shoulder before a fill: the setback from the paved edge Street View shows), the rest even out to R)
-  const kk = P.kink != null && P.kink > 0.05 && P.kink < R / 2 ? P.kink : null;
-  const oAt = k => kk == null ? R * k / (ACROSS - 1) : k === 0 ? 0 : kk + (R - kk) * (k - 1) / (ACROSS - 2);
+  // (and up a cut the foot's outer side a point of its own too: the foot's gentle rise drawn, not a ramp from the verge)
+  const kk = P.kink != null && P.kink > 0.05 && P.kink < R / 2 ? P.kink : null, ft = kk != null && P.foot != null && P.foot < R * 0.7 ? P.foot : null;
+  const oAt = k => kk == null ? R * k / (ACROSS - 1) : k === 0 ? 0 : ft == null ? kk + (R - kk) * (k - 1) / (ACROSS - 2) : k === 1 ? kk : ft + (R - ft) * (k - 2) / (ACROSS - 3);
   const d = R / (ACROSS - 1) / 2, over = o => Math.max(g(o), (g(Math.max(0, o - d)) + g(o + d)) / 2) + 0.03;
   for (let k = 0; k < ACROSS; k++) { const o = oAt(k); pts.push([o, k === 0 ? y - 0.03 : k === ACROSS - 1 || flat ? g(o) : Math.max(hAt(o), over(o))]); }
   const out = [];

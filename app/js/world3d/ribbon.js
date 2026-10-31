@@ -81,22 +81,35 @@ export function builder() {
 // width], ...] (tapers): no step where two ways of different layouts meet
 export const TAPER = 25;
 export function taperedWidth(w, joints, x, z) {
-  for (const [jx, jz, wj] of joints || []) { const d = Math.hypot(x - jx, z - jz); if (d < TAPER) { const f = d / TAPER; w = wj + (w - wj) * f * f * (3 - 2 * f); } }
+  for (const [jx, jz, wj] of joints || []) { if (wj == null) continue; const d = Math.hypot(x - jx, z - jz); if (d < TAPER) { const f = d / TAPER; w = wj + (w - wj) * f * f * (3 - 2 * f); } }
   return w;
 }
-// Where two ways meet end to end and only they (OpenStreetMap splits a road where its tags change) with widths
-// width(road) more than 0.3 m apart: per road index its joints [[x, z, width], ...], the width there halfway between
-// the two (the other's own where that one is rigid(road): a bridge or a tunnel drawn at its own width). pts in
+// Where two ways meet end to end (OpenStreetMap splits a road where its tags change): per road index its joints [[x, z,
+// width, tx, tz], ...]. width: where theirs are more than 0.3 m apart, halfway between the two (the other's own where that
+// one is rigid(road): a bridge or a tunnel drawn at its own width), else null (no taper); (tx, tz): the two ways' mean
+// direction there (unit, either sense), both ribbons' ends cut square to it (one line: no wedge of ground between two ends
+// meeting at an angle, nor an overlap). At a node where a third way meets (a side road, a slip road), the two that run on
+// most nearly straight through it (within 40 degrees) are the joint (Street View East Road 0a_0130: East Road wider with
+// its bike lanes south of the slip road's node, a step and a green wedge across the lane were drawn there). pts in
 // [lat, lon], xz(lat, lon) to local metres; ok(road): a road that takes part.
 export function tapers(roads, { width, rigid = () => false, ok = () => true, xz }) {
   const k = p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`, ends = new Map(), out = new Map();
   roads.forEach((r, i) => { if (r.pts.length < 2 || !ok(r)) return; for (const e of [0, 1]) { const q = k(e ? r.pts.at(-1) : r.pts[0]); (ends.get(q) ?? ends.set(q, []).get(q)).push([i, e]); } });
+  // (a way's direction out of the node, over its first 6 m)
+  const out1 = (i, e) => { const P = roads[i].pts.map(p => xz(...p)), Q = e ? P.slice().reverse() : P, o = Q[0]; let q = Q[1];
+    for (let m = 1; m < Q.length; m++) { q = Q[m]; if (Math.hypot(q[0] - o[0], q[1] - o[1]) >= 6) break; }
+    const l = Math.hypot(q[0] - o[0], q[1] - o[1]) || 1; return [(q[0] - o[0]) / l, (q[1] - o[1]) / l]; };
   for (const at of ends.values()) {
-    if (at.length !== 2 || at[0][0] === at[1][0]) continue;
-    const [[i, e], [j]] = at, wa = width(roads[i]), wb = width(roads[j]), ra = rigid(roads[i]), rb = rigid(roads[j]);
-    if (Math.abs(wa - wb) < 0.3 || (ra && rb)) continue;
-    const wj = ra ? wa : rb ? wb : (wa + wb) / 2, [x, z] = xz(...(e ? roads[i].pts.at(-1) : roads[i].pts[0]));
-    for (const [n, rg] of [[i, ra], [j, rb]]) if (!rg) (out.get(n) ?? out.set(n, []).get(n)).push([x, z, wj]);
+    if (at.length < 2) continue;
+    let pair = null;
+    if (at.length === 2) { if (at[0][0] !== at[1][0]) pair = at; }
+    else { let best = -0.766; for (let a = 0; a < at.length; a++) for (let b = a + 1; b < at.length; b++) { if (at[a][0] === at[b][0]) continue; const u = out1(...at[a]), v = out1(...at[b]), d = u[0] * v[0] + u[1] * v[1]; if (d < best) { best = d; pair = [at[a], at[b]]; } } }
+    if (!pair) continue;
+    const [[i, e], [j, f]] = pair, wa = width(roads[i]), wb = width(roads[j]), ra = rigid(roads[i]), rb = rigid(roads[j]);
+    if (ra && rb) continue;
+    const wj = Math.abs(wa - wb) < 0.3 ? null : ra ? wa : rb ? wb : (wa + wb) / 2, [x, z] = xz(...(e ? roads[i].pts.at(-1) : roads[i].pts[0]));
+    const u = out1(i, e), v = out1(j, f); let tx = u[0] - v[0], tz = u[1] - v[1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+    for (const [n, rg] of [[i, ra], [j, rb]]) if (!rg) (out.get(n) ?? out.set(n, []).get(n)).push([x, z, wj, tx, tz]);
   }
   return out;
 }
@@ -115,7 +128,7 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
   // circle each side out to R along it; a point every 0.75 m within its reach)
   if (flares?.length) { const by = q => flares.some(([x, z, R]) => Math.hypot(q[0] - x, q[1] - z) < R + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 0.75).slice(1)); }
   // (within a taper's reach of a joint a point every 1.5 m: the edges follow the width's curve, not a corner every step)
-  if (joints?.length) { const by = q => joints.some(([x, z]) => Math.hypot(q[0] - x, q[1] - z) < TAPER + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 1.5).slice(1)); }
+  if (joints?.some(j => j[2] != null)) { const by = q => joints.some(([x, z, wj]) => wj != null && Math.hypot(q[0] - x, q[1] - z) < TAPER + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 1.5).slice(1)); }
   const n = P.length; if (n < 2) return [];
   let code = [lm, surf, lanes, w, a, b, pL, pR];
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
@@ -128,7 +141,13 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
     // the join: the average of the two segments' normals, stretched to keep the width (capped at sharp turns)
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], c = P[i];
     let tx = b[0] - a[0], tz = b[1] - a[1]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+    // (an end at a joint: square to the two ways' mean direction there, the other way's end on the same line; stretched
+    // to keep the width across the road)
     let k = 1;
+    if ((i === 0 || i === n - 1) && joints?.length) for (const [x, z, , jx, jz] of joints) if (jx != null && Math.hypot(c[0] - x, c[1] - z) < 0.5) {
+      const s = jx * tx + jz * tz >= 0 ? 1 : -1, d = Math.abs(jx * tx + jz * tz); if (d < 0.6) break;
+      tx = jx * s; tz = jz * s; k = 1 / d; break;
+    }
     if (i > 0 && i < n - 1) {
       const s1x = c[0] - a[0], s1z = c[1] - a[1], l1 = Math.hypot(s1x, s1z) || 1;
       k = 1 / Math.max(0.6, Math.abs((s1x * tx + s1z * tz) / l1));

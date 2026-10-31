@@ -263,7 +263,7 @@ def test_road_sides_embankments_cuts_and_rails(out):
     assert c[1][3] - c[1][1] <= 0.7 * (c[1][2] - c[1][0])                         # a cut's foot past the verge: about 1 in 2 (Street View), not 68 degrees
     assert c[0][5] == 1 and f[0][5] == 1 and not any(q[5] for q in c if q[4])     # the verge and the shoulder grass; never a steep face
     k = b["curb"]
-    assert k[0][2] == pytest.approx(0.6) and k[0][3] == pytest.approx(10.12)      # behind a curb its shoulder at the curb's top
+    assert k[0][2] == pytest.approx(0.6) and k[0][3] == pytest.approx(10.05)      # behind a curb its shoulder 0.1 m under the curb's top
     assert k[-1][3] < 10                                                          # then down to the ground
 
 

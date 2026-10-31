@@ -331,7 +331,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   out.banks = { normals: [R[0][3], R[0][4], Lf[0][3], Lf[0][4]], right: kr.map(k => k.kind), left: kl.map(k => k.kind), cutH: r3(kl[4].h),
     fill: br.map(b => b.map(r3)), cut: bl.map(b => b.map(r3)), tris: geo.idx.length / 3, up, under, over, runs: runs.length, level, blockedTo: r3(blocked.at(-1)[2]),
     rail: { pts: rl.pts.length, z: r3(rl.pts[3][2]), posts: rl.posts.length, gap: r3(Math.hypot(rl.posts[1][0] - rl.posts[0][0], rl.posts[1][2] - rl.posts[0][2])), yaw: r3(rl.posts[0][3]) }, railed: railed[2] };
-  // behind a curb: its shoulder at the curb's top, then down to the ground
+  // behind a curb: its shoulder 0.1 m under the curb's top, then down to the ground
   const cb = bands(R[4], { kind: FILL, h: 0, rail: true, curb: true }, ground, { raw });
   out.banks.curb = cb.map(b => b.map(r3));
 }

@@ -226,3 +226,21 @@ export const MARKINGS = [
 export const BUILDINGS = [
   [37.842694, -122.477684, 4], [37.842778, -122.477657, 4],
 ];
+
+// CUTS: exposed earth on the road cuts the aerial imagery's colours miss (USDA NAIP has them grass or scrub there), from a
+// Street View survey, each traced along the USGS 3DEP lidar's ground where it is 40 degrees or steeper with no cover over it
+// (chm_fetch.py: no return 0.5 m over the ground) within the stretch Street View shows bare: { pts: [[lat, lon], ...], w:
+// metres across }. Drawn as the ground's own bare earth (veg.js class 4 painted over the cells: the banded red-brown earth on
+// the steep ground there, texture only, no face of its own; no scrub there). C:/Dev/justwatts-private/streetview/sources.md, A12.
+export const CUTS = [
+  // upper Conzelman Road past the bend below the Battery Spencer lot: the cut along the road's east side after it turns south
+  // (Street View gate_conzelmanroad_3a_0430, 2025-03, heading 66: a continuous red-brown cut at the foot of the slope across the bend)
+  { pts: [[37.832957, -122.488661], [37.832759, -122.488466], [37.832583, -122.488244], [37.832407, -122.488021], [37.832187, -122.487798], [37.831967, -122.487576], [37.831747, -122.487409], [37.831484, -122.487269]], w: 10 },
+  // upper Conzelman Road from McCullough Road: the cut above the road's north side round the bend (Street View
+  // user_upperconz_mccullough, heading 101: exposed rock and soil above the left edge, gullies, on to the bend)
+  { pts: [[37.833575, -122.492665], [37.833567, -122.492437], [37.833519, -122.492184], [37.833427, -122.491981], [37.833266, -122.491829], [37.833086, -122.491728], [37.832926, -122.491652], [37.832766, -122.491525], [37.832646, -122.491323], [37.832638, -122.491069]], w: 8 },
+  // Alexander Avenue's cut west of the old rails: the reddish scar up the bank north of the road (Street View
+  // user_alexander_cut, heading 273: reddish exposed earth upper right, low cover below it to the road)
+  // (its upper part: the lidar's bare steep cells 8 to 15 m north of the road's middle, the bank below them under cover)
+  { pts: [[37.840014, -122.480517], [37.840021, -122.48063], [37.840037, -122.480744], [37.840041, -122.480857]], w: 6 },
+];

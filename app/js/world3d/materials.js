@@ -101,9 +101,13 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   if (known > 0.0) {
     float sc = smoothstep(0.25, 0.75, vg.r + (fine - 0.5) * 0.35), br = smoothstep(0.3, 0.7, vg.b + (fine - 0.5) * 0.3), tr = smoothstep(0.3, 0.7, vg.g);
     // (green: OpenStreetMap's lawns, a road's verge (banks.js): grass whatever the imagery's class)
-    float lg = smoothstep(0.3, 0.8, green); sc *= 1.0 - lg * 0.9; br *= 1.0 - lg; tr *= 1.0 - lg;
+    float lg = smoothstep(0.3, 0.8, green); sc *= 1.0 - lg; br *= 1.0 - lg; tr *= 1.0 - lg;
     vec3 grassC = mix(srgb(vec3(0.41, 0.47, 0.31)), srgb(vec3(0.51, 0.52, 0.38)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
     grassC = mix(grassC, srgb(vec3(0.36, 0.45, 0.25)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
+    // (a road's verge and OpenStreetMap's lawns: fresh green grass, even (Street View Alexander Avenue 0a_1230: bright grass
+    // round the rail's supports, its green pixels' median #627739 to #778b49; A11's verge took the imagery's olive and its
+    // patches, read bare))
+    grassC = mix(grassC, srgb(vec3(0.43, 0.51, 0.27)) * (0.94 + 0.12 * small), lg * 0.7);
     vec3 scrC = mix(srgb(vec3(0.31, 0.36, 0.29)), srgb(vec3(0.42, 0.45, 0.38)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));  // grey olive to the sage's grey green
     float bush = jwN(p / 3.1 + 0.37).g;
     scrC *= 0.68 + 0.5 * smoothstep(0.25, 0.75, bush);

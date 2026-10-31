@@ -10,13 +10,13 @@ import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } fro
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers } from './rail.js';
-import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS } from './handlist.js';
+import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS } from './handlist.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
-import { loadVeg, SCRUB, CYPRESS, EUC, PAVED } from './veg.js';
-import { createScrub } from './scrub.js';
+import { loadVeg, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
+import { createScrub, REACH, TOP } from './scrub.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
 import { createSky, FOG_SUN, SEA } from './sky.js';
@@ -141,6 +141,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const vcls = (x, z) => veg ? veg.at(proj.lat(z), proj.lon(x)) : 0;
   loadVeg().then(v => {
     if (dead || !v) return;
+    if (!v.cut) { v.cut = true; for (const { pts, w } of CUTS) v.paint(pts, w, BARE); }  // (the hand list's exposed cuts: bare earth; once, the grid is shared)
     const tex = new THREE.DataTexture(v.rgba(), v.n, v.n, THREE.RGBAFormat);
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.anisotropy = 4; tex.needsUpdate = true;
     renderer.initTexture(tex);
@@ -305,7 +306,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     // (v: 1 a road's cells (its half width and 1.2 m, the cells coarser than a verge), 2 a car park's or a building's)
     const mark = (x, z, r, v = 1) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = Math.max(occ[b * OCC + a], v); };
-    const minor = c.lod > 0, lanes = [], drive = [], lines = [], tops = [], surf = [], sides = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
+    const minor = c.lod > 0, lanes = [], drive = [], lines = [], tops = [], surf = [], sides = [], gends = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     // ways that go on as one road drawn as one ribbon (no seam where OpenStreetMap splits a road), corners rounded
     t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`);
     // where one road's ways of different layouts meet, the width eases from one to the other (no step)
@@ -371,9 +372,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (!ins.some(Boolean)) return [P];
       const inR = (x, z, t) => wide(x, z, t) || same(x, z, t);
       const edge = (a, b) => { const t = tan(a, b); let lo = 0, hi = 1; const ia = inR(...a, t); for (let k = 0; k < 12; k++) { const f = (lo + hi) / 2; if (inR(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, t) === ia) lo = f; else hi = f; } const f = ia ? hi : lo; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; };
+      // (a mouth's corners rounded only where it meets the other road across, 50 degrees or more: at a narrower angle (a slip
+      // road joining) the rounding stood out past the other road's edge as a spike over the grass, East Road 0a_0130; the
+      // gore between them is paved instead)
+      const across = (a, b) => { const [tx, tz] = tan(a, b); for (const id of RI.near(b[0], b[1])) { const m = RI.rails[id]; if (m.r === r || m.r.fl & 3 || isTrail(m.r)) continue; const p = m.T.at(b[0], b[1]); if (!p || Math.abs(p.d) > m.half + 0.5) continue; const A = m.T.P[p.k], Bp = m.T.P[p.k + 1], l = Math.hypot(Bp[0] - A[0], Bp[1] - A[1]) || 1; return Math.abs(((Bp[0] - A[0]) * tx + (Bp[1] - A[1]) * tz) / l) < 0.643 ? 1 : 0; } return 1; };
       const out = []; let cur = [];
       for (let k = 0; k < P.length; k++) {
-        if (k && ins[k] !== ins[k - 1]) { const e = edge(P[k - 1], P[k]); if (ins[k]) { cur.push(e); cur.fe = 1; out.push(cur); cur = []; } else { cur.push(e); cur.fs = 1; } }
+        if (k && ins[k] !== ins[k - 1]) { const e = edge(P[k - 1], P[k]); if (ins[k]) { cur.push(e); cur.fe = across(P[k - 1], P[k]); cur.ne = !cur.fe; out.push(cur); cur = []; } else { cur.push(e); cur.fs = across(P[k], P[k - 1]); cur.ns = !cur.fs; } }
         if (!ins[k]) cur.push(P[k]);
       }
       out.push(cur);
@@ -424,7 +429,71 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (the roads the rides can reach: their barriers and banks; any other road's banks too (a lot's way in, a fire road
       // at the top of Hawk Hill: no step down off its edge))
       if (!minor && !trail && !dk && centre.length > 1) sides.push({ C: centre, r, st, own: r.inW ??= r.pts.some(([la, lo]) => inWorld(la, lo)) });
+      if (!minor && !trail && !dk && centre.length > 1 && !/service/.test(r.hw)) gends.push({ C: centre, r, lift, narrow: [!!pts.ns, !!pts.ne] });
       }
+    }
+    // (a point on another drawn road's paving: a side way's end)
+    const onOther = (G, x, z) => gends.some(H => { if (H === G) return false; for (let i = 1; i < H.C.length; i++) { const a = H.C[i - 1], b = H.C[i], ex = b[0] - a[0], ez = b[2] - a[2], L2 = ex * ex + ez * ez, f = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * ex + (z - a[2]) * ez) / L2)) : 0; if (Math.hypot(x - a[0] - ex * f, z - a[2] - ez * f) < Math.max(a[3], b[3]) - 0.05) return true; } return false; });
+    // the gore where two roads meet at a narrow angle (a slip road joining, a fork): paved between their facing edges
+    // from the node back to where they are 8 m apart, 40 m at most (USDA NAIP, East Road 0a_0130: the slip road from
+    // Alexander Avenue and East Road one paved triangle to their node; Street View: continuous asphalt, no grass between)
+    // (by OpenStreetMap's node where two ways end: each's drawn piece with an end within 15 m of it (a side way may stop
+    // inside the other's paving short of the node), its end the nearer one)
+    const gnodes = new Map(); if (!minor) for (const [i, gE] of gends.entries()) for (const [la, lo] of [gE.r.pts[0], gE.r.pts.at(-1)]) { const k = `${la.toFixed(6)},${lo.toFixed(6)}`; (gnodes.get(k) ?? gnodes.set(k, []).get(k)).push(i); }
+    for (const [nk0, list] of gnodes) for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
+      const A = gends[list[a]], Bw = gends[list[b]]; if (A.r === Bw.r) continue;
+      const [nla, nlo] = nk0.split(',').map(Number), [nx0, nz0] = proj.xz(nla, nlo);
+      const near0 = C => { const d0 = Math.hypot(C[0][0] - nx0, C[0][2] - nz0), d1 = Math.hypot(C.at(-1)[0] - nx0, C.at(-1)[2] - nz0); return d0 <= d1 ? [d0, 0] : [d1, 1]; };
+      const [oa, ea] = near0(A.C), [ob, eb] = near0(Bw.C); if (oa > 15 || ob > 15) continue;
+      const CA = ea ? A.C.slice().reverse() : A.C, CB = eb ? Bw.C.slice().reverse() : Bw.C;
+      // (each's way out of the node over its first 8 m; the two within 35 degrees of each other)
+      const dir = C => { let k = 1; while (k < C.length - 1 && Math.hypot(C[k][0] - C[0][0], C[k][2] - C[0][2]) < 8) k++; const l = Math.hypot(C[k][0] - C[0][0], C[k][2] - C[0][2]) || 1; return [(C[k][0] - C[0][0]) / l, (C[k][2] - C[0][2]) / l]; };
+      const da = dir(CA), db = dir(CB); if (da[0] * db[0] + da[1] * db[1] < Math.cos(35 * Math.PI / 180)) continue;
+      // (which edge of each faces the other: B lies left or right of A's way out)
+      const bLeft = da[0] * db[1] - da[1] * db[0] < 0;  // (x east, z south: negative is to the left)
+      // centre entries [x, y, z, half, right x, y, z, left x, y, z] as the ribbon ran; reversed, its right is its left
+      const edgeA = q => (bLeft !== !!ea) ? [q[7], q[8], q[9]] : [q[4], q[5], q[6]], edgeB = q => (bLeft === !!eb) ? [q[7], q[8], q[9]] : [q[4], q[5], q[6]];
+      const at0 = (C, d, f) => { let s = 0; for (let k = 1; k < C.length; k++) { const l = Math.hypot(C[k][0] - C[k - 1][0], C[k][2] - C[k - 1][2]); if (s + l >= d) { const u = (d - s) / (l || 1), p = f(C[k - 1]), q = f(C[k]); return p.map((v, i) => v + (q[i] - v) * u); } s += l; } return null; };
+      const at = (C, d, f) => at0(C, Math.max(0, d - (C === CA ? oa : ob)), f);
+      const LA = [], LB = [], d0 = Math.max(oa, ob);
+      // (none where they run on side by side, 8 m apart or less, past 40 m: a divided road's median, not a gore; walked
+      // from where both are drawn)
+      let apart = false;
+      for (let d = d0; d <= d0 + 40; d += 1.5) { const pa = at(CA, d, edgeA), pb = at(CB, d, edgeB); if (!pa || !pb) break; const gap = Math.hypot(pa[0] - pb[0], pa[2] - pb[2]); LA.push(pa); LB.push(pb); if (gap > 8) { apart = true; break; } }
+      if (LA.length < 3 || !apart) continue;
+      const code = [0, 0, 0, 6, 0, 0, 0, 0], i0 = B.idx.length, P = B.pos;
+      const up = (a, b, c) => { const ux = P[3 * b] - P[3 * a], uz = P[3 * b + 2] - P[3 * a + 2], wx = P[3 * c] - P[3 * a], wz = P[3 * c + 2] - P[3 * a + 2]; if (uz * wx - ux * wz > 0) B.tri(a, b, c); else B.tri(a, c, b); };
+      const seg = (p, q, y, h = 1) => { surf.push(p[0], y, p[2], q[0], y, q[2], h); mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, Math.hypot(p[0] - q[0], p[2] - q[2]) / 2 + h + 1.2); };
+      for (let k = 0; k < LA.length; k++) {
+        const pa = LA[k], pb = LB[k], y = Math.min(pa[1], pb[1]) - 0.02;
+        B.v(pa[0], y, pa[2], 0.5, 0, code); B.v(pb[0], y, pb[2], 0.5, 0, code);
+        if (k) { const v = B.n - 4; up(v, v + 2, v + 1); up(v + 1, v + 2, v + 3);
+          // (its paving in the road index: along the middle as wide as it is, the banks, the grass and the scrub keep off)
+          const m0 = LA[k - 1].map((v, i) => (v + LB[k - 1][i]) / 2), m1 = pa.map((v, i) => (v + pb[i]) / 2);
+          seg(m0, m1, y, Math.max(Math.hypot(LA[k - 1][0] - LB[k - 1][0], LA[k - 1][2] - LB[k - 1][2]), Math.hypot(pa[0] - pb[0], pa[2] - pb[2])) / 2 + 0.1); }
+      }
+      tops.push([i0, B.idx.length, false]);
+    }
+    // a slip road's end cut at the other road's edge at a narrow angle (no rounded mouth there): its outer edge drawn on
+    // until it meets the other road's edge, the corner its square end leaves paved (USDA NAIP, East Road 0a_0130: the slip
+    // road from Alexander Avenue merges, its outer edge running into East Road's; Street View: no grass between them)
+    if (!minor) for (const G of gends) for (const e of [0, 1]) {
+      if (!G.narrow[e] || G.C.length < 2) continue;
+      const q = e ? G.C.at(-1) : G.C[0], o = e ? G.C.at(-2) : G.C[1], l = Math.hypot(q[0] - o[0], q[2] - o[2]) || 1, fx = (q[0] - o[0]) / l, fz = (q[2] - o[2]) / l;
+      // (its outer corner: the one further inside no other road; the ray on from it along the way)
+      const cR = [q[4], q[5], q[6]], cL = [q[7], q[8], q[9]], inR = onOther(G, cR[0], cR[2]), inL = onOther(G, cL[0], cL[2]); if (inR === inL) continue;
+      const out = inR ? cL : cR, inn = inR ? cR : cL;
+      let best = null;
+      for (const H of gends) { if (H === G) continue; for (const k of [4, 7]) for (let i = 1; i < H.C.length; i++) {
+        const a = H.C[i - 1], b = H.C[i], ax = a[k], az = a[k + 2], ex = b[k] - ax, ez = b[k + 2] - az, den = fx * ez - fz * ex; if (Math.abs(den) < 1e-6) continue;
+        const s = ((ax - out[0]) * ez - (az - out[2]) * ex) / den, u = ((ax - out[0]) * fz - (az - out[2]) * fx) / den;
+        if (s > 0.2 && s < 15 && u >= 0 && u <= 1 && (!best || s < best[0])) best = [s, [ax + ex * u, a[k + 1] + (b[k + 1] - a[k + 1]) * u, az + ez * u]]; } }
+      if (!best) continue;
+      const hP = best[1], y = Math.min(out[1], inn[1], hP[1]) - 0.02, code = [0, 0, 0, 6, 0, 0, 0, 0], i0 = B.idx.length, P = B.pos;
+      const a = B.v(inn[0], y, inn[2], 0.5, 0, code), b = B.v(out[0], y, out[2], 0.5, 0, code), c = B.v(hP[0], y, hP[2], 0.5, 0, code);
+      { const ux = P[3 * b] - P[3 * a], uz = P[3 * b + 2] - P[3 * a + 2], wx = P[3 * c] - P[3 * a], wz = P[3 * c + 2] - P[3 * a + 2]; if (uz * wx - ux * wz > 0) B.tri(a, b, c); else B.tri(a, c, b); }
+      for (const [p1, p2] of [[out, hP], [inn, hP], [inn, out]]) { surf.push(p1[0], y, p1[2], p2[0], y, p2[2], 0.8); mark((p1[0] + p2[0]) / 2, (p1[2] + p2[2]) / 2, Math.hypot(p1[0] - p2[0], p1[2] - p2[2]) / 2 + 2); }
+      tops.push([i0, B.idx.length, false]);
     }
     // car parks (OpenStreetMap: the pullouts, vista points and lots by the roads): paved, on the ground, unmarked, a
     // little under the roads; on the ground as it is after the roads are pushed in (below: no step at their edges)
@@ -494,10 +563,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) < S[k + 6] && Math.abs(S[k + 1] + (S[k + 4] - S[k + 1]) * t - y) < 1.5) return true; } return false; };
       // (a strip ends short of any other road's paving within 8 m of this edge's height: a junction's other leg; not past a
       // way's end, where no paving is drawn)
-      // (nor up over a car park or a pad where the ground rises: it lies on the ground eased to the road's edge; where the
-      // ground falls the strip runs on under its paving, no step down off the edge beside it)
+      // (nor over a car park or a pad: it lies on the ground eased up to the road's edge within 3 m (A12: a strip up the
+      // lidar's ground over the carve hid Mitchell Road's lot and Conzelman 0a_2030's turnout under grass))
       const inLot = (x, z) => lotRings.some(r => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) if ((r[i][1] > z) !== (r[j][1] > z) && x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c; return c; });
-      const block = (x, z, ey) => { if (lotRings.length && inLot(x, z) && (ground(x, z) ?? ey) > ey + 0.3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
+      const block = (x, z, ey) => { if (lotRings.length && inLot(x, z) && Math.abs((ground(x, z) ?? ey) - ey) < 3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
         const S = SI.S, ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, tu = L2 ? ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2 : 0, t = Math.max(0, Math.min(1, tu));
         if (tu > -0.05 && tu < 1.05 && Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) < S[k + 6] && Math.abs(S[k + 1] + (S[k + 4] - S[k + 1]) * t - ey) < 8) return true; } return false; };
       // one edge's strips (banks.js): into the banks' geometry; nothing grows where a strip stands off the ground (grass,
@@ -895,7 +964,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
       for (const { pts, kind } of c.rails) { const S = SEC[kind]; if (!S || kind === 'wall') continue; add(kind, pts, S[1], S[2], S[4]); if (S[3]) add(kind, pts, S[3], true); if (kind === 'chain') add('mesh', pts, SEC.mesh[1], false); }
       for (const [key, { pos, idx, pl }] of sweep) {
-        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); if (pl) g.setAttribute('pl', new THREE.Float32BufferAttribute(pl, 3)); g.setIndex(idx); g.computeVertexNormals(); g.computeBoundingSphere();
+        let g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); if (pl) g.setAttribute('pl', new THREE.Float32BufferAttribute(pl, 3)); g.setIndex(idx);
+        // (a curb's faces each lit flat: its face to the road a lit band below its top, not a dark line (A11's deep foot
+        // smoothed the face's normals down toward its foot: Street View Center Road 0a_0030's raised curb read flush))
+        if (key === 'curb' || key === 'red') g = g.toNonIndexed();
+        g.computeVertexNormals(); g.computeBoundingSphere();
         const m = new THREE.Mesh(g, SEC[key][0]); m.castShadow = key !== 'mesh' && QUALITY[q].shadow > 0; m.receiveShadow = true; grp.add(m);
       }
     }
@@ -1075,12 +1148,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   // how far a point is outside the nearest drawn road's edge (negative: on it), null with no road within 10 m
   function roadGap(x, z) {
-    const [tx, ty] = tileOf(x, z), R = near.get(key(NEAR_Z, tx, ty))?.surf; if (!R) return null;
-    const cx = Math.floor(x / 10), cz = Math.floor(z / 10), S = R.S; let best = null;
+    const [tx, ty] = tileOf(x, z), R0 = near.get(key(NEAR_Z, tx, ty))?.surf; if (!R0) return null;
+    // (and the next tile's roads within 6 m: a road drawn by it reaches over the tile's edge)
+    const Rs = [R0]; for (const [dx, dz] of [[6, 0], [-6, 0], [0, 6], [0, -6]]) { const [ux, uy] = tileOf(x + dx, z + dz); if (ux !== tx || uy !== ty) { const R = near.get(key(NEAR_Z, ux, uy))?.surf; if (R && !Rs.includes(R)) Rs.push(R); } }
+    const cx = Math.floor(x / 10), cz = Math.floor(z / 10); let best = null;
+    for (const R of Rs) { const S = R.S;
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of R.cells.get(`${cx + a},${cz + b}`) || []) {
       const ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2)) : 0;
       const g = Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) - S[k + 6]; if (best == null || g < best) best = g;
-    }
+    } }
     return best;
   }
   // how far right of the road's centre line a rider rides: about a metre in from the edge
@@ -1109,23 +1185,28 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     return { h, nx: N[3 * v], ny: N[3 * v + 1], nz: N[3 * v + 2], cv: c.cv[v], m: [mk[8 * v] / 255, mk[8 * v + 1] / 255, mk[8 * v + 2] / 255, mk[8 * v + 3] / 255] };
   }
   const grass = createGrass({ THREE, scene, mat: mats.grass, sample: groundSample });
-  // the scrub's bushes stand on the ground: from a metre and a half past a road's edge (the road mask's cells are
-  // coarser), not in a building, a bore or on a steep bank cut for a road
-  function scrubGround(x, z, sc = 1) {
+  // the scrub's bushes stand on the ground: not on a road, in a building, a bore or on a steep bank cut for a road; clear of
+  // a road's paved edge by their whole reach and low beside it (Street View user_conzelman_railbend: coyote brush 0.3 to
+  // 1.5 m, low at the edge, nothing over the paving; A11's bushes from 1.6 m at full size hung over the road)
+  function scrubGround(x, z, w = 1) {
     const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid || !c.mask || !c.occ) return null;
-    // (a verge of spring grass along the roads, Street View)
-    // (a bush clear of the road by its own half width (about 1.5 m at scale 1): none through a rail at the edge, Street View
-    // Alexander Avenue 0a_1230)
-    if ((roadGap(x, z) ?? 9) < Math.max(1.6, 0.4 + 1.5 * sc)) return { skip: true };
+    const gap = roadGap(x, z) ?? 9; if (gap < 1) return { skip: true };
     if (occAt(c.occ, x, z) === 2) return { skip: true };  // (a car park, a building: the road itself by its gap above, not its coarse cells (bushes were cleared 5 m out, A11: Conzelman 0a_2030, 3a_0430))
     const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), v = Math.round(fj) * n + Math.round(fi), h0 = gridHeight(g, x, z);
     if (h0 == null || !(v >= 0 && v < n * n)) return null;
     const h = standOn(c, x, z, h0); if (h == null) return { skip: true };
     if (onTunnel(x, z, h)) return { skip: true };
-    if (h < SEA + 0.3 || (c.mask[8 * v + 4] > 100 && c.nor[3 * v + 1] < 0.9)) return { skip: true };  // the road cuts bare (Street View: red chert)
-    return { h };
+    // (the road cuts bare (Street View: red chert) where the lidar does not say what grows there; where it does, it decides
+    // (cellBushes): Street View user_conzelman_railbend, the cut above the road under low scrub to the edge)
+    if (h < SEA + 0.3 || (c.mask[8 * v + 4] > 100 && c.nor[3 * v + 1] < 0.9 && veg?.scrubH(proj.lat(z), proj.lon(x)) == null)) return { skip: true };
+    // (the largest it may be: its leaves 0.25 m short of the paved edge, its top 0.5 m at a metre from it, 0.35 m more a
+    // metre further out; the ground's slope a metre either way, for its lean and its foot)
+    const reach = (gap - 0.25) / (REACH * w), top = (0.5 + 0.35 * (gap - 1)) / TOP;
+    const hh = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => { const q = gridHeight(g, x + dx, z + dz), s = q == null ? null : standOn(c, x + dx, z + dz, q); return s ?? h; });
+    const gx = Math.max(-1.5, Math.min(1.5, (hh[0] - hh[1]) / 2)), gz = Math.max(-1.5, Math.min(1.5, (hh[2] - hh[3]) / 2));
+    return { h, reach, top, grad: [gx, gz] };
   }
-  const scrub = createScrub({ THREE, scene, geos: scrubGeometries(), mat: mats.scrub, fade: scrubFade, cls: vcls, ground: scrubGround });
+  const scrub = createScrub({ THREE, scene, geos: scrubGeometries(), mat: mats.scrub, fade: scrubFade, cls: vcls, hgt: (x, z) => veg ? veg.scrubH(proj.lat(z), proj.lon(x)) : null, ground: scrubGround });
 
   /* ---------- tunnels: a lined bore through the hill, portals at both ends, the rider on the line between them ----------
      The baked tiles cut a tunnel at their edges, so the pieces are joined across tiles first; a tunnel is drawn once

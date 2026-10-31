@@ -8,7 +8,7 @@ import { GRID, gridAt } from './baked.js';
 import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSteps, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from './terrain.js';
 import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } from './banks.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
-import { wanted, plan, jobQueue, childrenOf, NEAR_Z, FAR_Z } from './stream.js';
+import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impGrow } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers } from './rail.js';
 import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS } from './handlist.js';
 import { hash2 } from './landuse.js';
@@ -39,7 +39,7 @@ export const QUALITY = [
   { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30] },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18] },
 ];
-const CAP = { 0: 22000, 1: 18000 };  // trees per tile at full share, by detail (a denser tile is thinned evenly)
+const CAP = 22000;  // trees per tile at full share (a denser tile is thinned evenly)
 // trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
 // wood (mixed, broadleaf, needleleaf), and ground no tree grows on (rock, sand, water). [class, metres between trees,
 // share of the spots kept, leaf type]
@@ -166,6 +166,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
 
   /* ---------- streaming ---------- */
   const near = new Map(), far = new Map(), jobs = jobQueue();
+  const easing = new Set(), leaving = new Map();  // near tiles easing in from the far ground; dropped ones drawn until their far tile covers them again
   if (globalThis.__w3?.prof) globalThis.__w3.slowJobs = jobs.slow;  // profiling: the jobs that took over 6 ms
   const tileOf = (x, z) => { const lat = proj.lat(z), lon = proj.lon(x); return [Math.floor(tileX(lon, NEAR_Z)), Math.floor(tileY(lat, NEAR_Z))]; };
   function disposeObj(o) {
@@ -178,8 +179,48 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     baked.get(z, x, y).then(t => { c.tile = t; poke(); });
     return c;
   }
-  function dropChunk(map, k) { const c = map.get(k); if (!c) return; disposeObj(c.group); map.delete(k); jobs.drop(id => id.startsWith(k + '|')); farDirty = true; }
-  function setPart(c, name, obj) { if (c.parts[name]) disposeObj(c.parts[name]); c.parts[name] = obj; if (obj) c.group.add(obj); }
+  // (a near tile its far tile leaves out stays drawn until the far tile is built again with that ground: no hole meanwhile)
+  function dropChunk(map, k) {
+    const c = map.get(k); if (!c) return; map.delete(k); jobs.drop(id => id.startsWith(k + '|')); farDirty = true; easing.delete(c);
+    if (map === far) { for (const [nk, n] of leaving) if (parentOf(nk) === k) { disposeObj(n.group); leaving.delete(nk); } disposeObj(c.group); return; }
+    if (c.group.visible && far.get(parentOf(k))?.skipped?.has(k)) { leaving.get(k) && disposeObj(leaving.get(k).group); leaving.set(k, c); } else disposeObj(c.group);
+  }
+  function setPart(c, name, obj) { if (c.parts[name]) disposeObj(c.parts[name]); c.parts[name] = obj; if (obj) c.group.add(obj); if (c.ease) easePart(c, name, obj); }
+  // easing a near tile in: every vertex of its parts (ground, roads and banks, buildings) starts at the far tile's ground
+  // under it, as far over or under it as it is over its own ground, and comes to its place over EASE ms: a morph target
+  // (three's, relative: the far ground's height over its own, weighed by 1 - w), so the ease sends nothing to the GPU
+  // after the start (writing the heights into the buffers every frame held a frame 1.5 s on Conzelman); its programs are
+  // built while the world loads (warm). Tree cards and instanced models are shown once it is in place
+  function easePart(c, name, obj) {
+    const E = c.ease, list = [], own = name === 'terrain' && c.tmesh?.src;
+    obj?.traverse(m => {
+      if (!m.geometry) return;
+      if (m.isInstancedMesh || m.geometry.attributes.ia || !m.geometry.attributes.position) { if (m.visible) { m.visible = false; list.push({ hid: m }); } return; }
+      const a = m.geometry.attributes.position, n = a.count, A = a.array, D = new Float32Array(3 * n);
+      for (let i = 0; i < n; i++) D[3 * i + 1] = own ? E.Dn[own[i]] : easeAt(E, A[3 * i], A[3 * i + 2]);
+      m.geometry.morphAttributes.position = [new THREE.BufferAttribute(D, 3)]; m.geometry.morphTargetsRelative = true; m.updateMorphTargets();
+      list.push({ m });
+    });
+    E.parts = E.parts.filter(p => p.name !== name); if (list.length) E.parts.push({ name, list });
+    easeApply(c, E.t0 == null ? 0 : easeW(performance.now() - E.t0));
+  }
+  // (Dn between its grid points: the tile's grid is even in x and as near as matters in z)
+  function easeAt(E, x, z) {
+    const s = E.s, n = s + 1, fi = Math.max(0, Math.min(s - 1e-6, (x - E.x0) / (E.x1 - E.x0) * s)), fj = Math.max(0, Math.min(s - 1e-6, (z - E.z0) / (E.z1 - E.z0) * s));
+    const i = Math.floor(fi), j = Math.floor(fj), u = fi - i, v = fj - j, D = E.Dn;
+    return (D[j * n + i] * (1 - u) + D[j * n + i + 1] * u) * (1 - v) + (D[(j + 1) * n + i] * (1 - u) + D[(j + 1) * n + i + 1] * u) * v;
+  }
+  // w: 0 at the far ground .. 1 in place (and the morph targets dropped, the hidden parts shown)
+  function easeApply(c, w) {
+    for (const { list } of c.ease.parts) for (const { m, hid } of list) {
+      if (hid) { if (w >= 1) hid.visible = true; continue; }
+      if (w < 1) { m.morphTargetInfluences[0] = 1 - w; continue; }
+      delete m.geometry.morphAttributes.position; m.morphTargetInfluences = undefined; m.morphTargetDictionary = undefined;
+    }
+  }
+  function easeStep(now) {
+    for (const c of easing) { const w = easeW(now - c.ease.t0); easeApply(c, w); if (w >= 1) { c.ease = null; easing.delete(c); hz.touch(); } }
+  }
 
   // a neighbour tile's height sample (grid indices past this tile's edge; tiles share their edge rows), null if not loaded
   const extOf = c => (i, j) => {
@@ -191,9 +232,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   function* buildTerrain(c) {
     const t = c.tile, Q = QUALITY[q];
     if (!t) { c.grid = null; setPart(c, 'terrain', null); c.built = true; c.ver = (c.ver || 0) + 1; farDirty = true; return; }
-    // the grid's side: the quality's near the rider (upsampled from a coarse tile), 32 in the ring round them, a far
+    // the grid's side: the quality's on every near tile, whatever its detail (upsampled from a coarse tile; the ground
+    // and the roads the same seen from the outer ring as close up: nothing shifts when the rider comes nearer), a far
     // tile's own; from it the step through the tile's samples or the upsampling
-    const fine = c.z === NEAR_Z && c.lod === 0, src = t.n - 1, want = c.z === FAR_Z ? src : fine ? Q.segs * Q.up : 32;
+    const fine = c.z === NEAR_Z, src = t.n - 1, want = c.z === FAR_Z ? src : Q.segs * Q.up;
     const up = want > src ? Math.round(want / src) : 1, step = want < src ? Math.round(src / want) : 1, gk = up > 1 ? 'u' + up : 's' + step;
     const lidar = c.z === NEAR_Z && src > GRID[NEAR_Z];  // a tile from the lidar (about 7.5 m): its roads' benches and cuts are in the heights
     // built aside (G) and swapped in at the end: the ground in use stays as it is while this runs over several frames
@@ -202,7 +244,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (up > 1) G = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: upsample(t.hs, t.n, up, extOf(c)), n: (t.n - 1) * up + 1, step: 1, proj });
       else G = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: t.hs, n: t.n, step, proj });
       G.key = gk; G.m = (up > 1 ? 1 / up : step) * GRID[c.z] / src;  // the grid's step over the coarse grid's (about 15 m)
-      yield;
+      yield 't:grid';
     } else G = { ...G };
     G.cut = null; G.hs = G.raw;
     const ms = G.m;
@@ -227,7 +269,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // not over a tunnel (the deck)
         for (const run of gp.length ? P.reduce((rs, p) => { if (gp.some(([a, b]) => p[3] >= a && p[3] <= b)) { if (rs.at(-1).length) rs.push([]); } else rs.at(-1).push(p); return rs; }, [[]]) : [P])
           if (run.length > 1) under.push(lidar || rl ? { pts: run, r0: w / 2 + 2.5, r1: w / 2 + 7, rc: w / 2 + 18, half: w / 2 } : { pts: run, r0: w / 2 + Math.max(2.5, 8 * ms), r1: w / 2 + Math.max(9, 22 * ms) });
-        if (under.length % 12 === 0) yield;
+        if (under.length % 12 === 0) yield 't:roads';
       }
       // the Golden Gate Bridge's ends: the ground meets the deck (just under it) where the land comes up to it
       if (marks.ggb) for (const [a, b] of [[GGB.span[0], GGB.span[0] + 24], [GGB.span[1] - 24, GGB.span[1]]]) {
@@ -258,20 +300,34 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           if (pts.length > 1) under.push(!short ? { pts, r0: w / 2 + 2.5, r1: w / 2 + 9 } : arch ? { pts, r0: w / 2 + 2, r1: w / 2 + 9 } : { pts, r0: w / 2 + 9, r1: w / 2 + 12 });
         }
       }
-      yield; if (!globalThis.__w3?.noCarve) yield* carveSteps(G, [], 0, 1, under); yield;  // (__w3.noCarve, noPush: checks)
+      yield 't:ports'; if (!globalThis.__w3?.noCarve) yield* carveSteps(G, [], 0, 1, under); yield 't:carved';  // (__w3.noCarve, noPush: checks)
       // the ground as carved to the roads, before it is pushed under their tops (the grid is coarser than a road: a
       // triangle under one road and beside another comes down whole): the road sides are drawn on this one (banks.js)
       G.carved = G.hs.slice();
     }
-    const lu = rasterClasses(G, withGardens(t)); yield;
-    const m = gridMesh(G, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: c.z === FAR_Z ? farSkip(c, G) : null }); yield;
-    const nor = gridNormals(G), mask = classMasks(lu, G.cut); yield;
-    const cv = gridCurvature(G, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6); yield;
+    // a near tile built for the first time where its far tile's ground is drawn: kept hidden until the far tile is drawn
+    // without it, then eased in from the far ground (easeStep), from Dn: per grid point the far ground's height over its own
+    // (built again, a new quality: swapped in as it is)
+    let ease = null;
+    if (fine) { const f = far.get(parentOf(c.k)); if (c.ver == null && f?.parts.terrain && f.grid) {
+      const s = G.segs, n = s + 1, Dn = new Float32Array(n * n);
+      for (let j = 0; j <= s; j++) { for (let i = 0; i <= s; i++) { const fh = gridHeight(f.grid, G.xs[i], G.zs[j]); Dn[j * n + i] = fh == null ? 0 : fh - G.hs[j * n + i]; } if (j % 48 === 47) yield 't:ease'; }
+      ease = { Dn, s, x0: G.xs[0], x1: G.xs[s], z0: G.zs[0], z1: G.zs[s], t0: null, parts: [] }; } }
+    // (the classes a few hundred polygons a slice, the higher class winning as in one pass)
+    const feats = withGardens(t); let lu = null;
+    for (let a = 0; a < feats.length || !lu; a += 150) { const part = rasterClasses(G, feats.slice(a, a + 150)); if (!lu) lu = part; else for (let v = 0; v < lu.length; v++) if (part[v] > lu[v]) lu[v] = part[v]; yield 't:classes'; }
+    const skipped = c.z === FAR_Z ? new Set(childrenOf(c.k).filter(k => near.get(k)?.built)) : null;
+    const m = gridMesh(G, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: skipped ? farSkip(c, G, skipped) : null }); yield 't:mesh';
+    const nor = gridNormals(G); yield 't:normals';
+    const mask = classMasks(lu, G.cut); yield 't:masks';
+    const cv = gridCurvature(G, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6); yield 't:curv';
     const nv = m.src.length, N = new Float32Array(nv * 3), A = new Uint8Array(nv * 4), B = new Uint8Array(nv * 4), CV = new Float32Array(nv);
     for (let i = 0; i < nv; i++) {
       const v = m.src[i]; N[3 * i] = nor[3 * v]; N[3 * i + 1] = nor[3 * v + 1]; N[3 * i + 2] = nor[3 * v + 2]; CV[i] = cv[v];
       for (let k = 0; k < 4; k++) { A[4 * i + k] = mask[8 * v + k]; B[4 * i + k] = mask[8 * v + 4 + k]; }
+      if (i % 16384 === 16383) yield 't:attrs';
     }
+    yield 't:attrs';
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
     g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
@@ -279,7 +335,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : bored ? mats.terrainFarBore : mats.terrainFar);  // (the bores left out at every quality) mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
     c.grid = G; c.tmesh = { src: m.src, nv: (G.segs + 1) ** 2, skirt: c.z === FAR_Z ? 40 : 12 };
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); } else { c.nor = c.mask = c.cv = null; }
-    setPart(c, 'terrain', mesh); upload(mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
+    if (fine) { c.ease = ease; c.group.visible = !ease; }
+    setPart(c, 'terrain', mesh); upload(mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) { farDirty = true; poke(); }
+    if (c.z === FAR_Z) {
+      // the near tiles it leaves out now: shown (and eased in); the ones gone that it draws again: dropped
+      c.skipped = skipped;
+      for (const k of skipped) { const n = near.get(k); if (n?.ease && n.ease.t0 == null) { n.ease.t0 = performance.now(); n.group.visible = true; easing.add(n); } }
+      for (const [k, n] of leaving) if (parentOf(k) === c.k && !skipped.has(k)) { disposeObj(n.group); leaving.delete(k); }
+    }
   }
   // a tile the rides can reach (the open world's edge, world.js BOUNDS, met by its box): its roads' decks over tunnels,
   // banks and rails are worked out (the scenery beyond, San Francisco's streets, seen from afar, goes without)
@@ -292,9 +355,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const keepCulled = function () { this.frustumCulled = true; this.onAfterRender = () => {}; };
   function upload(mesh) { mesh.frustumCulled = false; mesh.onAfterRender = keepCulled; }
   // far tiles leave out the quads a built near tile covers
-  function farSkip(c, g = c.grid) {
+  function farSkip(c, g, skipped) {
     const s = 2 ** (NEAR_Z - FAR_Z), per = g.segs / s;
-    return (i, j) => { const n = near.get(key(NEAR_Z, c.x * s + Math.floor(i / per), c.y * s + Math.floor(j / per))); return !!n?.built; };
+    return (i, j) => skipped.has(key(NEAR_Z, c.x * s + Math.floor(i / per), c.y * s + Math.floor(j / per)));
   }
   const hOf = c => (x, z) => c.grid ? gridHeight(c.grid, x, z) : null;
   // a tile's features with a garden round every building (its footprint grown by about 6 m, as town ground), once
@@ -303,14 +366,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const r = f.rings[0], n = r.length - 1; let la = 0, lo = 0; for (let i = 0; i < n; i++) { la += r[i][0]; lo += r[i][1]; } la /= n; lo /= n;
     return { k: 'urban', rings: [r.map(([a, b]) => { const dy = (a - la) * 111195, dx = (b - lo) * 87800, d = Math.hypot(dx, dy) || 1, k = (d + 6) / d; return [la + (a - la) * k, lo + (b - lo) * k]; })] };
   }));
+  // a clock for a build's slices: true once `ms` have gone since the slice began (yield then)
+  const slicer = (ms = 6) => { let t = performance.now(), fresh = false; return () => { const n = performance.now(); if (fresh) { t = n; fresh = false; return false; } if (n - t > ms) { fresh = true; return true; } return false; }; };
   function* buildRoads(c) {
+    const due = slicer();
     const t = c.tile, decks = [];
     if (!t || !c.grid) return setPart(c, 'roads', null);
     const B = builder(), pillars = [], hAt = hOf(c), g = c.grid, occ = new Uint8Array(OCC * OCC), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     // (v: 1 a road's cells (its half width and 1.2 m, the cells coarser than a verge), 2 a car park's or a building's)
     const mark = (x, z, r, v = 1) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = Math.max(occ[b * OCC + a], v); };
-    const minor = c.lod > 0, lanes = [], drive = [], lines = [], tops = [], surf = [], sides = [], gends = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
+    const lanes = [], drive = [], lines = [], tops = [], surf = [], sides = [], gends = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     // ways that go on as one road drawn as one ribbon (no seam where OpenStreetMap splits a road), corners rounded
     t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`);
     // where one road's ways of different layouts meet, the width eases from one to the other (no step)
@@ -338,7 +404,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     };
     // the roads' centre lines in 8 m cells (a trail that runs along a road's shoulder is the shoulder: not drawn there)
     const isTrail = r => /path|footway|track|bridleway|steps/.test(r.hw), side = new Map(), sk = (x, z) => `${Math.floor(x / 8)},${Math.floor(z / 8)}`;
-    if (!minor) for (const r of t.chained) if (!(r.fl & 3) && !isTrail(r)) { const h = roadStyle(r.hw, r.ln, r.fl, r.wd).w / 2; for (const [x, z] of resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 4)) (side.get(sk(x, z)) ?? side.set(sk(x, z), []).get(sk(x, z))).push([x, z, h]); }
+    for (const r of t.chained) if (!(r.fl & 3) && !isTrail(r)) { const h = roadStyle(r.hw, r.ln, r.fl, r.wd).w / 2; for (const [x, z] of resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 4)) (side.get(sk(x, z)) ?? side.set(sk(x, z), []).get(sk(x, z))).push([x, z, h]); }
     const byRoad = (x, z) => { for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const [u, w, h] of side.get(`${Math.floor(x / 8) + a},${Math.floor(z / 8) + b}`) || []) if (Math.hypot(u - x, w - z) < h + 3) return true; return false; };
     // a road with no rail (a motorway and its ramps, a street past the rides' area) where it runs onto a railed one, a
     // node shared or not (OpenStreetMap draws a ramp's or a side road's end on top of the bigger road): one surface, its
@@ -389,9 +455,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       return out.filter(q => q.length > 1 && q.reduce((s, p, i) => i ? s + Math.hypot(p[0] - q[i - 1][0], p[1] - q[i - 1][1]) : 0, 0) > 1);
     };
     for (const [ri, r] of t.chained.entries()) {
-      if (++nr % 6 === 0) yield;
+      if (due()) yield;
       if (r.fl & 2) continue;                          // tunnels: under the hill
-      if (minor && /path|footway|track|bridleway|service/.test(r.hw)) continue;
       const st = roadStyle(r.hw, r.ln, r.fl, r.wd), tr = !(r.fl & 1) && isTrail(r);
       // its rail (rail.js): the centre's height wherever the ribbon samples it (a deck over a tunnel is in it too)
       let rail = null; if (r.h) { const T = track(dense(r.pts).map(([la, lo]) => proj.xz(la, lo)), r.h); let hint = -1; rail = (x, z) => { const q = T.at(x, z, hint); hint = q?.k ?? -1; return q && q.h; }; }
@@ -408,6 +473,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       });
       const cutP = tr || !RI || r.fl & 19 ? pieces : pieces.flatMap(p => p.line ? [p] : offRails(p, r, st.w / 2)); if (cutP !== pieces) yield;
       for (const pts of cutP) {  // exactly this tile: the next one draws on from its edge
+      if (due()) yield;
       if (pts.length < 2) continue;
       const dk = pts.line ?? (r.fl & 16 && r.dk ? [marks.deckLine(...pts[0]), marks.deckLine(...pts.at(-1))] : r.dk);  // the approaches meet the deck
       // a trail lies on the hillside (each edge on the ground); the ground goes under it only where it would cover it
@@ -420,20 +486,20 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (a side road cut at the other road's edge: its corners rounded there (curb returns), 5 m: NAIP, Field Road 0a_0130's
       // T junction, both corners about 4 to 6 m; Street View: a flared mouth. Not a service way's)
       const fl = r.hw === 'service' ? null : [...(pts.fs ? [[...pts[0], 5]] : []), ...(pts.fe ? [[...pts.at(-1), 5]] : [])];
-      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: minor ? 12 : trail ? 3 : 5, joints: t.joints.get(ri), drape: trail, mk, flares: fl });
+      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : 5, joints: t.joints.get(ri), drape: trail, mk, flares: fl });
       tops.push([i0, B.idx.length, trail]);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
-      if (!minor && !st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk, lm: st.lm, b: st.b, park: !!(r.fl & 256), st });
-      if (!minor && st.lm && st.lanes >= 2 && !st.surf && centre.length > 3) drive.push({ P: centre, w: st.w, lanes: st.lanes, one: !!(r.fl & 8), big: /motorway|trunk|primary/.test(r.hw) });
+      if (!st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk, lm: st.lm, b: st.b, park: !!(r.fl & 256), st });
+      if (st.lm && st.lanes >= 2 && !st.surf && centre.length > 3) drive.push({ P: centre, w: st.w, lanes: st.lanes, one: !!(r.fl & 8), big: /motorway|trunk|primary/.test(r.hw) });
       if (dk) {
         const pl = deckSides(B, centre, st.w, 1.4, hAt); if (!pts.line) pillars.push(...pl);
         for (let i = 1; i < centre.length; i++) decks.push([centre[i - 1], centre[i], st.w / 2 + 0.6]);
       }
-      if (!minor) centre.forEach((q, i) => { mark(q[0], q[2], q[3] + 1.2); lanes.push(q[0], q[2], q[3]); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, q[3] + 1.2); } });
+      centre.forEach((q, i) => { mark(q[0], q[2], q[3] + 1.2); lanes.push(q[0], q[2], q[3]); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, q[3] + 1.2); } });
       // (the roads the rides can reach: their barriers and banks; any other road's banks too (a lot's way in, a fire road
       // at the top of Hawk Hill: no step down off its edge))
-      if (!minor && !trail && !dk && centre.length > 1) sides.push({ C: centre, r, st, own: r.inW ??= r.pts.some(([la, lo]) => inWorld(la, lo)) });
-      if (!minor && !trail && !dk && centre.length > 1 && !/service/.test(r.hw)) gends.push({ C: centre, r, lift, narrow: [!!pts.ns, !!pts.ne] });
+      if (!trail && !dk && centre.length > 1) sides.push({ C: centre, r, st, own: r.inW ??= r.pts.some(([la, lo]) => inWorld(la, lo)) });
+      if (!trail && !dk && centre.length > 1 && !/service/.test(r.hw)) gends.push({ C: centre, r, lift, narrow: [!!pts.ns, !!pts.ne] });
       }
     }
     // (a point on another drawn road's paving: a side way's end)
@@ -443,7 +509,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // Alexander Avenue and East Road one paved triangle to their node; Street View: continuous asphalt, no grass between)
     // (by OpenStreetMap's node where two ways end: each's drawn piece with an end within 15 m of it (a side way may stop
     // inside the other's paving short of the node), its end the nearer one)
-    const gnodes = new Map(); if (!minor) for (const [i, gE] of gends.entries()) for (const [la, lo] of [gE.r.pts[0], gE.r.pts.at(-1)]) { const k = `${la.toFixed(6)},${lo.toFixed(6)}`; (gnodes.get(k) ?? gnodes.set(k, []).get(k)).push(i); }
+    const gnodes = new Map(); for (const [i, gE] of gends.entries()) for (const [la, lo] of [gE.r.pts[0], gE.r.pts.at(-1)]) { const k = `${la.toFixed(6)},${lo.toFixed(6)}`; (gnodes.get(k) ?? gnodes.set(k, []).get(k)).push(i); }
     for (const [nk0, list] of gnodes) for (let a = 0; a < list.length; a++) for (let b = a + 1; b < list.length; b++) {
       const A = gends[list[a]], Bw = gends[list[b]]; if (A.r === Bw.r) continue;
       const [nla, nlo] = nk0.split(',').map(Number), [nx0, nz0] = proj.xz(nla, nlo);
@@ -481,7 +547,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // a slip road's end cut at the other road's edge at a narrow angle (no rounded mouth there): its outer edge drawn on
     // until it meets the other road's edge, the corner its square end leaves paved (USDA NAIP, East Road 0a_0130: the slip
     // road from Alexander Avenue merges, its outer edge running into East Road's; Street View: no grass between them)
-    if (!minor) for (const G of gends) for (const e of [0, 1]) {
+    for (const G of gends) for (const e of [0, 1]) {
       if (!G.narrow[e] || G.C.length < 2) continue;
       const q = e ? G.C.at(-1) : G.C[0], o = e ? G.C.at(-2) : G.C[1], l = Math.hypot(q[0] - o[0], q[2] - o[2]) || 1, fx = (q[0] - o[0]) / l, fz = (q[2] - o[2]) / l;
       // (its outer corner: the one further inside no other road; the ray on from it along the way)
@@ -505,7 +571,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // traced on NAIP; each drawn by the tile its middle is in, its surface the road shader's: 0 asphalt, 3 gravel, 4 dirt)
     const pads = (veg?.pads || []).filter(([, P]) => { const [x, z] = proj.xz(P.reduce((s, q) => s + q[0], 0) / P.length, P.reduce((s, q) => s + q[1], 0) / P.length); return x >= tbox[0] && x < tbox[2] && z >= tbox[1] && z < tbox[3]; });
     const lotRings = [];
-    if (!minor) for (const [ring, surf, pad] of [...(t.lots || []).map(r => [r, 0, false]), ...pads.map(([sf, P]) => [P, sf, true])]) {
+    for (const [ring, surf, pad] of [...(t.lots || []).map(r => [r, 0, false]), ...pads.map(([sf, P]) => [P, sf, true])]) {
       const r = ring.map(([la, lo]) => proj.xz(la, lo)); if (r.length > 3 && r[0][0] === r.at(-1)[0] && r[0][1] === r.at(-1)[1]) r.pop();
       if (r.length < 3) continue;
       lotRings.push(r);
@@ -523,7 +589,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       };
       for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(r.map(p => new THREE.Vector2(p[0], p[1])), [])) tri(r[a], r[b], r[c]);
       tops.push([i0, B.idx.length, pad ? 'pad' : 'lot']);
-      if (B.idx.length - i0 > 600) yield;
+      if (due()) yield;
     }
     for (const f of t.features) if (f.k === 'building') {
       const r = f.rings[0].map(([la, lo]) => proj.xz(la, lo)); let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
@@ -543,7 +609,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // the trails draped on the ground as it now is (after the roads' carve and push): every vertex 4 cm over it, the
       // ground never pushed under them (that left their edges over a trench)
       // (the car parks too: on the ground, under any road's top they reach)
-      if (g) for (const [a, b, trail] of tops) if (trail) { if (b - a > 600) yield; for (let k = a; k < b; k++) { const v = B.idx[k], x = B.pos[3 * v], z = B.pos[3 * v + 2], h = gridHeight(g, x, z) ?? (trail !== true ? gridHeight(g, Math.max(tbox[0], Math.min(tbox[2], x)), Math.max(tbox[1], Math.min(tbox[3], z))) : null); if (h == null) continue; const lot = trail === 'lot' || trail === 'pad', rt = lot ? RI?.top(x, z, h) : null; B.pos[3 * v + 1] = rt != null ? rt - 0.04 : lot ? h + 0.04 + lotEase(x, z, h) : h + 0.04; } } }
+      if (g) for (const [a, b, trail] of tops) if (trail) { if (b - a > 600) yield; for (let k = a; k < b; k++) { const v = B.idx[k], x = B.pos[3 * v], z = B.pos[3 * v + 2], h = gridHeight(g, x, z) ?? (trail !== true ? gridHeight(g, Math.max(tbox[0], Math.min(tbox[2], x)), Math.max(tbox[1], Math.min(tbox[3], z))) : null); if (due()) yield; if (h == null) continue; const lot = trail === 'lot' || trail === 'pad', rt = lot ? RI?.top(x, z, h) : null; B.pos[3 * v + 1] = rt != null ? rt - 0.04 : lot ? h + 0.04 + lotEase(x, z, h) : h + 0.04; } } }
     yield;
     // the road sides (banks.js) on the ground as it now is: embankments down to it, cut faces up the lidar's banks, the
     // barriers at the paved edge: on a surveyed road the hand list's (handlist.js, Street View), each its kind; elsewhere
@@ -551,7 +617,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // guessed (a rail where the ground fell away was drawn where Street View has none). Gaps of up to three points
     // closed, runs under 6 m left out
     const rails = [], bk = { pos: [], cut: [], vg: [], idx: [], ends: [] }, bankRuns = [], bankH = new Map(), bankS = new Map();
-    if (c.lod === 0 && sides.length && ridden(g) && !globalThis.__w3?.noBanks) {  // (__w3.noBanks: profiling)
+    if (sides.length && ridden(g) && !globalThis.__w3?.noBanks) {  // (__w3.noBanks: profiling)
       const ground = (x, z) => gridHeight(g, x, z) ?? groundAt(x, z), raw = (x, z) => gridHeight(g, x, z, g.raw), n1 = g.segs + 1;
       const osm = new Map(), ok = (x, z) => `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
       for (const line of t.rails || []) for (const [x, z] of resample(line.map(([la, lo]) => proj.xz(la, lo)), 2)) (osm.get(ok(x, z)) ?? osm.set(ok(x, z), []).get(ok(x, z))).push([x, z]);
@@ -581,15 +647,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // none on a steep face: a negative height)
         for (const run of sr) for (let i = 1; i < run.length; i++) { const { p: pa, b: ba } = run[i - 1], { p: pb, b: bb } = run[i], L = Math.hypot(pb[0] - pa[0], pb[2] - pa[2]), nu = Math.max(1, Math.ceil(L / 1.0));
           for (let k = 0; k < ba.length; k++) { const W = Math.max(ba[k][2] - ba[k][0], bb[k][2] - bb[k][0]), nv = Math.max(1, Math.ceil(W / 1.0));
-            for (let u = 0; u <= nu; u++) for (let w = 0; w <= nv; w++) { const f = u / nu, e = w / nv, o = (ba[k][0] + (bb[k][0] - ba[k][0]) * f) * (1 - e) + (ba[k][2] + (bb[k][2] - ba[k][2]) * f) * e;
+            for (let u = 0; u <= nu; u++) { if (due()) yield; for (let w = 0; w <= nv; w++) { const f = u / nu, e = w / nv, o = (ba[k][0] + (bb[k][0] - ba[k][0]) * f) * (1 - e) + (ba[k][2] + (bb[k][2] - ba[k][2]) * f) * e;
               const h = (ba[k][1] + (bb[k][1] - ba[k][1]) * f) * (1 - e) + (ba[k][3] + (bb[k][3] - ba[k][3]) * f) * e, x = pa[0] + (pb[0] - pa[0]) * f + (pa[3] + (pb[3] - pa[3]) * f) * o, z = pa[2] + (pb[2] - pa[2]) * f + (pa[4] + (pb[4] - pa[4]) * f) * o;
-              const kk = bkey(x, z), old = bankH.get(kk); if (ba[k][4] || bb[k][4]) { bankH.set(kk, -1e9); bankS.set(kk, Math.max(bankS.get(kk) ?? -1e9, h)); } else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } }
-          if (i % 8 === 0) yield; }
+              const kk = bkey(x, z), old = bankH.get(kk); if (ba[k][4] || bb[k][4]) { bankH.set(kk, -1e9); bankS.set(kk, Math.max(bankS.get(kk) ?? -1e9, h)); } else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } } }
+          if (due()) yield; }
       };
       for (const { C, r, st, own } of sides) for (const sd of [1, -1]) {
         yield;
         // (none across another road's mouth: a side road, a lot's way in)
-        const E = ribbonEdge(C, sd), half = st.w / 2, mouth = new Uint8Array(E.length), walled = new Uint8Array(E.length), curbed = new Uint8Array(E.length), kinds = E.map((p, i) => { if (onRoad(p[0] + p[3] * 0.6, p[2] + p[4] * 0.6, p[1])) { mouth[i] = 1; return []; } const h = HB?.at(p[0], p[2], half, C[i][0], C[i][2]) ?? []; return h.length || HB?.onSurveyed(p[0], p[2]) || !osmNear(p) ? h : ['wbeam']; }), railed = new Uint8Array(E.length);
+        const E = ribbonEdge(C, sd), half = st.w / 2, mouth = new Uint8Array(E.length), walled = new Uint8Array(E.length), curbed = new Uint8Array(E.length), kindAt = (p, i) => { if (onRoad(p[0] + p[3] * 0.6, p[2] + p[4] * 0.6, p[1])) { mouth[i] = 1; return []; } const h = HB?.at(p[0], p[2], half, C[i][0], C[i][2]) ?? []; return h.length || HB?.onSurveyed(p[0], p[2]) || !osmNear(p) ? h : ['wbeam']; }, railed = new Uint8Array(E.length);
+        const kinds = new Array(E.length); for (let i = 0; i < E.length; i++) { kinds[i] = kindAt(E[i], i); if (due()) yield; }  // (in slices: a long road's edge)
+        yield;
         if (own) for (const kind of BARRIER) {
           // (a barrier stops at a junction's mouth: no gap closed across one, none where its own line is on the other
           // road's paving (Street View, Field Road 0a_0130: the cable fence ends at the side road's corner))
@@ -606,6 +674,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
             rails.push({ ...R, kind: kind.k }); if (kind.sh) for (let i = i0; i <= i1; i++) railed[i] = 1; if (kind.cb) for (let i = i0; i <= i1; i++) curbed[i] = 1;
           }
         }
+        yield;
         // (behind a retaining wall the bank rises from the wall's back, not from a verge before it)
         const K = sideKinds(E, ground, raw, i => railed[i] === 1 || curbed[i] === 1, byTunnel); K.forEach((k, i) => { if (walled[i] && k.kind === CUT) k.wall = true; if (curbed[i] && !railed[i]) k.curb = true; });
         yield* strips(E, K, st);
@@ -619,7 +688,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (!nodes) { nodes = new Map(); for (const r of t.chained) for (const [la, lo] of r.pts) { const [x, z] = proj.xz(la, lo); (nodes.get(nk(x, z)) ?? nodes.set(nk(x, z), []).get(nk(x, z))).push([x, z, r]); } }
         for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const [u, w, r2] of nodes.get(`${Math.floor(e[0] / 4) + a},${Math.floor(e[1] / 4) + b}`) || []) if (r2 !== r && Math.hypot(u - e[0], w - e[1]) < 1.5) return false;
         return true; };
-      for (const { C, st, r } of sides) for (const i of [0, C.length - 1]) {
+      let de = 0; for (const { C, st, r } of sides) for (const i of [0, C.length - 1]) {
+        if (due()) yield;
         const q = C[i], o = C[i ? i - 1 : 1], dl = Math.hypot(q[0] - o[0], q[2] - o[2]) || 1, dx = (q[0] - o[0]) / dl, dz = (q[2] - o[2]) / dl;
         if (q[0] < tbox[0] + 1 || q[0] > tbox[2] - 1 || q[2] < tbox[1] + 1 || q[2] > tbox[3] - 1 || onRoad(q[0] + dx * 1.5, q[2] + dz * 1.5, q[1]) || !deadEnd(r, q[0], q[2])) continue;
         const n = Math.max(2, Math.ceil(2 * q[3]) + 1), E = [];
@@ -627,14 +697,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         yield* strips(E, sideKinds(E, ground, raw, () => false, byTunnel), st);
       }
     }
+    yield;
     c.rails = rails; c.bankRuns = bankRuns; c.bankH = bankH; c.bankS = bankS;  // (the runs: the seams check, debug().seamData)
     { const T = []; for (const [a, b, trail] of tops) if (trail === true) for (let k = a; k < b; k++) { const v = B.idx[k]; T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]); } c.trailPts = T; }
-    c.surf = roadIndex(surf); c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; if (c.lod === 0) { grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); }  // no grass or scrub on the roads
+    c.surf = roadIndex(surf); c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c));  // no grass or scrub on the roads
     if (!B.n) return setPart(c, 'roads', null);
+    yield;
     const d = B.done(), geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); geo.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2));
     geo.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); geo.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4)); geo.setAttribute('rd3', new THREE.BufferAttribute(d.code3, 4)); geo.setIndex(new THREE.BufferAttribute(d.idx, 1)); geo.computeVertexNormals(); geo.computeBoundingSphere();
-    const grp = new THREE.Group(), mesh = new THREE.Mesh(geo, mats.road); mesh.receiveShadow = c.lod === 0; grp.add(mesh);
+    const grp = new THREE.Group(), mesh = new THREE.Mesh(geo, mats.road); mesh.receiveShadow = true; grp.add(mesh); yield;
     // the banks: the ground's own material and classes (the nearest grid point's), cut faces bare (cut bank class)
     if (bk.idx.length && c.mask) {
       const nv = bk.pos.length / 3, A = new Uint8Array(nv * 4), Bm = new Uint8Array(nv * 4), n1 = g.segs + 1;
@@ -643,6 +715,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         for (let k = 0; k < 4; k++) { A[4 * i + k] = c.mask[8 * v + k]; Bm[4 * i + k] = c.mask[8 * v + 4 + k]; }
         Bm[4 * i] = bk.cut[i] === 1 ? 255 : 0; Bm[4 * i + 1] = 0;  // a steep face (cut), not rock
         if (bk.vg[i]) A[4 * i + 1] = 255;  // (the verge: grass (green))
+        if (due()) yield;
       }
       // (in pieces of at most 65,536 vertices, a side's strips never split: 16-bit indices, and no one buffer of tens of
       // megabytes sent in one frame (a quarter-second hold on Bunker Road when a tile's banks were one mesh))
@@ -654,7 +727,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           bg.setAttribute('position', new THREE.BufferAttribute(P32.slice(3 * v0, 3 * v1), 3)); bg.setAttribute('mk', new THREE.BufferAttribute(A.slice(4 * v0, 4 * v1), 4, true)); bg.setAttribute('mk2', new THREE.BufferAttribute(Bm.slice(4 * v0, 4 * v1), 4, true));
           bg.setAttribute('cv', new THREE.BufferAttribute(new Float32Array(v1 - v0), 1)); bg.setIndex(new THREE.BufferAttribute(ix, 1)); bg.computeVertexNormals(); bg.computeBoundingSphere();
           // (drawn before the ground: the ground under a bank then costs the GPU nothing)
-          const bm = new THREE.Mesh(bg, mats.terrain); bm.receiveShadow = true; bm.renderOrder = -1; grp.add(bm);
+          const bm = new THREE.Mesh(bg, mats.terrain); bm.receiveShadow = true; bm.renderOrder = -1; grp.add(bm); yield;
         }
         v0 = v1; i0 = i1;
       }
@@ -671,7 +744,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const occAt = (o, x, z) => { if (!o) return 0; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < OCC && b < OCC ? o.occ[b * OCC + a] : 0; };
   function* buildTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
-    const share = QUALITY[q].trees, cap = CAP[c.lod] * share, g = c.grid, hAt = hOf(c), fine = c.lod === 0, box = tileBox(c);
+    const share = QUALITY[q].trees, cap = CAP * share, g = c.grid, hAt = hOf(c), fine = true, box = tileBox(c);
     const out = {}; let n = 0, ferns = 0;
     // [x, y, z, scale, random, near only: a full model, no impostor] (on a road side's strip where one is, none on a steep face)
     // (hf: the height over the width scale, else a little either way at random; foot: the ground's lowest round the trunk;
@@ -682,7 +755,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
     for (let i = 0; i <= R; i++) { xs.push(proj.x(lonOf(c.x + i / R, c.z))); zs.push(proj.z(latOf(c.y + i / R, c.z))); }
     let thin = 1;
-    const dens = k => { const T = TREE[k]; if (!T) return 0; const st = T[1] * (c.lod ? 1.2 : 1) / Math.sqrt(Math.max(0.15, share)); return thin * T[2] / (st * st); };
+    const dens = k => { const T = TREE[k]; if (!T) return 0; const st = T[1] / Math.sqrt(Math.max(0.15, share)); return thin * T[2] / (st * st); };
     // a tile with more trees than its cap keeps the same share of them everywhere (not the first rows only)
     { let all = 0; for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) all += dens(ras[j * (R + 1) + i]) * Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])); thin = Math.min(1, cap / Math.max(1, all * 1.1)); }
     yield;
@@ -739,7 +812,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       } }
     yield;
     // lone oaks on the open hills, in loose clumps
-    { const step = 26 * (c.lod ? 1.4 : 1) / Math.sqrt(Math.max(0.15, share));
+    { const step = 26 / Math.sqrt(Math.max(0.15, share));
       for (let x = Math.ceil(box[0] / step) * step; x < box[2]; x += step) for (let z = Math.ceil(box[1] / step) * step; z < box[3]; z += step) {
         if (n > cap) break;
         const ix = Math.round(x / step), iz = Math.round(z / step), clump = hash2(Math.floor(x / 260), Math.floor(z / 260));
@@ -786,12 +859,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     let y0 = Infinity, y1 = -Infinity;
     for (const [sp, list] of Object.entries(out)) {
       const ci = SPECIES.indexOf(sp);
-      // the ring of tiles further out (2 km and more) keeps four trees in ten, bigger, once and for all (thinning in the
-      // shader would still cost the GPU every one of them); in the dense groves of redwood and fir fewer cards, no bigger:
-      // there a card mostly covers others, and every layer costs the GPU (the full trees fill the near view)
-      const keep = c.lod > 0 ? 0.42 : sp === 'redwood' ? 0.5 : sp === 'fir' ? 0.7 : 1, grow = c.lod > 0 ? 1 / Math.sqrt(keep) : 1;
+      // the same trees at every detail; the ring of tiles further out (2 km and more) keeps the cards the shader keeps
+      // past 1.6 km (FAR_KEEP), as big as it draws them there, once and for all (thinning in the shader would still cost
+      // the GPU every one of them): the same picture when the tile comes nearer. In the dense groves of redwood and fir
+      // fewer cards, no bigger: there a card mostly covers others, and every layer costs the GPU
+      const thin = c.lod > 0, own = sp === 'redwood' ? 0.5 : sp === 'fir' ? 0.7 : 1, keep = thin ? Math.min(own, FAR_KEEP) : own, grow = thin ? impGrow(FAR_KEEP) : 1;
       if (ci >= 0) for (const [x, y, z, s, r, nearOnly, hf] of list) {
-        const thin = c.lod > 0; if (nearOnly || (x * 0.1731 + z * 0.2917) - Math.floor(x * 0.1731 + z * 0.2917) > keep) continue;
+        if (nearOnly || (x * 0.1731 + z * 0.2917) - Math.floor(x * 0.1731 + z * 0.2917) > keep) continue;
         imp.push([x, y, z, s * grow, ci, (thin ? -1 : 1) * (hf ?? 0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
         y0 = Math.min(y0, y); y1 = Math.max(y1, y + 50 * s);
       }
@@ -1017,8 +1091,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       let ring = f.rings[0].map(([la, lo]) => proj.xz(la, lo));
       { let cx = 0, cz = 0; for (const p of ring) { cx += p[0]; cz += p[1]; } cx /= ring.length; cz /= ring.length;
         const k = 0.04 + 0.12 * hash2(Math.round(cx), Math.round(cz)); ring = ring.map(([x, z]) => { const d = Math.hypot(x - cx, z - cz) || 1; return [x - (x - cx) / d * k, z - (z - cz) / d * k]; }); }
-      if (c.lod > 0 && ring.length > 12) continue;
-      let base = Infinity; for (const p of ring) { const h = hAt(p[0], p[1]); if (h != null) base = Math.min(base, h); }
+            let base = Infinity; for (const p of ring) { const h = hAt(p[0], p[1]); if (h != null) base = Math.min(base, h); }
       if (!isFinite(base)) continue;
       { const dk = marks.deckAt(...ring[0]); if (dk != null && base + (f.h || 6) > dk - 12) continue; }  // the bridge's own anchorages and pylons (its model draws them); Fort Point under it stays
       // (a height Street View shows, handlist.js BUILDINGS, where OpenStreetMap has none)
@@ -1029,7 +1102,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const grp = new THREE.Group();
     for (let i = 0; i < list.length; i += 60) {
       yield;
-      const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60)), mats.bldg); mesh.castShadow = c.lod === 0 && QUALITY[q].shadow > 0; mesh.receiveShadow = c.lod === 0; grp.add(mesh);
+      const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60)), mats.bldg); mesh.castShadow = QUALITY[q].shadow > 0; mesh.receiveShadow = true; grp.add(mesh);
     }
     setPart(c, 'bldg', grp);
   }
@@ -1083,9 +1156,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   function stream(lat, lon, now) {
     if (now - lastStream < 300) return; lastStream = now;
     const Q = QUALITY[q];
-    const wn = wanted(lat, lon, NEAR_Z, Q.rings), pn = plan(new Map([...near].map(([k, c]) => [k, c.lod])), wn, lat, lon, 1);
+    const rings = globalThis.__w3?.rings ?? Q.rings, wn = wanted(lat, lon, NEAR_Z, rings), pn = plan(new Map([...near].map(([k, c]) => [k, c.lod])), wn, lat, lon, 1);
     for (const k of pn.drop) dropChunk(near, k);
-    for (const [k, lod] of pn.add) near.set(k, newChunk(k, lod));
+    for (const [k, lod] of pn.add) { const old = leaving.get(k); if (old) { disposeObj(old.group); leaving.delete(k); } near.set(k, newChunk(k, lod)); }
     for (const [k, lod] of pn.change) { const c = near.get(k); c.lod = lod; }
     const wf = wanted(lat, lon, FAR_Z, [Q.far]), pf = plan(new Map([...far].map(([k, c]) => [k, c.lod])), wf, lat, lon, 1);
     for (const k of pf.drop) dropChunk(far, k);
@@ -1101,25 +1174,34 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const pri = (along != null ? Math.min(dist, Math.max(0, along - d0) / 1500) : dist + 1.5) + c.lod * 3;
       // (a new route, a U-turn: what is queued moves to its new place, nothing built or half built is dropped)
       if (route !== c.route) { c.route = route; for (const [s, o] of [['t', 0], ['r', 0.1], ['u', 0.15], ['b', 6.2 + c.lod], ['v', 6.3 + c.lod], ['f', 6.4 + c.lod]]) jobs.reprio(c.k + '|' + s, pri + o); }
-      const ts = `${c.lod}|${q}`;
-      if (c.sig.terrain !== ts) { c.sig.terrain = ts; jobs.add(c.k + '|t', pri, () => buildTerrain(c)); }
-      const ds = `${ts}|${c.ver}`;
-      const rs = ds + (RI ? '|r' : '') + (veg?.pads?.length ? '|p' : '');  // (the roads and their barriers again once the rails are in: junctions, the hand list)
-      if (c.ver != null && c.sig.roads !== rs) { c.sig.roads = rs; jobs.add(c.k + '|r', pri + 0.1, () => buildRoads(c)); }
-      if (c.ver != null && c.sig.trees !== ds) { c.sig.trees = ds; jobs.add(c.k + '|v', pri + 6.3 + c.lod, () => buildTrees(c)); }
-      if (c.ver != null && c.sig.bldg !== ds) { c.sig.bldg = ds; jobs.add(c.k + '|b', pri + 6.2 + c.lod, () => buildBuildings(c)); }
-      if (c.ver != null && c.sig.furn !== rs) { c.sig.furn = rs; jobs.add(c.k + '|f', pri + 6.4 + c.lod, () => buildFurniture(c)); }
-      if (c.ver != null && c.sig.tun !== ds) { c.sig.tun = ds; jobs.add(c.k + '|u', pri + 0.15, () => buildTunnels(c)); }
+      // (the ground, roads, banks and buildings do not depend on the detail: a tile coming nearer is not built again;
+      // its trees are, the same cards as they were drawn (stream.js sigs), and the furniture is added at detail 0)
+      // (the roads and their barriers again once the rails are in: junctions, the hand list; and once the pads are)
+      const S = sigs(c.lod, q, c.ver, !!RI, !!veg?.pads?.length);
+      if (c.sig.terrain !== S.terrain) { c.sig.terrain = S.terrain; jobs.add(c.k + '|t', pri, () => buildTerrain(c)); }
+      if (c.ver != null && c.sig.roads !== S.roads) { c.sig.roads = S.roads; jobs.add(c.k + '|r', pri + 0.1, () => buildRoads(c)); }
+      if (c.ver != null && c.sig.trees !== S.trees) { c.sig.trees = S.trees; jobs.add(c.k + '|v', pri + 6.3 + c.lod, () => buildTrees(c)); }
+      if (c.ver != null && c.sig.bldg !== S.bldg) { c.sig.bldg = S.bldg; jobs.add(c.k + '|b', pri + 6.2 + c.lod, () => buildBuildings(c)); }
+      if (c.ver != null && c.sig.furn !== S.furn) { c.sig.furn = S.furn; jobs.add(c.k + '|f', pri + 6.4 + c.lod, () => buildFurniture(c)); }
+      if (c.ver != null && c.sig.tun !== S.tun) { c.sig.tun = S.tun; jobs.add(c.k + '|u', pri + 0.15, () => buildTunnels(c)); }
+      // (waiting to ease in, its far tile gone or not drawn: shown as it is)
+      if (c.ease && c.ease.t0 == null && !far.get(parentOf(c.k))?.parts.terrain) { easeApply(c, 1); c.ease = null; c.group.visible = true; }
     }
     for (const c of far.values()) {
       if (c.tile === undefined) continue;
       const mask = childrenOf(c.k).map(k => near.get(k)?.built ? 1 : 0).join('');
       const fs = `${mask}|${q}`;
-      if (c.sig.terrain !== fs) { c.sig.terrain = fs; jobs.add(c.k + '|t', 20 + (farDirty ? 0 : 5), () => buildTerrain(c)); }
+      // (first, when a near tile waits to be shown or a dropped one to be covered: the far ground is built again at once)
+      const urgent = childrenOf(c.k).some(k => near.get(k)?.ease?.t0 === null || leaving.has(k));
+      if (c.sig.terrain !== fs) { c.sig.terrain = fs; jobs.add(c.k + '|t', urgent ? -1 : 20 + (farDirty ? 0 : 5), () => buildTerrain(c)); }
+      else if (urgent) jobs.reprio(c.k + '|t', -1);
       // its woods as impostors, once, within reach of the eye (the near tiles' square is left out in the shader)
       if (c.grid && c.sig.trees !== q && farReach(c, lat, lon)) { c.sig.trees = q; jobs.add(c.k + '|v', 26, () => buildFarTrees(c)); }
-      if (c.farImp) { const u = c.farImp.material.userData.u.nearBox.value, R = Q.rings.at(-1), X = Math.floor(tileX(lon, NEAR_Z)), Y = Math.floor(tileY(lat, NEAR_Z));
-        u.set(proj.x(lonOf(X - R, NEAR_Z)), proj.z(latOf(Y - R, NEAR_Z)), proj.x(lonOf(X + R + 1, NEAR_Z)), proj.z(latOf(Y + R + 1, NEAR_Z))); }
+      // (left out only in the near tiles whose own trees are drawn: no tile without trees while its own are built)
+      if (c.farImp) { const U = c.farImp.material.userData.u, u = U.nearBox.value, R = Math.max(0, rings.at(-1)), X = Math.floor(tileX(lon, NEAR_Z)), Y = Math.floor(tileY(lat, NEAR_Z));
+        u.set(proj.x(lonOf(X - R, NEAR_Z)), proj.z(latOf(Y - R, NEAR_Z)), proj.x(lonOf(X + R + 1, NEAR_Z)), proj.z(latOf(Y + R + 1, NEAR_Z)));
+        let bits = 0; for (let j = 0; j <= 2 * R; j++) for (let i = 0; i <= 2 * R; i++) { const n = near.get(key(NEAR_Z, X - R + i, Y - R + j)); if (n && n.group.visible && !n.ease && (n.parts.trees !== undefined || n.tile === null)) bits |= 1 << (j * (2 * R + 1) + i); }
+        U.nearBits.value = bits; U.nearN.value = 2 * R + 1; }
     }
     farDirty = false;
     // impostors after everything else that is opaque, nearest tile first: what is drawn before hides what is behind it
@@ -1357,7 +1439,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const vs = [B.idx[k], B.idx[k + 1], B.idx[k + 2]]; if (!vs.every(v => B.uv[2 * v + 1] <= port + 1) && !vs.every(v => B.uv[2 * v + 1] >= L - port - 1)) continue;
         for (const v of vs) T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]);
       }
-      if (T.length) for (const c of near.values()) if (c.lod === 0 && c.grid) { const bx = tileBox(c), Tc = [];
+      if (T.length) for (const c of near.values()) if (c.grid) { const bx = tileBox(c), Tc = [];
         for (let k = 0; k < T.length; k += 9) if (T[k] > bx[0] - 12 && T[k] < bx[2] + 12 && T[k + 2] > bx[1] - 12 && T[k + 2] < bx[3] + 12) Tc.push(...T.slice(k, k + 9));
         groundUnder(c, Tc); yield; } }
     const d = B.done(), rg = new THREE.BufferGeometry();
@@ -1698,6 +1780,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (const [m, cast, receive] of [[mats.underpass, false, true], [mats.tunnel, false, false], [mats.portal, true, true], [mats.walk, false, true], [mats.road, false, false], [mats.road, false, true], [mats.bldg, true, true], [mats.bldg, false, false], [mats.rail, true, true], [mats.curb, false, true]]) {
       const o = new THREE.Mesh(geo, m); o.applyMatrix4(under); o.frustumCulled = false; o.castShadow = cast; o.receiveShadow = receive; warm.add(o);
     }
+    // a near tile easing in (easePart): its ground, banks, roads and buildings with a morph target
+    { const mg = geo.clone(); mg.morphAttributes.position = [new THREE.BufferAttribute(new Float32Array(mg.attributes.position.count * 3), 3)]; mg.morphTargetsRelative = true;
+      for (const [m, cast, receive] of [[mats.terrain, false, false], [mats.terrain, false, true], [mats.terrainBore, false, false], [mats.terrainFar, false, false], [mats.terrainFar, false, true], [mats.terrainFarBore, false, false], [mats.road, false, true], [mats.bldg, true, true]]) {
+        const o = new THREE.Mesh(mg, m); o.updateMorphTargets(); o.morphTargetInfluences[0] = 0.5; o.applyMatrix4(under); o.frustumCulled = false; o.castShadow = cast; o.receiveShadow = receive; warm.add(o);
+      } }
     // shadow casters of every kind the world adds later (their shadow map programs): batched, instanced with colours
     { const bm = new THREE.BatchedMesh(1, 64, 64, mats.furn); bm.setMatrixAt(bm.addInstance(bm.addGeometry(geo)), under); bm.frustumCulled = false; bm.castShadow = bm.receiveShadow = true; warm.add(bm);
       for (const side of [THREE.FrontSide, THREE.DoubleSide]) { const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ side }), 1); im.setMatrixAt(0, under); im.setColorAt(0, new THREE.Color(1, 1, 1)); im.frustumCulled = false; im.castShadow = im.receiveShadow = true; im.userData.ownMat = true; warm.add(im); } }
@@ -1747,6 +1834,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       stream(lat, lon, now);
       const PF = globalThis.__w3?.prof, pm = PF ? [c0] : null, mark = PF ? () => pm.push(performance.now()) : () => {}, gq0 = PF && globalThis.__w3.gpu ? gpuTime.begin() : null;
       jobs.run(globalThis.__w3?.budget ?? (q === 2 ? 2.5 : 4)); mark();  // (__w3.budget: tools that only want it built)
+      if (easing.size) easeStep(performance.now());
       marks.update(camera, dt);
       // the full trees follow the rider: split a tile again after 60 m, unless it is all far away and already all simple
       for (const c of near.values()) if (c.treeSets && c.lod === 0 && (!c.partAt || Math.hypot(c.partAt[0] - p[0], c.partAt[1] - p[1]) > 60)) {
@@ -1855,7 +1943,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setKit(kit, accent) { me.setKit?.(kit, accent); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
-    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready: ready && warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 10, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow }),
+    stats: () => ({ fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size, ready: ready && warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 10, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow, long: jobs.long }),
     setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
@@ -1876,6 +1964,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           for (const f of c.feet || []) if (Math.hypot(f[0] - x, f[2] - z) < R) (out.feet ??= []).push(f); }
         return out; },
       veg: (x, z) => vcls(x, z), ground: (x, z) => groundAt(x, z),
+      // the LOD check (r5check.mjs lod): a near tile's detail at a point, the far tile's ground there, and points every
+      // `step` m along the roads within R of (x, z) ([x, z, half width, railed, normal x, z]; no bores, trails or bridges)
+      tileLod: (x, z) => near.get(key(NEAR_Z, ...tileOf(x, z)))?.lod ?? null,
+      lodState: () => ({ hidden: [...near.values()].filter(c => !c.group.visible).map(c => c.k), easing: [...easing].map(c => c.k), leaving: [...leaving.keys()] }),
+      farGround: (x, z) => { const lat = proj.lat(z), lon = proj.lon(x), f = far.get(key(FAR_Z, Math.floor(tileX(lon, FAR_Z)), Math.floor(tileY(lat, FAR_Z)))); return f?.grid ? gridHeight(f.grid, x, z) : null; },
+      roadPts: (x, z, R, step = 10) => { const out = [], seen = new Set();
+        for (const c of near.values()) for (const r of c.tile?.roads || []) { if (seen.has(r) || r.fl & 3 || /path|footway|track|bridleway|steps/.test(r.hw)) continue; seen.add(r);
+          const half = roadStyle(r.hw, r.ln, r.fl, r.wd).w / 2, P = resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), step);
+          P.forEach(([u, w], i) => { if (Math.hypot(u - x, w - z) >= R || P.length < 2) return; const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; out.push([u, w, half, r.h ? 1 : 0, -(b[1] - a[1]) / L, (b[0] - a[0]) / L]); }); }
+        return out; },
       // the ways (OpenStreetMap, as chained) with a node within R of (x, z): their tags and nodes (checks)
       ways: (x, z, R) => { const out = new Map(); for (const c of near.values()) for (const r of c.tile?.chained || []) { const P = r.pts.map(([la, lo]) => proj.xz(la, lo)); if (P.some(([u, w]) => Math.hypot(u - x, w - z) < R)) out.set(r, { hw: r.hw, ln: r.ln, fl: r.fl, wd: r.wd, rail: !!r.h, pts: P.map(([u, w]) => [+u.toFixed(1), +w.toFixed(1)]) }); } return [...out.values()]; },
       // the top of any road's paving at (x, z) (its built tile's road index, any height), the nearest to y

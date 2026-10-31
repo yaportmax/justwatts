@@ -58,18 +58,19 @@ export function bakeImpostors(renderer, geos, names, leaves, near = {}) {
 // The impostor material: a MeshLambertMaterial (three's lights, fog and haze) on an InstancedBufferGeometry quad with
 // per instance ia = [x, y, z, scale], ib = [cell, height scale (negative: a far tile's tree, never thinned), light,
 // warm]. One per tile (they share the program): userData.u.nearC / nearR, the full models' circle, and nearBox
-// [x0, z0, x1, z1] the near tiles' square (a far tile's trees), none drawn inside them.
+// [x0, z0, x1, z1] the near tiles' square (a far tile's trees), none drawn inside them: in those of its nearN x nearN
+// tiles whose bit (row by row from the north west) is set in nearBits (the near tiles with their own trees drawn).
 export function impostorMaterial(imp) {
-  const m = new THREE.MeshLambertMaterial({ color: 0xffffff }), u = m.userData.u = { nearC: { value: new THREE.Vector2(0, 0) }, nearR: { value: 0 }, nearBox: { value: new THREE.Vector4(1e9, 1e9, -1e9, -1e9) } };
+  const m = new THREE.MeshLambertMaterial({ color: 0xffffff }), u = m.userData.u = { nearC: { value: new THREE.Vector2(0, 0) }, nearR: { value: 0 }, nearBox: { value: new THREE.Vector4(1e9, 1e9, -1e9, -1e9) }, nearBits: { value: 0x1ffffff }, nearN: { value: 5 } };
   imp.cellU ??= { value: Array.from({ length: 16 }, (_, i) => new THREE.Vector4(...(imp.cells[i] || [1, 1, 0, 0]))) };
   m.onBeforeCompile = sh => {
     // the haze and the hills' shadow worked out per vertex (a far tree card is small: as smooth, much cheaper)
-    Object.assign(sh.uniforms, { impColor: { value: imp.color }, impNormal: { value: imp.normal }, impCell: imp.cellU, impN: { value: imp.n }, nearC: u.nearC, nearR: u.nearR, nearBox: u.nearBox,
+    Object.assign(sh.uniforms, { impColor: { value: imp.color }, impNormal: { value: imp.normal }, impCell: imp.cellU, impN: { value: imp.n }, nearC: u.nearC, nearR: u.nearR, nearBox: u.nearBox, nearBits: u.nearBits, nearN: u.nearN,
       jwSunD: FOG_SUN.d, jwSunC: FOG_SUN.c, hzMap: HORIZON.map, hzBox: HORIZON.box });
     sh.vertexShader = '#define JW_FOG_V\n' + sh.vertexShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D hzMap; uniform vec4 hzBox; varying float vJwVis;
-        attribute vec4 ia; attribute vec4 ib; uniform vec4 impCell[16]; uniform float impN; uniform vec2 nearC; uniform float nearR; uniform vec4 nearBox;
+        attribute vec4 ia; attribute vec4 ib; uniform vec4 impCell[16]; uniform float impN; uniform vec2 nearC; uniform float nearR; uniform vec4 nearBox; uniform int nearBits; uniform float nearN;
         varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);')
       .replace('#include <begin_vertex>', /* glsl */`
@@ -78,6 +79,8 @@ export function impostorMaterial(imp) {
         // thin out far away: keep a share, the kept ones grow to cover for the rest
         float keep = ib.y < 0.0 ? 1.0 : mix(1.0, 0.3, clamp((d - 140.0) / 1500.0, 0.0, 1.0)), r = fract(ia.x * 0.1731 + ia.z * 0.2917), hs = abs(ib.y);
         float inBox = step(nearBox.x, ia.x) * step(ia.x, nearBox.z) * step(nearBox.y, ia.z) * step(ia.z, nearBox.w);
+        if (inBox > 0.0) { int bi = int(clamp(floor((ia.x - nearBox.x) / (nearBox.z - nearBox.x) * nearN), 0.0, nearN - 1.0)), bj = int(clamp(floor((ia.z - nearBox.y) / (nearBox.w - nearBox.y) * nearN), 0.0, nearN - 1.0));
+          inBox = float((nearBits >> (bj * int(nearN) + bi)) & 1); }
         float on = step(r, keep) * step(nearR * cell.w, distance(ia.xz, nearC)) * (1.0 - step(14000.0, d)) * (1.0 - inBox);
         s *= inversesqrt(keep) * 0.92 + 0.08;
         vec3 ctr = ia.xyz + vec3(0.0, cell.z * s * hs, 0.0);

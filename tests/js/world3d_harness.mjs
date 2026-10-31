@@ -14,7 +14,7 @@ import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, r
 import { parseVeg, makeVeg, parseTrees, fitTree, CLEAR, SCRUB, GRASS, PAVED } from '../../app/js/world3d/veg.js';
 import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
-import { wanted, plan, jobQueue, childrenOf, parentOf } from '../../app/js/world3d/stream.js';
+import { wanted, plan, jobQueue, childrenOf, parentOf, sigs, easeW, EASE, FAR_D, FAR_KEEP, impKeep, impGrow } from '../../app/js/world3d/stream.js';
 import { packTile, unpackTile, gridAt } from '../../app/js/world3d/baked.js';
 import { makeProj, tileX, tileY, latOf, lonOf } from '../../app/js/world3d/geo.js';
 import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js';
@@ -147,6 +147,19 @@ let clock = 0; const q = jobQueue(() => clock), ran = [];
 q.add('a', 2, () => { ran.push('a'); clock += 3; }); q.add('b', 1, () => { ran.push('b'); clock += 3; }); q.add('c', 3, () => { ran.push('c'); clock += 3; }); q.add('a', 0, () => { ran.push('a2'); clock += 3; });
 const first = q.run(5), left = q.size; q.run(100);
 out.jobs = { first, left, ran };
+
+/* ---------- detail (LOD): a tile's ground and roads the same at every detail, its far trees the shader's own ---------- */
+{ const a = sigs(1, 0, 3, true), b = sigs(0, 0, 3, true), shader = [], cpu = [];
+  // the cards a far (detail 1) tile keeps and their size against what the shader draws of the full set past FAR_D
+  for (let i = 0; i < 2000; i++) { const x = i * 7.31, z = i * 3.17, r = (x * 0.1731 + z * 0.2917) % 1;
+    for (const d of [FAR_D, 1930, 3870]) { const k = impKeep(d); if (r <= k) shader.push([i, d, +(impGrow(k)).toFixed(4)]); }
+    if (r <= FAR_KEEP) for (const d of [FAR_D, 1930, 3870]) cpu.push([i, d, +(impGrow(FAR_KEEP)).toFixed(4)]); }
+  out.lod = { same: ['terrain', 'roads', 'bldg', 'tun'].filter(k => a[k] === b[k]), differ: ['trees', 'furn'].filter(k => a[k] !== b[k]),
+    newRoads: sigs(1, 0, 3, false).roads !== a.roads, cards: JSON.stringify(shader) === JSON.stringify(cpu), near: impKeep(100), grow: +impGrow(1).toFixed(6),
+    ease: [easeW(-5), +easeW(EASE / 2).toFixed(3), easeW(EASE), easeW(EASE * 2)] };
+  // (the shader's thinning (impostor.js) is the one stream.js mirrors: from 140 m, to FAR_KEEP at FAR_D)
+  const m = readFileSync(new URL('../../app/js/world3d/impostor.js', import.meta.url), 'utf8').match(/mix\(1\.0, ([\d.]+), clamp\(\(d - 140\.0\) \/ ([\d.]+), 0\.0, 1\.0\)\)/);
+  out.lod.shader = m ? [+m[1], 140 + +m[2]] : null; out.lod.mirror = [FAR_KEEP, FAR_D]; }
 
 /* ---------- baked tiles ---------- */
 const hs = new Float32Array(17 * 17).map((_, i) => 100 + (i % 17) * 1.25 - Math.floor(i / 17) * 0.75 + (i === 40 ? -150.3 : 0));

@@ -146,6 +146,17 @@ def test_chunk_streaming_bookkeeping(out):
     assert out["jobs"] == {"first": 2, "left": 1, "ran": ["a2", "b", "c"]}    # a budget per frame, replaced jobs run once
 
 
+def test_a_tile_is_the_same_at_every_detail(out):
+    # its ground, roads, banks, buildings and bores do not depend on the detail (no rebuild, no shift as the rider comes
+    # nearer); only its trees (the cards the shader keeps out there) and its street furniture (near only) do
+    d = out["lod"]
+    assert d["same"] == ["terrain", "roads", "bldg", "tun"] and d["differ"] == ["trees", "furn"] and d["newRoads"]
+    assert d["cards"]                                           # a far tile's cards: the very ones, as big, as the shader draws
+    assert d["shader"] == d["mirror"]                           # (the shader thins as stream.js says it does)
+    assert d["near"] == 1 and d["grow"] == 1                    # near the rider every card, its own size
+    assert d["ease"] == [0, 0.5, 1, 1]                          # a tile eases in from the far ground, smooth at both ends
+
+
 def test_baked_tile_format(out):
     b = out["baked"]
     assert b["json"] == {"f": [[1, [[1, 2, 3, 4]]]]} and b["maxErr"] < 0.0501 and b["corner"] == 100

@@ -46,6 +46,7 @@ export function parentOf(k, z = FAR_Z) { const [nz, x, y] = unkey(k), s = 2 ** (
 // as many frames as it takes, so no build holds up a frame for long.
 export function jobQueue(now = () => performance.now()) {
   let q = [];
+  const long = [];  // slices over 8 ms: [id, the label the job yielded before it (where it started), ms, at]
   const slow = [];  // the last jobs that took over 6 ms in all: [id, ms in all, started at, longest slice ms] (for checks)
   return {
     add(id, pri, fn) { q = q.filter(j => j.id !== id); q.push({ id, pri, fn }); q.sort((a, b) => a.pri - b.pri); },
@@ -57,7 +58,7 @@ export function jobQueue(now = () => performance.now()) {
       while (q.length && (n === 0 || now() - t0 < budget)) {
         const j = q[0], a = now(); let done = true;
         if (!j.it) { j.at = a; j.ms = j.max = 0; const r = j.fn(); if (r && typeof r.next === 'function') { j.it = r; done = false; } }
-        if (j.it) { let r; do { const b = now(); r = j.it.next(); j.max = Math.max(j.max, now() - b); } while (!r.done && now() - t0 < budget); done = !!r.done; }
+        if (j.it) { let r; do { const b = now(); r = j.it.next(); const e = now() - b; j.max = Math.max(j.max, e); if (e > 8) { long.push([j.id, j.lab ?? '', Math.round(e * 10) / 10, Math.round(b)]); if (long.length > 200) long.shift(); } j.lab = r.value; } while (!r.done && now() - t0 < budget); done = !!r.done; }
         j.ms += now() - a; n++;
         if (!done) break;  // the budget is spent in the middle of it: on with it next frame
         q.shift();
@@ -65,8 +66,26 @@ export function jobQueue(now = () => performance.now()) {
       }
       return n;
     },
-    slow,
+    slow, long,
     get size() { return q.length; },
     has: id => q.some(j => j.id === id),
   };
 }
+
+// Detail (LOD) of a near tile. A tile's ground, roads, banks and buildings are the same at every detail: a tile seen
+// from the outer ring and the same tile close up sit at the same heights, so nothing shifts when it changes. The
+// detail only thins what is too small to tell apart out there: the trees (the share the impostors' shader keeps past
+// FAR_D, as the shader would draw them) and the street furniture (detail 0 only). A detail change rebuilds neither the
+// ground nor the roads. sigs: the build signatures of a tile's parts (a part is rebuilt when its signature changes).
+export const FAR_D = 1640, FAR_KEEP = 0.3;
+// the impostors' thinning by distance (impostor.js): the share kept and how much the kept ones grow
+export const impKeep = d => 1 + (FAR_KEEP - 1) * Math.min(1, Math.max(0, (d - 140) / (FAR_D - 140)));
+export const impGrow = keep => 0.92 / Math.sqrt(keep) + 0.08;
+export function sigs(lod, q, ver, rails, pads = false) {
+  const ts = `${q}`, ds = `${ts}|${ver}`, rs = ds + (rails ? '|r' : '') + (pads ? '|p' : '');
+  return { terrain: ts, roads: rs, trees: `${ds}|${lod > 0 ? 'far' : 'all'}`, bldg: ds, tun: ds, furn: `${rs}|${lod}` };
+}
+// a near tile eases in from the far tile's ground under it (where one was drawn) over EASE ms: the weight of its own
+// heights at t ms after it is shown (smooth at both ends)
+export const EASE = 2500;
+export const easeW = t => { const f = Math.min(1, Math.max(0, t / EASE)); return f * f * (3 - 2 * f); };

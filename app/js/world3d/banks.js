@@ -76,7 +76,7 @@ export function bands(p, K, ground, { sh = 0.15, verge = 0.6 } = {}) {
   // level: a verge on the ground as carved to the road, out to 6 m, a few centimetres under it (where the ground is
   // pushed further down under a road beside, the verge is what shows: no pit)
   const v = o => Math.min(y - 0.04, g(o) - 0.03);
-  return [[0, y - 0.04, 1.5, v(1.5), 0], [1.5, v(1.5), 3.5, v(3.5), 0], [3.5, v(3.5), 6, g(6) - 0.03, 0]];
+  return [[0, y - 0.04, 3, v(3), 0], [3, v(3), 6, g(6) - 0.03, 0]];
 }
 
 // Runs of one kind along an edge, each point's bands; each run on to the next run's first point in its own kind (the

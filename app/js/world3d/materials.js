@@ -219,8 +219,8 @@ export function grassMaterial() {
   return m;
 }
 
-// road attributes rd = [marking, surface, lanes, width], rd2 = [a, b, pL, pR] (ribbon.js roadStyle); uv: across 0..1
-// from the right edge, metres along
+// road attributes rd = [marking, surface, lanes, width], rd2 = [a, b, pL, pR] (ribbon.js roadStyle); uv: across in
+// metres from the right edge, metres along
 // a bike lane's symbol (a bicycle and its rider, an arrow ahead), white on the road: q in metres, x across the lane, y
 // along it (the arrow toward +y); coverage 0..1 over antialiasing width aa
 const GLSL_BIKE = /* glsl */`
@@ -250,7 +250,7 @@ export function roadMaterial() {
       .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_BIKE)
       .replace('#include <color_fragment>', /* glsl */`
         float lm = floor(vRd.x + 0.5), surf = floor(vRd.y + 0.5), lanes = floor(vRd.z + 0.5), W = vRd.w;
-        float along = vRuv.y, x = (vRuv.x - 0.5) * W, ax = abs(x);
+        float along = vRuv.y, x = vRuv.x - W * 0.5, ax = abs(x);
         float n1 = texture2D(tNoise, vW.xz / 31.0).g, n2 = texture2D(tNoise, vW.xz / 3.7).r, n3 = texture2D(tNoise, vW.xz / 0.9).r;
         // asphalt as it is on the Headlands' roads (Street View, sRGB about #8c8b87 to #a7a59f): pale weathered grey,
         // darker patches where it was mended, black sealed cracks, the wheel tracks a little darker, the edges dusty
@@ -314,7 +314,7 @@ export function roadMaterial() {
         c = mix(c, srgb(vec3(0.88, 0.88, 0.85)), line * 0.92 * fade);
         diffuseColor.rgb *= c;`);
   };
-  m.customProgramCacheKey = () => 'jw-road-5';
+  m.customProgramCacheKey = () => 'jw-road-6';
   return m;
 }
 

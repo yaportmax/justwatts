@@ -48,13 +48,15 @@ export function resample(pts, step) {
 
 // A growing geometry: positions, uvs (u across 0..1 from the right edge, v metres along), per vertex the road
 // [marking, surface, lanes, width] and its parts across [a, b, pL, pR] (roadStyle) the shader draws (marking -1: a
-// bridge's side)
+// bridge's side). u is kept as metres from the right edge (u times the width): where the width changes along a road (a
+// taper) a quad is a trapezoid, and a fraction across it does not interpolate straight over its two triangles (the lines
+// zigzagged at each diagonal); metres from either edge do
 export function builder() {
   const pos = [], uv = [], code = [], code2 = [], idx = [];
   return {
     pos, uv, code, idx,
     get n() { return pos.length / 3; },
-    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u, w); code.push(c[0], c[1], c[2], c[3]); code2.push(c[4] || 0, c[5] || 0, c[6] || 0, c[7] || 0); return pos.length / 3 - 1; },
+    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u * c[3], w); code.push(c[0], c[1], c[2], c[3]); code2.push(c[4] || 0, c[5] || 0, c[6] || 0, c[7] || 0); return pos.length / 3 - 1; },
     tri(a, b, c) { idx.push(a, b, c); },
     done() { return { pos: new Float32Array(pos), uv: new Float32Array(uv), code: new Float32Array(code), code2: new Float32Array(code2), idx: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) }; },
   };
@@ -92,7 +94,10 @@ export function tapers(roads, { width, rigid = () => false, ok = () => true, xz 
 // rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
 // centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
 export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null }) {
-  const P = resample(pts, step), n = P.length; if (n < 2) return [];
+  let P = resample(pts, step);
+  // (within a taper's reach of a joint a point every 1.5 m: the edges follow the width's curve, not a corner every step)
+  if (joints?.length) { const by = q => joints.some(([x, z]) => Math.hypot(q[0] - x, q[1] - z) < TAPER + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 1.5).slice(1)); }
+  const n = P.length; if (n < 2) return [];
   let code = [lm, surf, lanes, w, a, b, pL, pR];
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
   const tot = L[n - 1] || 1, centre = [];

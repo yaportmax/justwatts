@@ -50,8 +50,15 @@ const PORT = 12;  // metres of open cut before a tunnel's portal
 // the triangles between them lie up to a few centimetres over the line (Hawk Hill: 3.4 cm at 26 m/s); a road tyre's own
 // contact patch is about that deep
 const TYRE = 0.04;
-// underpasses that are a barrel arch, not a concrete box (Street View): Bunker Road under US-101
-const ARCHED = [[37.8380, -122.4830]];
+// underpasses that are a barrel arch, not a concrete box (Street View): Bunker Road under US-101. Per portal (its way's end,
+// [lat, lon]) its wing walls looking out of it, right and left: [length along the way out (m), splay (radians), height
+// over the road at its end (m)], the top straight down to that from the headwall's. From USGS 3DEP's 1 m bare earth
+// resampled at 0.5 m (the walls' faces: the ground 6 to 9 m up within 1.5 m of the road's edge, out to where it is a bank;
+// the ground behind each wall's end) and Street View (2025-03, panos at 37.83821,-122.48334 heading 132 and
+// 37.83778,-122.48269 heading 309): the west portal's right wall 10 m, its left a short wing (a rubble wall about 1.6 m
+// high goes on along the road, not drawn); the east portal's right wall a panelled one 22 m along the road down to about
+// 1 m, its left a short wing splayed out.
+const ARCHED = [{ at: [37.8380, -122.4830], walls: [[[37.83810, -122.48318], [10, 0.04, 1.3], [3, 0.1, 2]], [[37.83790, -122.48288], [22, 0.02, 1], [4, 0.6, 1]]] }];
 
 // life: the cars, walkers and birds (life.js), off by default (they cost frames; __w3.life turns them on for checks)
 export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, quality = 0, time = 'golden', sound = true, fog = true, kit = null, life: lifeOn = !!globalThis.__w3?.life }) {
@@ -77,7 +84,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const scene = new THREE.Scene(), proj = makeProj(...ORIGIN);
   const camera = new THREE.PerspectiveCamera(50, 1, 0.3, 60000);
   const sky = createSky(scene, { far: 60000 }); sky.set(time);
-  const mats = { terrain: terrainMaterial(), terrainBore: terrainMaterial({ bores: true }), terrainFar: terrainMaterial({ detail: false }), road: roadMaterial(), prop: propMaterial(),
+  const mats = { terrain: terrainMaterial(), terrainBore: terrainMaterial({ bores: true }), terrainFar: terrainMaterial({ detail: false }), terrainFarBore: terrainMaterial({ detail: false, bores: true }), road: roadMaterial(), prop: propMaterial(),
     bldg: buildingMaterial(), grass: grassMaterial(), pillar: new THREE.MeshLambertMaterial({ color: 0x9a968c }),
     tunnel: tunnelMaterial(), portal: portalMaterial(),
     furn: furnitureMaterial(), rail: new THREE.MeshLambertMaterial({ color: 0xdfe3e6, emissive: 0x3a3d40, side: THREE.DoubleSide }), curb: new THREE.MeshLambertMaterial({ color: 0xa9a69e }) };  // the rails galvanised, bright even on their shaded side; the kerbs under them concrete
@@ -125,6 +132,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   let RI = null;
   baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
   // a tunnel's rail at a point (its floor, baked), null off every tunnel's
+  // the drawn top of the road at a point nearest the height e, of the rails it is on, not past one's end (rail.js top
+  // counts a rail's end out to its half width past it: a bore's floor carried on level out of its portal)
+  const roadTopOn = (x, z, e) => { if (!RI) return null; let best = null, bm = Infinity; for (const id of RI.near(x, z)) { const q = RI.rails[id], p = q.T.at(x, z); if (!p || Math.abs(p.d) >= q.half + 0.3 || (Math.abs(p.d) > 0.3 && ((p.k === 0 && p.t === 0) || (p.k === q.T.P.length - 2 && p.t === 1)))) continue; const y = p.h + q.lift; if (Math.abs(y - e) < bm) { bm = Math.abs(y - e); best = y; } } return best; };
   const tunRail = (x, z) => { if (!RI) return null; let best = null; for (const id of RI.near(x, z)) { const q = RI.rails[id]; if (!(q.r.fl & 2)) continue; const p = q.T.at(x, z); if (p && Math.abs(p.d) < q.half + 3 && (!best || Math.abs(p.d) < Math.abs(best.d))) best = p; } return best ? best.h : null; };
 
   /* ---------- streaming ---------- */
@@ -209,12 +219,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           // (the portal's height: the tunnel's rail, baked; else the lower of the ground there and a step out)
           const out = [P[a][0] * 2 - P[a + dir][0], P[a][1] * 2 - P[a + dir][1]], h = r.h ? (a ? r.h.at(-1) : r.h[0]) : Math.min(gridHeight(G, ...P[a], G.raw) ?? 1e9, gridHeight(G, ...out, G.raw) ?? 1e9);
           if (h > 1e8) continue;
-          const pts = [];
-          if (short) { const ux = (P[a][0] - P[a + dir][0]), uz = (P[a][1] - P[a + dir][1]), ul = Math.hypot(ux, uz) || 1; for (let o = -3; o <= 12; o += 1) pts.push([P[a][0] + ux / ul * o, P[a][1] + uz / ul * o, h]); }
+          const pts = [], mid = P[P.length >> 1], arch = ARCHED.some(({ at: [la, lo] }) => Math.hypot(proj.x(lo) - mid[0], proj.z(la) - mid[1]) < 60);
+          // (out from the portal at the road's own height there: its rail's top, as far over the portal's as it is)
+          const t0 = roadTopOn(...P[a], h + 0.3), hOut = (x, z) => { const t = roadTopOn(x, z, h + 0.3); return t0 != null && t != null ? h + t - t0 : h; };
+          if (short) { const ux = (P[a][0] - P[a + dir][0]), uz = (P[a][1] - P[a + dir][1]), ul = Math.hypot(ux, uz) || 1; for (let o = -3; o <= 12; o += 1) { const px = P[a][0] + ux / ul * o, pz = P[a][1] + uz / ul * o; pts.push([px, pz, o > 0 ? hOut(px, pz) : h]); } }
           else for (let i = a; i >= 0 && i < P.length && Math.abs(D[i] - D[a]) <= PORT + 1; i += dir) pts.push([P[i][0], P[i][1], h]);
           // (an underpass's cut level out past its headwall's wing walls, the opening clear down to the road: the fill
-          // meets the wings, not the opening; its half width w / 2 + 1 and the wings 2.6 m past it, as rebuildTunnels draws)
-          if (pts.length > 1) under.push(short ? { pts, r0: w / 2 + 9, r1: w / 2 + 12 } : { pts, r0: w / 2 + 2.5, r1: w / 2 + 9 });
+          // meets the wings, not the opening; its half width w / 2 + 1 and the wings 2.6 m past it, as rebuildTunnels draws.
+          // An arch's measured wings (ARCHED) stand at the opening's sides, w / 2 + 1.6 out: the cut to them, the fill behind
+          // them kept (rebuildTunnels leaves out the ground between them and draws their floor))
+          if (pts.length > 1) under.push(!short ? { pts, r0: w / 2 + 2.5, r1: w / 2 + 9 } : arch ? { pts, r0: w / 2 + 2, r1: w / 2 + 9 } : { pts, r0: w / 2 + 9, r1: w / 2 + 12 });
         }
       }
       yield; if (!globalThis.__w3?.noCarve) yield* carveSteps(G, [], 0, 1, under); yield;  // (__w3.noCarve, noPush: checks)
@@ -235,7 +249,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     g.setAttribute('position', new THREE.BufferAttribute(m.pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
     g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
     g.setIndex(new THREE.BufferAttribute(m.idx, 1)); g.computeBoundingSphere();
-    const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : mats.terrainFar); mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
+    const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : bored ? mats.terrainFarBore : mats.terrainFar);  // (the bores left out at every quality) mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();
     c.grid = G; c.tmesh = { src: m.src, nv: (G.segs + 1) ** 2, skirt: c.z === FAR_Z ? 40 : 12 };
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); } else { c.nor = c.mask = c.cv = null; }
     setPart(c, 'terrain', mesh); upload(mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) farDirty = true;
@@ -980,19 +994,23 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // the end of a cut.
       // (the cover: the most ground over its middle half; a short one under a motorway's fill has its ends carved down)
       // (or a road's deck over it: the lidar has a gap under an overpass)
-      let cover = 0, decked = false; for (let i = 0; i < P.length; i++) if (D[i] > L * 0.25 && D[i] < L * 0.75) { const f = h0 + (h1 - h0) * D[i] / L, g = groundAt(...P[i]) ?? 0, d = deckAt(...P[i]) ?? 0; cover = Math.max(cover, g - f, d - f); decked ||= d - f > 3 && d > g; }
+      // (or a road's rail over it: the same at every quality, where the low one's grid is too coarse to keep a fill's top)
+      let cover = 0, decked = false; for (let i = 0; i < P.length; i++) if (D[i] > L * 0.25 && D[i] < L * 0.75) { const f = h0 + (h1 - h0) * D[i] / L, g = groundAt(...P[i]) ?? 0, d = deckAt(...P[i]) ?? 0, o = roadTopOn(...P[i], f + 40) ?? 0; cover = Math.max(cover, g - f, d - f, o - f > 3 ? o - f - 0.3 : 0); decked ||= d - f > 3 && d > g; }
       if (cover < 3 || L < 18) { ribbon(B, P, { ...st, hAt: (x, z) => groundAt(x, z), rail: tunRail, lift: railLift(r), step: 6 }); continue; }
-      const box = decked || cover < 8 || L < 3 * PORT, port = box ? 1.5 : one ? 2 : PORT, mid = P[P.length >> 1], arch = box && ARCHED.some(([la, lo]) => Math.hypot(proj.x(lo) - mid[0], proj.z(la) - mid[1]) < 60);
+      const box = decked || cover < 8 || L < 3 * PORT, port = box ? 1.5 : one ? 2 : PORT, mid = P[P.length >> 1], arch = box && ARCHED.find(({ at: [la, lo] }) => Math.hypot(proj.x(lo) - mid[0], proj.z(la) - mid[1]) < 60);
+      // (a point where the lining starts and ends: the headwalls there and the ground left out from there, not from the
+      // next 6 m point on, where the road had gone down under the ground carved level at the portal)
+      for (const d of [port - 0.5, L - port + 0.5]) { const i = D.findIndex(v => v >= d); if (i > 0 && D[i] - d > 0.3 && d - D[i - 1] > 0.3) { const f = (d - D[i - 1]) / (D[i] - D[i - 1]); P.splice(i, 0, [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * f, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * f]); Y.splice(i, 0, Y[i - 1] + (Y[i] - Y[i - 1]) * f); D.splice(i, 0, d); } }
       // half width, the walls' height, the arch's rise over them (0: a flat roof)
       // (a box no taller than the road over it allows)
       const w = st.w / 2 + (one || arch ? 1 : 2), H = box ? (arch ? 1.4 : Math.max(3.2, Math.min(5.2, cover - 0.9))) : one ? 2 : 2.2, rise = box && !arch ? 0 : one || arch ? w : w * 0.75;
       // the bore as straight pieces of up to 40 m (for the ground to leave out): [x0, z0, x1, z1, floor0, floor1, half width, height]
       const segs = []; let i0 = P.findIndex((_, i) => D[i] >= port - 0.5);  // (the same points as the lining's rings, below)
-      for (let i = i0 + 1; i0 >= 0 && i < P.length && D[i0] < L - port + 0.5; i++) if (D[i] - D[i0] >= 40 || i === P.length - 1 || D[i + 1] > L - port + 0.5) {
+      for (let i = i0 + 1; i0 >= 0 && i < P.length && D[i0] < L - port + 0.5; i++) if (D[i] - D[i0] >= 40 || i === P.length - 1 || D[i + 1] > L - port + 0.6) {
         segs.push([P[i0][0], P[i0][1], P[i][0], P[i][1], Y[i0], Y[i], w + 0.3, H + rise + 0.6]); i0 = i;
       }
       let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity; for (const [x, z] of P) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); }
-      list.push({ P, D, Y, h0, h1, w, L, segs, port, box, lift: railLift(r), bb: [bx0 - w - 5, bz0 - w - 5, bx1 + w + 5, bz1 + w + 5] });
+      list.push({ P, D, Y, h0, h1, w, L, segs, cuts: [], port, box, lift: railLift(r), bb: [bx0 - w - 5, bz0 - w - 5, bx1 + w + 5, bz1 + w + 5] });
       const k0 = B.idx.length; ribbon(B, P, { ...st, hAt: () => 0, deck: [h0, h1], rail: (x, z) => tunRail(x, z), lift: railLift(r), step: 6 }); cuts.push([k0, B.idx.length, port, L]);  // (its top as its rail's: rail.js)
       // a ring: walls up to the arch (or the flat roof), and the floor under the road (closed, so nothing outside shows through)
       const SEG = 12, R = w, ring = [];
@@ -1015,7 +1033,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           for (const [cx, cy] of WALK) { walk.pos.push(P[i][0] + nx * cx * ns, y + cy, P[i][1] + nz * cx * ns); walk.col.push(...(cy < 0.3 ? [0.62, 0.6, 0.56] : [0.24, 0.24, 0.25])); }
           if (n) for (const [k0, k1] of [[0, 2], [3, 9], [10, 16]]) for (let k = k0; k < k1; k++) { const p0 = wb + (n - 1) * WALK.length + k, p1 = p0 + WALK.length; walk.idx.push(p0, p1, p0 + 1, p0 + 1, p1, p1 + 1); }
         }
-        if (n === 0 || n === keep.length - 1) ports.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1, box, rise, arch, one]);
+        if (n === 0 || n === keep.length - 1) ports.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1, box, rise, arch, one, list.at(-1), n === 0 ? P[0] : P.at(-1)]);
       });
     }
     if (!B.n) { if (tun.group) disposeObj(tun.group); tun.group = null; tun.list = list; return; }
@@ -1059,7 +1077,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (let i = 0; i < p.count; i++) { pl.push(p.getX(i), p.getY(i), p.getZ(i)); v.fromBufferAttribute(p, i).applyMatrix4(m4); pp.push(v.x, v.y, v.z); v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize(); pn.push(v.x, v.y, v.z); }
       if (ng !== g) ng.dispose(); g.dispose();
     };
-    for (const [x, y, z, yaw, R, H, dir, box, rise, arch, one] of ports) {
+    for (const [x, y, z, yaw, R, H, dir, box, rise, arch, one, T, end] of ports) {
       if (arch || one) {
         // a flat headwall with a round-arched opening, a coping, wing walls splayed out from it and sloping down (Street
         // View: the Baker-Barry tunnel's portals, Bunker Road under US-101); at a one-lane tunnel a signal each side of
@@ -1070,11 +1088,33 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         hole.lineTo(-R, -0.5); sh.holes.push(hole);
         const parts = [new THREE.ExtrudeGeometry(sh, { depth: 0.8, bevelEnabled: false }).translate(0, 0, -0.8), new THREE.BoxGeometry(2 * half + 0.5, 0.35, 1.1).translate(0, top + 0.15, -0.4)];
         // (a one-lane tunnel's wings long and close along its way in: the retaining walls of its cut, the road between them)
-        // (an arch under a fill: its wings 14 m along the way in, close to it, holding the fill back from the opening)
-        const wl = one ? 17 : 14, wa = one ? 0.22 : 0.3;
-        for (const s of [-1, 1]) {
-          const ws = new THREE.Shape(); ws.moveTo(0, -1); ws.lineTo(wl, -1); ws.lineTo(wl, 0.9); ws.lineTo(0, top - 0.4); ws.lineTo(0, -1);
+        if (one) for (const s of [-1, 1]) {
+          const wl = 17, wa = 0.22, ws = new THREE.Shape(); ws.moveTo(0, -1); ws.lineTo(wl, -1); ws.lineTo(wl, 0.9); ws.lineTo(0, top - 0.4); ws.lineTo(0, -1);
           parts.push(new THREE.ExtrudeGeometry(ws, { depth: 0.6, bevelEnabled: false }).translate(0, 0, -0.3).rotateY(Math.atan2(Math.cos(wa), s * Math.sin(wa))).translate(s * (half - 0.3), 0, -0.8));
+        }
+        // (an arch's wing walls as measured (ARCHED), from the opening's sides out along the way; a floor between each and
+        // the road's middle, the ground over it left out (BORES))
+        const spec = !one && arch?.walls.find(([[la, lo]]) => Math.hypot(proj.x(lo) - end[0], proj.z(la) - end[1]) < 8);
+        if (spec) {
+          const ry = yaw + (dir > 0 ? Math.PI : 0), cs = Math.cos(ry), sn = Math.sin(ry), W = (lx, lz) => [x + lx * cs + lz * sn, z - lx * sn + lz * cs];
+          // (the floor's height out along the way: the road's rail there, as far over the portal's as its top is)
+          const t0 = roadTopOn(x, z, y + 0.3), fl = s => { const [px, pz] = W(0, -0.8 - s), t = roadTopOn(px, pz, y + 0.3); return t0 != null && t != null ? y + t - t0 : y; };
+          for (const [k, [wl, wa, he]] of [[1, spec[1]], [-1, spec[2]]]) {
+            const x0 = k * (R + 0.3), n = Math.max(2, Math.ceil(wl)), ws = new THREE.Shape(), tops = [], te = Math.min(top - 0.4, fl(wl) - y + he);
+            for (let j = 0; j <= n; j++) tops.push([wl * j / n, top - 0.4 + (te - top + 0.4) * j / n]);
+            ws.moveTo(0, -1); ws.lineTo(wl, fl(wl) - y - 1); for (let j = n; j >= 0; j--) ws.lineTo(...tops[j]); ws.lineTo(0, -1);
+            parts.push(new THREE.ExtrudeGeometry(ws, { depth: 0.6, bevelEnabled: false }).translate(0, 0, -0.3).rotateY(Math.atan2(Math.cos(wa), k * Math.sin(wa))).translate(x0, 0, -0.8));
+            const fg = new THREE.BufferGeometry(), fp = [];
+            for (let j = 0; j < n; j++) {
+              const s0 = wl * j / n, s1 = wl * (j + 1) / n, o0 = x0 + k * s0 * Math.sin(wa), o1 = x0 + k * s1 * Math.sin(wa), y0 = fl(s0) - y + 0.15, y1 = fl(s1) - y + 0.15, z0 = -0.8 - s0 * Math.cos(wa), z1 = -0.8 - s1 * Math.cos(wa);
+              const q = [[0, y0, z0], [o0, y0, z0], [0, y1, z1], [o1, y1, z1]]; for (const t of k > 0 ? [0, 1, 2, 1, 3, 2] : [0, 2, 1, 1, 2, 3]) fp.push(...q[t]);
+            }
+            fg.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3)); parts.push(fg);
+            // (the ground left out from the road's middle to the wall, over the floor: [x0, z0, x1, z1, floor + 2 at each end
+            // (the test leaves out the ground from 2 m under it), half width, height])
+            const om = (x0 + k * wl / 2 * Math.sin(wa)) / 2, [ax, az] = W(om, -0.8), [bx, bz] = W(om, -0.8 - wl * Math.cos(wa));
+            T.cuts.push([ax, az, bx, bz, y + 0.12 + 2, fl(wl) + 0.12 + 2, Math.abs(om) + 0.25, 60]);
+          }
         }
         for (const g of parts) add(g, x, y, z, ry);
         if (one) for (const s of [-1, 1]) { const v = new THREE.Vector3(s * (R + 1.1), H + rise * 0.55, -0.85).applyAxisAngle(new THREE.Vector3(0, 1, 0), ry); heads.push([x + v.x, y + v.y, z + v.z, ry + Math.PI]); }
@@ -1436,7 +1476,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       mark(); if (ready) hz.update(p[0], p[1], now); mark();
       // the bores nearest the camera, for the ground to leave out
       { const segs = [];
-        for (const T of tun.list) for (const g of T.segs) segs.push([Math.hypot((g[0] + g[2]) / 2 - camPos.x, (g[1] + g[3]) / 2 - camPos.z), g]);
+        for (const T of tun.list) for (const g of [...T.segs, ...T.cuts]) segs.push([Math.hypot((g[0] + g[2]) / 2 - camPos.x, (g[1] + g[3]) / 2 - camPos.z), g]);
         segs.sort((a, b) => a[0] - b[0]); const n = Math.min(12, segs.length);
         for (let i = 0; i < n; i++) { const g = segs[i][1]; BORES.a.value[i].set(g[0], g[1], g[2], g[3]); BORES.b.value[i].set(g[4], g[5], g[6], g[7]); }
         BORES.n.value = n; }

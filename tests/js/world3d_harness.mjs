@@ -422,6 +422,16 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   { const t = railNear(37.83800, -122.48305, tun); ux.bunkerUnder101 = t ? r3(lidarOver(37.838, -122.48305) - t.p.h) : null; }
   { const t = railNear(37.8405, -122.4897, tun), [x, z] = xz(37.8405, -122.4897); ux.bakerBarry = t ? r3(ground(x, z) - t.p.h) : null; }
   out.railUnder = ux;
+  // every portal: the road going on from it meets the bore at its floor's height and heads into its opening (within
+  // 35 degrees of the bore's line at the portal: not past its side)
+  { const res = [];
+    for (const t of RI.rails) { if (!(t.r.fl & 2)) continue;
+      for (const end of [0, 1]) {
+        const P = t.T.P, n = P.length, e = end ? P[n - 1] : P[0], f = end ? P[n - 2] : P[1], ux = e[0] - f[0], uz = e[1] - f[1], ul = Math.hypot(ux, uz) || 1, he = end ? t.T.h[n - 1] : t.T.h[0];
+        for (const q of RI.rails) { if (q === t || q.r.fl & 2) continue; const Q = q.T.P, k = Math.hypot(Q[0][0] - e[0], Q[0][1] - e[1]) < 0.5 ? 0 : Math.hypot(Q.at(-1)[0] - e[0], Q.at(-1)[1] - e[1]) < 0.5 ? Q.length - 1 : -1; if (k < 0) continue;
+          const g = Q[k ? k - 2 : 2] ?? Q[k ? k - 1 : 1], vx = g[0] - e[0], vz = g[1] - e[1], vl = Math.hypot(vx, vz) || 1, ang = Math.acos(Math.max(-1, Math.min(1, (ux * vx + uz * vz) / (ul * vl)))) * 180 / Math.PI;
+          res.push({ at: [+proj.lat(e[1]).toFixed(5), +proj.lon(e[0]).toFixed(5)], ang: Math.round(ang), dh: r3(Math.abs(q.T.h[k] - he)) }); } } }
+    out.portals = res; }
 
   // (b): the open world's starts (world.js PRESETS and perfride's rides), each way, 3 km on: the course as world.js makes
   // it (10 m points, heights from the baked tiles, straight over bridges and through tunnels, smoothed), its profile

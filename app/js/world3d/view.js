@@ -202,15 +202,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (!(r.fl & 2) || /path|footway|steps/.test(r.hw)) continue;
         const P = resample(r.pts.map(([la, lo]) => proj.xz(la, lo)), 4); if (P.length < 3) continue;
         const w = roadStyle(r.hw, r.ln, r.fl, r.wd).w, D = [0]; for (let i = 1; i < P.length; i++) D.push(D[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
-        const L = D.at(-1); if (L < 3 * PORT) continue;
+        const L = D.at(-1), short = L < 3 * PORT;  // (an underpass: its approach cut out in front of each headwall, level)
         const box = [Math.min(G.xs[0], G.xs[G.segs]), Math.min(G.zs[0], G.zs[G.segs]), Math.max(G.xs[0], G.xs[G.segs]), Math.max(G.zs[0], G.zs[G.segs])];
         for (const [a, dir] of [[0, 1], [P.length - 1, -1]]) {
           if (!(P[a][0] > box[0] + 1 && P[a][0] < box[2] - 1 && P[a][1] > box[1] + 1 && P[a][1] < box[3] - 1)) continue;  // past the tile's edge: the neighbour's piece, not a portal
           // (the portal's height: the tunnel's rail, baked; else the lower of the ground there and a step out)
           const out = [P[a][0] * 2 - P[a + dir][0], P[a][1] * 2 - P[a + dir][1]], h = r.h ? (a ? r.h.at(-1) : r.h[0]) : Math.min(gridHeight(G, ...P[a], G.raw) ?? 1e9, gridHeight(G, ...out, G.raw) ?? 1e9);
           if (h > 1e8) continue;
-          const pts = []; for (let i = a; i >= 0 && i < P.length && Math.abs(D[i] - D[a]) <= PORT + 1; i += dir) pts.push([P[i][0], P[i][1], h]);
-          if (pts.length > 1) under.push({ pts, r0: w / 2 + 2.5, r1: w / 2 + 9 });
+          const pts = [];
+          if (short) { const ux = (P[a][0] - P[a + dir][0]), uz = (P[a][1] - P[a + dir][1]), ul = Math.hypot(ux, uz) || 1; for (let o = -3; o <= 10; o += 1) pts.push([P[a][0] + ux / ul * o, P[a][1] + uz / ul * o, h]); }
+          else for (let i = a; i >= 0 && i < P.length && Math.abs(D[i] - D[a]) <= PORT + 1; i += dir) pts.push([P[i][0], P[i][1], h]);
+          if (pts.length > 1) under.push(short ? { pts, r0: w / 2 + 1.5, r1: w / 2 + 6 } : { pts, r0: w / 2 + 2.5, r1: w / 2 + 9 });
         }
       }
       yield; if (!globalThis.__w3?.noCarve) yield* carveSteps(G, [], 0, 1, under); yield;  // (__w3.noCarve, noPush: checks)

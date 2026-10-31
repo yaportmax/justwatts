@@ -19,7 +19,7 @@ export function ribbonEdge(C, side) {
   return out;
 }
 
-export const LEVEL = 0, CUT = 1, FILL = 2;
+export const LEVEL = 0, CUT = 1, FILL = 2, NONE = 3;  // (NONE: nothing drawn: by a tunnel's portal)
 // What the ground does beyond each point of an edge E (ribbonEdge): { kind, h, o } per point. ground(x, z): the ground as
 // drawn (carved), raw(x, z): the lidar's own, either null where unknown. A cut: the lidar's ground 2 m or more over the
 // edge 4.5 m out and rising at 3 in 5 or steeper (h its height there; a lower bank, 0.8 m or more, rocky: a ditch's
@@ -30,7 +30,7 @@ export const LEVEL = 0, CUT = 1, FILL = 2;
 export function sideKinds(E, ground, raw, rail = () => false, skip = () => false) {
   const at = (f, p, o) => f(p[0] + p[3] * o, p[2] + p[4] * o);
   const out = E.map((p, i) => {
-    if (skip(p)) return { kind: LEVEL, h: 0 };
+    if (skip(p)) return { kind: NONE, h: 0 };
     const r45 = at(raw, p, 4.5), r3 = at(raw, p, 3), g05 = at(ground, p, 0.5), g15 = at(ground, p, 1.5);
     if (rail(i)) return { kind: FILL, h: 0, rail: true };
     if (r45 != null && r3 != null && r45 - p[1] >= 2 && r45 - p[1] >= 0.6 * 4.5 && r3 > p[1] + 0.6) return { kind: CUT, h: Math.min(18, r45 - p[1]) };
@@ -73,6 +73,7 @@ export function bands(p, K, ground, { sh = 0.15, verge = 0.6 } = {}) {
     const H = K.h, of = verge, ot = of + 0.4 * H, oc = Math.max(ot + 2.5, 7.5), hc = Math.min(g(oc), y + H + 0.4 * (oc - ot));
     return [[0, y - 0.03, of, y - 0.05, 0], [of, y - 0.3, ot, y + H, 1], [ot, y + H, oc, Math.max(hc, y + H - 1) - 0.15, 1]];
   }
+  if (K.kind === NONE) return null;
   // level: a verge on the ground as carved to the road, out to 6 m, a few centimetres under it (where the ground is
   // pushed further down under a road beside, the verge is what shows: no pit)
   const v = o => Math.min(y - 0.04, g(o) - 0.03);

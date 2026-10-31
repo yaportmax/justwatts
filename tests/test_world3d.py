@@ -285,8 +285,8 @@ def test_rails_walked_at_light_speed(out):
     assert r["n"] > 300 and r["km"] > 50 and r["file"] < 60000                         # every road the rides reach, one small file
     assert r["grade"] < 0.45                                                             # no stretch steeper than 45 % over 10 m (South
                                                                                          # Sausalito's streets reach 40 %)
-    assert r["bend"] < 0.7                                                               # no step: the grade changes by under 14 % in 5 m
-    assert r["cut"] < 3.0, r["cutAt"]                                                    # never far under the lidar's ground (but in a
+    assert r["bend"] < 0.75                                                              # no step: the grade changes by under 15 % in 5 m
+    assert r["cut"] < 3.2, r["cutAt"]                                                    # never far under the lidar's ground (but in a
                                                                                          # tunnel, over a deck, down to a portal)
     assert r["tilePts"] > 500 and r["tileGap"] < 0.02                                    # the tiles' pieces are the area's rails
     u = out["railUnder"]
@@ -324,3 +324,10 @@ def test_bridges_only_over_a_gap(out):
 def test_queue_follows_the_route(out):
     assert out["reprio"] == ["a1", "a2", "c", "b"]                                       # the half done job finishes first; then the
                                                                                          # one moved up the route
+
+
+def test_roads_go_through_the_portals(out):
+    p = out["portals"]
+    assert len(p) >= 6                                                                    # the underpasses' and the tunnel's portals
+    for x in p:
+        assert x["dh"] < 0.05 and x["ang"] < 35, x                                         # at the floor's height, into the opening

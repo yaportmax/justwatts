@@ -41,6 +41,12 @@ vec4 jwVeg(vec2 p) {
 float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0;
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
+  // (the small noise on a steep face laid across the face, along it and up it, not projected from above: no streaks
+  // stretched up a bank)
+  // (looked at from above and, on a steep face, from the side too (east-west and north-south, by which way it faces),
+  // blended by steepness: world-fixed, so no seam where two faces meet)
+  float fw = smoothstep(0.15, 0.45, slope), fax = abs(n.x) / (abs(n.x) + abs(n.z) + 1e-4);
+  #define JWS(q, k) (fw > 0.0 ? mix(jwN(p / q + k), mix(jwN(vec2(p.x, h) / q + k), jwN(vec2(p.y, h) / q + k), fax), fw) : jwN(p / q + k))
   float north = clamp(-n.z * 1.9, 0.0, 1.0) * smoothstep(0.03, 0.22, slope);
   // two looks at the noise give every scale (its four channels are four sizes): about 2 km, 250 m, 160 m, 80 m, 40 m, 20 m
   vec4 nA = jwN(p / 4100.0 + 0.31), nB = jwN(mat2(0.8, -0.6, 0.6, 0.8) * p / 330.0 + 0.7);
@@ -103,8 +109,10 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     vec3 bareC = mix(srgb(vec3(0.49, 0.43, 0.37)), srgb(vec3(0.57, 0.46, 0.37)), smoothstep(0.3, 0.7, fine));
     vec3 d = mix(grassC, scrC, sc); d = mix(d, bareC, br); d = mix(d, srgb(vec3(0.24, 0.22, 0.17)), tr);
     // the pullouts, car parks and gravel shoulders: pale grey, a little warm, mottled
-    d = mix(d, mix(srgb(vec3(0.47, 0.46, 0.43)), srgb(vec3(0.58, 0.56, 0.51)), smoothstep(0.3, 0.7, fine * 0.7 + small * 0.3)), smoothstep(0.25, 0.65, pav));
+    vec3 pavC = mix(srgb(vec3(0.47, 0.46, 0.43)), srgb(vec3(0.58, 0.56, 0.51)), smoothstep(0.3, 0.7, fine * 0.7 + small * 0.3));
+    d = mix(d, pavC, smoothstep(0.25, 0.65, pav));
     c = mix(c, d * (0.92 + 0.16 * fine), known * (1.0 - town * 0.6));
+    c = mix(c, pavC * (0.92 + 0.16 * fine), smoothstep(0.25, 0.65, pav) * known * town * 0.6);  // (a lot in a fort's town ground paved all the same: Mitchell Road's at Rodeo Beach)
     jwScrub = sc * known * (1.0 - br) * (1.0 - tr);
   }
   // sand: the beach and dunes
@@ -119,7 +127,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // space noise sheared by height (a face varies up it as along it; no tiling at riding distance). Colours: Street View
   // (Conzelman Road 0a_1030, 2025-03, a bare face's 15th to 85th percentile, sRGB #3c2c1a to #8f6d50, median #675037)
   float bare = cut * max(smoothstep(0.42, 0.66, slope + (mid - 0.5) * 0.3), smoothstep(0.3, 0.7, vg.b) * known);
-  { vec2 q = p + vec2(h * 0.8, h * 0.6); float b1 = jwN(q / 11.0 + 0.4).r, b2 = jwN(q / 3.7 + 0.9).g;
+  // (on a face its noise is laid across the face, along it and up it: no streaks slanting up a cut)
+  if (bare > 0.001) { float b1 = JWS(11.0, 0.4).r, b2 = JWS(3.7, 0.9).g;
     float bed = 0.5 + 0.5 * sin(h * 3.0 + (b1 - 0.5) * 6.0);
     vec3 earth = mix(srgb(vec3(0.40, 0.31, 0.22)), srgb(vec3(0.54, 0.42, 0.31)), smoothstep(0.25, 0.75, b1 * 0.6 + b2 * 0.4));
     earth = mix(earth, srgb(vec3(0.47, 0.44, 0.38)), smoothstep(0.62, 0.8, b1) * 0.45);  // chert, grey
@@ -176,9 +185,12 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         ${detail ? `
         // close up: clumps of grass and earth, and a bump to light them
         float near = 1.0 - smoothstep(40.0, 260.0, dist);
-        float f1 = jwN(vW.xz / 9.0).r, f2 = jwN(mat2(0.8, 0.6, -0.6, 0.8) * vW.xz / 2.3).g;
+        // (on a steep face also looked at across it, blended by steepness: no streaks stretched up a bank)
+        float fwd = smoothstep(0.15, 0.45, 1.0 - nW.y) * step(0.001, near), fdx = abs(nW.x) / (abs(nW.x) + abs(nW.z) + 1e-4);
+        #define JWF(q) (fwd > 0.0 ? mix(jwN(vW.xz q), mix(jwN(vW.xy q), jwN(vW.zy q), fdx), fwd) : jwN(vW.xz q))
+        float f1 = JWF(/ 9.0).r, f2 = JWF(/ 2.3).g;
         c *= 1.0 + near * ((f1 - 0.5) * 0.16 + (f2 - 0.5) * 0.1 * (1.0 - rk * 0.5));
-        float hb = (f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * jwN((vW.xz + vW.y * vec2(0.8, 0.6)) / 3.5).b * 0.25 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
+        float hb = (f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * jwN(vW.xz / 3.5).b * 0.25 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
         vec3 dpx = dFdx(vW), dpy = dFdy(vW); float dhx = dFdx(hb), dhy = dFdy(hb);
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
         vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.55 + rk * 0.25) * near;
@@ -186,7 +198,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-6' + (detail ? 'd' : '') + (bores ? 'b' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-12' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 

@@ -11,6 +11,7 @@
 //   cable    timber posts about 1 m tall with a wire between them (Field Road, Conzelman Road by Point Bonita)
 //   fence    a timber post and two rail fence (Mitchell Road, upper Conzelman, Bunker Road by the stables)
 //   chain    a chain-link fence on steel posts about 2 m tall (Field Road, behind Alexander Avenue's old rails)
+//   wall     a grey concrete retaining wall at the paved edge, its top the ground it holds up (East Road by Fort Baker)
 // Posts unseen at that size are W-beam's timber all the same (Alexander Avenue south of Sausalito: the panos show the beam,
 // not its posts).
 export const BARRIERS = [
@@ -70,6 +71,7 @@ export const BARRIERS = [
   // East Road
   [37.844037, -122.478327, 206, 'L', -10, 60, 'wbeam'], [37.844037, -122.478327, 206, 'R', -10, 60, 'fence'],
   [37.835935, -122.476842, 89, 'R', -10, 40, 'chain'],
+  [37.843199, -122.478046, 171, 'R', -10, 21, 'wall'],  // (0a_0130: grey concrete, 3 m tall 9 m on, nothing by 21 m: its top the lidar's)
   [37.83705, -122.473063, 359, 'L', -10, 40, 'cable'],
   // Field Road
   [37.822896, -122.528884, 353, 'L', -10, 100, 'cable'], [37.822896, -122.528884, 353, 'R', -10, 60, 'cable'],

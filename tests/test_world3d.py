@@ -248,6 +248,8 @@ def test_road_sides_embankments_cuts_and_rails(out):
     assert 7 <= c[-1][2] <= 7.5 and c[-1][3] == pytest.approx(10 + 1.5 * c[-1][2])  # up the lidar's bank to where the carved ground meets it
     assert all(q[2] > q[0] for q in c) and any(q[4] == 1 for q in c)              # never leaning toward the road; a steep face (cut)
     assert all(q[3] - q[1] <= 2.5 * (q[2] - q[0]) + 0.01 for q in c)              # at 68 degrees at most
+    assert c[0][2] == pytest.approx(0.6) and abs(c[0][3] - 10) < 0.1              # the verge before the cut kept: a flat band to it
+    assert f[0][2] == pytest.approx(0.15) and abs(f[0][3] - 9.97) < 0.05          # the shoulder before the fill too
     assert b["under"] == 0 and b["over"] == 0                                     # on or over the ground, never over the lidar
     assert b["tris"] == b["up"] > 0 and b["runs"] == 2                            # every face toward the sky; one strip a side
     assert b["level"] is None and b["blockedTo"] <= 3                             # the ground at the edge: no strip; short of another road

@@ -46,7 +46,7 @@ export function sideKinds(E, ground, raw, rail = () => false, skip = () => false
 }
 
 const STEP0 = 0.75;
-export const ACROSS = 6;  // a strip's points across (five bands)
+export const ACROSS = 7;  // a strip's points across (six bands: the verge or shoulder by the edge where there is one, five out to its end)
 // The profile out from edge point p for kind K: { prof: [[o, h], ...] from the edge (0, just under it) to where it meets
 // the ground as drawn, O: that offset, need: anywhere 5 cm or more over the ground } (null: NONE). ground(x, z): as drawn;
 // opt.raw: the lidar's; opt.block(x, z, y): another road's paving there within reach of height y (the profile ends on the
@@ -56,23 +56,28 @@ export function profile(p, K, ground, { sh = 0.15, verge = 0.6, raw = null, bloc
   const y = p[1], at = o => [p[0] + p[3] * o, p[2] + p[4] * o], g = o => ground(...at(o)) ?? y - 0.03, rw = o => (raw && raw(...at(o))) ?? g(o);
   // (the lidar's own ground wherever it is over the ground as drawn: a cut's bank, or what the carve and the push under
   // the road dug out beside it; at 68 degrees at most from the verge)
+  // (behind a retaining wall (K.wall, its back 0.5 m out) the bank rises from the wall's back)
+  if (K.wall) verge = 0.5;
   const up = o => Math.min(rw(o), y + Math.max(0, o - verge) * 2.5);
   const down = o => y - 0.03 - Math.max(0, o - sh) / 1.5;
   const STEP = 0.75, MAX = 10.5, T = [];
   let lim = MAX;
+  // (the flat strip's outer side, where it turns up a cut or down a fill: a point of its own, so the strip keeps it)
+  const rises = rw(STEP) > y + 0.05, kink = rises ? verge : sh, OS = [];
+  for (let o = STEP; o <= MAX + 1e-9; o += STEP) { if (kink > o - STEP + 0.05 && kink < o - 0.05) OS.push(kink); OS.push(o); }
   // out to MAX or short of another road; the strip ends a step past the last point it stands 5 cm or more over the
   // ground (the lidar may rise past a level verge the carve made: the strip goes on over it); lim: how far it may reach
-  for (let o = STEP; o <= MAX + 1e-9; o += STEP) {
-    if (block && block(...at(o), y)) { lim = o - STEP; break; }
+  for (const o of OS) {
+    if (block && block(...at(o), y)) { lim = Math.max(0, (T.at(-1)?.[0] ?? 0)); break; }
     const gg = g(o); T.push([o, Math.min(Math.max(up(o), down(o)), gg + (MAX - o) * 1.0), gg]);
   }
   // (needed where it stands 5 cm over the ground, or where the ground just past the edge is 15 cm under it: a step down
   // off the edge shows under the road's paving)
   let L = -1; T.forEach(([, t, gg], k) => { if (t > gg + 0.05 || (k === 0 && gg < y - 0.15)) L = k; });
-  if (L < 0) return { prof: [[0, y - 0.03], [STEP, g(STEP)]], O: STEP, need: false, lim };
+  if (L < 0 || !T.length) return { prof: [[0, y - 0.03], [STEP, g(STEP)]], O: STEP, need: false, lim, kink };
   const end = Math.min(L + 1, T.length - 1), prof = [[0, y - 0.03], ...T.slice(0, end).map(([o, t, gg]) => [o, Math.max(t, gg)]), [T[end][0], T[end][2]]];
   const need = true;
-  return { prof, O: prof.at(-1)[0], need, lim };
+  return { prof, O: prof.at(-1)[0], need, lim, kink };
 }
 // The strip across p out to offset R (R >= the profile's O: past it on the ground): [[o0, h0, o1, h1, cut], ...] (each
 // band's inner and outer offset and height; cut 1: a steep face, else the ground's own cover). Every point on or over
@@ -83,8 +88,12 @@ export function strip(p, P, R, ground, flat = false) {
   const pts = [];
   // (each inner point over the ground at it and over the mean of the ground halfway to its neighbours: where the ground
   // bulges between two points)
+  // (the first band the flat strip by the edge where it turns up or down within the strip's first half (the verge before
+  // a cut, the shoulder before a fill: the setback from the paved edge Street View shows), the rest even out to R)
+  const kk = P.kink != null && P.kink > 0.05 && P.kink < R / 2 ? P.kink : null;
+  const oAt = k => kk == null ? R * k / (ACROSS - 1) : k === 0 ? 0 : kk + (R - kk) * (k - 1) / (ACROSS - 2);
   const d = R / (ACROSS - 1) / 2, over = o => Math.max(g(o), (g(Math.max(0, o - d)) + g(o + d)) / 2) + 0.03;
-  for (let k = 0; k < ACROSS; k++) { const o = R * k / (ACROSS - 1); pts.push([o, k === 0 ? y - 0.03 : k === ACROSS - 1 || flat ? g(o) : Math.max(hAt(o), over(o))]); }
+  for (let k = 0; k < ACROSS; k++) { const o = oAt(k); pts.push([o, k === 0 ? y - 0.03 : k === ACROSS - 1 || flat ? g(o) : Math.max(hAt(o), over(o))]); }
   const out = [];
   for (let k = 1; k < ACROSS; k++) { const [o0, h0] = pts[k - 1], [o1, h1] = pts[k]; out.push([o0, h0, o1, h1, (h1 - h0) > 1.0 * (o1 - o0) && h1 > y + 0.3 ? 1 : 0]); }
   return out;
@@ -95,7 +104,10 @@ export function bands(p, K, ground, opt = {}) { const P = profile(p, K, ground, 
 // Runs of strips along an edge: the points that need one; each strip out to the furthest of its own and its neighbours'
 // ends (no long diagonal between a wide strip and a narrow one); each run with the point before and after it laid flat
 // on the ground out as far (its ends sunk: no hole under them). opt: profile's. -> [[{ p, b }, ...], ...]
-export function sideRuns(E, kinds, ground, opt = {}) {
+export function sideRuns(E, kinds, ground, opt = {}) { const it = sideRunsSteps(E, kinds, ground, opt); let r; do r = it.next(); while (!r.done); return r.value; }
+// (the same a slice at a time: a generator that yields every `every` points, its value the runs; a tile's build runs it
+// over several frames)
+export function* sideRunsSteps(E, kinds, ground, opt = {}, every = 24) {
   // (points at most 3 m apart along the edge: the ground between two may bulge over a strip)
   { const E2 = [], K2 = [];
     for (let i = 0; i < E.length; i++) {
@@ -104,11 +116,13 @@ export function sideRuns(E, kinds, ground, opt = {}) {
       E2.push(E[i]); K2.push(kinds[i]);
     }
     E = E2; kinds = K2; }
-  const P = E.map((p, i) => profile(p, kinds[i], ground, { ...opt, sh: kinds[i].rail ? 0.75 : opt.sh ?? 0.15 }));
+  const P = [];
+  for (let i = 0; i < E.length; i++) { if (i % every === every - 1) yield; P.push(profile(E[i], kinds[i], ground, { ...opt, sh: kinds[i].rail ? 0.75 : opt.sh ?? 0.15 })); }
   // (each strip out to the furthest end within 6 m along, short of another road)
   const need = i => !!P[i]?.need, reach = i => { let r = P[i]?.O ?? 0; for (let k = Math.max(0, i - 3); k <= Math.min(E.length - 1, i + 3); k++) if (need(k)) r = Math.max(r, P[k].O); return Math.max(STEP0, Math.min(r, P[i]?.lim ?? r)); };
   const runs = [];
   for (let i = 0; i < E.length; i++) {
+    if (i % every === every - 1) yield;
     if (!need(i)) continue;
     let j = i; while (j + 1 < E.length && need(j + 1)) j++;
     const run = [];

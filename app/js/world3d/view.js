@@ -546,7 +546,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // OpenStreetMap's barrier=guard_rail ways (a W-beam: it maps them a few metres off, any within 6 m of an edge). None
     // guessed (a rail where the ground fell away was drawn where Street View has none). Gaps of up to three points
     // closed, runs under 6 m left out
-    const rails = [], bk = { pos: [], cut: [], vg: [], idx: [], ends: [] }, bankRuns = [], bankH = new Map();
+    const rails = [], bk = { pos: [], cut: [], vg: [], idx: [], ends: [] }, bankRuns = [], bankH = new Map(), bankS = new Map();
     if (c.lod === 0 && sides.length && ridden(g) && !globalThis.__w3?.noBanks) {  // (__w3.noBanks: profiling)
       const ground = (x, z) => gridHeight(g, x, z) ?? groundAt(x, z), raw = (x, z) => gridHeight(g, x, z, g.raw), n1 = g.segs + 1;
       const osm = new Map(), ok = (x, z) => `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
@@ -579,7 +579,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           for (let k = 0; k < ba.length; k++) { const W = Math.max(ba[k][2] - ba[k][0], bb[k][2] - bb[k][0]), nv = Math.max(1, Math.ceil(W / 1.0));
             for (let u = 0; u <= nu; u++) for (let w = 0; w <= nv; w++) { const f = u / nu, e = w / nv, o = (ba[k][0] + (bb[k][0] - ba[k][0]) * f) * (1 - e) + (ba[k][2] + (bb[k][2] - ba[k][2]) * f) * e;
               const h = (ba[k][1] + (bb[k][1] - ba[k][1]) * f) * (1 - e) + (ba[k][3] + (bb[k][3] - ba[k][3]) * f) * e, x = pa[0] + (pb[0] - pa[0]) * f + (pa[3] + (pb[3] - pa[3]) * f) * o, z = pa[2] + (pb[2] - pa[2]) * f + (pa[4] + (pb[4] - pa[4]) * f) * o;
-              const kk = bkey(x, z), old = bankH.get(kk); if (ba[k][4] || bb[k][4]) bankH.set(kk, -1e9); else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } }
+              const kk = bkey(x, z), old = bankH.get(kk); if (ba[k][4] || bb[k][4]) { bankH.set(kk, -1e9); bankS.set(kk, Math.max(bankS.get(kk) ?? -1e9, h)); } else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } }
           if (i % 8 === 0) yield; }
       };
       for (const { C, r, st, own } of sides) for (const sd of [1, -1]) {
@@ -623,7 +623,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         yield* strips(E, sideKinds(E, ground, raw, () => false, byTunnel), st);
       }
     }
-    c.rails = rails; c.bankRuns = bankRuns; c.bankH = bankH;  // (the runs: the seams check, debug().seamData)
+    c.rails = rails; c.bankRuns = bankRuns; c.bankH = bankH; c.bankS = bankS;  // (the runs: the seams check, debug().seamData)
     { const T = []; for (const [a, b, trail] of tops) if (trail === true) for (let k = a; k < b; k++) { const v = B.idx[k]; T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]); } c.trailPts = T; }
     c.surf = roadIndex(surf); c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; if (c.lod === 0) { grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); }  // no grass or scrub on the roads
     if (!B.n) return setPart(c, 'roads', null);
@@ -1194,7 +1194,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (occAt(c.occ, x, z) === 2) return { skip: true };  // (a car park, a building: the road itself by its gap above, not its coarse cells (bushes were cleared 5 m out, A11: Conzelman 0a_2030, 3a_0430))
     const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), v = Math.round(fj) * n + Math.round(fi), h0 = gridHeight(g, x, z);
     if (h0 == null || !(v >= 0 && v < n * n)) return null;
-    const h = standOn(c, x, z, h0); if (h == null) return { skip: true };
+    // (on a strip's steep face too where the lidar has scrub (cellBushes decides): Street View Conzelman 0a_1030, the cut
+    // above the road under scrub; leaning with the face (below))
+    const h = standOn(c, x, z, h0) ?? c.bankS?.get(bkey(x, z)); if (h == null) return { skip: true };
     if (onTunnel(x, z, h)) return { skip: true };
     // (the road cuts bare (Street View: red chert) where the lidar does not say what grows there; where it does, it decides
     // (cellBushes): Street View user_conzelman_railbend, the cut above the road under low scrub to the edge)
@@ -1202,7 +1204,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // (the largest it may be: its leaves 0.25 m short of the paved edge, its top 0.5 m at a metre from it, 0.35 m more a
     // metre further out; the ground's slope a metre either way, for its lean and its foot)
     const reach = (gap - 0.25) / (REACH * w), top = (0.5 + 0.35 * (gap - 1)) / TOP;
-    const hh = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => { const q = gridHeight(g, x + dx, z + dz), s = q == null ? null : standOn(c, x + dx, z + dz, q); return s ?? h; });
+    const hh = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => { const q = gridHeight(g, x + dx, z + dz), s = q == null ? null : standOn(c, x + dx, z + dz, q) ?? c.bankS?.get(bkey(x + dx, z + dz)); return s ?? h; });
     const gx = Math.max(-1.5, Math.min(1.5, (hh[0] - hh[1]) / 2)), gz = Math.max(-1.5, Math.min(1.5, (hh[2] - hh[3]) / 2));
     return { h, reach, top, grad: [gx, gz] };
   }

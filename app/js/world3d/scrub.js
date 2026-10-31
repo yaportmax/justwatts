@@ -24,10 +24,10 @@ export function cellBushes(ci, cj, cls, hgt = null) {
     const tall = hash2(Math.floor(x / 60), Math.floor(z / 60) + 17), sage = hash2(Math.floor(x / 120) + 9, Math.floor(z / 120)) < 0.4 && hash2(gi, gj + 11) < 0.7 ? 1 : 0;
     const tint = hash2(gj * 3, gi + 5), H = hgt ? hgt(x, z) : null;
     if (H != null && H < 0.25) continue;  // (grass between the bushes, or a tree's crown over them)
-    // (its spread as before (a continuous cover) within 0.8 to 1.8 times its height scale; its height the lidar's: the low
-    // ones broad mounds)
+    // (its spread as before (a continuous cover) within 1 to 2.2 times its height scale; its height the lidar's: the low
+    // ones broad mounds, touching)
     let sc = (0.6 + 0.8 * hash2(gj, gi + 3) ** 1.5) * (0.8 + 0.45 * tall), vh = sc;
-    if (H != null) { vh = H * (0.8 + 0.4 * hash2(gi + 17, gj)) / (TOP * (0.75 + 0.5 * tint)); sc = Math.max(vh * 0.8, Math.min(sc * 0.85, vh * 1.8)); }
+    if (H != null) { vh = H * (0.8 + 0.4 * hash2(gi + 17, gj)) / (TOP * (0.75 + 0.5 * tint)); sc = Math.max(vh, Math.min(sc, vh * 2.2)); }
     out.push([x, z, sc, hash2(gi + 1, gj + 2) * 6.283, sage, tint, 0.75 + 0.5 * hash2(gi * 7, gj + 13), vh]);
   }
   return out;
@@ -65,7 +65,7 @@ export function createScrub({ THREE, scene, geos, mat, fade, cls, hgt = null, gr
       // downhill side stood off it, its leaves' undersides showing); its foot sunk by what the lean leaves of the ground's
       // fall across its reach)
       const [gx, gz] = g.grad || [0, 0], f = 0.7, sl = Math.hypot(gx, gz) * (1 - f);
-      out.push([x, g.h - Math.min(0.15 * vh + sl * 0.6 * REACH * sc * w, 0.6 * TOP * vh), z, sc, turn, sage, t, st, vh, -gx * f, -gz * f]);
+      out.push([x, g.h - Math.min(0.1 * vh + sl * 0.4 * REACH * sc * w, 0.4 * TOP * vh), z, sc, turn, sage, t, st, vh, -gx * f, -gz * f]);
     }
     return out;
   }

@@ -46,6 +46,9 @@ export function sideKinds(E, ground, raw, rail = () => false, skip = () => false
 }
 
 const STEP0 = 0.75, FOOT = 1.5;
+// (a gravel verge's strip where the ground is level or meets the strip within it: out this far; its bands from under 2 m gravel (strip's v), so the
+// gravel ends about 2 m out, NAIP Mitchell Road: a tan band 2 to 3 m wide)
+const GRAVEL = 2.4, GRAVEL_LEVEL = 2.0;
 export const ACROSS = 7;  // a strip's points across (six bands: the verge or shoulder by the edge where there is one, five out to its end)
 // The profile out from edge point p for kind K: { prof: [[o, h], ...] from the edge (0, just under it) to where it meets
 // the ground as drawn, O: that offset, need: anywhere 5 cm or more over the ground } (null: NONE). ground(x, z): as drawn;
@@ -61,6 +64,10 @@ export function profile(p, K, ground, { sh = 0.15, verge = 0.6, raw = null, bloc
   // (behind a curb (K.curb) its shoulder 0.1 m under the curb's top for 0.6 m, then down (A12: at its top the curb read flush,
   // Street View Center Road 0a_0030: a raised curb, the lawn behind a little under its top; its foot buried, no underside))
   const top = K.curb ? 0.05 : -0.03; if (K.curb) sh = 0.6;
+  // (a gravel verge (handlist.js VERGES) level out to its outer edge before a fill falls away (A17: Street View Mitchell
+  // Road a4 0a_0030 2025-03 h96, the gravel level with the road out to the fence, the bins on it, the bank down to the
+  // lagoon past it; a fill from 0.6 m fell away out of sight from the road)
+  if (K.gravel) sh = Math.max(sh, GRAVEL_LEVEL);
   // (up a cut: a grassy foot first, 1 in 4 for its first 1.5 m out from the verge, then at 68 degrees at most (Street View,
   // Alexander Avenue 0a_0530, McCullough Road 0a_0530: a near level grass margin about 2 m wide at the bank's foot before it
   // steepens; the lidar's 7.5 m grid cannot place the foot itself. A11's 1 in 2 never showed: the strip's points across
@@ -82,8 +89,14 @@ export function profile(p, K, ground, { sh = 0.15, verge = 0.6, raw = null, bloc
   // (needed where it stands 5 cm over the ground, or where the ground just past the edge is 15 cm under it: a step down
   // off the edge shows under the road's paving)
   let L = -1; T.forEach(([, t, gg], k) => { if (t > gg + 0.05 || (k === 0 && gg < y - 0.15)) L = k; });
+  // (a gravel verge (handlist.js VERGES) where the ground beside the road is level: a strip all the same, on the ground out
+  // to GRAVEL m, its bands drawn as the gravel (A17: Street View Mitchell Road a4 0a_0030 2025-03 h96, the gravel behind
+  // the kerb at the pano, where the ground is level with the road and no strip was drawn: grass to the kerb)
+  if ((L < 0 || !T.length) && K.gravel) { const o = Math.min(GRAVEL, Math.max(STEP, lim)); return { prof: [[0, y - 0.03], [o, g(o)]], O: o, need: true, lim, kink, foot }; }
   if (L < 0 || !T.length) return { prof: [[0, y - 0.03], [STEP, g(STEP)]], O: STEP, need: false, lim, kink, foot };
   const end = Math.min(L + 1, T.length - 1), prof = [[0, y - 0.03], ...T.slice(0, end).map(([o, t, gg]) => [o, Math.max(t, gg)]), [T[end][0], T[end][2]]];
+  // (a gravel verge's strip at least GRAVEL m out, on the ground past where the profile meets it)
+  if (K.gravel && prof.at(-1)[0] < GRAVEL && lim > prof.at(-1)[0]) { const o = Math.min(GRAVEL, lim); prof.push([o, g(o)]); }
   const need = true;
   return { prof, O: prof.at(-1)[0], need, lim, kink, foot };
 }

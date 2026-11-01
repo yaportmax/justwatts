@@ -361,7 +361,7 @@ def test_hand_listed_barriers_on_their_roads(out):
     h = out["hand"]
     assert h["pieces"] >= h["n"] and abs(h["got"] - h["want"]) < 0.02 * h["want"], h  # every listed stretch on its road, as long
     assert h["surveyed"] >= 30                                                          # the surveyed roads' rails
-    assert h["right"] == ["wbeam"] and h["left"] == [], h                                # Conzelman Road at Hawk Hill: the W-beam on
+    assert h["right"] == ["wbeamg"] and h["left"] == [], h                               # Conzelman Road at Hawk Hill: the W-beam on
                                                                                          # its outer (right) edge only (Street View)
 
 

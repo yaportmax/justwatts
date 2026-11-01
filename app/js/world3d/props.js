@@ -205,7 +205,9 @@ export function treeGeometries() {
     // core (A16: Street View Center Road 0a_0130 2025-03, the sky through the crowns, the trunks pale grey-tan in the sun,
     // pixels' median #918462 (85th percentile #b0a382) against the model's #514937 at the same view; the A13 model's dark
     // core read as a brown ball in the crown and its stems splayed out to 1.2 m by 6.5 m)
-    eucS: merge([bark(trunkG(0.32, 0.26, 2.8, 6), paleS, M(0, 0, 0, 1, 1, 1, 0, 0.04)), ...[[0.7, 0.2], [-0.6, 0.45], [0.2, -0.75], [-0.3, -0.35]].map(([x, z], i) => limb(x * 0.12, 2.6, z * 0.12, x, 7.2 + 0.5 * i, z, 0.15, paleS)),
+    // (A17: three stems from the fork, not four: Street View Center Road 0a_0030 2025-03 h206, the near gums fork into two
+    // or three limbs; four read as a bundle up close)
+    eucS: merge([bark(trunkG(0.32, 0.26, 2.8, 6), paleS, M(0, 0, 0, 1, 1, 1, 0, 0.04)), ...[[0.7, 0.2], [-0.6, 0.45], [0.05, -0.75]].map(([x, z], i) => limb(x * 0.14, 2.6, z * 0.14, x, 7.4 + 0.6 * i, z, 0.17, paleS)),
       limb(0.1, 3.4, 0, 1.5, 5.6, 0.3, 0.09, paleS), limb(-0.1, 3.8, 0.1, -1.3, 6.0, 0.6, 0.09, paleS),
       ...lumps(0, 7.9, 0, 3.1, 4.0, 3.0, 11, 13, 2.4, LEAF.euc, 22, { lump: 0.62, lift: 0.2 }).map(g => leaves(g, F.euc))]),
     // a big sheltered Monterey cypress: a short thick dark trunk forking low, a dense dark irregular crown from about 2.5 m,
@@ -285,6 +287,8 @@ export function furnitureGeometries() {
     // barrier posts 1 m tall (scaled to their height), from their foot: a W-beam's or a fence's square dark timber post (6 by
     // 8 in, Caltrans A77; Street View: every one in the Headlands dark timber), a concrete rail's block, a chain-link's steel (rusty)
     tpost: merge([[B(0.15, 1, 0.2, 0, 0.5, 0), wood]]),
+    // (the same, pale grey weathered timber: Conzelman Road, handlist.js wbeamg, A17)
+    gpost: merge([[B(0.15, 1, 0.2, 0, 0.5, 0), col(0x8e897c)]]),
     // a cable fence's post: slender, weathered grey-brown (Street View Field Road 0a_0130, Mitchell Road 0a_0030: about 10 cm)
     kpost: merge([[C(0.055, 0.05, 1, 6), col(0x7d7264)]]),
     cpost: merge([[B(0.3, 1, 0.3, 0, 0.5, 0), col(0xd9d6cc)]]),

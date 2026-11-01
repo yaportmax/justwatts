@@ -5,7 +5,9 @@
 // m along each road one way, 110 degrees across, both sides read; C:/Dev/justwatts-private/streetview/sources.md, A4).
 // On a surveyed road (SURVEY) these are the only barriers drawn; elsewhere OpenStreetMap's barrier=guard_rail ways. Each: [lat, lon, heading] the pano and the way it looks, 'L' or 'R' the side
 // (as it looks), [from, to] metres along the road from the pano, the kind:
-//   wbeam    galvanised W-beam on square dark timber block posts (every one seen in the Headlands)
+//   wbeam    galvanised W-beam on square dark timber block posts (Alexander Avenue, Bunker Road, McCullough Road)
+//   wbeamg   the same on pale grey weathered timber posts (Conzelman Road: Street View 0a_0030 and 3a_0430 2025-03, 0a_1030
+//            2019-04, the posts' faces #524843, #616469, #706c5b, saturation 0.08 to 0.19; A17)
 //   beam     a white painted concrete beam on short concrete block posts (Alexander Avenue's old rails by US-101)
 //   krail    a concrete K-rail, painted white or bare (Alexander Avenue)
 //   cable    slender weathered posts about 1 m tall with a wire between them (Field Road, Conzelman Road by Point Bonita,
@@ -53,21 +55,21 @@ export const BARRIERS = [
   // Conzelman Road, the one way down from Hawk Hill to Point Bonita
   ...[[37.826728, -122.499215, 169], [37.826292, -122.500003, 288], [37.826642, -122.501048, 279], [37.827041, -122.501939, 323], [37.827509, -122.502886, 292],
     [37.827459, -122.50388, 224], [37.826925, -122.504776, 204], [37.826335, -122.505559, 250], [37.826418, -122.506612, 287], [37.826111, -122.507634, 256],
-    [37.826561, -122.50849, 292], [37.826775, -122.509596, 285]].map(([la, lo, h]) => [la, lo, h, 'L', -10, 100, 'wbeam']),
-  [37.827262, -122.510533, 312, 'L', -10, 30, 'wbeam'],
-  [37.827271, -122.514401, 259, 'L', 30, 60, 'wbeam'],
+    [37.826561, -122.50849, 292], [37.826775, -122.509596, 285]].map(([la, lo, h]) => [la, lo, h, 'L', -10, 100, 'wbeamg']),
+  [37.827262, -122.510533, 312, 'L', -10, 30, 'wbeamg'],
+  [37.827271, -122.514401, 259, 'L', 30, 60, 'wbeamg'],
   [37.823168, -122.528393, 246, 'L', -10, 40, 'cable'],
   // Conzelman Road, from Hawk Hill down to McCullough Road
   ...[[37.829326, -122.498264, 347], [37.830207, -122.498459, 16], [37.830821, -122.497672, 30], [37.831577, -122.497162, 66], [37.831764, -122.49606, 94],
-    [37.832046, -122.495095, 21]].map(([la, lo, h]) => [la, lo, h, 'R', -10, 100, 'wbeam']),
-  [37.832916, -122.494813, 25, 'R', -10, 40, 'wbeam'],
-  [37.833383, -122.494294, 215, 'L', -10, 60, 'wbeam'],
+    [37.832046, -122.495095, 21]].map(([la, lo, h]) => [la, lo, h, 'R', -10, 100, 'wbeamg']),
+  [37.832916, -122.494813, 25, 'R', -10, 40, 'wbeamg'],
+  [37.833383, -122.494294, 215, 'L', -10, 60, 'wbeamg'],
   // Conzelman Road, from McCullough Road down to US-101 by Battery Spencer
-  [37.833279, -122.492139, 144, 'R', 5, 100, 'wbeam'],
-  [37.832523, -122.491558, 126, 'R', 0, 40, 'wbeam'],
+  [37.833279, -122.492139, 144, 'R', 5, 100, 'wbeamg'],
+  [37.832523, -122.491558, 126, 'R', 0, 40, 'wbeamg'],
   ...[[37.832859, -122.490651, 62, 60], [37.832676, -122.48963, 66, 100], [37.832816, -122.488622, 130, 100], [37.832158, -122.487867, 131, 100], [37.831376, -122.487335, 157, 100],
     [37.830556, -122.486937, 180, 100], [37.829657, -122.486916, 181, 100], [37.829263, -122.48545, 43, 100], [37.829505, -122.484423, 93, 100], [37.830468, -122.484064, 341, 100],
-    [37.831359, -122.483993, 15, 100], [37.832188, -122.483562, 27, 60]].map(([la, lo, h, to]) => [la, lo, h, 'R', -10, to, 'wbeam']),
+    [37.831359, -122.483993, 15, 100], [37.832188, -122.483562, 27, 60]].map(([la, lo, h, to]) => [la, lo, h, 'R', -10, to, 'wbeamg']),
   [37.832188, -122.483562, 27, 'L', -10, 30, 'fence'],
   // East Road
   [37.844037, -122.478327, 206, 'L', -10, 60, 'wbeam'], [37.844037, -122.478327, 206, 'R', -10, 60, 'fence'],
@@ -85,7 +87,8 @@ export const BARRIERS = [
   [37.835804, -122.49967, 216, 'R', -10, 60, 'wbeam'],
   // Mitchell Road (along the lagoon: slender dark posts with cables between them, Street View gate_mitchellroad_0a_0030,
   // 2025-03, heading 98; rev5 and rev6 severity 2: not a timber rail fence)
-  [37.832202, -122.539224, 98, 'R', -10, 100, 'cable'],
+  // (A17: at the gravel verge's outer edge, about 2.1 m out, as far as the gravel goes (VERGES, to 115 m))
+  [37.832202, -122.539224, 98, 'R', -10, 100, 'cablev'],
   [37.831882, -122.531363, 85, 'R', -10, 80, 'wbeam'],
 ];
 
@@ -117,7 +120,8 @@ export const CURBS = [
   [37.831724, -122.535866, 108, 'R', -10, 60, 'curb'], [37.831706, -122.533629, 83, 'R', -10, 60, 'curb'],
   // Mitchell Road at the Rodeo Beach lot, the lagoon side: a low pale concrete kerb at the paved edge, the gravel behind it
   // (Street View a4 0a_0030 2025-03 h96: the kerb from under the camera to the bins about 25 m on; A16)
-  [37.832205, -122.539175, 98, 'R', -10, 30, 'curb'],
+  // (A17: low, about 7 cm: its pale top and the grass line at its foot, no face showing; view.js BARRIER low)
+  [37.832205, -122.539175, 98, 'R', -10, 30, 'low'],
 ];
 
 // VERGES: a road side's verge (its first 2 m where not steep, banks.js) gravel, not grass: [lat, lon, heading, side,

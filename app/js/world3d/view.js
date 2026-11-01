@@ -12,7 +12,7 @@ import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, ease
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths } from './rail.js';
 import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS } from './handlist.js';
 import { hash2 } from './landuse.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
+import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { loadVeg, loadTrees, loadHandVeg, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
@@ -53,12 +53,19 @@ const PORT = 12;  // metres of open cut before a tunnel's portal
 // a road side strip's surface raster's key: the metre (x, z) as one number (no string per lookup)
 const bkey = (x, z) => Math.round(x) * 2097152 + Math.round(z);
 const BARRIER = [
-  { k: 'wbeam', off: 0.5, gap: 1.905, sh: true }, { k: 'beam', off: 0.45, gap: 2.5, sh: true }, { k: 'krail', off: 0.4, gap: 6, sh: true },
+  { k: 'wbeam', off: 0.5, gap: 1.905, sh: true }, { k: 'wbeamg', off: 0.5, gap: 1.905, sh: true }, { k: 'beam', off: 0.45, gap: 2.5, sh: true }, { k: 'krail', off: 0.4, gap: 6, sh: true },
   { k: 'cable', off: 0.8, gap: 2.4 }, { k: 'fence', off: 1, gap: 2.4 }, { k: 'chain', off: 1.6, gap: 3 },
+  // (cablev: a cable fence at a gravel verge's outer edge (handlist.js VERGES), A17: Street View Mitchell Road a4 0a_0030
+  // 2025-03 h96, its nearest post 10 m on about 2.1 m past the paved edge, the gravel between)
+  { k: 'cablev', off: 2.1, gap: 2.4 },
   // (a curb along the paved edge, its face there: 6 in tall, 6 in across, A5)
   // (cb: the ground behind it at its top, a lawn or verge flush with it (Street View, Fort Baker: a low curb round a level
   // grass corner), then down to the ground)
   { k: 'curb', off: 0.075, gap: 1e9, cb: true }, { k: 'red', off: 0.075, gap: 1e9, cb: true },
+  // (low: a kerb about 7 cm tall, its face no wider than the grass line along its foot from 2.5 m up, A17: Street View
+  // Mitchell Road a4 0a_0030 2025-03 h96, the pale kerb top about 0.15 m across, the green line at its foot about 0.2 m,
+  // seen 7 to 9 m off; a 6 in face would show as a band about 0.4 m)
+  { k: 'low', off: 0.075, gap: 1e9, cb: true },
   // (a concrete retaining wall, its face 0.25 m out from the paved edge, 0.25 m thick; its top the lidar's ground just
   // behind it (what it holds up), none where that is under 0.3 m: East Road, Street View 0a_0130)
   { k: 'wall', off: 0.375, gap: 1e9, wall: true },
@@ -647,11 +654,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const sr = yield* sideRunsSteps(E, kinds, ground, { verge: st.lm ? 0.8 : 0.4, raw, block }); bankGeometry(sr, bk); bk.ends.push([bk.pos.length / 3, bk.idx.length]); bankRuns.push(...sr); yield;
         // the strips' surface on a 1 m raster (the grass, the scrub and the trees stand on it, not on the ground under it;
         // none on a steep face: a negative height)
+        // (no grass blades or bushes on a gravel verge, nor on the strip's level band just past it: the short grass line at
+        // the gravel's outer edge, A17 Street View Mitchell Road a4 0a_0030; the blades beyond 2 m hid the gravel)
         for (const run of sr) for (let i = 1; i < run.length; i++) { const { p: pa, b: ba } = run[i - 1], { p: pb, b: bb } = run[i], L = Math.hypot(pb[0] - pa[0], pb[2] - pa[2]), nu = Math.max(1, Math.ceil(L / 1.0));
           for (let k = 0; k < ba.length; k++) { const W = Math.max(ba[k][2] - ba[k][0], bb[k][2] - bb[k][0]), nv = Math.max(1, Math.ceil(W / 1.0));
             for (let u = 0; u <= nu; u++) { if (due()) yield; for (let w = 0; w <= nv; w++) { const f = u / nu, e = w / nv, o = (ba[k][0] + (bb[k][0] - ba[k][0]) * f) * (1 - e) + (ba[k][2] + (bb[k][2] - ba[k][2]) * f) * e;
               const h = (ba[k][1] + (bb[k][1] - ba[k][1]) * f) * (1 - e) + (ba[k][3] + (bb[k][3] - ba[k][3]) * f) * e, x = pa[0] + (pb[0] - pa[0]) * f + (pa[3] + (pb[3] - pa[3]) * f) * o, z = pa[2] + (pb[2] - pa[2]) * f + (pa[4] + (pb[4] - pa[4]) * f) * o;
-              const kk = bkey(x, z), old = bankH.get(kk); if (ba[k][5] && run[i].g) bankG.add(kk); if (ba[k][4] || bb[k][4]) { bankH.set(kk, -1e9); bankS.set(kk, Math.max(bankS.get(kk) ?? -1e9, h)); } else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } } }
+              const kk = bkey(x, z), old = bankH.get(kk); if (run[i].g && (ba[k][5] || (ba[k][0] < 2.1 && !ba[k][4]))) bankG.add(kk); if (ba[k][4] || bb[k][4]) { bankH.set(kk, -1e9); bankS.set(kk, Math.max(bankS.get(kk) ?? -1e9, h)); } else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } } }
           if (due()) yield; }
       };
       for (const { C, r, st, own } of sides) for (const sd of [1, -1]) {
@@ -945,7 +954,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
@@ -1027,10 +1036,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // the barriers' posts (buildRoads), each from 0.3 m into the ground under it (however far it falls away) to its top:
     // a W-beam's square dark timber posts, a cable fence's and a rail fence's timber posts, a concrete rail's blocks, a
     // chain-link fence's steel posts
-    const POST = { wbeam: ['tpost', 0.8], cable: ['kpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
+    const POST = { wbeam: ['tpost', 0.8], wbeamg: ['gpost', 0.8], cable: ['kpost', 1], cablev: ['kpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
     for (const R of c.rails || []) { const P = POST[R.kind]; if (P) for (const [x, y, z, yaw] of R.posts) { const bot = Math.min(y, hAt(x, z) ?? y) - 0.3; items[P[0]].push([x, bot, z, yaw, y + P[1] - bot]); } }
     // (the feet of what stands on the ground: the seams check)
-    c.feet = ['pole', 'stop', 'lamp', 'limit', 'tpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
+    c.feet = ['pole', 'stop', 'lamp', 'limit', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3();
     // every kind in one batched draw
@@ -1061,15 +1070,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (c.rails?.length) {
       const SEC = {
         wbeam: [mats.rail, [[0.47, 0.16], [0.54, 0.22], [0.63, 0.16], [0.72, 0.22], [0.79, 0.16]], false],
+        wbeamg: [mats.rail, [[0.47, 0.16], [0.54, 0.22], [0.63, 0.16], [0.72, 0.22], [0.79, 0.16]], false],
         beam: [mats.wcon, [[0.42, 0.18], [0.72, 0.18], [0.72, -0.12], [0.42, -0.12]], true],
         krail: [mats.wcon, [[-0.05, 0.31], [0.08, 0.31], [0.33, 0.19], [0.81, 0.08], [0.81, -0.08], [0.33, -0.19], [0.08, -0.31], [-0.05, -0.31]], true],
         cable: [mats.wire, [[0.86, 0.01], [0.88, 0.01], [0.88, -0.01], [0.86, -0.01]], true],
+        cablev: [mats.wire, [[0.86, 0.01], [0.88, 0.01], [0.88, -0.01], [0.86, -0.01]], true],
         fence: [mats.wood, [[0.45, 0.06], [0.6, 0.06], [0.6, -0.02], [0.45, -0.02]], true, [[0.95, 0.06], [1.1, 0.06], [1.1, -0.02], [0.95, -0.02]]],
         chain: [mats.wire, [[2.05, 0.03], [2.1, 0.03], [2.1, -0.03], [2.05, -0.03]], true],
         mesh: [mats.mesh, [[0.05, 0], [2.05, 0]], false],
         wall: [mats.portal, [], true],
         // (a curb's foot 0.45 m under the edge: in the ground however it falls behind it; its ends closed)
         curb: [mats.curb, [[-0.45, 0.075], [0.15, 0.075], [0.15, -0.075], [-0.45, -0.075]], true, null, true], red: [mats.redCurb, [[-0.45, 0.075], [0.15, 0.075], [0.15, -0.075], [-0.45, -0.075]], true, null, true],
+        low: [mats.curb, [[-0.45, 0.075], [0.07, 0.075], [0.07, -0.075], [-0.45, -0.075]], true, null, true],
       };
       const sweep = new Map(), add = (key, pts, S, closed, caps = false) => {
         const g = sweep.get(key) ?? sweep.set(key, { pos: [], idx: [] }).get(key), b0 = g.pos.length / 3, N = S.length;
@@ -1090,7 +1102,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         let g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); if (pl) g.setAttribute('pl', new THREE.Float32BufferAttribute(pl, 3)); g.setIndex(idx);
         // (a curb's faces each lit flat: its face to the road a lit band below its top, not a dark line (A11's deep foot
         // smoothed the face's normals down toward its foot: Street View Center Road 0a_0030's raised curb read flush))
-        if (key === 'curb' || key === 'red') g = g.toNonIndexed();
+        if (key === 'curb' || key === 'red' || key === 'low') g = g.toNonIndexed();
         g.computeVertexNormals(); g.computeBoundingSphere();
         const m = new THREE.Mesh(g, SEC[key][0]); m.castShadow = key !== 'mesh' && QUALITY[q].shadow > 0; m.receiveShadow = true; grp.add(m);
       }
@@ -1919,7 +1931,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // the cars' lamps: on with the sun low (under about 8 degrees) and in tunnels
       { const sy = sky.sunDir.y, k = Math.min(1, Math.max(0, (0.14 - sy) / 0.12)); life.setLamps(Math.max(k * k * (3 - 2 * k), dark), scene.fog.color); LAMPS.value = Math.min(1, Math.max(0, (0.07 - sy) / 0.08)); }
       sky.sun.intensity = sky.sunI * (1 - 0.96 * dark); sky.hemi.intensity = sky.hemiI * (1 - 0.6 * dark);
-      FOG_SUN.d.value.copy(sky.sunDir); FOG_SUN.c.value.copy(sky.sun.color).multiplyScalar(sky.sun.intensity);
+      FOG_SUN.d.value.copy(sky.sunDir); GROUND_SUN.value.copy(sky.sunDir); FOG_SUN.c.value.copy(sky.sun.color).multiplyScalar(sky.sun.intensity);
       // the tunnel's own lamps: warm light all round inside it
       if (hemiKey !== sky.time) { hemiKey = sky.time; hemiBase[0].copy(sky.hemi.color); hemiBase[1].copy(sky.hemi.groundColor); }
       sky.hemi.color.copy(hemiBase[0]).lerp(TUN_LIGHT, dark * 0.9); sky.hemi.groundColor.copy(hemiBase[1]).lerp(TUN_LIGHT, dark * 0.7);

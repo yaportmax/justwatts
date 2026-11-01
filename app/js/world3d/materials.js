@@ -29,8 +29,11 @@ float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 *
 `;
 // p: world xz; n: world normal; m: [wood, green, sand, town]; m2: [cut bank, rock, lake, farm]; cv: hollow (+) or
 // ridge (-); h: height. Returns the albedo; rk: how much of it is rock or bare earth (no grass grows there).
+// the sun's world direction for the ground's bare earth (view.js keeps it up to date)
+export const GROUND_SUN = { value: new THREE.Vector3(0, 1, 0) };
 const GLSL_GROUND = /* glsl */`
-uniform sampler2D tNoise; uniform vec4 rwBox[4]; uniform vec4 hlBox; uniform vec4 sfBox; uniform sampler2D tVeg; uniform vec4 vegBox;
+uniform vec3 jwSunG; uniform sampler2D tNoise;
+const float EARTH_SUN = 2.4; uniform vec4 rwBox[4]; uniform vec4 hlBox; uniform vec4 sfBox; uniform sampler2D tVeg; uniform vec4 vegBox;
 vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
 vec4 jwVeg(vec2 p) {
   vec2 uv = (p - vegBox.xy) / (vegBox.zw - vegBox.xy);
@@ -38,7 +41,7 @@ vec4 jwVeg(vec2 p) {
 }
 // set by jwGround: how much of the point is coastal scrub from the aerial imagery, and whether there is any there; set
 // before it: how near the point is (1: among the scrub's drawn bushes, its ground the litter and grass under them)
-float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0, jwGv = 0.0;
+float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0, jwGv = 0.0, jwEarth = 0.0;
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
   // (the small noise on a steep face laid across the face, along it and up it, not projected from above: no streaks
@@ -154,8 +157,15 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     earth = mix(earth, srgb(vec3(0.53, 0.36, 0.28)), smoothstep(0.35, 0.65, b1) * 0.6);
     // (Street View 3a_0430's cut too: scrub in strips across it; the scrub's own grey olive, coyote brush, props.js)
     float sp = smoothstep(0.42, 0.55, b2) * max(jwScrub * 0.9, 0.75);
+    // (A17: in the sun the bare earth as light as Street View's sunlit cuts (the sunlight on it stronger: jwEarth,
+    // terrainMaterial's JW_SUN_MUL, the shadows kept), less saturated: Conzelman 3a_0430 2025-03 h61, the cut
+    // across the bend (its face toward the day's sun) median #a18969, value 0.63, against the game's 0.44 at the same view;
+    // McCullough Road 0a_0530's bare patch #887057, both less saturated than the earth below (saturation 0.35 against
+    // 0.46). The colours above came from a face out of the sun (#675037); a face away from the sun as before)
+    { float sl = max(dot(n, jwSunG), 0.0); earth = mix(earth, vec3(dot(earth, vec3(0.2126, 0.7152, 0.0722))), 0.15 * sl); }
     c = mix(c, earth * (0.95 + 0.1 * bed), bare);
-    c = mix(c, srgb(vec3(0.44, 0.45, 0.33)) * (0.85 + 0.3 * b1), sp * bare * 0.9); bare *= 1.0 - sp; }
+    jwEarth = bare;
+    c = mix(c, srgb(vec3(0.44, 0.45, 0.33)) * (0.85 + 0.3 * b1), sp * bare * 0.9); jwEarth *= 1.0 - sp * 0.9; bare *= 1.0 - sp; }
   rk = max(rk, bare); jwPav = smoothstep(0.25, 0.65, pav) * known;
   // under the redwoods: red-brown needle litter, patches of sorrel
   float rw = 0.0;
@@ -177,12 +187,12 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv; attribute float gv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vGv = gv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN; uniform float scrubR;\n' + GLSL_COMMON + GLSL_GROUND)
+      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN; uniform float scrubR;\n' + GLSL_COMMON + GLSL_GROUND + '\n#define JW_SUN_MUL (1.0 + EARTH_SUN * jwEarth)\n')
       .replace('#include <color_fragment>', /* glsl */`
         bool inBore = false;
         ${bores ? `
@@ -233,7 +243,7 @@ export function grassMaterial() {
   const T = textures(), U = { radius: { value: 60 }, centre: { value: new THREE.Vector2() } };
   m.userData.u = U;
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
+    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 gA; attribute vec4 gB; uniform float wTime, wGust, radius; uniform vec2 centre; varying vec3 vGc;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <begin_vertex>', /* glsl */`
@@ -587,6 +597,9 @@ export function withSun(m) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <fog_pars_fragment>', `#include <fog_pars_fragment>
         uniform sampler2D hzMap; uniform vec4 hzBox;
+        #ifndef JW_SUN_MUL
+        #define JW_SUN_MUL 1.0
+        #endif
         #ifdef JW_VIS_V
         varying float vJwVis;
         float jwSunVis() { return vJwVis; }
@@ -599,7 +612,7 @@ export function withSun(m) {
           return 1.0;
         }
         #endif`)
-      .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= jwSunVis();'));
+      .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n\t\tdirectLight.color *= jwSunVis() * JW_SUN_MUL;'));
   };
   m.customProgramCacheKey = () => key;
   return m;

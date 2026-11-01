@@ -91,7 +91,9 @@ export const BARRIERS = [
 
 // CURBS: concrete curbs along the ridden roads' edges from the same survey (none in OpenStreetMap here: no kerb= tags),
 // as BARRIERS: [lat, lon, heading, side, from, to, kind]: curb a grey concrete curb 6 in tall (Fort Baker, the cut on upper
-// Conzelman, East Road, Center Road), red a red painted one (Field Road by the Point Bonita lot)
+// Conzelman, East Road, Center Road), red a red painted one (Field Road by the Point Bonita lot, and by Fort Barry's
+// crosswalk only: Street View 0a_1530 2025-03, red from about 5 m before the pano to the sidewalk's ramp 4 m on, grey on to
+// the crosswalk 12 m on; the grey 10 to 5 m before it from a point 5 m back, A14)
 const both = (la, lo, h, to = 100) => [[la, lo, h, 'L', -10, to, 'curb'], [la, lo, h, 'R', -10, to, 'curb']];
 export const CURBS = [
   [37.846797, -122.478691, 141, 'L', -10, 60, 'curb'],
@@ -108,7 +110,8 @@ export const CURBS = [
   ...[[37.835986, -122.474565, 88], [37.836256, -122.473531, 42], [37.83705, -122.473063, 359], [37.838505, -122.474272, 329], [37.839192, -122.475001, 330],
     [37.839987, -122.475532, 336], [37.840806, -122.476002, 334], [37.841363, -122.476867, 297], [37.842108, -122.477456, 337]].flatMap(([la, lo, h]) => both(la, lo, h)),
   [37.837774, -122.473644, 304, 'R', -10, 100, 'curb'], [37.842928, -122.477923, 333, 'L', -10, 60, 'curb'],
-  [37.822896, -122.528884, 353, 'L', -10, 60, 'curb'], [37.830439, -122.524453, 91, 'L', -10, 30, 'red'], [37.830439, -122.524453, 91, 'R', -10, 60, 'curb'],
+  [37.822896, -122.528884, 353, 'L', -10, 60, 'curb'], [37.830439, -122.52451, 91, 'L', -5, 0, 'curb'], [37.830439, -122.524453, 91, 'L', -5, 4, 'red'], [37.830439, -122.524453, 91, 'L', 4, 12, 'curb'],
+  [37.830439, -122.524453, 91, 'R', -10, 60, 'curb'],
   [37.821781, -122.52985, 263, 'R', -10, 40, 'red'], [37.821781, -122.52985, 263, 'L', -10, 30, 'curb'],
   [37.836402, -122.498985, 278, 'L', -10, 80, 'curb'],
   [37.831724, -122.535866, 108, 'R', -10, 60, 'curb'], [37.831706, -122.533629, 83, 'R', -10, 60, 'curb'],

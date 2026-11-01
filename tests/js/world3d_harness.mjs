@@ -20,8 +20,8 @@ import { makeProj, tileX, tileY, latOf, lonOf } from '../../app/js/world3d/geo.j
 import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js';
 import { probeWebGL2, resetProbe, pickView } from '../../app/js/world3d/probe.js';
 import { RoadGraph, Plan, bridges, smoothFrom } from '../../app/js/roads.js';
-import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, smoothRail, isTrail, handBarriers } from '../../app/js/world3d/rail.js';
-import { BARRIERS, SURVEY, MARKINGS, STOPS, CROSSINGS } from '../../app/js/world3d/handlist.js';
+import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, smoothRail, isTrail, handBarriers, setWidths, widthAt } from '../../app/js/world3d/rail.js';
+import { BARRIERS, SURVEY, MARKINGS, STOPS, CROSSINGS, WIDTHS } from '../../app/js/world3d/handlist.js';
 import { onDeck, toST, GGB } from '../../app/js/ggb.js';
 import { readdirSync } from 'node:fs';
 import { inWorld, BOUNDS } from '../../app/js/world.js';
@@ -349,6 +349,8 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   // two ways meet end to end each travel lane's or buffer's line of the one ends within 0.1 m of one of the other (a
   // parking lane's may end there). Over every z14 tile; counted apart in the Headlands (the rides' roads) and the rest.
   const dir = new URL('../../app/world/14/', import.meta.url), proj = makeProj(37.83, -122.5);
+  // (and a width along part of a way as the app draws it, handlist.js WIDTHS)
+  const RW = setWidths(railIndex(JSON.parse(gunzipSync(readFileSync(new URL('../../app/world/rails.bin', import.meta.url))).toString()), proj.xz), WIDTHS, proj.xz); let widened = 0;
   const key = r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`, okW = r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw);
   const lineOffs = (c, c2) => { const [lm, , , w] = c, [a, b, pL, pR] = c2, h = w / 2, o = []; if (!lm) return o;
     o.push(['R', h - a], ['L', -(h - b)]); if (lm === 4) o.push(['L4', -(h - b + YB)]); if (pR) o.push(['PR', h - pR]); if (pL) o.push(['PL', -(h - pL)]); return o; };
@@ -362,7 +364,8 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     const ends = new Map();
     ch.forEach((r, ri) => {
       if (!okW(r) || r.fl & 3) return; const st = roadStyle(r.hw, r.ln, r.fl, r.wd); if (!st.lm) return; roads++;
-      const B = builder(), cen = ribbon(B, r.pts.map(p => proj.xz(...p)), { ...st, hAt: () => 0, joints: J.get(ri), step: 5 }), d = B.done(), n = cen.length;
+      const B = builder(), cen = ribbon(B, r.pts.map(p => proj.xz(...p)), { ...st, hAt: () => 0, joints: J.get(ri), step: 5, wAt: RW.widthOf }), d = B.done(), n = cen.length;
+      if (r.hw === 'unclassified') for (const c of cen) if (c[3] * 2 < st.w - 0.9) widened++;
       const at = i => lineOffs(Array.from(d.code.slice(8 * i, 8 * i + 4)), Array.from(d.code2.slice(8 * i, 8 * i + 4)));
       for (let i = 1; i < n; i++) {
         const p = at(i - 1), q = at(i), ds = Math.hypot(cen[i][0] - cen[i - 1][0], cen[i][2] - cen[i - 1][2]);
@@ -381,7 +384,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
       for (const [A, B] of [[E[0], E[1]], [E[1], E[0]]]) for (const [, x, z] of run(A.pts)) { const m = Math.min(...run(B.pts).map(([, x2, z2]) => Math.hypot(x - x2, z - z2))); if (m > 0.1) fail(x, z, m, 'joint'); }
     }
   }
-  out.lines = { roads, joints, ...S };
+  out.lines = { roads, joints, widened, ...S };
 }
 
 /* ---------- road sides (banks.js) ---------- */
@@ -466,7 +469,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     lanes: { bunker: [r3(laneOf(r2, true)), r3(laneOf(r2, false))], plain: r3(laneOf(r0, true)), path: laneOf(rp, true), conzUp: r3(laneOf(rk, false)), conzDown: r3(laneOf(rk, true)) } };
 
   const APP = new URL('../../app/', import.meta.url), proj = makeProj(37.83, -122.5), xz = (la, lo) => proj.xz(la, lo);
-  const RJ = JSON.parse(gunzipSync(readFileSync(new URL('world/rails.bin', APP))).toString()), RI = railIndex(RJ, xz);
+  const RJ = JSON.parse(gunzipSync(readFileSync(new URL('world/rails.bin', APP))).toString()), RI = setWidths(railIndex(RJ, xz), WIDTHS, xz);
   const tiles = new Map(), tile = (x, y) => { const k = `${x}_${y}`; if (!tiles.has(k)) { const f = new URL(`world/14/${k}.bin`, APP); tiles.set(k, existsSync(f) ? unpackTile(new Uint8Array(gunzipSync(readFileSync(f)))) : null); } return tiles.get(k); };
   const ground = (x, z) => { const la = proj.lat(z), lo = proj.lon(x), X = tileX(lo, 14), Y = tileY(la, 14), t = tile(Math.floor(X), Math.floor(Y)); return t ? gridAt(t.hs, t.n, (X % 1) * (t.n - 1), (Y % 1) * (t.n - 1)) : null; };
   // (a): every rail: its grade over 10 m, the bend from one 5 m step to the next (a jump), how far under the lidar's
@@ -560,8 +563,8 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
       if (!turn && a != null && m != null && c != null) b = Math.max(b, Math.abs(a - 2 * m + c)); } return b; };
   // (a rail's road as drawn at (x, z): its half width and the parking on the rider's side, eased at a joint with another
   // way as the ribbon is, ribbon.js taperedWidth / taperedParts)
-  const drawn = (q, x, z, fw) => { const st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd); if (!q.joints?.length || (q.r.fl & 2 && q.r.ln === 1)) return { st, half: st.w / 2, park: fw ? st.pR : st.pL };
-    const w = taperedWidth(st.w, q.joints, x, z), tp = taperedParts([st.a, st.b, st.pL, st.pR], q.joints, x, z); return { st, half: w / 2, park: tp ? tp[fw ? 3 : 2] : (fw ? st.pR : st.pL) * w / st.w }; };
+  const drawn = (q, x, z, fw) => { const st = roadStyle(q.r.hw, q.r.ln, q.r.fl, q.r.wd); if (!q.joints?.length || (q.r.fl & 2 && q.r.ln === 1)) return { st, half: q.r.fl & 2 && q.r.ln === 1 ? st.w / 2 : widthAt(q, x, z, st.w) / 2, park: fw ? st.pR : st.pL };
+    const w = taperedWidth(st.w, q.joints, x, z), tp = taperedParts([st.a, st.b, st.pL, st.pR], q.joints, x, z); return { st, half: widthAt(q, x, z, w) / 2, park: tp ? tp[fw ? 3 : 2] : (fw ? st.pR : st.pL) * w / st.w }; };
   out.courses = {};
   for (const [name, la, lo, hd] of starts) for (const back of [0, 1]) {
     const c = courseOf(la, lo, (hd + 180 * back) % 360), key = name + (back ? 'Back' : ''); if (!c) { out.courses[key] = null; continue; }

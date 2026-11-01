@@ -72,15 +72,35 @@ export const oneLane = r => !!(r.fl & 2) && r.ln === 1 && !(r.fl & 8);
 // (x, z, joints: where it meets another way end to end, tapers: the width and the parts there as the road is drawn,
 // ribbon.js: in the bike lane's paint through the joint (A13: upper Conzelman's contraflow lane, the rider on the
 // buffer's hatching near each joint, its way's half width 0.9 m off the drawn one))
-export function laneOf(r, fwd = true, x = 0, z = 0, joints = null) {
+export function laneOf(r, fwd = true, x = 0, z = 0, joints = null, q = null) {
   const st = roadStyle(r.hw, r.ln, r.fl, r.wd), bike = r.fl & (fwd ? 64 : 32);
   let half = st.w / 2, park = fwd ? st.pR : st.pL;
   if (joints?.length && !oneLane(r)) { const w = taperedWidth(st.w, joints, x, z), tp = taperedParts([st.a, st.b, st.pL, st.pR], joints, x, z); half = w / 2; park = tp ? tp[fwd ? 3 : 2] : park * w / st.w; }
+  if (q?.widths && !oneLane(r)) half = widthAt(q, x, z, half * 2) / 2;  // (a width measured along part of the way, handlist.js WIDTHS)
   // (the Golden Gate Bridge's sidewalks, two way for bikes: keep right, the middle of its right half; goldengate.org)
   if (r.fl & 16 && /cycleway|footway|path|pedestrian/.test(r.hw)) return half / 2;
   if (isTrail(r) || /cycleway|pedestrian/.test(r.hw) || half < 2) return 0;
   if (oneLane(r)) return ONE_OFF;
   return Math.max(0, Math.min(6.5, bike ? half - park - BIKE_LANE / 2 : half - park - 1));
+}
+
+// A width along part of a way (handlist.js WIDTHS: [lat, lon, heading, from, to, metres, taper]) on its rails: q.widths, the
+// stretches as handBarriers lays them. widthAt(q, x, z, w): the drawn width at a point of rail q whose own width there is w,
+// eased to the entry's over its first and last `taper` metres (A16). idx.widthOf(x, z, w): the same on the rail whose line
+// the point is on (within 1 m), null on none with a width
+export function widthAt(q, x, z, w) {
+  if (!q.widths) return w; const t = q.T.at(x, z); if (!t) return w;
+  for (const p of q.widths) if (t.s >= p.s0 && t.s <= p.s1) {
+    const pos = p.w.off + Math.abs(t.s - p.w.s), e = Math.min(pos, p.w.L - pos) / (p.w.b || 1), f = e >= 1 ? 1 : e <= 0 ? 0 : e * e * (3 - 2 * e);
+    return w + (p.w.a - w) * f;
+  }
+  return w;
+}
+export function setWidths(idx, list, xz) {
+  const H = handBarriers(idx, list.map(([la, lo, h, from, to, w, tp]) => [la, lo, h, 'C', from, to, 'width', [w, tp]]), [], xz);
+  for (const p of H.pieces) if (p.w) (idx.rails[p.id].widths ??= []).push(p);
+  idx.widthOf = (x, z, w) => { for (const id of idx.near(x, z)) { const q = idx.rails[id]; if (!q.widths) continue; const t = q.T.at(x, z); if (t && Math.abs(t.d) < 1) return widthAt(q, x, z, w); } return null; };
+  return idx;
 }
 
 // The whole area's rails (app/world/rails.bin: { r: roads as landuse.js encodeRoads, h: packH per road }) in local
@@ -155,7 +175,7 @@ export function profileOf(idx, P, ele = null, old = null, k = 0) {
   for (let i = k; i < n; i++) {
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)];
     ri[i] = prev = idx.match(P[i][0], P[i][1], b[0] - a[0], b[1] - a[1], ele ? ele[i] : null, prev, dir);
-    if (prev >= 0) { fw[i] = dir[0]; lane[i] = laneOf(idx.rails[prev].r, dir[0] > 0, P[i][0], P[i][1], idx.rails[prev].joints); }
+    if (prev >= 0) { fw[i] = dir[0]; lane[i] = laneOf(idx.rails[prev].r, dir[0] > 0, P[i][0], P[i][1], idx.rails[prev].joints, idx.rails[prev]); }
     // (into a one-lane bore: the lane narrows with the road, onto the bore's)
     for (const [x, z] of idx.narrows) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < TAPER) { const f = d / TAPER; lane[i] = ONE_OFF + (lane[i] - ONE_OFF) * f * f * (3 - 2 * f); } }
   }

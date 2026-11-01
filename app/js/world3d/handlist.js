@@ -263,6 +263,15 @@ export const MARKINGS = [
   [37.829508, -122.484477, 93, 'C', 10, 80, 'yposts'],
 ];
 
+// WIDTHS: a paved width along part of a way where the measures differ from the way's drawn width along it:
+// [lat, lon, heading, from, to, metres, taper] (a pano, the way it looks, metres along from it), eased in and out over
+// the stretch's first and last `taper` metres; the travel lanes take the change (rail.js widthAt, A16).
+// Upper Conzelman Road (way 1302287450, drawn 10.3 m): Street View 3a_0430 (pano H9qZ_jHw, 2025-03 h61) 9.3 m (A14:
+// bike lane 2.5, buffer 0.7, lanes 2.5 and 3.6), 3a_0630 about 10.0 m (A15); the USGS 3DEP 1 m lidar (0.5 m resample,
+// cache/lidar_fine/conz3a.npz) shelf across 9.25 to 10.25 m from 205 to 275 m along the way, 11 to 14 m either side:
+// 9.3 m from 84 to 138 m past 3a_0330 (GnZP8Npl, h62), eased from 69 and to 153 m
+export const WIDTHS = [[37.83284184, -122.49067238, 62, 69, 153, 9.3, 15]];
+
 // STOPS: stop signs Street View shows that OpenStreetMap lacks (no highway=stop there): [lat, lon, heading] the stop
 // bar's point on the road's centre and the way traffic runs into it, { legend: STOP painted that many metres before the
 // bar in the right lane, half: the bar across the right half (a two way road) }. CROSSINGS: marked crossings it lacks

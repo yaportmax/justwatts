@@ -146,7 +146,7 @@ export function tapers(roads, { width, parts = null, rigid = () => false, ok = (
 // mk(x, z, tx, tz): the hand list's markings at a centre point, the way running (tx, tz): [centre, bits] (MARK).
 // rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
 // centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null, mk = null, flares = null }) {
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null, mk = null, flares = null, wAt = null }) {
   let P = resample(pts, step);
   // (flares [[x, z, R], ...]: a side road's mouth, its corners rounded R metres: the width there 2 R more, a quarter
   // circle each side out to R along it; a point every 0.75 m within its reach)
@@ -154,15 +154,18 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
   // (within a taper's reach of a joint a point every 1.5 m: the edges follow the width's curve, not a corner every step)
   if (joints?.some(j => j[2] != null)) { const by = q => joints.some(([x, z, wj]) => wj != null && Math.hypot(q[0] - x, q[1] - z) < TAPER + step); P = P.flatMap((p, i) => !i || !(by(P[i - 1]) || by(p)) ? [p] : resample([P[i - 1], p], 1.5).slice(1)); }
   const n = P.length; if (n < 2) return [];
-  let code = [lm, surf, lanes, w, a, b, pL, pR];
+  const code0 = [lm, surf, lanes, w, a, b, pL, pR]; let code = code0;
   const L = [0]; for (let i = 1; i < n; i++) L.push(L[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
   const tot = L[n - 1] || 1, centre = [];
   let last = 0, base = B.n, half = w / 2;
   const ins = [a, b, pL, pR];
   for (let i = 0; i < n; i++) {
+    if (wAt && !joints?.length && !flares?.length) { code = code0; half = w / 2; }
     if (joints?.length || flares?.length) { const wt = taperedWidth(w, joints, P[i][0], P[i][1]); let wi = wt; for (const [x, z, R] of flares || []) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < R) wi += 2 * (R - Math.sqrt(R * R - (R - d) * (R - d))); }
       // (the parts eased to a joint's where it has them, else in proportion to the width; a side road's mouth widens them)
       const tp = taperedParts(ins, joints, P[i][0], P[i][1]), s = wi / (tp ? wt : w); half = wi / 2; code = [lm, surf, lanes, wi, ...(tp || ins).map(v => v * s)]; }
+    // (a width measured along part of the way, wAt (rail.js widthAt): the travel lanes take the change, the parts kept)
+    if (wAt) { const wo = wAt(P[i][0], P[i][1], code[3]); if (wo != null && Math.abs(wo - code[3]) > 1e-4) { code = [code[0], code[1], code[2], wo, ...code.slice(4, 8)]; half = wo / 2; } }
     // the join: the average of the two segments' normals, stretched to keep the width (capped at sharp turns)
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], c = P[i];
     let tx = b[0] - a[0], tz = b[1] - a[1]; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;

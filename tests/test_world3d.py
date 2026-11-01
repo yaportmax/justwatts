@@ -119,6 +119,8 @@ def test_painted_lines_never_step_sideways(out):
     L = out["lines"]
     assert L["roads"] > 5000 and L["joints"] > 3000
     assert L["hl"]["along"] == 0 and L["hl"]["joint"] == 0, L["hl"]
+    # (A16: upper Conzelman 3a_0430 drawn 9.3 m along part of its way, handlist.js WIDTHS: drawn, and its lines ease)
+    assert L["widened"] > 5, L["widened"]
 
 
 def test_road_ways_join_and_corners_round(out):

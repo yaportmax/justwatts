@@ -9,8 +9,8 @@ import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSt
 import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } from './banks.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impGrow } from './stream.js';
-import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers } from './rail.js';
-import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES } from './handlist.js';
+import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths } from './rail.js';
+import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS } from './handlist.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -157,7 +157,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // the rails of every road the rides reach (rail.js): the rider's heights, read before any tile; a course's profile is
   // matched to them when both are here
   let RI = null, HB = null, HM = null, HV = null;  // (HB, HM: the hand list's barriers and lane markings on the rails, rail.js handBarriers)
-  baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS), SURVEY, proj.xz); HM = handBarriers(RI, MARKINGS, [], proj.xz, true); HV = handBarriers(RI, VERGES, [], proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
+  baked.rails?.().then(j => { if (dead || !j) return; RI = setWidths(railIndex(j, proj.xz), WIDTHS, proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS), SURVEY, proj.xz); HM = handBarriers(RI, MARKINGS, [], proj.xz, true); HV = handBarriers(RI, VERGES, [], proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
   // a tunnel's rail at a point (its floor, baked), null off every tunnel's
   // the drawn top of the road at a point nearest the height e, of the rails it is on, not past one's end (rail.js top
   // counts a rail's end out to its half width past it: a bore's floor carried on level out of its portal)
@@ -487,7 +487,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (a side road cut at the other road's edge: its corners rounded there (curb returns), 5 m: NAIP, Field Road 0a_0130's
       // T junction, both corners about 4 to 6 m; Street View: a flared mouth. Not a service way's)
       const fl = r.hw === 'service' ? null : [...(pts.fs ? [[...pts[0], 5]] : []), ...(pts.fe ? [[...pts.at(-1), 5]] : [])];
-      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : 5, joints: t.joints.get(ri), drape: trail, mk, flares: fl });
+      const i0 = B.idx.length, centre = ribbon(B, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : 5, joints: t.joints.get(ri), drape: trail, mk, flares: fl, wAt: RI?.widthOf && !trail ? RI.widthOf : null });
       tops.push([i0, B.idx.length, trail]);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
       if (!st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk, lm: st.lm, b: st.b, park: !!(r.fl & 256), st });

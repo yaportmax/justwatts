@@ -222,8 +222,9 @@ hw.social.close();
 const local = t => new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 hw.social.open('new');
 out.newForm = $('#socBody').innerHTML;
-// datetime-local has minutes only: create for later, then Bob joins; a second one starts in a few seconds via the API
-const g1 = await hw.social.create({ name: 'Tuesday spin', start: 'c:r-hawk', at: local(Date.now() + 3600e3), workout: '', invite: [bobId] });
+// datetime-local has minutes only: create for later (3 h: an hour ahead lands on an ambiguous wall time in the fall-back hour,
+// which parses as the earlier instant, now), then Bob joins; a second one starts in a few seconds via the API
+const g1 = await hw.social.create({ name: 'Tuesday spin', start: 'c:r-hawk', at: local(Date.now() + 3 * 3600e3), workout: '', invite: [bobId] });
 out.created = g1 && [g1.name, g1.plan.kind, g1.plan.id];
 await until(() => hw.social.state().viewData?.g, 'lobby');
 out.lobby = { title: $('#socTitle').textContent, html: $('#socLobby').innerHTML };

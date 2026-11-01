@@ -15,7 +15,7 @@ import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
-import { loadVeg, loadTrees, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
+import { loadVeg, loadTrees, loadHandVeg, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
 import { createScrub, REACH, TOP } from './scrub.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
 import { textures } from './tex.js';
@@ -139,9 +139,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // came are built again
   let veg = null;
   const vcls = (x, z) => veg ? veg.at(proj.lat(z), proj.lon(x)) : 0;
-  loadVeg().then(v => {
+  Promise.all([loadVeg(), loadHandVeg()]).then(([v, hand]) => {
     if (dead || !v) return;
     if (!v.cut) { v.cut = true; for (const { pts, w } of CUTS) v.paint(pts, w, BARE); }  // (the hand list's exposed cuts: bare earth; once, the grid is shared)
+    v.hand(hand);  // (Conzelman Road's hand list, A18: over the imagery's classes)
     const tex = new THREE.DataTexture(v.rgba(), v.n, v.n, THREE.RGBAFormat);
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true; tex.anisotropy = 4; tex.needsUpdate = true;
     renderer.initTexture(tex);
@@ -786,7 +787,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // and crown (the model scaled to them, fitTree), clear of the roads; its trunk on the lowest ground round its foot
     if (lidarTrees) {
       const T = [];
-      lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp) => T.push([la, lo, h, r, sp]));
+      lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp) => { if (!veg?.handAt(la, lo, 'notrees')) T.push([la, lo, h, r, sp]); });
+      // (and the hand list's, A18: Street View's own trees where the lidar's are wrong or missing)
+      for (const t of veg?.handTrees || []) { const [la, lo] = t.at; if (la <= proj.lat(box[1]) && la > proj.lat(box[3]) && lo >= proj.lon(box[0]) && lo < proj.lon(box[2])) T.push([la, lo, t.h, t.r, t.sp]); }
       for (let i = 0; i < T.length; i++) {
         if (i % 400 === 399) yield;
         const [la, lo, h, r, sp0] = T[i], sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0 === 'cypress' && h >= CYP_TALL ? 'cypressT' : sp0, dim = DIMS[sp]; if (!dim) continue;
@@ -1328,11 +1331,19 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   const grass = createGrass({ THREE, scene, mat: mats.grass, sample: groundSample });
   // the scrub's bushes stand on the ground: not on a road, in a building, a bore or on a steep bank cut for a road; clear of
-  // a road's paved edge by their whole reach and low beside it (Street View user_conzelman_railbend: coyote brush 0.3 to
-  // 1.5 m, low at the edge, nothing over the paving; A11's bushes from 1.6 m at full size hung over the road)
-  function scrubGround(x, z, w = 1) {
+  // a road's paved edge by their whole reach (nothing over the paving; A11's bushes from 1.6 m at full size hung over the
+  // road). A bush of scale sc whose leaves would reach within 0.25 m of the paving is moved out from the road till they
+  // end there (up to 3 m), its size and the lidar's height kept (A18: Street View Conzelman 0a_1030 and cz_0000, 2019-04 /
+  // 2025-03: the brush in full to a narrow margin at the edge; the lidar there 1 to 1.5 m from 1 to 2 m out. Shrunk to the
+  // gap and capped at 0.5 m a metre out, the verge's bushes read as lawn)
+  function scrubGround(x, z, w = 1, sc = null) {
     const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid || !c.mask || !c.occ) return null;
-    const gap = roadGap(x, z) ?? 9; if (gap < 1) return { skip: true };
+    const gap = roadGap(x, z) ?? 9; if (gap < 0.3) return { skip: true };
+    if (sc != null && gap < 0.6 * sc * REACH * w + 0.25) {  // (down to six tenths of its size it shrinks to fit (below), else it moves)
+      const gx = (roadGap(x + 1, z) ?? gap) - (roadGap(x - 1, z) ?? gap), gz = (roadGap(x, z + 1) ?? gap) - (roadGap(x, z - 1) ?? gap), L = Math.hypot(gx, gz);
+      const d = 0.6 * sc * REACH * w + 0.25 - gap; if (L < 0.2 || d > 3) return { skip: true };
+      const nx = x + gx / L * d, nz = z + gz / L * d, r = scrubGround(nx, nz, w); return r && !r.skip ? { ...r, x: nx, z: nz } : r;
+    }
     if (occAt(c.occ, x, z) === 2) return { skip: true };  // (a car park, a building: the road itself by its gap above, not its coarse cells (bushes were cleared 5 m out, A11: Conzelman 0a_2030, 3a_0430))
     const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), v = Math.round(fj) * n + Math.round(fi), h0 = gridHeight(g, x, z);
     if (h0 == null || !(v >= 0 && v < n * n)) return null;
@@ -1344,14 +1355,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // (the road cuts bare (Street View: red chert) where the lidar does not say what grows there; where it does, it decides
     // (cellBushes): Street View user_conzelman_railbend, the cut above the road under low scrub to the edge)
     if (h < SEA + 0.3 || (c.mask[8 * v + 4] > 100 && c.nor[3 * v + 1] < 0.9 && veg?.scrubH(proj.lat(z), proj.lon(x)) == null)) return { skip: true };
-    // (the largest it may be: its leaves 0.25 m short of the paved edge, its top 0.5 m at a metre from it, 0.35 m more a
-    // metre further out; the ground's slope a metre either way, for its lean and its foot)
-    const reach = (gap - 0.25) / (REACH * w), top = (0.5 + 0.35 * (gap - 1)) / TOP;
+    // (the largest it may be: its leaves 0.25 m short of the paved edge; the ground's slope a metre either way, for its lean
+    // and its foot)
+    const reach = (gap - 0.25) / (REACH * w), top = Infinity;
     const hh = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => { const q = gridHeight(g, x + dx, z + dz), s = q == null ? null : standOn(c, x + dx, z + dz, q) ?? c.bankS?.get(bkey(x + dx, z + dz)); return s ?? h; });
     const gx = Math.max(-1.5, Math.min(1.5, (hh[0] - hh[1]) / 2)), gz = Math.max(-1.5, Math.min(1.5, (hh[2] - hh[3]) / 2));
-    return { h, reach, top, grad: [gx, gz] };
+    return { h, reach, top, grad: [gx, gz], gap };
   }
-  const scrub = createScrub({ THREE, scene, geos: scrubGeometries(), mat: mats.scrub, fade: scrubFade, cls: vcls, hgt: (x, z) => veg ? veg.scrubH(proj.lat(z), proj.lon(x)) : null, ground: scrubGround });
+  const scrub = createScrub({ THREE, scene, geos: scrubGeometries(), mat: mats.scrub, fade: scrubFade, cls: vcls, hgt: (x, z) => veg ? veg.scrubH(proj.lat(z), proj.lon(x)) : null, ground: scrubGround, dense: (x, z) => !!veg?.handAt(proj.lat(z), proj.lon(x), 'brush') });
 
   /* ---------- tunnels: a lined bore through the hill, portals at both ends, the rider on the line between them ----------
      The baked tiles cut a tunnel at their edges, so the pieces are joined across tiles first; a tunnel is drawn once
@@ -1986,6 +1997,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           for (const f of c.feet || []) if (Math.hypot(f[0] - x, f[2] - z) < R) (out.feet ??= []).push(f); }
         return out; },
       veg: (x, z) => vcls(x, z), ground: (x, z) => groundAt(x, z),
+      // what grows at a point (the roadside vegetation check): the cover class, the lidar's scrub height, the gap to the paving,
+      // what a bush stands on there; the trees drawn within R ([species, x, y, z, width scale, height over width])
+      grows: (x, z) => ({ cls: vcls(x, z), scrubH: veg ? veg.scrubH(proj.lat(z), proj.lon(x)) : null, gap: roadGap(x, z), bush: scrubGround(x, z) }),
+      bushesNear: (x, z, R) => scrub.near(x, z, R), dims: () => DIMS,
+      treesNear: (x, z, R) => { const out = []; for (const c of near.values()) for (const t of c.treeSets || []) for (const e of t.list) if (Math.hypot(e[0] - x, e[2] - z) < R) out.push([t.sp, ...e.slice(0, 4), e[6]]); return out; },
       // the LOD check (r5check.mjs lod): a near tile's detail at a point, the far tile's ground there, and points every
       // `step` m along the roads within R of (x, z) ([x, z, half width, railed, normal x, z]; no bores, trails or bridges)
       tileLod: (x, z) => near.get(key(NEAR_Z, ...tileOf(x, z)))?.lod ?? null,

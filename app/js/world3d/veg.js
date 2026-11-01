@@ -29,6 +29,8 @@ export function makeVeg(box, n, cls, sh = null, H = 0) {
     at(lat, lon) { const k = cell(lat, lon); return k < 0 ? NONE : cls[k] & 127; },
     // the scrub's height there from the lidar (metres; 0: none, grass; -1: under a tree's crown; null: no plane baked)
     scrubH(lat, lon) {
+      // (the hand list's brush: its own height range, a bush's worth (about 2 m) at a time)
+      const hb = this.handAreas && this.handAt(lat, lon, 'brush'); if (hb?.h) { const u = Math.sin(Math.floor(lat * 55600) * 12.9898 + Math.floor(lon * 44000) * 78.233) * 43758.5453; return hb.h[0] + (hb.h[1] - hb.h[0]) * (u - Math.floor(u)); }
       if (!sh) return null;
       const fj = (nn - lat) * ky / 2 - 0.5, fi = (lon - w) * kx / 2 - 0.5, j = Math.round(fj), i = Math.round(fi); if (i < 0 || j < 0 || i >= H || j >= H) return 0;
       if (sh[j * H + i] === 255) return -1;
@@ -49,6 +51,21 @@ export function makeVeg(box, n, cls, sh = null, H = 0) {
         }
       }
     },
+    // the hand list's areas (app/world/conzelman_veg.json, A18: Street View's own cover beside Conzelman Road): brush,
+    // grass and bare earth painted over the cells (not paving, sea or buildings); brush's height from the list (scrubH) and
+    // its bushes dense (scrub.js); no lidar tree in a notrees area. Once: the grid is shared
+    hand(list) {
+      if (this.handAreas) return; const my = 111195, mx = 111195 * Math.cos((s + nn) / 2 * Math.PI / 180), K = { brush: SCRUB, grass: GRASS, bare: BARE };
+      this.handAreas = (list?.areas || []).map(a => { const la = a.poly.map(p => p[0]), lo = a.poly.map(p => p[1]); return { ...a, bb: [Math.min(...la), Math.min(...lo), Math.max(...la), Math.max(...lo)] }; });
+      for (const a of this.handAreas) {
+        const k = K[a.kind]; if (k == null) continue;
+        const j0 = Math.max(0, Math.floor((nn - a.bb[2]) * ky)), j1 = Math.min(n - 1, Math.floor((nn - a.bb[0]) * ky)), i0 = Math.max(0, Math.floor((a.bb[1] - w) * kx)), i1 = Math.min(n - 1, Math.floor((a.bb[3] - w) * kx));
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const c = cls[j * n + i] & 127; if (c === NONE || c === PAVED) continue; if (inPoly(a.poly, nn - (j + 0.5) / ky, w + (i + 0.5) / kx)) cls[j * n + i] = k; }
+      }
+      this.handTrees = list?.trees || [];
+    },
+    // the hand list's area of a kind at a point, or null
+    handAt(lat, lon, kind) { for (const a of this.handAreas || []) if (a.kind === kind && lat >= a.bb[0] && lat <= a.bb[2] && lon >= a.bb[1] && lon <= a.bb[3] && inPoly(a.poly, lat, lon)) return a; return null; },
     // the cell's index and its centre [lat, lon] (for scattering by cell)
     cellOf: cell,
     centre: k => [nn - (Math.floor(k / n) + 0.5) / ky, w + (k % n + 0.5) / kx],
@@ -65,6 +82,9 @@ export function makeVeg(box, n, cls, sh = null, H = 0) {
     },
   };
 }
+
+// [lat, lon] inside a ring of [lat, lon] (even-odd)
+export function inPoly(P, la, lo) { let r = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [a, b] = P[i], [c, d] = P[j]; if ((a > la) !== (c > la) && lo < (d - b) * (la - a) / (c - a) + b) r = !r; } return r; }
 
 // The Headlands' trees one by one (tools/veg_trees.py, app/world/trees.bin): where each stands, its height and crown
 // radius from the USGS 3DEP lidar's canopy height model (2018 QL1), its species from the Marin County fine scale
@@ -117,6 +137,11 @@ export function fitTree(dim, h, r, gap = null) {
   return { s: sx, hf: sy / sx };
 }
 
+// the hand list's vegetation (A18, app/world/conzelman_veg.json): Promise<{ areas, trees } | null>
+let sharedHand = null;
+export function loadHandVeg({ fetch = globalThis.fetch?.bind(globalThis), url = '/world/conzelman_veg.json' } = {}) {
+  return sharedHand ??= (async () => { try { const r = await fetch(url); return r.ok ? await r.json() : null; } catch { return null; } })();
+}
 async function gunzip(r) { return new Uint8Array(await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()); }
 // one per page: Promise<veg | null> (null: none baked, or it failed: the world goes on without it)
 let shared = null;

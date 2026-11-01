@@ -99,6 +99,13 @@ def test_ground_cover_and_scrub(out):
     assert 0.6 * 164 < v["westN"] <= 169 and 0.45 <= v["scales"][0] < v["scales"][1] <= 1.75  # about a bush every 2.5 m
 
 
+def test_hand_vegetation(out):
+    h = out["handVeg"]
+    assert h["brush"] == 2 and h["bare"] == h["BARE"] and h["outside"] == 1   # painted over the grass; outside as it was
+    assert h["sh"] and h["square"] == [True, False]                           # brush its own height range; a point in a ring
+    assert h["dense"] > 0.6 * h["plain"]                                      # a second bush a cell in dense brush
+
+
 def test_lidar_trees(out):
     t = out["trees"]
     assert t["n"] == 3 and t["all"] == [[10, 3, "oak"], [40, 8, "euc"], [6, 2, "willow"]] and t["west"] == 1   # by the box

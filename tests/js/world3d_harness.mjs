@@ -11,7 +11,7 @@ import { noisePixels, wavePixels, coverageMips } from '../../app/js/world3d/texg
 import { windGain, tireGain, tireHz, tickRate, oceanGain } from '../../app/js/world3d/audio.js';
 import { passPlan, carStep } from '../../app/js/world3d/life.js';
 import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, roundCorners, tapers, taperedWidth, taperedParts, TAPER, YB, markCode } from '../../app/js/world3d/ribbon.js';
-import { parseVeg, makeVeg, parseTrees, fitTree, CLEAR, SCRUB, GRASS, PAVED } from '../../app/js/world3d/veg.js';
+import { parseVeg, makeVeg, parseTrees, fitTree, inPoly, CLEAR, SCRUB, GRASS, PAVED, BARE } from '../../app/js/world3d/veg.js';
 import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf, sigs, easeW, EASE, FAR_D, FAR_KEEP, impKeep, impGrow } from '../../app/js/world3d/stream.js';
@@ -323,6 +323,12 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   out.veg = { west: v.at(37.805, -122.598), east: v.at(37.805, -122.591), outside: v.at(37.9, -122.598), rgba: [...rgba.slice(0, 4)], rgbaEast: [...rgba.slice(4 * (n - 1), 4 * n)], paved: [...paved],
     same: JSON.stringify(b1) === JSON.stringify(b2), westN: west.length, eastN: east.length, onScrub: west.every(([x, z]) => at(x, z) === SCRUB),
     perCell: SCRUB_CELL * SCRUB_CELL, scales: [r3(Math.min(...west.map(q => q[2]))), r3(Math.max(...west.map(q => q[2])))] };
+  // the hand list (A18): brush over the grass east, a bare strip; brush's height its own; its extra bushes kept dense
+  const h = parseVeg(buf.slice()), at2 = (x, z) => h.at(proj.lat(z), proj.lon(x));
+  h.hand({ areas: [{ kind: 'brush', poly: [[37.801, -122.594], [37.809, -122.594], [37.809, -122.591], [37.801, -122.591]], h: [1, 2] }, { kind: 'bare', poly: [[37.801, -122.5915], [37.809, -122.5915], [37.809, -122.591], [37.801, -122.591]] }], trees: [] });
+  const dn = (x, z) => !!h.handAt(proj.lat(z), proj.lon(x), 'brush'), sh = h.scrubH(37.805, -122.593);
+  out.handVeg = { brush: h.at(37.805, -122.593), bare: h.at(37.805, -122.59125), outside: h.at(37.805, -122.5904), sh: sh >= 1 && sh <= 2, square: [inPoly([[0, 0], [0, 1], [1, 1], [1, 0]], 0.5, 0.5), inPoly([[0, 0], [0, 1], [1, 1], [1, 0]], 1.5, 0.5)],
+    plain: cellBushes(8, 0, at2).length, dense: cellBushes(8, 0, at2, null, true, dn).filter(b => b[8] === 2).length, BARE };
 }
 {
   // the lidar's trees (trees.bin): records, the coverage raster, a box query; a model fitted to a tree's height and crown,

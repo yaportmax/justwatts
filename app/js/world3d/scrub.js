@@ -15,10 +15,12 @@ export const SIZE = 32, STEP = 2.5;
 // none, -1 under a tree's crown, null unknown): each bush's top that high, a fifth either way (Street View: coyote brush and
 // sage 0.3 to 1.5 m along the roads, user_conzelman_railbend), none where it is under 0.25 m or a crown stands
 export const TOP = 1.5;  // a bush's top at scale 1 (props.js scrubGeometries, its foot sunk 0.15)
-export function cellBushes(ci, cj, cls, hgt = null) {
+// (extra: a second bush in each grid cell too, marked 1 last, kept only beside a road (build): the lidar's brush cover there
+// is nearly whole, Street View Conzelman 0a_1030 a mass to the verge's narrow margin, A18)
+export function cellBushes(ci, cj, cls, hgt = null, extra = false, dense = null) {
   const out = [], n = SIZE / STEP;
-  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
-    const gi = ci * n + a, gj = cj * n + b, x = (gi + hash2(gi, gj * 3 + 1)) * STEP, z = (gj + hash2(gj + 5, gi * 7)) * STEP;
+  for (let e = 0; e < (extra ? 2 : 1); e++) for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
+    const gi = ci * n + a + e * 7919, gj = cj * n + b + e * 104729, x = ((ci * n + a) + hash2(gi, gj * 3 + 1)) * STEP, z = ((cj * n + b) + hash2(gj + 5, gi * 7)) * STEP;
     if (cls(x, z) !== SCRUB || hash2(gi * 5 + 3, gj) > 0.96) continue;  // a gap now and then (few: Street View's cover is unbroken)
     // patches of taller and lower scrub (about 60 m), sage on two in five (about 120 m)
     const tall = hash2(Math.floor(x / 60), Math.floor(z / 60) + 17), sage = hash2(Math.floor(x / 120) + 9, Math.floor(z / 120)) < 0.4 && hash2(gi, gj + 11) < 0.7 ? 1 : 0;
@@ -28,7 +30,7 @@ export function cellBushes(ci, cj, cls, hgt = null) {
     // ones broad mounds, touching)
     let sc = (0.6 + 0.8 * hash2(gj, gi + 3) ** 1.5) * (0.8 + 0.45 * tall), vh = sc;
     if (H != null) { vh = H * (0.8 + 0.4 * hash2(gi + 17, gj)) / (TOP * (0.75 + 0.5 * tint)); sc = Math.max(vh, Math.min(sc, vh * 2.2)); }
-    out.push([x, z, sc, hash2(gi + 1, gj + 2) * 6.283, sage, tint, 0.75 + 0.5 * hash2(gi * 7, gj + 13), vh]);
+    out.push([x, z, sc, hash2(gi + 1, gj + 2) * 6.283, sage, tint, 0.75 + 0.5 * hash2(gi * 7, gj + 13), vh, e && dense?.(x, z) ? 2 : e]);  // (2: in a hand list's dense brush, kept anywhere)
   }
   return out;
 }
@@ -38,8 +40,9 @@ export function cellBushes(ci, cj, cls, hgt = null) {
 // top, slope } | null (null: not loaded yet, tried again later; w: the bush's widest stretch, for its clearance; reach, top:
 // the largest spread and height scale it may have there (clear of a road's edge, low beside it); grad: the ground's
 // slope there [dh/dx, dh/dz])
+export const EDGE = 4;  // (the extra bushes within this many metres of a road's paving, cellBushes)
 export const REACH = 2.6;  // how far a bush's leaves reach from its middle at scale 1 (props.js scrubGeometries)
-export function createScrub({ THREE, scene, geos, mat, fade, cls, hgt = null, ground }) {
+export function createScrub({ THREE, scene, geos, mat, fade, cls, hgt = null, ground, dense = null }) {
   const cells = new Map(), pend = new Map();
   let R = 150, NEAR = 45, gen = 0, dirty = true, at = [1e9, 1e9], cast = 0, merged = 0;
   const kinds = ['brush', 'brushLo', 'sage', 'sageLo'], mesh = {}, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), qt = new THREE.Quaternion(), nv = new THREE.Vector3(), v = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), tint = new THREE.Color();
@@ -54,13 +57,14 @@ export function createScrub({ THREE, scene, geos, mat, fade, cls, hgt = null, gr
   // a cell's bushes on the ground: per bush [x, y, z, scale, turn, sage, tint, stretch, height scale, lean x, lean z]; a
   // generator (a slice at a time)
   function* build(ci, cj) {
-    const list = cellBushes(ci, cj, cls, hgt), out = [];
+    const list = cellBushes(ci, cj, cls, hgt, true, dense), out = [];
     for (let k = 0; k < list.length; k++) {
       if ((k & 63) === 63) yield;
-      const [x, z, sc0, turn, sage, t, st, vh0] = list[k], w = Math.max(st, 1 / Math.sqrt(st)), g = ground(x, z, w);
+      const [x0, z0, sc0, turn, sage, t, st, vh0, extra] = list[k], w = Math.max(st, 1 / Math.sqrt(st)), g = ground(x0, z0, w, sc0);
       if (g === null) return null;  // the ground is not there yet
-      if (g.skip) continue;
-      const sc = Math.min(sc0, g.reach ?? Infinity), vh = Math.min(vh0, g.top ?? Infinity, sc * 1.3); if (sc < 0.15 || vh < 0.12) continue;
+      if (g.skip || (extra === 1 && !(g.gap < EDGE))) continue;
+      const x = g.x ?? x0, z = g.z ?? z0;  // (moved out from a road's edge)
+      const sc = Math.min(sc0, g.reach ?? Infinity), vh = Math.min(vh0, g.top ?? Infinity, sc * 2); if (sc < 0.15 || vh < 0.12) continue;
       // (on a slope it leans with the ground, seven tenths of the way (Street View: coyote brush hugs a bank; upright, its
       // downhill side stood off it, its leaves' undersides showing); its foot sunk by what the lean leaves of the ground's
       // fall across its reach)
@@ -121,6 +125,8 @@ export function createScrub({ THREE, scene, geos, mat, fade, cls, hgt = null, gr
       for (const c of cells.values()) if ((c.i + 1) * SIZE > box[0] && c.i * SIZE < box[2] && (c.j + 1) * SIZE > box[1] && c.j * SIZE < box[3]) c.gen = -1;
       for (const [k, p] of pend) { const [i, j] = k.split(',').map(Number); if ((i + 1) * SIZE > box[0] && i * SIZE < box[2] && (j + 1) * SIZE > box[1] && j * SIZE < box[3]) p.gen = -1; }
     },
+    // the bushes built within R of (x, z) ([x, y, z, scale, height scale]; checks)
+    near(x, z, R) { const out = []; for (const c of cells.values()) for (const b of c.bushes) if (Math.hypot(b[0] - x, b[2] - z) < R) out.push([b[0], b[1], b[2], b[3], b[8]]); return out; },
     show(on) { for (const k of kinds) mesh[k].visible = on; },
     get count() { return kinds.reduce((n, k) => n + mesh[k].count, 0); },
     dispose() { for (const k of kinds) { scene.remove(mesh[k]); mesh[k].dispose(); } cells.clear(); pend.clear(); },

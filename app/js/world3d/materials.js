@@ -110,10 +110,10 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     // round the rail's supports, its green pixels' median #627739 to #778b49; A11's verge took the imagery's olive and its
     // patches, read bare))
     grassC = mix(grassC, srgb(vec3(0.43, 0.51, 0.27)) * (0.94 + 0.12 * small), lg * 0.7);
-    vec3 scrC = mix(srgb(vec3(0.31, 0.36, 0.29)), srgb(vec3(0.42, 0.45, 0.38)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));  // grey olive to the sage's grey green
+    vec3 scrC = mix(srgb(vec3(0.38, 0.40, 0.30)), srgb(vec3(0.50, 0.51, 0.41)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));  // grey olive to the sage's grey green
     float bush = jwN(p / 3.1 + 0.37).g;
-    scrC *= 0.68 + 0.5 * smoothstep(0.25, 0.75, bush);
-    scrC = mix(scrC, scrC * 0.72, jwNear);  // near the camera its bushes stand on it: the shade under them
+    scrC *= 0.78 + 0.4 * smoothstep(0.25, 0.75, bush);
+    scrC = mix(scrC, scrC * 0.82, jwNear);  // near the camera its bushes stand on it: the shade under them
     vec3 bareC = mix(srgb(vec3(0.49, 0.43, 0.37)), srgb(vec3(0.57, 0.46, 0.37)), smoothstep(0.3, 0.7, fine));
     // (the litter under the groves; in a fort's mown ground and OpenStreetMap's lawns grass under the trees, Street View
     // Fort Baker: the parade ground's lawn up to the eucalyptus' trunks)
@@ -154,7 +154,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     // (Street View 3a_0430's cut too: scrub in strips across it; the scrub's own grey olive, coyote brush, props.js)
     float sp = smoothstep(0.42, 0.55, b2) * max(jwScrub * 0.9, 0.75);
     c = mix(c, earth * (0.95 + 0.1 * bed), bare);
-    c = mix(c, srgb(vec3(0.36, 0.42, 0.28)) * (0.8 + 0.35 * b1), sp * bare * 0.9); bare *= 1.0 - sp; }
+    c = mix(c, srgb(vec3(0.44, 0.45, 0.33)) * (0.85 + 0.3 * b1), sp * bare * 0.9); bare *= 1.0 - sp; }
   rk = max(rk, bare); jwPav = smoothstep(0.25, 0.65, pav) * known;
   // under the redwoods: red-brown needle litter, patches of sorrel
   float rw = 0.0;

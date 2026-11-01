@@ -237,7 +237,7 @@ export function treeDims(geos) {
 export function scrubGeometries() {
   // the bushes broad and low, their cores not much darker than their leaves (a cover with no black between the bushes)
   // (Street View: coyote brush a grey olive, the sage paler and greyer still; USDA NAIP's scrub about #6b7354)
-  const brush = col(0x667352, 1.3), sage = col(0x8f977c, 1.3);
+  const brush = col(0x6f7352, 1.3), sage = col(0x959680, 1.3);
   return {
     // (no solid core past a small dark one deep inside: a smooth mound read as a pillow from any distance; the bush is
     // its leaf clumps, rough and open at the edge, Street View's coyote brush and sage)

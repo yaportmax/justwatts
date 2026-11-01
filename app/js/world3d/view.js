@@ -994,7 +994,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         for (let i = 1; i < n; i++) {
           run2 += Math.hypot(P[i][0] - P[i - 1][0], P[i][2] - P[i - 1][2]); if (run2 < 9) continue;
           const [dx, dz] = dir(i), k = HM.across(P[i][0], P[i][2], dx, dz).find(([k]) => k === 'wposts' || k === 'yposts'); if (!k) continue; run2 = 0;
-          const o = hw(i) - ((P[i][10] ?? L.b * hw(i) * 2 / L.w) - YB / 2);  // (the buffer's middle as drawn there, ribbon.js) put(k[0] === 'wposts' ? 'wdelin' : 'delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
+          // (the buffer's middle as drawn there, ribbon.js; a wider one (A14) reaches into the travel lane)
+          const bw = HM.across(P[i][0], P[i][2], dx, dz).find(([k]) => k === 'buffer')?.[2] || YB, o = hw(i) - ((P[i][10] ?? L.b * hw(i) * 2 / L.w) - YB + bw / 2);
+          put(k[0] === 'wposts' ? 'wdelin' : 'delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
         } }
     }
     // OpenStreetMap's power lines: a wooden pole with a crossarm at each node in the tile (across the line), two wires

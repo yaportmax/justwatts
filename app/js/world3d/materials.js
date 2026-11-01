@@ -301,10 +301,10 @@ export function roadMaterial() {
   m.onBeforeCompile = sh => {
     sh.uniforms.tNoise = { value: T.noise };
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec4 rd2;\nattribute vec4 rd3;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying vec2 vRuv;\nvarying vec3 vW;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vRd3 = rd3; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec4 rd2;\nattribute vec4 rd3;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying float vBw;\nvarying vec2 vRuv;\nvarying vec3 vW;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vRd3 = rd3; vBw = rd3.z; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_BIKE)
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying float vBw;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_BIKE)
       .replace('#include <color_fragment>', /* glsl */`
         float lm = floor(vRd.x + 0.5), surf = floor(vRd.y + 0.5), lanes = floor(vRd.z + 0.5), W = vRd.w;
         float along = vRuv.y, x = vRuv.x - W * 0.5, ax = abs(x);
@@ -345,9 +345,10 @@ export function roadMaterial() {
           if (vRd2.z > 0.5 && vRd2.y - vRd2.z > 0.5) line = max(line, LN(W - vRd2.z, 0.06));
           if (lm == 4.0) {
             // the buffer against a contraflow bike lane (YB, ribbon.js: 0.9 m): a yellow line at each side, ticks across it
-            // every 6 m, or cross hatched
-            yel = max(yel, max(LN(ll + 0.08, 0.05), LN(ll + 0.82, 0.05)));
-            float inb = step(ll + 0.08, r) * step(r, ll + 0.82);
+            // every 6 m, or cross hatched; wider where the hand list gives its width (vBw, A14: into the travel lane)
+            float bi = ll + 0.08 - max(vBw - 0.9, 0.0);
+            yel = max(yel, max(LN(bi, 0.05), LN(ll + 0.82, 0.05)));
+            float inb = step(bi, r) * step(r, ll + 0.82);
             if ((mb & 8) != 0) { float tk = fract(along / 6.0) * 6.0; yel = max(yel, inb * (1.0 - smoothstep(0.08, 0.08 + aa * 2.0, min(tk, 6.0 - tk)))); }
             if ((mb & 16) != 0) { float dg = fract((along + (r - ll) * 1.5) / 2.0) * 2.0; yel = max(yel, inb * (1.0 - smoothstep(0.1, 0.1 + aa * 2.0, min(dg, 2.0 - dg)))); }
           }

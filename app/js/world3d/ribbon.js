@@ -38,14 +38,15 @@ export function roadStyle(hw, ln = 0, fl = 0, wd = 0) {
 // 0 as the style has it, 1 none, 2 a single broken yellow, 3 solid and broken with the broken line on the right (as the
 // ribbon runs), 4 on the left, 5 double white, 6 yellow raised markers, 7 double yellow on a road with no lines; bits 1 no edge lines, 2 no bike symbols, 4 BIKE
 // LANE in words, 8 ticks across the contraflow buffer, 16 that buffer cross hatched, 32 / 64 stall ticks in the
-// right / left parking lane (no buffer before it)
+// right / left parking lane (no buffer before it); and that buffer's width where the hand list gives one (0: YB; A14)
 export function markCode(kinds) {
-  let c = 0, b = 0;
-  for (const [k, sd] of kinds) {
+  let c = 0, b = 0, bw = 0;
+  for (const [k, sd, w] of kinds) {
+    if (k === 'buffer') { bw = w; continue; }
     if (k === 'nocentre') c = 1; else if (k === 'dash') c = 2; else if (k === 'pass') c = sd > 0 ? 3 : 4; else if (k === 'white2') c = 5; else if (k === 'dots') c = 6; else if (k === 'yellow2') c = 7;
     else b |= { noedge: 1, nosym: 2, words: 4, ladder: 8, hatch: 16 }[k] || (k === 'stalls' ? (sd > 0 ? 32 : 64) : 0);
   }
-  return [c, b];
+  return [c, b, bw];
 }
 // the order roads draw in where they overlap (bigger roads on top)
 export const roadLift = hw => 0.22 + 0.02 * Math.min(4, ['service', 'residential', 'unclassified', 'tertiary', 'secondary'].indexOf(hw) + 1 || (STYLE[hw]?.[0] > 9 ? 5 : 0));
@@ -71,7 +72,7 @@ export function builder() {
   return {
     pos, uv, code, idx,
     get n() { return pos.length / 3; },
-    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u * c[3], w); code.push(c[0], c[1], c[2], c[3]); code2.push(c[4] || 0, c[5] || 0, c[6] || 0, c[7] || 0); code3.push(c[8] || 0, c[9] || 0, 0, 0); return pos.length / 3 - 1; },
+    v(x, y, z, u, w, c) { pos.push(x, y, z); uv.push(u * c[3], w); code.push(c[0], c[1], c[2], c[3]); code2.push(c[4] || 0, c[5] || 0, c[6] || 0, c[7] || 0); code3.push(c[8] || 0, c[9] || 0, c[10] || 0, 0); return pos.length / 3 - 1; },
     tri(a, b, c) { idx.push(a, b, c); },
     done() { return { pos: new Float32Array(pos), uv: new Float32Array(uv), code: new Float32Array(code), code2: new Float32Array(code2), code3: new Float32Array(code3), idx: pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) }; },
   };
@@ -184,7 +185,7 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
       const cf = drape ? Infinity : Math.max(0.25, half * 0.07); hl = Math.max(hc - cf, Math.min(hc + cf, hl)); hr = Math.max(hc - cf, Math.min(hc + cf, hr));
     }
     last = hc;
-    if (mk) { const m = mk(c[0], c[1], tx, tz); code = code.slice(0, 8); code.push(m[0], m[1]); }
+    if (mk) { const m = mk(c[0], c[1], tx, tz); code = code.slice(0, 8); code.push(m[0], m[1], m[2] || 0); }
     B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);
     B.v(c[0] - nx, hr + lift, c[1] - nz, 1, v0 + L[i], code);
     centre.push([c[0], hc + lift, c[1], half, c[0] + nx, hl + lift, c[1] + nz, c[0] - nx, hr + lift, c[1] - nz, code[5]]);

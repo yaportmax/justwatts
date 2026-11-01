@@ -203,9 +203,10 @@ export function handBarriers(idx, list, survey, xz) {
   const pano = (la, lo, hd) => { const [x, z] = xz(la, lo), r = hd * Math.PI / 180, dir = [1], id = idx.match(x, z, Math.sin(r), -Math.cos(r), null, -1, dir); return id < 0 ? null : { id, s: idx.rails[id].T.at(x, z).s, dir: dir[0] }; };
   for (const [la, lo, hd] of survey) { const m = pano(la, lo, hd); if (m) surveyed.add(m.id); }
   // a stretch on rail id from s along dir for len metres, side sd; on past its end onto the next rail (a few at most)
-  const lay = (id, s, dir, len, sd, kind, hop = 0) => {
+  // (w: a buffer's width from the entry's start to its end, [w0, w1, total length, metres laid before this rail])
+  const lay = (id, s, dir, len, sd, kind, hop = 0, w = null) => {
     const q = idx.rails[id], L = q.T.L, e = dir > 0 ? L : 0, here = Math.min(len, Math.abs(e - s));
-    if (here > 0) pieces.push({ id, s0: Math.min(s, s + dir * here), s1: Math.max(s, s + dir * here), sd, kind });
+    if (here > 0) pieces.push({ id, s0: Math.min(s, s + dir * here), s1: Math.max(s, s + dir * here), sd, kind, w: w && { a: w[0], b: w[1], L: w[2], off: w[3], s, dir } });
     if (len - here < 1 || hop > 3) return;
     // (the one going on straightest, where a junction has several)
     const P = q.T.P, n = P.length, ux = dir > 0 ? P[n - 1][0] - P[n - 2][0] : P[0][0] - P[1][0], uz = dir > 0 ? P[n - 1][1] - P[n - 2][1] : P[0][1] - P[1][1];
@@ -214,12 +215,12 @@ export function handBarriers(idx, list, survey, xz) {
       if (j === id || idx.rails[j].r.fl & 16) continue; const Q = idx.rails[j].T.P, m = Q.length, vx = je ? Q[m - 2][0] - Q[m - 1][0] : Q[1][0] - Q[0][0], vz = je ? Q[m - 2][1] - Q[m - 1][1] : Q[1][1] - Q[0][1];
       const c = (ux * vx + uz * vz) / ((Math.hypot(ux, uz) * Math.hypot(vx, vz)) || 1); if (c > bc) { bc = c; best = [j, je]; }
     }
-    if (best) { const [j, je] = best, nd = je ? -1 : 1; lay(j, je ? idx.rails[j].T.L : 0, nd, len - here, sd * nd * dir, kind, hop + 1); }
+    if (best) { const [j, je] = best, nd = je ? -1 : 1; lay(j, je ? idx.rails[j].T.L : 0, nd, len - here, sd * nd * dir, kind, hop + 1, w && [w[0], w[1], w[2], w[3] + here]); }
   };
-  for (const [la, lo, hd, side, from, to, kind] of list) {
+  for (const [la, lo, hd, side, from, to, kind, wd] of list) {
     const m = pano(la, lo, hd); if (!m) continue; const sd = (side === 'R' ? 1 : -1) * m.dir;
     if (from < 0) lay(m.id, m.s, -m.dir, -from, sd, kind);
-    lay(m.id, m.s + m.dir * Math.max(0, from), m.dir, to - Math.max(0, from), sd, kind);
+    lay(m.id, m.s + m.dir * Math.max(0, from), m.dir, to - Math.max(0, from), sd, kind, 0, wd ? [wd[0], wd[1], to - Math.max(0, from), 0] : null);
   }
   const byId = new Map(); for (const p of pieces) (byId.get(p.id) ?? byId.set(p.id, []).get(p.id)).push(p);
   function at(x, z, half, cx = null, cz = null) {
@@ -229,13 +230,14 @@ export function handBarriers(idx, list, survey, xz) {
     return out;
   }
   // the kinds whose stretch covers a point on a road's paved width (its rail's |d| within half and 0.5 m), each [kind,
-  // side]: side +1 the right of the way (tx, tz) runs there, -1 its left (the lane markings, handlist.js MARKINGS)
+  // side, width]: side +1 the right of the way (tx, tz) runs there, -1 its left (the lane markings, handlist.js MARKINGS);
+  // width: a buffer entry's width there (A14), else 0
   const hint = new Map();
   function across(x, z, tx, tz) {
     const out = [];
     for (const id of idx.near(x, z)) { const P = byId.get(id); if (!P) continue; const q = idx.rails[id], t = q.T.at(x, z, hint.get(id) ?? -1); if (!t) continue; hint.set(id, t.k); if (Math.abs(t.d) > q.half + 0.5) continue;
       const a = q.T.P[t.k], b = q.T.P[t.k + 1], rel = (b[0] - a[0]) * tx + (b[1] - a[1]) * tz < 0 ? -1 : 1;
-      for (const p of P) if (t.s >= p.s0 && t.s <= p.s1) out.push([p.kind, p.sd * rel]); }
+      for (const p of P) if (t.s >= p.s0 && t.s <= p.s1) out.push([p.kind, p.sd * rel, p.w ? p.w.a + (p.w.b - p.w.a) * Math.min(1, Math.max(0, (p.w.off + Math.abs(t.s - p.w.s)) / (p.w.L || 1))) : 0]); }
     return out;
   }
   // a point on a surveyed road (within its paved width and 8 m beyond)

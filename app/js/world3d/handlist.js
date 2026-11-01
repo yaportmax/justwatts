@@ -184,6 +184,8 @@ export const SURVEY = [
 //   dots      no paint, yellow raised markers in pairs along the centre (Alexander Avenue in Sausalito)
 //   ladder    a contraflow bike lane's buffer (upper Conzelman Road) with transverse ticks between its two lines
 //   hatch     that buffer cross hatched
+//   buffer    that buffer's width, an eighth entry [metres at from, metres at to] (else 0.9 m, ribbon.js YB); the extra
+//             width out of the travel lane beside it
 //   stalls    a parking lane's stall ticks, no buffer before it (on the side given)
 //   wposts    white flexible posts on the contraflow buffer; yposts yellow ones
 //   nosym     no bike lane symbols (Bunker Road's shoulders: cycleway=lane in OpenStreetMap, never a symbol in Street View)
@@ -221,6 +223,9 @@ export const MARKINGS = [
   // end the buffer cross hatched and a parking lane with stall ticks on the right; then the buffer's ticks all the way
   // down; white posts on it at the top and above the Battery Spencer lot's east end, yellow ones below that
   [37.833528, -122.493192, 101, 'C', 0, 170, 'hatch'], [37.833528, -122.493192, 101, 'R', 0, 170, 'stalls'],
+  // (the hatched buffer's width, Street View user_upperconz_mccullough 2025-03 h101 measured: 2.2 m 6.5 m on, 2.4 m 9 m
+  // on, from a 2.5 m camera; 2.4 m held, eased to the ladder's 0.9 m over the hatch's last 20 m, A14)
+  [37.833528, -122.493192, 101, 'C', 0, 150, 'buffer', [2.4, 2.4]], [37.833528, -122.493192, 101, 'C', 150, 170, 'buffer', [2.4, 0.9]],
   ...each([[37.832546, -122.491606, 126], [37.832842, -122.490672, 62], [37.832673, -122.489632, 66], [37.832784, -122.488582, 130],
     [37.832170, -122.487897, 131], [37.831368, -122.487339, 157], [37.830529, -122.486957, 180], [37.829618, -122.486927, 181],
     [37.829287, -122.485422, 43], [37.829508, -122.484477, 93], [37.829780, -122.483441, 10], [37.830505, -122.484072, 341],

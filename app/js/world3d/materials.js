@@ -59,8 +59,9 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // (a road side strip's gravel verge, handlist.js VERGES: jwGv set before the call)
   pav = max(pav, jwGv); vg.rgb *= 1.0 - jwGv; known = max(known, jwGv);
   wood = mix(wood, vg.g, known);
-  // the open hills: straw, gold and tawny patches
-  vec3 straw = srgb(vec3(0.85, 0.75, 0.52)), gold = srgb(vec3(0.76, 0.62, 0.37)), tawny = srgb(vec3(0.62, 0.49, 0.31));
+  // the open hills: plain grey green (user 2026-11-01: the old straw and gold read as sand far off; Street View's distant
+  // hills, Angel Island and Tiburon from Battery Spencer, are green grey)
+  vec3 straw = srgb(vec3(0.46, 0.50, 0.36)), gold = srgb(vec3(0.40, 0.45, 0.31)), tawny = srgb(vec3(0.36, 0.41, 0.28));
   vec3 c = mix(gold, straw, smoothstep(0.25, 0.8, mid * 0.75 + small * 0.25));
   c = mix(c, tawny, smoothstep(0.5, 0.9, small) * 0.5);
   // the Headlands: green coastal grass with dry patches (Street View, spring), the edge eased over a kilometre

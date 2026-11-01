@@ -281,6 +281,8 @@ export function furnitureGeometries() {
     // barrier posts 1 m tall (scaled to their height), from their foot: a W-beam's or a fence's square dark timber post (6 by
     // 8 in, Caltrans A77; Street View: every one in the Headlands dark timber), a concrete rail's block, a chain-link's steel (rusty)
     tpost: merge([[B(0.15, 1, 0.2, 0, 0.5, 0), wood]]),
+    // a cable fence's post: slender, weathered grey-brown (Street View Field Road 0a_0130, Mitchell Road 0a_0030: about 10 cm)
+    kpost: merge([[C(0.055, 0.05, 1, 6), col(0x7d7264)]]),
     cpost: merge([[B(0.3, 1, 0.3, 0, 0.5, 0), col(0xd9d6cc)]]),
     spost: merge([[C(0.04, 0.04, 1, 6), col(0x7a5340)]]),
     pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),

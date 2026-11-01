@@ -8,8 +8,9 @@
 //   wbeam    galvanised W-beam on square dark timber block posts (every one seen in the Headlands)
 //   beam     a white painted concrete beam on short concrete block posts (Alexander Avenue's old rails by US-101)
 //   krail    a concrete K-rail, painted white or bare (Alexander Avenue)
-//   cable    timber posts about 1 m tall with a wire between them (Field Road, Conzelman Road by Point Bonita)
-//   fence    a timber post and two rail fence (Mitchell Road, upper Conzelman, Bunker Road by the stables)
+//   cable    slender weathered posts about 1 m tall with a wire between them (Field Road, Conzelman Road by Point Bonita,
+//            Mitchell Road along the lagoon)
+//   fence    a timber post and two rail fence (upper Conzelman, Bunker Road by the stables)
 //   chain    a chain-link fence on steel posts about 2 m tall (Field Road, behind Alexander Avenue's old rails)
 //   wall     a grey concrete retaining wall at the paved edge, its top the ground it holds up (East Road by Fort Baker)
 // Posts unseen at that size are W-beam's timber all the same (Alexander Avenue south of Sausalito: the panos show the beam,
@@ -82,8 +83,9 @@ export const BARRIERS = [
   // McCullough Road
   [37.836402, -122.498985, 278, 'R', -10, 80, 'wbeam'],
   [37.835804, -122.49967, 216, 'R', -10, 60, 'wbeam'],
-  // Mitchell Road
-  [37.832202, -122.539224, 98, 'R', -10, 100, 'fence'],
+  // Mitchell Road (along the lagoon: slender dark posts with cables between them, Street View gate_mitchellroad_0a_0030,
+  // 2025-03, heading 98; rev5 and rev6 severity 2: not a timber rail fence)
+  [37.832202, -122.539224, 98, 'R', -10, 100, 'cable'],
   [37.831882, -122.531363, 85, 'R', -10, 80, 'wbeam'],
 ];
 

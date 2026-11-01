@@ -931,7 +931,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
@@ -1011,10 +1011,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // the barriers' posts (buildRoads), each from 0.3 m into the ground under it (however far it falls away) to its top:
     // a W-beam's square dark timber posts, a cable fence's and a rail fence's timber posts, a concrete rail's blocks, a
     // chain-link fence's steel posts
-    const POST = { wbeam: ['tpost', 0.8], cable: ['tpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
+    const POST = { wbeam: ['tpost', 0.8], cable: ['kpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
     for (const R of c.rails || []) { const P = POST[R.kind]; if (P) for (const [x, y, z, yaw] of R.posts) { const bot = Math.min(y, hAt(x, z) ?? y) - 0.3; items[P[0]].push([x, bot, z, yaw, y + P[1] - bot]); } }
     // (the feet of what stands on the ground: the seams check)
-    c.feet = ['pole', 'stop', 'lamp', 'limit', 'tpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
+    c.feet = ['pole', 'stop', 'lamp', 'limit', 'tpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3();
     // every kind in one batched draw

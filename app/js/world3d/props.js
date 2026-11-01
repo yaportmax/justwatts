@@ -166,7 +166,7 @@ export function treeGeometries() {
   const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15);
   // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
   const F = { oak: col(0x51693a, 1.2), bay: col(0x3e5838, 1.12), fir: col(0x34552f, 1.35), red: col(0x264a32, 1.2),
-    euc: col(0x7c9a7a, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), willow: col(0x6d7d48, 1.25), fern: col(0x4f7a2c, 1.4) };
+    euc: col(0x8f836b, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), willow: col(0x6d7d48, 1.25), fern: col(0x4f7a2c, 1.4) };
   const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
   return {
     stone: merge([[bumpy(ico(0.45, 1), 0.12, 21), col(0x8d867a), M(0, 0.12, 0, 1, 0.6, 1)]]),

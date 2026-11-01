@@ -1246,14 +1246,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // the terrain mesh moved to its grid's heights (after the ground was lowered under roads)
   function groundMoved(c) {
     const g = c.grid; if (!g || !c.tmesh || !c.parts.terrain) return;
-    // (its heights in place, only the stretch of vertices that moved sent to the GPU again: a whole new geometry (a near
-    // tile's about 20 MB with its 32-bit index) held a frame a quarter of a second on Bunker Road when the tunnels' cuts
-    // were pushed in after the ride began)
+    // (a whole new geometry (a near tile's about 20 MB with its 32-bit index) held a frame a quarter of a second on Bunker
+    // Road when the tunnels' cuts were pushed in after the ride began; the heights written into the position buffer in
+    // place (a range) held one half a second on Conzelman about 320 s in: the GPU was still drawing from that buffer
+    // (Chrome's trace: the one bufferSubData, 0.8 MB, 839 ms in the GPU process; A15). So a new position buffer, the
+    // positions only (about a tenth of the tile's GPU data); the old one kept on the geometry under a name no shader
+    // reads, freed with the tile)
     const mesh = c.parts.terrain, geo = mesh.geometry, P = geo.attributes.position, A = P.array, { src, nv, skirt } = c.tmesh;
-    let lo = -1, hi = -1;
-    for (let i = 0; i < src.length; i++) { const y = g.hs[src[i]] - (i >= nv ? skirt : 0); if (A[3 * i + 1] !== y) { A[3 * i + 1] = y; if (lo < 0) lo = i; hi = i; } }
-    if (lo < 0) return;
-    P.clearUpdateRanges(); P.addUpdateRange(3 * lo, 3 * (hi - lo + 1)); P.needsUpdate = true; geo.computeBoundingSphere(); hz.touch();
+    let moved = false;
+    for (let i = 0; i < src.length; i++) { const y = g.hs[src[i]] - (i >= nv ? skirt : 0); if (A[3 * i + 1] !== y) { A[3 * i + 1] = y; moved = true; } }
+    if (!moved) return;
+    let k = 0; while (geo.attributes['jwOld' + k]) k++; geo.setAttribute('jwOld' + k, P);
+    geo.setAttribute('position', new THREE.BufferAttribute(A, 3)); geo.computeBoundingSphere(); hz.touch();
   }
   // a tile's road tops for the rider: segments [x0, y0, z0, x1, y1, z1, half width] in 10 m cells
   function roadIndex(a) {

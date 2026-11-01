@@ -10,7 +10,7 @@ import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } fro
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impGrow } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers } from './rail.js';
-import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS } from './handlist.js';
+import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES } from './handlist.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -156,8 +156,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
 
   // the rails of every road the rides reach (rail.js): the rider's heights, read before any tile; a course's profile is
   // matched to them when both are here
-  let RI = null, HB = null, HM = null;  // (HB, HM: the hand list's barriers and lane markings on the rails, rail.js handBarriers)
-  baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS), SURVEY, proj.xz); HM = handBarriers(RI, MARKINGS, [], proj.xz, true); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
+  let RI = null, HB = null, HM = null, HV = null;  // (HB, HM: the hand list's barriers and lane markings on the rails, rail.js handBarriers)
+  baked.rails?.().then(j => { if (dead || !j) return; RI = railIndex(j, proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS), SURVEY, proj.xz); HM = handBarriers(RI, MARKINGS, [], proj.xz, true); HV = handBarriers(RI, VERGES, [], proj.xz); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
   // a tunnel's rail at a point (its floor, baked), null off every tunnel's
   // the drawn top of the road at a point nearest the height e, of the rails it is on, not past one's end (rail.js top
   // counts a rail's end out to its half width past it: a bore's floor carried on level out of its portal)
@@ -617,7 +617,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // OpenStreetMap's barrier=guard_rail ways (a W-beam: it maps them a few metres off, any within 6 m of an edge). None
     // guessed (a rail where the ground fell away was drawn where Street View has none). Gaps of up to three points
     // closed, runs under 6 m left out
-    const rails = [], bk = { pos: [], cut: [], vg: [], idx: [], ends: [] }, bankRuns = [], bankH = new Map(), bankS = new Map();
+    const rails = [], bk = { pos: [], cut: [], vg: [], idx: [], ends: [] }, bankRuns = [], bankH = new Map(), bankS = new Map(), bankG = new Set();
     if (sides.length && ridden(g) && !globalThis.__w3?.noBanks) {  // (__w3.noBanks: profiling)
       const ground = (x, z) => gridHeight(g, x, z) ?? groundAt(x, z), raw = (x, z) => gridHeight(g, x, z, g.raw), n1 = g.segs + 1;
       const osm = new Map(), ok = (x, z) => `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
@@ -650,7 +650,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           for (let k = 0; k < ba.length; k++) { const W = Math.max(ba[k][2] - ba[k][0], bb[k][2] - bb[k][0]), nv = Math.max(1, Math.ceil(W / 1.0));
             for (let u = 0; u <= nu; u++) { if (due()) yield; for (let w = 0; w <= nv; w++) { const f = u / nu, e = w / nv, o = (ba[k][0] + (bb[k][0] - ba[k][0]) * f) * (1 - e) + (ba[k][2] + (bb[k][2] - ba[k][2]) * f) * e;
               const h = (ba[k][1] + (bb[k][1] - ba[k][1]) * f) * (1 - e) + (ba[k][3] + (bb[k][3] - ba[k][3]) * f) * e, x = pa[0] + (pb[0] - pa[0]) * f + (pa[3] + (pb[3] - pa[3]) * f) * o, z = pa[2] + (pb[2] - pa[2]) * f + (pa[4] + (pb[4] - pa[4]) * f) * o;
-              const kk = bkey(x, z), old = bankH.get(kk); if (ba[k][4] || bb[k][4]) { bankH.set(kk, -1e9); bankS.set(kk, Math.max(bankS.get(kk) ?? -1e9, h)); } else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } } }
+              const kk = bkey(x, z), old = bankH.get(kk); if (ba[k][5] && run[i].g) bankG.add(kk); if (ba[k][4] || bb[k][4]) { bankH.set(kk, -1e9); bankS.set(kk, Math.max(bankS.get(kk) ?? -1e9, h)); } else if (old == null || (old > -1e8 && h > old)) bankH.set(kk, h); } } }
           if (due()) yield; }
       };
       for (const { C, r, st, own } of sides) for (const sd of [1, -1]) {
@@ -678,6 +678,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         yield;
         // (behind a retaining wall the bank rises from the wall's back, not from a verge before it)
         const K = sideKinds(E, ground, raw, i => railed[i] === 1 || curbed[i] === 1, byTunnel); K.forEach((k, i) => { if (walled[i] && k.kind === CUT) k.wall = true; if (curbed[i] && !railed[i]) k.curb = true; });
+        // (the verge gravel where the hand list says, handlist.js VERGES)
+        if (HV) K.forEach((k, i) => { if (HV.at(E[i][0], E[i][2], half, C[i][0], C[i][2]).includes('gravel')) k.gravel = true; });
         yield* strips(E, K, st);
       }
       // a dead end's end across (a turnaround, a lot's way in that stops): its strip too (none where it runs on into
@@ -699,7 +701,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
     }
     yield;
-    c.rails = rails; c.bankRuns = bankRuns; c.bankH = bankH; c.bankS = bankS;  // (the runs: the seams check, debug().seamData)
+    c.rails = rails; c.bankRuns = bankRuns; c.bankH = bankH; c.bankS = bankS; c.bankG = bankG;  // (the runs: the seams check, debug().seamData)
     { const T = []; for (const [a, b, trail] of tops) if (trail === true) for (let k = a; k < b; k++) { const v = B.idx[k]; T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]); } c.trailPts = T; }
     c.surf = roadIndex(surf); c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c));  // no grass or scrub on the roads
     if (!B.n) return setPart(c, 'roads', null);
@@ -710,12 +712,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const grp = new THREE.Group(), mesh = new THREE.Mesh(geo, mats.road); mesh.receiveShadow = true; grp.add(mesh); yield;
     // the banks: the ground's own material and classes (the nearest grid point's), cut faces bare (cut bank class)
     if (bk.idx.length && c.mask) {
-      const nv = bk.pos.length / 3, A = new Uint8Array(nv * 4), Bm = new Uint8Array(nv * 4), n1 = g.segs + 1;
+      const nv = bk.pos.length / 3, gv = new Float32Array(nv), A = new Uint8Array(nv * 4), Bm = new Uint8Array(nv * 4), n1 = g.segs + 1;
       for (let i = 0; i < nv; i++) {
         const [fi, fj] = gridIJ(g, bk.pos[3 * i], bk.pos[3 * i + 2]), v = Math.max(0, Math.min(n1 - 1, Math.round(fj))) * n1 + Math.max(0, Math.min(n1 - 1, Math.round(fi)));
         for (let k = 0; k < 4; k++) { A[4 * i + k] = c.mask[8 * v + k]; Bm[4 * i + k] = c.mask[8 * v + 4 + k]; }
         Bm[4 * i] = bk.cut[i] === 1 ? 255 : 0; Bm[4 * i + 1] = 0;  // a steep face (cut), not rock
-        if (bk.vg[i]) A[4 * i + 1] = 255;  // (the verge: grass (green))
+        if (bk.vg[i] === 1) A[4 * i + 1] = 255;  // (the verge: grass (green))
+        else if (bk.vg[i] === 2) { A[4 * i + 1] = 0; gv[i] = 1; }  // (a gravel verge: drawn as the gravel by the roads, materials.js)
         if (due()) yield;
       }
       // (in pieces of at most 65,536 vertices, a side's strips never split: 16-bit indices, and no one buffer of tens of
@@ -726,7 +729,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (i1 > i0) {
           const bg = new THREE.BufferGeometry(), ix = new (v1 - v0 > 65536 ? Uint32Array : Uint16Array)(i1 - i0); for (let k = i0; k < i1; k++) ix[k - i0] = bk.idx[k] - v0;
           bg.setAttribute('position', new THREE.BufferAttribute(P32.slice(3 * v0, 3 * v1), 3)); bg.setAttribute('mk', new THREE.BufferAttribute(A.slice(4 * v0, 4 * v1), 4, true)); bg.setAttribute('mk2', new THREE.BufferAttribute(Bm.slice(4 * v0, 4 * v1), 4, true));
-          bg.setAttribute('cv', new THREE.BufferAttribute(new Float32Array(v1 - v0), 1)); bg.setIndex(new THREE.BufferAttribute(ix, 1)); bg.computeVertexNormals(); bg.computeBoundingSphere();
+          bg.setAttribute('cv', new THREE.BufferAttribute(new Float32Array(v1 - v0), 1)); bg.setAttribute('gv', new THREE.BufferAttribute(gv.slice(v0, v1), 1)); bg.setIndex(new THREE.BufferAttribute(ix, 1)); bg.computeVertexNormals(); bg.computeBoundingSphere();
           // (drawn before the ground: the ground under a bank then costs the GPU nothing)
           const bm = new THREE.Mesh(bg, mats.terrain); bm.receiveShadow = true; bm.renderOrder = -1; grp.add(bm); yield;
         }
@@ -1316,6 +1319,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (i < 0 || j < 0 || i >= n || j >= n) return null;
     const v = j * n + i, h0 = gridHeight(g, x, z), mk = c.mask, N = c.nor; if (h0 == null || h0 < SEA + 0.3) return null;
     const h = standOn(c, x, z, h0); if (h == null) return { skip: true };
+    if (c.bankG?.has(bkey(x, z))) return { skip: true };  // (a gravel verge, handlist.js VERGES)
     if (onTunnel(x, z, h)) return { skip: true };
     if ((mk[8 * v + 4] > 100 && N[3 * v + 1] < 0.8) || mk[8 * v + 5] > 128 || mk[8 * v + 6] > 100) return { skip: true };
     if (mk[8 * v] > 120 && REDWOOD.value.some(b => x > b.x && x < b.z && z > b.y && z < b.w)) return { skip: true };  // no grass under the redwoods
@@ -1335,6 +1339,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // (on a strip's steep face too where the lidar has scrub (cellBushes decides): Street View Conzelman 0a_1030, the cut
     // above the road under scrub; leaning with the face (below))
     const h = standOn(c, x, z, h0) ?? c.bankS?.get(bkey(x, z)); if (h == null) return { skip: true };
+    if (c.bankG?.has(bkey(x, z))) return { skip: true };
     if (onTunnel(x, z, h)) return { skip: true };
     // (the road cuts bare (Street View: red chert) where the lidar does not say what grows there; where it does, it decides
     // (cellBushes): Street View user_conzelman_railbend, the cut above the road under low scrub to the edge)

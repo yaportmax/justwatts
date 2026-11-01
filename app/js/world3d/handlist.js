@@ -115,6 +115,24 @@ export const CURBS = [
   [37.821781, -122.52985, 263, 'R', -10, 40, 'red'], [37.821781, -122.52985, 263, 'L', -10, 30, 'curb'],
   [37.836402, -122.498985, 278, 'L', -10, 80, 'curb'],
   [37.831724, -122.535866, 108, 'R', -10, 60, 'curb'], [37.831706, -122.533629, 83, 'R', -10, 60, 'curb'],
+  // Mitchell Road at the Rodeo Beach lot, the lagoon side: a low pale concrete kerb at the paved edge, the gravel behind it
+  // (Street View a4 0a_0030 2025-03 h96: the kerb from under the camera to the bins about 25 m on; A16)
+  [37.832205, -122.539175, 98, 'R', -10, 30, 'curb'],
+];
+
+// VERGES: a road side's verge (its first 2 m where not steep, banks.js) gravel, not grass: [lat, lon, heading, side,
+// from, to, 'gravel'] as BARRIERS. Each from Street View (the pano and the way it looks) and USDA NAIP (0.94 m, cache/naip:
+// the bare tan band along the paved edge, where it starts and ends). Not traced from NAIP alone: its summer colours do not
+// tell a bare shoulder from dry grass, a sidewalk or a lot (A16: a scan of every road side, NDVI under 0.03, bright and
+// neutral 1 to 2.5 m out, gave 307 stretches, 14.9 km, mostly lots and sidewalks, and missed the McCullough end's)
+export const VERGES = [
+  // upper Conzelman Road's McCullough end, the cut side (north): a gravel strip about 1.5 m between the asphalt and the
+  // bank (Street View user_upperconz_mccullough 2025-03 h101; NAIP: a tan band along the north edge from 40 m west of the
+  // pano to the bend 75 m east, where the scrub reaches the edge)
+  [37.833528, -122.493192, 101, 'L', -40, 75, 'gravel'],
+  // Mitchell Road at the Rodeo Beach lot, the lagoon side: gravel behind the kerb, the bins on it (Street View a4 0a_0030
+  // 2025-03 h96; NAIP: a tan band 2 to 3 m wide from the pano east, widening to the gravel parking 65 to 115 m on)
+  [37.832205, -122.539175, 98, 'R', -10, 115, 'gravel'],
 ];
 
 // SURVEY: the panos looked at (every 100 m along the surveyed roads, one way): the rails they lie on are the surveyed

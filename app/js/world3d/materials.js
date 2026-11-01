@@ -38,7 +38,7 @@ vec4 jwVeg(vec2 p) {
 }
 // set by jwGround: how much of the point is coastal scrub from the aerial imagery, and whether there is any there; set
 // before it: how near the point is (1: among the scrub's drawn bushes, its ground the litter and grass under them)
-float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0;
+float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0, jwGv = 0.0;
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
   // (the small noise on a steep face laid across the face, along it and up it, not projected from above: no streaks
@@ -56,6 +56,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // trees in place of OpenStreetMap's woods and scrub there
   vec4 vg = jwVeg(p + (jwN(p / 13.0).ba - 0.5) * 7.0); float known = vg.a;
   float pav = min(vg.r, min(vg.g, vg.b)); vg.rgb -= pav;  // paving and gravel by the roads (all three at once, veg.js)
+  // (a road side strip's gravel verge, handlist.js VERGES: jwGv set before the call)
+  pav = max(pav, jwGv); vg.rgb *= 1.0 - jwGv; known = max(known, jwGv);
   wood = mix(wood, vg.g, known);
   // the open hills: straw, gold and tawny patches
   vec3 straw = srgb(vec3(0.85, 0.75, 0.52)), gold = srgb(vec3(0.76, 0.62, 0.37)), tawny = srgb(vec3(0.62, 0.49, 0.31));
@@ -119,6 +121,9 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     // the pullouts, car parks and gravel shoulders: pale grey, a little warm, mottled
     vec3 pavC = mix(srgb(vec3(0.47, 0.46, 0.43)), srgb(vec3(0.58, 0.56, 0.51)), smoothstep(0.3, 0.7, fine * 0.7 + small * 0.3));
     d = mix(d, pavC, smoothstep(0.25, 0.65, pav));
+    // (a gravel verge: the traced pads' gravel (the road shader's surface 3), Street View user_upperconz_mccullough 2025-03
+    // h101: its left strip's pixels median #8e8781 against the asphalt's #938f8a, A16)
+    d = mix(d, mix(srgb(vec3(0.55, 0.52, 0.46)), srgb(vec3(0.66, 0.62, 0.55)), fine * 0.6 + small * 0.4) * (0.9 + 0.2 * mid), jwGv);
     c = mix(c, d * (0.92 + 0.16 * fine), known * (1.0 - town * 0.6));
     c = mix(c, pavC * (0.92 + 0.16 * fine), smoothstep(0.25, 0.65, pav) * known * town * 0.6);  // (a lot in a fort's town ground paved all the same: Mitchell Road's at Rodeo Beach)
     jwScrub = sc * known * (1.0 - br) * (1.0 - tr);
@@ -173,10 +178,10 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, { tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
+      .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv; attribute float gv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vGv = gv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN; uniform float scrubR;\n' + GLSL_COMMON + GLSL_GROUND)
+      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN; uniform float scrubR;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <color_fragment>', /* glsl */`
         bool inBore = false;
         ${bores ? `
@@ -190,7 +195,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         vec3 nW = normalize(vNw); float rk;
         float dist = length(vViewPosition);
         jwNear = 1.0 - smoothstep(scrubR * 0.6, scrubR * 0.95, dist);
-        vec3 c = jwGround(vW.xz, nW, vMk, vMk2, vCv, vW.y, rk);
+        jwGv = vGv; vec3 c = jwGround(vW.xz, nW, vMk, vMk2, vCv, vW.y, rk);
         // hollows a little darker (sky light does not reach the bottom of a gully)
         c *= 1.0 - clamp(vCv, 0.0, 1.0) * 0.25;
         // past the grass: the hills mottled, dots of scrub and their shade, drier and greener patches
@@ -215,7 +220,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-12' + (detail ? 'd' : '') + (bores ? 'b' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-13' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 

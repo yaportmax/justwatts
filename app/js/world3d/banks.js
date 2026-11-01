@@ -140,7 +140,7 @@ export function* sideRunsSteps(E, kinds, ground, opt = {}, every = 24) {
     const run = [];
     for (let k = Math.max(0, i - 1); k <= Math.min(E.length - 1, j + 1); k++) {
       if (!P[k]) continue;
-      run.push({ p: E[k], b: strip(E[k], P[k], reach(k), ground, k < i || k > j) });
+      run.push({ p: E[k], b: strip(E[k], P[k], reach(k), ground, k < i || k > j), g: !!kinds[k].gravel });
     }
     if (run.length > 1) runs.push(run);
     i = j;
@@ -155,8 +155,8 @@ export function bankGeometry(runs, out = { pos: [], cut: [], vg: [], idx: [] }) 
     const nb = run[0].b.length;
     for (let k = 0; k < nb; k++) {
       const base = out.pos.length / 3;
-      for (const { p, b } of run) {
-        const [o0, h0, o1, h1, c, v = 0] = b[k];
+      for (const { p, b, g } of run) {
+        const [o0, h0, o1, h1, c, v0 = 0] = b[k], v = v0 && g ? 2 : v0;  // (2: a gravel verge, handlist.js VERGES)
         out.pos.push(p[0] + p[3] * o0, h0, p[2] + p[4] * o0, p[0] + p[3] * o1, h1, p[2] + p[4] * o1); out.cut.push(c, c); out.vg?.push(v, v);
       }
       // facing up and out, whichever side of the road (the edge's outward normal says which way round)

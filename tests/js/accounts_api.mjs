@@ -827,7 +827,7 @@ S.integrations = async () => {
     r = await a.post('/api/integrations?op=syncs', { syncs_to: ['strava', 'bogus'] }, H);
     assert.deepEqual(r.body.integrations.find(x => x.id === 'garmin').syncs_to, ['strava']);
     // old FIT files are pruned; the secret and state stay
-    await st.pruneIntegrationData(NOW + 31 * DAY);
+    await st.pruneIntegrationData(Math.max(NOW, Date.now()) + 31 * DAY);  // the upload stamps the real clock
     assert.equal(await st.getIntegrationData(uid, 'file', 'fit:r-1'), null);
     assert.ok(await st.getIntegrationData(uid, 'secret', 'intervals'));
     // disconnect deletes the secret

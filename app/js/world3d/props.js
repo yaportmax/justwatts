@@ -163,7 +163,7 @@ export const CYP_TALL = 15;
 // the share of the full models' radius each is drawn in full (the tall dense ones cost the most; impostors past it)
 export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, willow: 0.8, eucS: 0.8, cypressT: 0.8, stone: 0.45, fern: 0.25 };
 export function treeGeometries() {
-  const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15);
+  const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15), paleS = col(0xd8caa6, 3.2);
   // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
   const F = { oak: col(0x51693a, 1.2), bay: col(0x3e5838, 1.12), fir: col(0x34552f, 1.35), red: col(0x264a32, 1.2),
     euc: col(0x8f836b, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), willow: col(0x6d7d48, 1.25), fern: col(0x4f7a2c, 1.4) };
@@ -200,10 +200,14 @@ export function treeGeometries() {
     // arroyo willow: many slender stems from the ground fanning out, a dense rounded thicket about 6 m tall and as wide
     willow: merge([...[[1.6, 0.3], [-1.4, 0.6], [0.4, -1.5], [-0.5, 1.5], [1.2, -1.0]].map(([x, z], i) => limb(x * 0.15, 0, z * 0.15, x, 3.6 + 0.3 * i, z, 0.11, brownD)),
       core(0, 3.8, 0, 2.5, 1.9, 2.4, F.willow, 19), ...lumps(0, 3.7, 0, 3.0, 2.3, 2.9, 8, 11, 2.2, LEAF.willow, 18, { lift: 0.4 }).map(g => leaves(g, F.willow))]),
-    // a young or cut-back blue gum (Street View: Alexander Avenue's cut, Center Road's avenue): a short pale leaning trunk
-    // forking low into stems, blue-grey hanging leaves in a tall oval from about 2.5 m, about 13 m tall
-    eucS: merge([bark(trunkG(0.3, 0.24, 1.9, 6), pale, M(0, 0, 0, 1, 1, 1, 0, 0.1)), ...[[1.2, 0.4], [-1.0, 0.7], [0.3, -1.2], [-0.4, -0.6]].map(([x, z], i) => limb(0.15 + x * 0.1, 1.7, z * 0.1, x, 6.5 + 0.6 * i, z, 0.15, pale)),
-      core(0, 7.6, 0, 2.3, 3.2, 2.2, F.euc, 23), ...lumps(0, 7.6, 0, 3.1, 4.3, 3.0, 9, 13, 2.4, LEAF.euc, 22, { lump: 0.62, lift: 0.2 }).map(g => leaves(g, F.euc))]),
+    // a young or cut-back blue gum (Street View: Alexander Avenue's cut, Center Road's avenue): a short pale trunk forking
+    // about 2.6 m up into upright stems, blue-grey hanging leaves in an open dome from about 3 m, about 13 m tall; no solid
+    // core (A16: Street View Center Road 0a_0130 2025-03, the sky through the crowns, the trunks pale grey-tan in the sun,
+    // pixels' median #918462 (85th percentile #b0a382) against the model's #514937 at the same view; the A13 model's dark
+    // core read as a brown ball in the crown and its stems splayed out to 1.2 m by 6.5 m)
+    eucS: merge([bark(trunkG(0.32, 0.26, 2.8, 6), paleS, M(0, 0, 0, 1, 1, 1, 0, 0.04)), ...[[0.7, 0.2], [-0.6, 0.45], [0.2, -0.75], [-0.3, -0.35]].map(([x, z], i) => limb(x * 0.12, 2.6, z * 0.12, x, 7.2 + 0.5 * i, z, 0.15, paleS)),
+      limb(0.1, 3.4, 0, 1.5, 5.6, 0.3, 0.09, paleS), limb(-0.1, 3.8, 0.1, -1.3, 6.0, 0.6, 0.09, paleS),
+      ...lumps(0, 7.9, 0, 3.1, 4.0, 3.0, 11, 13, 2.4, LEAF.euc, 22, { lump: 0.62, lift: 0.2 }).map(g => leaves(g, F.euc))]),
     // a big sheltered Monterey cypress: a short thick dark trunk forking low, a dense dark irregular crown from about 2.5 m,
     // about 22 m tall and 13 m across (Street View user_fortbaker_stop, 2025-03: right of the stop)
     cypressT: merge([bark(trunkG(0.9, 0.45, 9, 7), brownD), limb(0.3, 3.5, 0, 3.2, 8, 0.6, 0.3, brownD), limb(0.2, 4, 0, -2.8, 9, -0.5, 0.28, brownD), limb(0, 5, 0.2, 0.4, 12, 2.8, 0.24, brownD),

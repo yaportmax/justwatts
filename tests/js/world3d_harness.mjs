@@ -109,7 +109,7 @@ out.ribbon = { verts: d.pos.length / 3, tris: d.idx.length / 3, faceUp, xs: [...
   code: [...d.code.slice(0, 4)], v: [...d.uv].filter((_, i) => i % 2).slice(-2), deck: [r3(deck[0][1]), r3(deck.at(-1)[1]), r3(deck[Math.floor(deck.length / 2)][1])], pillars: pil.length,
   resample: resample([[0, 0], [0, 23]], 5).length };
 out.styles = Object.fromEntries([['tertiary', 0, 0], ['primary', 4, 0], ['trunk', 2, 8], ['motorway', 4, 8], ['residential', 0, 0], ['path', 0, 0], ['tertiary', 0, 4],
-  ['unclassified', 1, 8 | 32 | 256 | 4096], ['unclassified', 2, 32 | 64], ['tertiary', 0, 0, 9]]
+  ['unclassified', 1, 8 | 32 | 256 | 4096], ['unclassified', 2, 32 | 64], ['tertiary', 0, 0, 9], ['unclassified', 1, 8 | 32 | 256 | 4096 | 8192, 9.8]]
   .map(([hw, ln, fl, wd = 0]) => [`${hw}/${ln}/${fl}${wd ? '/' + wd : ''}`, roadStyle(hw, ln, fl, wd)]));
 out.clip = clipLine([[-10, 5], [5, 5], [5, 20], [20, 20], [20, 5], [30, 5]], [0, 0, 10, 10]).map(r => r.map(p => p.map(r3)));
 
@@ -603,6 +603,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     const at = (la, lo, hd) => { const [x, z] = xz(la, lo), r = hd * Math.PI / 180; return HM.across(x, z, Math.sin(r), -Math.cos(r)).map(([k, sd]) => k === 'pass' || k === 'stalls' ? k + (sd > 0 ? 'R' : 'L') : k).sort(); };
     out.marks = { n: MARKINGS.length, pieces: HM.pieces.length, want: r3(want), got: r3(got), bunkerDash: at(37.832461, -122.510236, 65), bunkerPass: at(37.833229, -122.508168, 65), bunkerPassBack: at(37.833229, -122.508168, 245),
       cronkhite: at(37.833930, -122.533105, 122), conzTop: at(37.833236, -122.492124, 144), conzMid: at(37.832673, -122.489632, 66), center: at(37.834933, -122.477937, 206), hawk: at(37.826250, -122.499000, 250), fortBaker: at(37.835160, -122.479916, 83),
+      mitchell: (() => { const [x, z] = xz(37.832205, -122.539175), r = 98 * Math.PI / 180; return markCode(HM.across(x, z, Math.sin(r), -Math.cos(r))); })(),
       stops: STOPS.length, crossings: CROSSINGS.length, code: markCode([['yellow2', 0]]) }; }
   // both ways along one road: the rider on the other side of its centre, at the same height
   { const c = courseOf(37.83300, -122.48341, 190), P = c.ll.map(p => xz(...p)), fwd = ride(c), rev = ride({ ll: c.ll.slice().reverse(), ele: c.ele.slice().reverse() }), L = (P.length - 1) * 10;

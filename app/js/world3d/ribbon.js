@@ -16,7 +16,8 @@ const STYLE = {
 const LANE_W = 3.6, BIKE_W = 1.8, PARK_W = 2.8;
 export const YB = 0.9;
 // Style of a way { hw, ln: lanes, fl: flags (landuse.js: 4 unpaved, 8 oneway, 32/64 a bike lane left/right, 128/256 a
-// parking lane left/right, 512 no lane markings, 4096 the left bike lane against the oneway), wd: its tagged width (m) }:
+// parking lane left/right, 512 no lane markings, 4096 the left bike lane against the oneway, 8192 wd a width measured from
+// Street View: the travel lanes take the difference, the bike lanes, buffer and parking kept), wd: its tagged width (m) }:
 // { w, lm, surf, lanes, a, b, pL, pR }. Across the road from its right edge (as the way runs): parking, bike lane, the
 // travel lanes, bike lane, parking; a and b how far in from the right and the left edge the travel lanes start, pR and
 // pL the parking lanes' widths (0: none). lm: 0 none, 1 edge lines, 2 two-way (double yellow centre line), 3 oneway
@@ -31,7 +32,7 @@ export function roadStyle(hw, ln = 0, fl = 0, wd = 0) {
   const sh = s[0] >= 8.5 ? 0.8 : 0.4, pR = fl & 256 ? PARK_W : 0, pL = fl & 128 ? PARK_W : 0, bR = fl & 64 ? BIKE_W : 0, bL = fl & 32 ? BIKE_W : 0;
   let w = lanes && lm ? lanes * LANE_W + 2 * sh : s[0], a = 0, b = 0;
   if (lm && (pR || pL || bR || bL)) { a = pR + bR + (pR || bR ? 0 : sh); b = pL + bL + (pL || bL ? 0 : sh) + (lm === 4 ? YB : 0); w = lanes * LANE_W + a + b; }
-  if (wd >= 3 && wd < 30 && lm) { const k = wd / w; w = wd; a *= k; b *= k; }  // the tagged width wins, the parts in proportion
+  if (wd >= 3 && wd < 30 && lm) { if (fl & 8192) w = wd; else { const k = wd / w; w = wd; a *= k; b *= k; } }  // the tagged width wins, the parts in proportion (8192: a measured width, the travel lanes take the difference, A15)
   return { w, lm, surf, lanes, a, b, pL, pR };
 }
 // The hand list's lane markings (handlist.js MARKINGS) as the road shader reads them, per vertex [centre, bits]: centre
@@ -39,14 +40,17 @@ export function roadStyle(hw, ln = 0, fl = 0, wd = 0) {
 // ribbon runs), 4 on the left, 5 double white, 6 yellow raised markers, 7 double yellow on a road with no lines; bits 1 no edge lines, 2 no bike symbols, 4 BIKE
 // LANE in words, 8 ticks across the contraflow buffer, 16 that buffer cross hatched, 32 / 64 stall ticks in the
 // right / left parking lane (no buffer before it); and that buffer's width where the hand list gives one (0: YB; A14)
+// and the right part's width where the hand list gives one (rpart, 0: as the style has it; A15: the line between it and the
+// travel lane there, the travel lane the rest)
 export function markCode(kinds) {
-  let c = 0, b = 0, bw = 0;
+  let c = 0, b = 0, bw = 0, ra = 0;
   for (const [k, sd, w] of kinds) {
     if (k === 'buffer') { bw = w; continue; }
+    if (k === 'rpart') { ra = w; continue; }
     if (k === 'nocentre') c = 1; else if (k === 'dash') c = 2; else if (k === 'pass') c = sd > 0 ? 3 : 4; else if (k === 'white2') c = 5; else if (k === 'dots') c = 6; else if (k === 'yellow2') c = 7;
     else b |= { noedge: 1, nosym: 2, words: 4, ladder: 8, hatch: 16 }[k] || (k === 'stalls' ? (sd > 0 ? 32 : 64) : 0);
   }
-  return [c, b, bw];
+  return [c, b, bw, ra];
 }
 // the order roads draw in where they overlap (bigger roads on top)
 export const roadLift = hw => 0.22 + 0.02 * Math.min(4, ['service', 'residential', 'unclassified', 'tertiary', 'secondary'].indexOf(hw) + 1 || (STYLE[hw]?.[0] > 9 ? 5 : 0));
@@ -185,7 +189,7 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
       const cf = drape ? Infinity : Math.max(0.25, half * 0.07); hl = Math.max(hc - cf, Math.min(hc + cf, hl)); hr = Math.max(hc - cf, Math.min(hc + cf, hr));
     }
     last = hc;
-    if (mk) { const m = mk(c[0], c[1], tx, tz); code = code.slice(0, 8); code.push(m[0], m[1], m[2] || 0); }
+    if (mk) { const m = mk(c[0], c[1], tx, tz), a0 = code.a0 ?? code[4]; code = code.slice(0, 8); code[4] = m[3] || a0; code.a0 = a0; code.push(m[0], m[1], m[2] || 0); }
     B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);
     B.v(c[0] - nx, hr + lift, c[1] - nz, 1, v0 + L[i], code);
     centre.push([c[0], hc + lift, c[1], half, c[0] + nx, hl + lift, c[1] + nz, c[0] - nx, hr + lift, c[1] - nz, code[5]]);

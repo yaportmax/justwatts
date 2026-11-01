@@ -72,6 +72,8 @@ def test_road_ribbon_geometry(out):
     assert c["lm"] == 4 and c["w"] == pytest.approx(9.1) and c["a"] == pytest.approx(2.8) and c["b"] == pytest.approx(2.7)  # the right, a bike lane up on the left
                                                                                             # (and its buffer's 0.9 m): 9.1 m, NAIP 8.5 (the
                                                                                             # travel lane there nearer 3 m than 3.6)
+    m = s["unclassified/1/12584/9.8"]                                                       # a measured width (8192, A15): the travel lane
+    assert m["w"] == pytest.approx(9.8) and m["a"] == pytest.approx(2.8) and m["b"] == pytest.approx(2.7)  # takes the difference
     b = s["unclassified/2/96"]                                                              # Bunker Road: a bike lane each side
     assert b["lm"] == 2 and b["w"] == pytest.approx(10.8) and b["a"] == b["b"] == pytest.approx(1.8)
     assert s["tertiary/0/0/9"]["w"] == 9                                                    # a tagged width wins
@@ -410,5 +412,6 @@ def test_lane_markings_from_the_hand_list(out):
     assert "passR" in m["bunkerPass"] and "passL" in m["bunkerPassBack"], m             # the broken line on the eastbound side
     assert "hatch" in m["conzTop"] and "stallsR" in m["conzTop"] and "ladder" in m["conzMid"], m  # upper Conzelman Road
     assert "words" in m["center"] and m["hawk"] == [], m                                # Center Road's BIKE LANE; none at Hawk Hill
-    assert "yellow2" in m["fortBaker"] and m["code"] == [7, 0, 0], m                      # Fort Baker's stop approach: double yellow
+    assert "yellow2" in m["fortBaker"] and m["code"] == [7, 0, 0, 0], m                   # Fort Baker's stop approach: double yellow
+    assert m["mitchell"][3] == 0.9 and m["mitchell"][1] & 1, m                         # the Rodeo Beach lot: one line 0.9 m in (A15)
     assert m["stops"] >= 1 and m["crossings"] >= 1                                     # its STOP, bar and crosswalk (Street View)

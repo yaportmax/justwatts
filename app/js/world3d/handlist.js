@@ -186,6 +186,8 @@ export const SURVEY = [
 //   hatch     that buffer cross hatched
 //   buffer    that buffer's width, an eighth entry [metres at from, metres at to] (else 0.9 m, ribbon.js YB); the extra
 //             width out of the travel lane beside it
+//   rpart     the right part (a bike lane or shoulder) this wide, an eighth entry [metres at from, metres at to]: its line
+//             there, the travel lane the rest (A15)
 //   stalls    a parking lane's stall ticks, no buffer before it (on the side given)
 //   wposts    white flexible posts on the contraflow buffer; yposts yellow ones
 //   nosym     no bike lane symbols (Bunker Road's shoulders: cycleway=lane in OpenStreetMap, never a symbol in Street View)
@@ -204,8 +206,12 @@ export const MARKINGS = [
   ...each([[37.833930, -122.533105, 122], [37.832123, -122.528736, 66], [37.831238, -122.524057, 81], [37.833169, -122.519772, 97],
     [37.831713, -122.514512, 97], [37.832846, -122.509204, 65], [37.834756, -122.504301, 21], [37.837628, -122.500278, 47],
     [37.840855, -122.496419, 60]], 'C', -10, 520, 'nosym'),
-  // Mitchell Road at the Rodeo Beach lot: no lines at all
+  // Mitchell Road at the Rodeo Beach lot: one white line 0.9 m in from the right paved edge, no other (Street View a4
+  // 0a_0030 2025-03 h96, measured 0.8 to 0.9 m from a 2.5 m camera, 0.9 to 1.0 m from 2.7 m; A14, A15)
   [37.832205, -122.539175, 98, 'C', -15, 60, 'nocentre'], [37.832205, -122.539175, 98, 'C', -15, 60, 'noedge'],
+  // (eased over the joint with way 255330053, 47 m on, to the plain road's edge line 0.3 m in by 75 m: the joint's taper
+  // between the bike lane's 1.8 m and none would bulge the line in)
+  [37.832205, -122.539175, 98, 'C', -15, 40, 'rpart', [0.9, 0.9]], [37.832205, -122.539175, 98, 'C', 40, 75, 'rpart', [0.9, 0.3]],
   // lower Conzelman Road past Field Road to Point Bonita (oneway): no yellow line
   ...each([[37.825830, -122.526653, 226], [37.825433, -122.527603, 269], [37.824810, -122.527783, 153]], 'C', -20, 100, 'nocentre'),
   // Alexander Avenue from East Road down to Bunker Road: its northbound shoulder (a bike lane in OpenStreetMap) never has a

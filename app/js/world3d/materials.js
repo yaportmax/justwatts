@@ -350,7 +350,7 @@ export function roadMaterial() {
             yel = max(yel, max(LN(bi, 0.05), LN(ll + 0.82, 0.05)));
             float inb = step(bi, r) * step(r, ll + 0.82);
             if ((mb & 8) != 0) { float tk = fract(along / 6.0) * 6.0; yel = max(yel, inb * (1.0 - smoothstep(0.08, 0.08 + aa * 2.0, min(tk, 6.0 - tk)))); }
-            if ((mb & 16) != 0) { float dg = fract((along + (r - ll) * 1.5) / 2.0) * 2.0; yel = max(yel, inb * (1.0 - smoothstep(0.1, 0.1 + aa * 2.0, min(dg, 2.0 - dg)))); }
+            if ((mb & 16) != 0) { float dg = fract((along + (r - ll) * 0.875) / 6.3) * 6.3; yel = max(yel, inb * (1.0 - smoothstep(0.1, 0.1 + aa * 2.0, min(dg, 6.3 - dg)))); }  // (bars 6.3 m apart, 2.1 m along over the 2.4 m buffer: Street View, A15)
           }
           else if (lm == 3.0) { if (mc != 1) yel = max(yel, LN(ll, 0.06)); }                       // a oneway's left edge
           else if (!noEdge || vRd2.y > 0.5) line = max(line, LN(ll, 0.06));

@@ -182,7 +182,8 @@ export const HW = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'mot
   'tertiary_link', 'unclassified', 'residential', 'road', 'living_street', 'service', 'cycleway', 'path', 'footway', 'pedestrian', 'bridleway', 'track'];
 // flags: 1 bridge, 2 tunnel, 4 unpaved, 8 oneway, 16 the Golden Gate Bridge (drawn by its own model), 32/64 a bike lane
 // on the left/right (as the way runs), 128/256 a parking lane left/right, 512 no lane markings, 1024/2048 a sidewalk
-// left/right, 4096 the left bike lane runs against the oneway. ln: lanes (0..15) and the tagged width in decimetres
+// left/right, 4096 the left bike lane runs against the oneway, 8192 the tagged width measured (the travel lanes take the
+// difference: ribbon.js roadStyle). ln: lanes (0..15) and the tagged width in decimetres
 // (wd, x 16)
 // a road's points in millionths of a degree (about 0.1 m; a hundred-thousandth, about a metre, zigzagged a curve's
 // lines): flagged in its flags (RQ6), so a row without it reads as before

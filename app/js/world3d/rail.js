@@ -46,7 +46,10 @@ export function track(P, h) {
     if (P.length < 2) return P.length ? { d: Math.hypot(x - P[0][0], z - P[0][1]), h: h[0], s: 0, k: 0, t: 0 } : null;
     let best = null;
     const scan = (k0, k1) => { for (let k = Math.max(0, k0); k <= Math.min(P.length - 2, k1); k++) { const r = seg(k, x, z); if (!best || Math.abs(r.d) < Math.abs(best.d)) best = r; } };
-    if (hint >= 0) { scan(hint - 6, hint + 6); if (best && best.k > Math.max(0, hint - 6) && best.k < Math.min(P.length - 2, hint + 6)) return best; best = null; }
+    // (the hint's window: its nearest taken only within 15 m of the point (A16: a point far from the window, its nearest
+    // segment inside it where the way curls back, at Bunker Road's end 395 m off, was taken and the hand list's
+    // markings missed every point of the way built after it)
+    if (hint >= 0) { scan(hint - 6, hint + 6); if (best && Math.abs(best.d) < 15 && best.k > Math.max(0, hint - 6) && best.k < Math.min(P.length - 2, hint + 6)) return best; best = null; }
     scan(0, P.length - 2);
     return best;
   }
@@ -197,7 +200,7 @@ export function profileAt(idx, pr, i, f) {
 // its side. -> { pieces: [{ id, s0, s1, sd (+1: the rail's right as it runs), kind }], surveyed: Set of rail ids (a
 // survey pano on it), at(x, z, half, cx, cz): the kinds whose stretch covers a road edge's point (its rail's |d| within
 // 2.5 m of half) of the road whose centre point is (cx, cz) (that rail's own: not a side road's edge by it), [] none }
-export function handBarriers(idx, list, survey, xz) {
+export function handBarriers(idx, list, survey, xz, join = false) {
   const pieces = [], surveyed = new Set(), ends = new Map(), ek = p => `${Math.round(p[0] * 2)},${Math.round(p[1] * 2)}`;
   idx.rails.forEach((q, id) => { for (const e of [0, 1]) { const p = e ? q.T.P.at(-1) : q.T.P[0]; (ends.get(ek(p)) ?? ends.set(ek(p), []).get(ek(p))).push([id, e]); } });
   const pano = (la, lo, hd) => { const [x, z] = xz(la, lo), r = hd * Math.PI / 180, dir = [1], id = idx.match(x, z, Math.sin(r), -Math.cos(r), null, -1, dir); return id < 0 ? null : { id, s: idx.rails[id].T.at(x, z).s, dir: dir[0] }; };
@@ -222,6 +225,12 @@ export function handBarriers(idx, list, survey, xz) {
     if (from < 0) lay(m.id, m.s, -m.dir, -from, sd, kind);
     lay(m.id, m.s + m.dir * Math.max(0, from), m.dir, to - Math.max(0, from), sd, kind, 0, wd ? [wd[0], wd[1], to - Math.max(0, from), 0] : null);
   }
+  // (one kind's stretches on a rail from the hand list's panos one after another, about 100 m apart, meet: a gap under
+  // 10 m closed (A16: their 0 to 100 m from each pano, measured along the rail, left 0.2 to 7 m between them, the edge
+  // lines back and the buffer's ticks gone for those metres on Bunker Road at Fort Baker and upper Conzelman)
+  // (markings only, join: a barrier's gap may be a gate or a path)
+  const run = new Map(); if (join) for (const p of pieces) if (!p.w) { const k = `${p.id}|${p.kind}|${p.sd}`; (run.get(k) ?? run.set(k, []).get(k)).push(p); }
+  for (const P of run.values()) { P.sort((a, b) => a.s0 - b.s0); for (let i = 1; i < P.length; i++) { const g = P[i].s0 - P[i - 1].s1; if (g > 0 && g < 10) P[i - 1].s1 = P[i].s0; } }
   const byId = new Map(); for (const p of pieces) (byId.get(p.id) ?? byId.set(p.id, []).get(p.id)).push(p);
   function at(x, z, half, cx = null, cz = null) {
     const out = [];

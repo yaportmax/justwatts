@@ -336,7 +336,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   const dim = { H: 10, R: 4, base: 3 }, open = fitTree(dim, 20, 8), thin = fitTree(dim, 20, 1), wide = fitTree(dim, 10, 12);
   const byRoad = fitTree(dim, 10, 6, 3), tall = fitTree({ H: 10, R: 4, base: 6 }, 10, 6, 3), atEdge = fitTree(dim, 10, 6, 0.5);
   out.trees = { n: T.n, all: all.map(a => [r3(a[2]), r3(a[3]), a[4]]), west: west.length, cov: [T.covered(37.809, -122.599), T.covered(37.801, -122.591)], open: [r3(open.s), r3(open.hf)], thin: [r3(thin.s), r3(thin.hf)], wide: [r3(wide.s), r3(wide.hf)],
-    byRoad: [r3(byRoad.s * dim.R), r3(byRoad.s * byRoad.hf * dim.H)], tall: [r3(tall.s * 4)], atEdge, clear: CLEAR };
+    byRoad: [r3(byRoad.s * dim.R), r3(byRoad.s * byRoad.hf * dim.H), r3(byRoad.clip)], tall: [r3(tall.s * 4), tall.clip ?? null], atEdge, clear: CLEAR };
   const f = new URL('../../app/world/trees.bin', import.meta.url);
   if (existsSync(f)) { const S = parseTrees(new Uint8Array(gunzipSync(readFileSync(f)))), n = {}, hs = {}; S.each(...[S.box[0], S.box[1], S.box[2], S.box[3]], (la, lo, h, r, sp) => { n[sp] = (n[sp] || 0) + 1; (hs[sp] ??= []).push(h); });
     const med = a => a.sort((p, q) => p - q)[a.length >> 1]; out.trees.file = { n: S.n, species: n, median: Object.fromEntries(Object.entries(hs).map(([k, a]) => [k, med(a)])), covered: S.covered(37.8357, -122.4775), bytes: readFileSync(f).length }; }

@@ -103,14 +103,16 @@ export function parseTrees(buf) {
 // no road near). -> { s: the width scale, hf: height over width scale } or null (none: a trunk within a metre of the
 // paving). The crown keeps the lidar's height; its width the lidar's within the model's own shape squeezed to 1.6 times
 // as tall (a lidar crown split between close tops is narrower than the tree) or spread to 0.6 times (crowns merged in a
-// grove read wider than one tree), and over a road only where its lowest leaves clear 4.5 m (a truck's height, the
-// road's clearance); a lower crown ends at the road's edge.
+// grove read wider than one tree), and over a road only where its leaves clear 4.5 m (a truck's height, the road's
+// clearance): a crown whose lowest leaves are lower and that reaches the paving keeps its width, its leaves under 4.5 m
+// ending 0.2 m short of the paving (clip: that distance from the trunk; view.js and the prop shader, A15), as Street View's
+// pruned roadside trees (Center Road 0a_0030: the gums' crowns broad and low over the verge, over the road only high up).
 export const CLEAR = 4.5;
 export function fitTree(dim, h, r, gap = null) {
-  const sy = h / dim.H; let sx = Math.min(sy / 0.6, Math.max(r / dim.R, sy / 1.6));
+  const sy = h / dim.H, sx = Math.min(sy / 0.6, Math.max(r / dim.R, sy / 1.6));
   if (gap != null) {
     if (gap < 1) return null;
-    if (sx * dim.R > gap && dim.base * sy < CLEAR) { sx = (gap - 0.2) / dim.R; if (sx < sy / 2.5) return null; }  // (thinner: a pole)
+    if (sx * dim.R > gap && dim.base * sy < CLEAR) return { s: sx, hf: sy / sx, clip: gap - 0.2 };
   }
   return { s: sx, hf: sy / sx };
 }

@@ -750,7 +750,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // [x, y, z, scale, random, near only: a full model, no impostor] (on a road side's strip where one is, none on a steep face)
     // (hf: the height over the width scale, else a little either way at random; foot: the ground's lowest round the trunk;
     // a lidar tree (hf) by a road's coarse cells too: its own gap to the paving decided, fitTree)
-    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - 0.3, z, s, r, nearOnly, hf]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
+    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3]) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - 0.3, z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
@@ -796,7 +796,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         }
         const f = fitTree(dim, h, r, roadGap(x, z)); if (!f) continue;
         const tr = 0.5 * f.s; let lo2 = Infinity; for (const [dx, dz] of [[tr, 0], [-tr, 0], [0, tr], [0, -tr]]) { const q = hAt(x + dx, z + dz); if (q != null) lo2 = Math.min(lo2, q); }
-        add(sp, x, z, f.s, hash2(Math.round(x * 3), Math.round(z * 3)), 0, f.hf, lo2);
+        // (a low crown reaching the paving: the way to the road, down the gap's slope; its leaves under the clearance end
+        // f.clip metres out that way, A15)
+        let clip = null;
+        if (f.clip != null) { const g0 = roadGap(x, z), gx = (roadGap(x + 1, z) ?? g0) - (roadGap(x - 1, z) ?? g0), gz = (roadGap(x, z + 1) ?? g0) - (roadGap(x, z - 1) ?? g0), L = Math.hypot(gx, gz); if (L > 0.2) clip = [-gx / L, -gz / L, f.clip]; }
+        add(sp, x, z, f.s, hash2(Math.round(x * 3), Math.round(z * 3)), 0, f.hf, lo2, clip);
       }
     }
     // the groves where the aerial imagery has them and the lidar does not cover (veg.js): Monterey cypress and pine, blue
@@ -913,6 +917,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       let k = 0; while (k < items.length && items[k][0] < Rs2) k++;
       c.hiCount += a; m.count = a; m.userData.cast = k;
       m.computeBoundingSphere();
+      // (a low crown by a road: its clip in the matrices' bottom rows, after the bounds; materials.js CLIP_GLSL, A15)
+      const IM = m.instanceMatrix.array; a = 0;
+      for (const [, t] of items) { const cl = t[7]; if (cl) { IM[16 * a + 3] = cl[0]; IM[16 * a + 7] = cl[1]; IM[16 * a + 11] = cl[2] + 1; } a++; }
     };
     for (const set of c.treeSets || []) {
       if (!set.fine) continue;

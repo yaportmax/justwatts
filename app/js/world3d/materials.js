@@ -401,6 +401,21 @@ export function roadMaterial() {
   return m;
 }
 
+// A tree by a road (veg.js fitTree clip, view.js partTrees): its leaves under the road's clearance (4.5 m over its foot,
+// which stands 0.3 m under the ground) end where the paving starts: the instance matrix's bottom row (free in an affine
+// matrix) holds the way to the road (x, z) and the trunk's distance to that line plus 1 (0: none); the matrix is used
+// with that row zeroed
+const CLIP_GLSL = `vec3 jwClip = vec3(instanceMatrix[0].w, instanceMatrix[1].w, instanceMatrix[2].w);
+        if (jwClip.z > 0.0) {
+          mat3 jwM = mat3(instanceMatrix); vec3 jwW = jwM * transformed; float jwP = dot(jwW.xz, jwClip.xy) - (jwClip.z - 1.0);
+          if (jwP > 0.0 && jwW.y < 4.8) { jwW.xz -= jwClip.xy * jwP; transformed = inverse(jwM) * jwW; }
+        }`;
+const CLIP_M = `#ifdef USE_INSTANCING
+mat4 jwIM = instanceMatrix; jwIM[0].w = 0.0; jwIM[1].w = 0.0; jwIM[2].w = 0.0;
+#endif
+`;
+const CLIP_PROJECT = CLIP_M + THREE.ShaderChunk.project_vertex.replace(/instanceMatrix/g, 'jwIM');
+const CLIP_WORLDPOS = THREE.ShaderChunk.worldpos_vertex.replace(/instanceMatrix/g, 'jwIM');
 // Trees and shrubs: vertex coloured, bark and leaf cards from the leaf atlas (alpha tested; the shadows too), the
 // crowns lit with soft (spherical) normals, the same on both faces of a card, and glowing a little with the sun
 // behind them. They lean with the wind by height, the leaves flutter. Instanced; per instance colour varies the green.
@@ -422,7 +437,9 @@ export function propMaterial({ fade = null } = {}) {
         float jwLf = step(uv.y, 0.74) * wGust;
         transformed += normal * sin(wTime * 6.0 + dot(position, vec3(3.1, 2.3, 2.7)) + jwPh) * 0.05 * jwLf;
         ${fade ? 'transformed *= 1.0 - smoothstep(fadeR * 0.75, fadeR, distance(jwRoot.xz, fadeC));' : ''}
-        #endif`);
+        ${CLIP_GLSL}
+        #endif`)
+      .replace('#include <project_vertex>', CLIP_PROJECT).replace('#include <worldpos_vertex>', CLIP_WORLDPOS);
     sh.fragmentShader = sh.fragmentShader
       // (a leaf's normal leans up: the light through and between the leaves reaches a crown's underside, Street View's
       // undersides a darker green, never black)
@@ -433,7 +450,7 @@ export function propMaterial({ fade = null } = {}) {
         reflectedLight.indirectDiffuse += diffuseColor.rgb * directionalLights[0].color * jwBack * 0.16;
         #endif`);
   };
-  m.customProgramCacheKey = () => 'jw-prop-4' + (fade ? 'f' : '');
+  m.customProgramCacheKey = () => 'jw-prop-5' + (fade ? 'f' : '');
   // the shadow: the same wind, the cards a third of them (attribute sk), alpha tested
   const d = m.userData.depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: T.leaves, alphaTest: 0.5, side: THREE.DoubleSide });
   d.onBeforeCompile = sh => {
@@ -446,10 +463,12 @@ export function propMaterial({ fade = null } = {}) {
         float jwPh = dot(jwRoot.xz, vec2(0.11, 0.07)), jwK = max(0.0, position.y - 1.5) * 0.012 * wGust;
         transformed.x += jwK * (sin(wTime * 0.9 + jwPh) + 0.4 * sin(wTime * 2.3 + jwPh * 3.0 + position.y));
         transformed.z += jwK * 0.6 * sin(wTime * 1.1 + jwPh * 1.7);
+        ${CLIP_GLSL}
         #endif
-        transformed *= step(0.5, sk);`);
+        transformed *= step(0.5, sk);`)
+      .replace('#include <project_vertex>', CLIP_PROJECT).replace('#include <worldpos_vertex>', CLIP_WORLDPOS);
   };
-  d.customProgramCacheKey = () => 'jw-prop-depth-1';
+  d.customProgramCacheKey = () => 'jw-prop-depth-2';
   return m;
 }
 

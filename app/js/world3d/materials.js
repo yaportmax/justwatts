@@ -71,12 +71,13 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   float hl = smoothstep(hlBox.x, hlBox.x + 1000.0, p.x) * (1.0 - smoothstep(hlBox.z - 1000.0, hlBox.z, p.x)) * smoothstep(hlBox.y, hlBox.y + 1000.0, p.y) * (1.0 - smoothstep(hlBox.w - 1000.0, hlBox.w, p.y));
   vec3 hlg = mix(srgb(vec3(0.47, 0.49, 0.35)), srgb(vec3(0.58, 0.57, 0.44)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
   // and coastal scrub over most of it (coyote brush, sage: dark olive, about #6f7a52 to #8a8f6a), grass in the clearings
-  vec3 scrubC = mix(srgb(vec3(0.38, 0.40, 0.29)), srgb(vec3(0.49, 0.50, 0.39)), smoothstep(0.35, 0.7, fine)) * (0.9 + 0.2 * small);
+  // (A23, coordinator: the pale fine-grained area seen from Conzelman (195 right) against the hand ground's mottled scrub: greener, darker and mottled at tens of metres, as Street View's brush on these hills)
+  vec3 scrubC = mix(srgb(vec3(0.30, 0.37, 0.21)), srgb(vec3(0.42, 0.47, 0.29)), smoothstep(0.3, 0.75, mid * 0.55 + small * 0.45)) * (0.82 + 0.3 * small);
   float scrA = smoothstep(0.42, 0.62, mid * 0.5 + small * 0.35 + patch80 * 0.15 + north * 0.25) * (1.0 - town);
   hlg = mix(hlg, scrubC, scrA);
   c = mix(c, mix(hlg, srgb(vec3(0.66, 0.61, 0.43)), smoothstep(0.78, 0.95, small) * 0.5), hl * 0.9);
   // the scrub's clumps: bushes a few metres across, darker in their hollows
-  if (hl * scrA > 0.02) { float bc = jwN(p / 4.3 + 0.17).g; c *= 1.0 - hl * scrA * (0.3 - 0.5 * bc); }
+  if (hl * scrA > 0.02) { float bc = jwN(p / 4.3 + 0.17).g; c *= 1.0 - hl * scrA * (0.14 - 0.24 * bc); }  // (A23: weaker: at a distance it read as a regular fine grain)
   float sf = step(sfBox.x, p.x) * step(p.x, sfBox.z) * step(sfBox.y, p.y) * step(p.y, sfBox.w);
   c *= 0.9 + 0.2 * fine;
   // green: shaded north slopes, hollows and gullies, parks and lawns, the damp coast

@@ -64,7 +64,8 @@ export const BARRIERS = [
     [37.832046, -122.495095, 21]].map(([la, lo, h]) => [la, lo, h, 'R', -10, 100, 'wbeamg']),
   [37.832916, -122.494813, 25, 'R', -10, 40, 'wbeamg'],
   [37.833383, -122.494294, 215, 'L', -10, 60, 'wbeamg'],
-  // Conzelman Road, from McCullough Road down to US-101 by Battery Spencer
+  // Conzelman Road, from McCullough Road down to US-101 by Battery Spencer (A17: from 930 m on conzelman.js's spec draws the
+  // road and its rails; these entries there give way to it)
   [37.833279, -122.492139, 144, 'R', 5, 100, 'wbeamg'],
   [37.832523, -122.491558, 126, 'R', 0, 40, 'wbeamg'],
   ...[[37.832859, -122.490651, 62, 60], [37.832676, -122.48963, 66, 100], [37.832816, -122.488622, 130, 100], [37.832158, -122.487867, 131, 100], [37.831376, -122.487335, 157, 100],

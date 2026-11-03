@@ -146,7 +146,7 @@ export function tapers(roads, { width, parts = null, rigid = () => false, ok = (
 // mk(x, z, tx, tz): the hand list's markings at a centre point, the way running (tx, tz): [centre, bits] (MARK).
 // rail(x, z): the road's own rail (rail.js) at a point, its centre's height (before a deck's line; null: not on it): the
 // centre on it and the road flat across (the rider at any lane offset on the drawn top), a trail's edges still draped.
-export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null, mk = null, flares = null, wAt = null }) {
+export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, pL = 0, pR = 0, hAt, lift = 0.25, deck = null, step = 5, v0 = 0, joints = null, drape = false, rail = null, mk = null, flares = null, wAt = null, xs = null }) {
   let P = resample(pts, step);
   // (flares [[x, z, R], ...]: a side road's mouth, its corners rounded R metres: the width there 2 R more, a quarter
   // circle each side out to R along it; a point every 0.75 m within its reach)
@@ -180,22 +180,27 @@ export function ribbon(B, pts, { w, lm = 0, surf = 0, lanes = 0, a = 0, b = 0, p
       const s1x = c[0] - a[0], s1z = c[1] - a[1], l1 = Math.hypot(s1x, s1z) || 1;
       k = 1 / Math.max(0.6, Math.abs((s1x * tx + s1z * tz) / l1));
     }
+    // (xs: a hand-authored cross-section (conzelman.js): its own paved edges either side of the line, no shader lines)
+    const sp = xs ? xs(c[0], c[1], tx, tz) : null;
+    if (sp) { half = Math.max(sp.R, -sp.L); code = [0, code[1], code[2], sp.R - sp.L, 0, 0, 0, 0]; }
     const nx = -tz * half * k, nz = tx * half * k;  // to the right of travel (u = 0)
+    const rx = sp ? -tz * sp.R * k : nx, rz = sp ? tx * sp.R * k : nz, lxo = sp ? tz * sp.L * k : nx, lzo = sp ? -tx * sp.L * k : nz;
     let hl, hr, hc;
     if (rail && (hc = rail(c[0], c[1])) != null) {
-      if (drape) { hl = hAt(c[0] + nx, c[1] + nz) ?? hc; hr = hAt(c[0] - nx, c[1] - nz) ?? hc; } else hl = hr = hc;
+      if (drape) { hl = hAt(c[0] + rx, c[1] + rz) ?? hc; hr = hAt(c[0] - lxo, c[1] - lzo) ?? hc; } else hl = hr = hc;
     } else if (deck) { hc = deck[0] + (deck[1] - deck[0]) * L[i] / tot; hl = hr = hc; }
     else {
-      hc = hAt(c[0], c[1]); hl = hAt(c[0] + nx, c[1] + nz); hr = hAt(c[0] - nx, c[1] - nz);
+      hc = hAt(c[0], c[1]); hl = hAt(c[0] + rx, c[1] + rz); hr = hAt(c[0] - lxo, c[1] - lzo);
       if (hc == null) hc = last; if (hl == null) hl = hc; if (hr == null) hr = hc;
       // a road's crossfall: the edges within a few per cent of the centre (a steep bank beside it never tips the edge up)
       const cf = drape ? Infinity : Math.max(0.25, half * 0.07); hl = Math.max(hc - cf, Math.min(hc + cf, hl)); hr = Math.max(hc - cf, Math.min(hc + cf, hr));
     }
     last = hc;
-    if (mk) { const m = mk(c[0], c[1], tx, tz), a0 = code.a0 ?? code[4]; code = code.slice(0, 8); code[4] = m[3] || a0; code.a0 = a0; code.push(m[0], m[1], m[2] || 0); }
-    B.v(c[0] + nx, hl + lift, c[1] + nz, 0, v0 + L[i], code);
-    B.v(c[0] - nx, hr + lift, c[1] - nz, 1, v0 + L[i], code);
-    centre.push([c[0], hc + lift, c[1], half, c[0] + nx, hl + lift, c[1] + nz, c[0] - nx, hr + lift, c[1] - nz, code[5]]);
+    if (mk && !sp) { const m = mk(c[0], c[1], tx, tz), a0 = code.a0 ?? code[4]; code = code.slice(0, 8); code[4] = m[3] || a0; code.a0 = a0; code.push(m[0], m[1], m[2] || 0); }
+    B.v(c[0] + rx, hl + lift, c[1] + rz, 0, v0 + L[i], code);
+    B.v(c[0] - lxo, hr + lift, c[1] - lzo, 1, v0 + L[i], code);
+    centre.push([c[0], hc + lift, c[1], half, c[0] + rx, hl + lift, c[1] + rz, c[0] - lxo, hr + lift, c[1] - lzo, code[5]]);
+    if (sp) centre.at(-1).sp = sp;
     if (i) { const p = base + 2 * (i - 1), q = base + 2 * i; B.tri(p, q, p + 1); B.tri(p + 1, q, q + 1); }  // facing up
   }
   return centre;

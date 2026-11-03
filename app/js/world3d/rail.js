@@ -169,13 +169,16 @@ export function railIndex(json, xz) {
 // Heights come from the rails at distances along them, eased between the course's points: a course a metre or two off
 // the rail (OpenStreetMap moves) never jumps where the nearest point on the rail skips across a bend.
 // (old, k: a profile of the same course's first k points, kept: a course that grew)
+// (a hand-authored road's own lanes, conzelman.js: (x, z, dx, dz) -> the rider's offset right of travel, or null)
+let laneHook = null;
+export function setLaneHook(f) { laneHook = f; }
 export function profileOf(idx, P, ele = null, old = null, k = 0) {
   const n = P.length, ri = new Int32Array(n).fill(-1), fw = new Int8Array(n).fill(1), lane = new Float32Array(n), s = new Float32Array(4 * n), dir = [1]; let prev = -1;
   if (old && k > 0) { k = Math.min(k, n, old.ri.length); ri.set(old.ri.subarray(0, k)); fw.set(old.fw.subarray(0, k)); lane.set(old.lane.subarray(0, k)); s.set(old.s.subarray(0, 4 * Math.max(0, k - 1))); prev = k ? ri[k - 1] : -1; } else k = 0;
   for (let i = k; i < n; i++) {
     const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)];
     ri[i] = prev = idx.match(P[i][0], P[i][1], b[0] - a[0], b[1] - a[1], ele ? ele[i] : null, prev, dir);
-    if (prev >= 0) { fw[i] = dir[0]; lane[i] = laneOf(idx.rails[prev].r, dir[0] > 0, P[i][0], P[i][1], idx.rails[prev].joints, idx.rails[prev]); }
+    if (prev >= 0) { fw[i] = dir[0]; lane[i] = laneOf(idx.rails[prev].r, dir[0] > 0, P[i][0], P[i][1], idx.rails[prev].joints, idx.rails[prev]); const h = laneHook?.(P[i][0], P[i][1], b[0] - a[0], b[1] - a[1]); if (h != null) lane[i] = h; }
     // (into a one-lane bore: the lane narrows with the road, onto the bore's)
     for (const [x, z] of idx.narrows) { const d = Math.hypot(P[i][0] - x, P[i][1] - z); if (d < TAPER) { const f = d / TAPER; lane[i] = ONE_OFF + (lane[i] - ONE_OFF) * f * f * (3 - 2 * f); } }
   }

@@ -1,0 +1,54 @@
+{
+ "box": [
+  11828.25,
+  10560.09,
+  13001.11,
+  11385.98
+ ],
+ "splat": "tex/g_splat.webp",
+ "channels": [
+  "dirt",
+  "cut",
+  "litter"
+ ],
+ "tiles": [
+  {
+   "layer": "dirt",
+   "file": "tex/g_dirt.webp",
+   "rep": 3.0,
+   "source": "https://polyhaven.com/a/red_dirt_mud_01",
+   "license": "CC0"
+  },
+  {
+   "layer": "cut",
+   "file": "tex/g_cut.webp",
+   "rep": 7.0,
+   "source": "https://polyhaven.com/a/cliff_side",
+   "license": "CC0"
+  },
+  {
+   "layer": "grass",
+   "file": "tex/g_grass.webp",
+   "rep": 4.0,
+   "source": "https://polyhaven.com/a/sparse_grass",
+   "license": "CC0"
+  },
+  {
+   "layer": "litter",
+   "file": "tex/g_litter.webp",
+   "rep": 5.3,
+   "source": "https://polyhaven.com/a/sparse_grass",
+   "license": "CC0"
+  }
+ ],
+ "note": "A19, private tools/blender/ground19.py",
+ "west": {
+  "box": [
+   8837.82,
+   10624.94,
+   12063.25,
+   12066.21
+  ],
+  "splat": "tex/g_splat_w.webp"
+ }
+}

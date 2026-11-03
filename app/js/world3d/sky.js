@@ -12,28 +12,41 @@ import { HORIZON } from './materials.js';
 import { skyRadiance, sunTint } from './skymath.js';
 
 // az: compass degrees, el: degrees above the horizon; turb/mie: haze in the sky; haze, low: aerial haze and the low
-// marine layer (per million per metre); banks: fog bank amount; cl: cumulus cover, ci: cirrus; si: sun intensity;
-// exp: exposure. Dusk: the sun just under the horizon, the lamps on.
+// marine layer (per million per metre); hzc: the haze's colour as a share of the sky's horizon (r, g, b: greyer and
+// darker; bluer by day, the far hills' aerial perspective); banks: fog bank amount; cl: cumulus cover, ci: cirrus; si:
+// sun intensity; exp: exposure. Dusk: the sun just under the horizon, the lamps on. Day: the sun of Street View's own
+// Conzelman captures (March, late morning: az 133 to 140, 39 degrees up; the slopes away from it in shade), a little
+// brighter so level ground is lit as at noon.
 export const TIMES = {
-  dawn: { az: 78, el: 4, turb: 3.2, ray: 2.2, mie: 0.006, si: 2.0, haze: 22, low: 120, banks: 1, cl: 0.3, ci: 0.6, exp: 1.05 },
-  morning: { az: 100, el: 15, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.6, haze: 18, low: 110, banks: 1, cl: 0.22, ci: 0.4, exp: 0.92 },
-  day: { az: 150, el: 52, turb: 1.9, ray: 1.15, mie: 0.0035, si: 3.1, haze: 7, low: 8, banks: 0, cl: 0.26, ci: 0.3, exp: 0.82 },
-  afternoon: { az: 228, el: 36, turb: 2.2, ray: 1.3, mie: 0.004, si: 3.0, haze: 12, low: 22, banks: 0.6, cl: 0.4, ci: 0.45, exp: 0.84 },
-  golden: { az: 248, el: 13, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.9, haze: 14, low: 30, banks: 0.75, cl: 0.3, ci: 0.55, exp: 0.88 },
-  sunset: { az: 258, el: 3.5, turb: 3.4, ray: 2.4, mie: 0.006, si: 2.3, haze: 20, low: 50, banks: 0.8, cl: 0.36, ci: 0.7, exp: 1.02 },
-  dusk: { az: 266, el: -3, turb: 3.2, ray: 2.8, mie: 0.006, si: 1.6, haze: 22, low: 55, banks: 0.85, cl: 0.32, ci: 0.6, exp: 1.9 },
+  dawn: { az: 78, el: 4, turb: 3.2, ray: 2.2, mie: 0.006, si: 2.0, haze: 22, low: 120, hzc: [0.69, 0.72, 0.78], banks: 1, cl: 0.3, ci: 0.6, exp: 1.05 },
+  morning: { az: 100, el: 15, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.6, haze: 18, low: 110, hzc: [0.69, 0.72, 0.78], banks: 1, cl: 0.22, ci: 0.4, exp: 0.92 },
+  day: { az: 140, el: 40, turb: 1.9, ray: 0.85, mie: 0.0035, si: 3.8, haze: 45, low: 35, hzc: [0.4, 0.48, 0.56], banks: 0, cl: 0.26, ci: 0.3, exp: 0.82 },
+  afternoon: { az: 228, el: 36, turb: 2.2, ray: 1.3, mie: 0.004, si: 3.0, haze: 12, low: 22, hzc: [0.69, 0.72, 0.78], banks: 0.6, cl: 0.4, ci: 0.45, exp: 0.84 },
+  golden: { az: 248, el: 13, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.9, haze: 14, low: 30, hzc: [0.69, 0.72, 0.78], banks: 0.75, cl: 0.3, ci: 0.55, exp: 0.88 },
+  sunset: { az: 258, el: 3.5, turb: 3.4, ray: 2.4, mie: 0.006, si: 2.3, haze: 20, low: 50, hzc: [0.69, 0.72, 0.78], banks: 0.8, cl: 0.36, ci: 0.7, exp: 1.02 },
+  dusk: { az: 266, el: -3, turb: 3.2, ray: 2.8, mie: 0.006, si: 1.6, haze: 22, low: 55, hzc: [0.69, 0.72, 0.78], banks: 0.85, cl: 0.32, ci: 0.6, exp: 1.9 },
 };
 export const TIME_ORDER = ['day', 'afternoon', 'golden', 'sunset', 'dusk', 'dawn', 'morning'];
 // a time of day between two presets (f 0..1): every number eased across, the sun along the shorter way round
 export function mixTimes(a, b, f) {
   const out = {};
-  for (const k of Object.keys(a)) out[k] = k === 'az' ? a.az + ((((b.az - a.az) % 360) + 540) % 360 - 180) * f : a[k] + (b[k] - a[k]) * f;
+  for (const k of Object.keys(a)) out[k] = Array.isArray(a[k]) ? a[k].map((v, i) => v + ((b[k] ?? a[k])[i] - v) * f) : k === 'az' ? a.az + ((((b.az - a.az) % 360) + 540) % 360 - 180) * f : a[k] + (b[k] - a[k]) * f;
   return out;
 }
 
 // the sea's surface: mean sea level in the lidar's datum (USGS 3DEP heights are NAVD88, on which San Francisco Bay's
 // mean sea level stands about 0.9 m up)
 export const SEA = 0.9;
+// The sky's radiance (Preetham, linear) to scene units: three's Sky encodes it for display (a power of 1/2.4) and the
+// scene drew that as linear light, so the post's tone map and sRGB encode came on top of a second encode: a white-grey
+// sky, haze and sea reflection. A20: the sky drawn linear (a power of 0.8 on it: Preetham's sky is too dark away from the
+// sun next to its glow, the camera's own sky is flatter), scaled to sit with the sun-lit ground (matched to Street View);
+// with the sun at the horizon and under it the linear sky goes black, so there it eases back to the encoded one (dusk).
+export const SKY_K = 0.5, SKY_P = 0.8;
+// The sun to sky light balance: the hemisphere light (sky) and the sun, relative to the old rig (the sky's share of the
+// light on a level face was a third: shade nearly as bright as sun). And the sea's reflectance at grazing angles: a
+// wind-roughened sea shows its dark body in most facets (a smooth fresnel made it a mirror of the pale horizon).
+const HEMI_K = 0.6, SUN_K = 1.2, SEA_FR = 0.38;
 /* ---------- three's fog chunks: height fog + aerial haze, warmer toward the sun ---------- */
 // THREE.Fog carries two numbers: near = haze density (per million per metre, scale height 1.4 km), far = low marine
 // layer density (scale height 110 m). Lit materials add the sun's colour looking toward the sun. A material with the
@@ -109,16 +122,16 @@ export function createSky(scene, { far, quality = 0 }) {
   const T = textures(), sunDir = new THREE.Vector3(0, 1, 0);
   /* the sky */
   const sky = new Sky(), su = sky.material.uniforms;
-  const cu = { skyGain: { value: 1 }, tNoise: { value: T.noise }, cTime: { value: 0 }, cCover: { value: 0.3 }, cCirrus: { value: 0.5 }, cLit: { value: new THREE.Color() },
+  const cu = { skyK: { value: SKY_K }, skyLin: { value: 1 }, tNoise: { value: T.noise }, cTime: { value: 0 }, cCover: { value: 0.3 }, cCirrus: { value: 0.5 }, cLit: { value: new THREE.Color() },
     cShade: { value: new THREE.Color() }, cHaze: { value: new THREE.Color() } };
   Object.assign(sky.material.uniforms, cu);
   sky.material.fragmentShader = sky.material.fragmentShader
     .replace('uniform vec3 up;', `uniform vec3 up;
-      uniform float skyGain, cTime, cCover, cCirrus; uniform vec3 cLit, cShade, cHaze; uniform sampler2D tNoise;
+      uniform float skyK, skyLin, cTime, cCover, cCirrus; uniform vec3 cLit, cShade, cHaze; uniform sampler2D tNoise;
       // cloud density on a layer at a point (metres): four octaves of the noise, cut at the cover
       float jwCl(vec2 p) { return texture2D(tNoise, p / 11000.0).a * 0.5 + texture2D(tNoise, p / 3900.0 + 0.37).b * 0.28 + texture2D(tNoise, p / 1300.0 + 0.71).g * 0.14 + texture2D(tNoise, p / 420.0 + 0.13).r * 0.08; }`)
     .replace('gl_FragColor = vec4( retColor, 1.0 );', /* glsl */`
-      vec3 col = retColor * skyGain;
+      vec3 col = mix(retColor * 0.52, pow(texColor, vec3(${SKY_P.toFixed(2)})) * skyK, skyLin);   // linear (retColor: the display-encoded one, kept round dusk)
       if (direction.y > 0.0) {
         // cumulus 1700 m up, drifting east with the sea breeze; lit on the side toward the sun, grey beneath where it is
         // thick, a silver edge against the sun; far ones melt into the haze
@@ -181,7 +194,7 @@ export function createSky(scene, { far, quality = 0 }) {
         vec2 g = wn(p / 61.0 + time * vec2(0.010, 0.006)) * 0.55 + wn(p / 19.0 + time * vec2(-0.021, 0.013)) * 0.35 + wn(p / 233.0 + time * vec2(0.003, -0.002)) * 0.5;
         g *= 0.28 / (1.0 + dist / 1800.0);
         vec3 N = normalize(vec3(g.x, 1.0, g.y));
-        float fr = 0.02 + 0.98 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
+        float fr = 0.02 + ${(0.98 * SEA_FR).toFixed(3)} * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
         vec3 R = reflect(-V, N); R.y = abs(R.y);
         vec3 refl = mix(hor, zen, pow(R.y, 0.6));
         float sd = max(dot(R, sunD), 0.0);
@@ -189,10 +202,10 @@ export function createSky(scene, { far, quality = 0 }) {
         vec3 c = mix(body, refl, fr) + sunC * (pow(sd, 900.0) * 30.0 + pow(sd, 90.0) * 0.6) * smoothstep(-0.02, 0.06, sunD.y);
         // the shallows: paler water over sand, then foam: lines of swash running in to the shore, a band at its edge
         float hf = seaFloor(p) - ${SEA.toFixed(2)}, nz = texture2D(tNoise, p / 23.0 + time * 0.01).r, nz2 = texture2D(tNoise, p / 7.0 - time * 0.02).g;
-        c = mix(c, mix(c, vec3(0.16, 0.27, 0.25) * (0.4 + 0.6 * clamp(sunD.y * 3.0, 0.0, 1.0)), 0.5), smoothstep(-9.0, -1.0, hf) * (1.0 - fr));
+        c = mix(c, mix(c, vec3(0.16, 0.27, 0.25) * (0.4 + 0.6 * clamp(sunD.y * 3.0, 0.0, 1.0)), 0.5), smoothstep(-9.0, -1.0, hf) * (1.0 - fr) * (1.0 - smoothstep(500.0, 1100.0, dist)));
         float swash = smoothstep(0.62, 0.95, sin(hf * 2.6 + time * 1.1 + nz * 4.0) * 0.5 + 0.5) * smoothstep(-4.0, -0.8, hf);
         float foam = max(swash * 0.55, smoothstep(-1.1, -0.15, hf)) * (0.55 + 0.6 * nz2) * smoothstep(1.2, 0.2, hf);
-        c = mix(c, (hor * 1.15 + sunC * 0.06) * (0.9 + 0.1 * nz), clamp(foam, 0.0, 0.9) * (1.0 - smoothstep(600.0, 2500.0, dist)));
+        c = mix(c, (hor * 1.15 + sunC * 0.06) * (0.9 + 0.1 * nz), clamp(foam, 0.0, 0.9) * (1.0 - smoothstep(500.0, 1100.0, dist)));
         gl_FragColor = vec4(c, 1.0);
         #include <fog_fragment>
         #include <tonemapping_fragment>
@@ -289,35 +302,37 @@ export function createSky(scene, { far, quality = 0 }) {
     sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
     su.turbidity.value = P.turb; su.rayleigh.value = P.ray; su.mieCoefficient.value = P.mie; su.mieDirectionalG.value = 0.82;
     su.sunPosition.value.copy(sunDir);
-    const gain = su.skyGain.value = 0.52;
+    const gain = 0.52, S = [sunDir.x, sunDir.y, sunDir.z];
     const sp = { turbidity: P.turb, rayleigh: su.rayleigh.value, mie: P.mie, mieG: 0.82 };
-    // haze: the sky's horizon averaged round the compass (the sun's glow comes from the fog chunk), a little greyer
-    const hz = [0, 0, 0];
-    for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, c = skyRadiance([Math.cos(a) * 0.999, 0.035, Math.sin(a) * 0.999], [sunDir.x, sunDir.y, sunDir.z], sp); for (let i = 0; i < 3; i++) hz[i] += c[i] * gain / 8; }
-    const zen = skyRadiance([0, 1, 0], [sunDir.x, sunDir.y, sunDir.z], sp).map(v => v * gain);
-    scene.fog.color.setRGB(hz[0] * 0.86, hz[1] * 0.9, hz[2] * 0.97, THREE.LinearSRGBColorSpace);
+    // haze: the sky's horizon averaged round the compass (the sun's glow comes from the fog chunk), a little greyer and
+    // darker (the average takes in the bright sky toward the sun). Linear as the sky draws it (hz, zen: the sea, haze,
+    // clouds); the old display-encoded values (hzG, zenG) as a measure of the sky's light (the hemisphere, the fog banks)
+    const w = cu.skyLin.value = Math.min(1, Math.max(0, (sunDir.y + 0.02) / 0.14)), hz = [0, 0, 0], hzG = [0, 0, 0], lin = c => c.map(v => w * Math.pow(v, 2.4 * SKY_P) * SKY_K + (1 - w) * v * gain);
+    for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, c = skyRadiance([Math.cos(a) * 0.999, 0.035, Math.sin(a) * 0.999], S, sp), l = lin(c); for (let i = 0; i < 3; i++) { hz[i] += l[i] / 8; hzG[i] += c[i] * gain / 8; } }
+    const zc = skyRadiance([0, 1, 0], S, sp), zen = lin(zc), zenG = zc.map(v => v * gain);
+    const hc = P.hzc; scene.fog.color.setRGB(hz[0] * hc[0], hz[1] * hc[1], hz[2] * hc[2], THREE.LinearSRGBColorSpace);
     scene.fog.near = P.haze; scene.fog.far = P.low;
     // sunlight reddened by the air it crosses; sky light from the zenith; bounce light from the golden hills
     const tint = sunTint(Math.max(0.5, P.el), sp);
-    sun.color.setRGB(tint[0], tint[1], tint[2], THREE.LinearSRGBColorSpace); sun.intensity = P.si * Math.min(1, 0.35 + P.el / 12);
-    hemi.color.setRGB(zen[0] * 1.6 + 0.1, zen[1] * 1.5 + 0.12, zen[2] * 1.3 + 0.14, THREE.LinearSRGBColorSpace);
+    sun.color.setRGB(tint[0], tint[1], tint[2], THREE.LinearSRGBColorSpace); sun.intensity = SUN_K * P.si * Math.min(1, 0.35 + P.el / 12);
+    hemi.color.setRGB(zenG[0] * 1.6 + 0.1, zenG[1] * 1.5 + 0.12, zenG[2] * 1.3 + 0.14, THREE.LinearSRGBColorSpace);
     hemi.groundColor.setRGB(0.42 * tint[0], 0.33 * tint[1], 0.2 * tint[2], THREE.LinearSRGBColorSpace);
-    hemi.intensity = (1.25 + 0.5 * Math.min(1, P.el / 40)) * (P.el < 0 ? Math.max(0.3, 1 + P.el / 5) : 1);
+    hemi.intensity = HEMI_K * (1.25 + 0.5 * Math.min(1, P.el / 40)) * (P.el < 0 ? Math.max(0.3, 1 + P.el / 5) : 1);
     wu.hor.value.setRGB(hz[0], hz[1], hz[2], THREE.LinearSRGBColorSpace); wu.zen.value.setRGB(zen[0], zen[1], zen[2], THREE.LinearSRGBColorSpace);
     wu.sunC.value.copy(sun.color).multiplyScalar(sun.intensity); wu.sunD.value.copy(sunDir);
     wu.deep.value.setRGB(0.018, 0.075, 0.105, THREE.LinearSRGBColorSpace);
     const bu = bankMat.uniforms;
     bu.lit.value.setRGB(0.35 + 0.65 * tint[0], 0.35 + 0.62 * tint[1], 0.37 + 0.56 * tint[2], THREE.LinearSRGBColorSpace).multiplyScalar(1.05 * (0.6 + 0.4 * Math.min(1, P.el / 20)));
-    bu.shade.value.setRGB(zen[0] * 0.7 + 0.25, zen[1] * 0.7 + 0.27, zen[2] * 0.6 + 0.32, THREE.LinearSRGBColorSpace);
+    bu.shade.value.setRGB(zenG[0] * 0.7 + 0.25, zenG[1] * 0.7 + 0.27, zenG[2] * 0.6 + 0.32, THREE.LinearSRGBColorSpace);
     banks.amount = P.banks; showBanks();
     // clouds: lit by the sun's colour, shaded with the zenith's blue; the far ones take the haze
-    cu.skyGain.value = gain; cu.cCover.value = P.cl; cu.cCirrus.value = P.ci;
+    cu.cCover.value = P.cl; cu.cCirrus.value = P.ci;
     cu.cLit.value.setRGB(tint[0], tint[1], tint[2], THREE.LinearSRGBColorSpace).multiplyScalar(0.34 * P.si * Math.min(1, 0.3 + P.el / 10)).add(new THREE.Color().setRGB(zen[0] * 0.5, zen[1] * 0.5, zen[2] * 0.5, THREE.LinearSRGBColorSpace));
     cu.cShade.value.setRGB(zen[0] * 0.75 + hz[0] * 0.35, zen[1] * 0.75 + hz[1] * 0.35, zen[2] * 0.7 + hz[2] * 0.35, THREE.LinearSRGBColorSpace);
     cu.cHaze.value.setRGB(hz[0], hz[1], hz[2], THREE.LinearSRGBColorSpace);
     // the fog volume: the sun on its top, the sky's light in it
     fog.u.sunC.value.copy(sun.color).multiplyScalar(sun.intensity * 0.22);
-    fog.u.ambC.value.setRGB(zen[0] * 0.9 + hz[0] * 0.5, zen[1] * 0.9 + hz[1] * 0.5, zen[2] * 0.8 + hz[2] * 0.5, THREE.LinearSRGBColorSpace);
+    fog.u.ambC.value.setRGB(zenG[0] * 0.9 + hzG[0] * 0.5, zenG[1] * 0.9 + hzG[1] * 0.5, zenG[2] * 0.8 + hzG[2] * 0.5, THREE.LinearSRGBColorSpace);
     fog.u.baseC.value.copy(scene.fog.color);
     exposure = P.exp; sunI = sun.intensity; hemiI = hemi.intensity;
   }

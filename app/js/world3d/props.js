@@ -385,7 +385,7 @@ export function buildingGeometry(list) {
     // (b.fort: the Headlands' army posts, Fort Baker, Barry and Cronkhite: white clapboard under red tile or grey roofs,
     // gabled or hipped barracks, halls and houses, the big ones too, Street View)
     const house = b.fort ? b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.7 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.74, barn = !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
-    const top = b.base + b.h, wi = Math.floor(h(1) * WALLS.length), wc = b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.fort ? (h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    const top = b.base + b.h, wi = Math.floor(h(1) * WALLS.length), wc = b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     const style = b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {

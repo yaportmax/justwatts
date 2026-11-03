@@ -10,8 +10,9 @@ export { GGB };
 export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const root = new THREE.Group(); scene.add(root);
   const mat = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, ...o });
-  // International Orange as it reads in daylight (softer than a red: Street View), a little darker in its shade
-  const orange = mat(0xbb5840), orangeDark = mat(0x94432f), concrete = mat(0xb8b2a6), white = mat(0xf2f0ea), red = mat(0xb03026), median = mat(0x4a4945), yellow = mat(0xd9a521);
+  // International Orange as it reads in daylight (softer than a red: Street View), a little darker in its shade; A20: a
+  // touch duller (sunlit it read more vivid than Street View's)
+  const orange = mat(0xa85a48), orangeDark = mat(0x86493a), concrete = mat(0xb8b2a6), white = mat(0xf2f0ea), red = mat(0xb03026), median = mat(0x4a4945), yellow = mat(0xd9a521);
 
   /* ---------- the Golden Gate Bridge ---------- */
   const A = proj.xz(...GGB.south), B = proj.xz(...GGB.north);
@@ -68,7 +69,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
       quad(D(s0, -e, y0 - dp), D(s1, -e, y1 - dp), D(s0, e, y0 - dp), D(s1, e, y1 - dp), s0 - S0, s1 - S0, 2 * e, 2 * e, 1);
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setAttribute('tk', new THREE.Float32BufferAttribute(tk, 2)); g.setIndex(idx); g.computeVertexNormals();
-    const m = mat(0xbb5840, { side: THREE.DoubleSide });
+    const m = mat(0xa85a48, { side: THREE.DoubleSide });
     m.onBeforeCompile = sh => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 tk; varying vec2 vTr; varying vec2 vTk;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvTr = uv; vTk = tk;');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vTr; varying vec2 vTk;').replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
@@ -109,7 +110,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
       for (let s = S0; s <= S1; s += 2, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 0.05, p.z, p.x, h + top, p.z); uv.push(s - S0, 0, s - S0, 1); }
       for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
-    const m = new THREE.MeshLambertMaterial({ color: 0xbb5840, side: THREE.DoubleSide });
+    const m = new THREE.MeshLambertMaterial({ color: 0xa85a48, side: THREE.DoubleSide });
     m.onBeforeCompile = sh => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vBar;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvBar = uv;');
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vBar;').replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vBar.y > 0.06 && vBar.y < 0.93 && fract(vBar.x / 0.19) > 0.3) discard;');
@@ -136,11 +137,15 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   // middle of each (the Art Deco fluting seen from the deck), a cap at each step; the portal struts with raised panels.
   // All of a tower's steel in one mesh.
   const part = (list, sx, sy, sz, s, t, y, a = 0, b = 0) => { const g = new THREE.BoxGeometry(sx, sy, sz).translate(a, 0, b), m = new THREE.Matrix4().makeRotationY(yaw); m.setPosition(W(s, t, y)); list.push(g.applyMatrix4(m)); };
+  // the legs' steps: [from, to (m over the water), across, along]. The base 33 by 54 ft (goldengate.org); over the deck
+  // they taper hard (the cells inside go from 93 to 21): from Conzelman Street View shows wide openings between slender
+  // legs (A20: they were the base's size to the top, a third too wide in every oblique view)
+  const LEG = [[0, 70, 9.6, 15.4], [70, 150, 8.2, 10.5], [150, GGB.towerTop, 6.6, 7.8]];
   for (const s of [-half, half]) {
     const steel = [];
     for (const t of [-legT, legT]) {
-      for (const [y0, y1, w] of [[0, 70, 9.6], [70, 150, 8.6], [150, GGB.towerTop, 7.4]]) {
-        const L = w * 1.6, h = y1 - y0, y = (y0 + y1) / 2, c = w * 0.24;
+      for (const [y0, y1, w, L] of LEG) {
+        const h = y1 - y0, y = (y0 + y1) / 2, c = w * 0.24;
         part(steel, w * 0.8, h, L * 0.86, s, t, y);                                                      // the recessed core
         for (const i of [-1, 1]) for (const k of [-1, 1]) part(steel, c, h, c * 1.3, s, t, y, i * (w - c) / 2, k * (L - c * 1.3) / 2);  // the corners
         for (const i of [-1, 1]) part(steel, w * 0.12, h, 1.1, s, t, y, i * (w * 0.4 + 0.02), 0);       // a rib down each wide face
@@ -150,7 +155,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
       box(3.2, 4, 3.2, orangeDark, s, t, GGB.towerTop + 2);
     }
     for (const y of [deckH(s) - 12, deckH(s) + 40, deckH(s) + 85, deckH(s) + 125, GGB.towerTop - 6]) {
-      const h = y === GGB.towerTop - 6 ? 9 : 6, len = 2 * legT - 8;
+      const h = y === GGB.towerTop - 6 ? 9 : 6, len = 2 * legT - LEG.find(l => y < l[1])[2] + 1.2;   // to the legs' inner faces
       part(steel, len, h, 5.4, s, 0, y);
       for (let k = 0; k < 5; k++) part(steel, len / 5 - 0.9, h * 0.72, 6.2, s, 0, y, -len / 2 + (k + 0.5) * len / 5, 0);  // raised panels both faces
       part(steel, len, 0.7, 6.6, s, 0, y + h / 2 - 0.35); part(steel, len, 0.7, 6.6, s, 0, y - h / 2 + 0.35);
@@ -175,7 +180,16 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     for (let s = -half + 15; s < half; s += 15) { const f = s / half, top = GGB.towerTop - 2, low = deckH(0) + 4, y = low + (top - low) * f * f, p = W(s, t, y); susp.push(p.x, y, p.z, p.x, deckH(s) + 0.5, p.z); }
   }
   const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.Float32BufferAttribute(susp, 3));
-  bridge.add(new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0xa8513c })));
+  // (a line is a pixel wide at any distance: past a few hundred metres the 250 pairs of 9 cm ropes read as a solid orange
+  // sail; each fades to what it covers of its pixel, A20)
+  { const lm = new THREE.LineBasicMaterial({ color: 0x9a5444, transparent: true, depthWrite: false });
+    lm.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vCover;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvCover = clamp(0.18 * projectionMatrix[1][1] * 450.0 / max(-mvPosition.z, 1.0), 0.03, 1.0);');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vCover;').replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vCover;');
+    };
+    lm.customProgramCacheKey = () => 'jw-ggb-susp-1';
+    bridge.add(new THREE.LineSegments(sg, lm)); }
   // anchorages: massive blocks from the ground (or the sea floor) up under the deck; the north one carries the roadway
   // from the side span to the north approach (OpenStreetMap's road on it runs s 984 to 1092)
   box(42, deckH(-GGB.anchor) - 8.2 + 8, 56, concrete, -GGB.anchor, 0, (deckH(-GGB.anchor) - 8.2 - 8) / 2);

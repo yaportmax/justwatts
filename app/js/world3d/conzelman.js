@@ -313,7 +313,7 @@ export const RAILS = [
   [45, 1790, 'L', 'curb', ['1OFFkVZuQayGMVYFN3C28Q', 'scenic_batteryspencer_bridge h67 (the kerb past the lot)', 'k0HidJ58c8iNShsZRY2iTg']],
   [10075, 10735, 'L', 'wbeamg', ['cz_10090_a', 'cz_10670_a']],
   [10815, 10835, 'L', 'wbeamg', ['cz_10825_a']],
-  [11040, 12330, 'L', 'wbeamg', ['cz_11110_a', 'cz_12305_a']],
+  [11085, 12330, 'L', 'wbeamg', ['cz_11110_a', 'cz_12305_a']],
   [12712, 12768, 'L', 'wbeamg', ['cz_12715_a', 'cz_12750_a', 'cz_12770_a']], [12925, 12990, 'L', 'wbeamg', ['cz_12950_a', 'cz_12990_l']],
   [14095, 14340, 'L', 'curb', ['cz_14095_a', 'cz_14335_a']],
   [14095, 14230, 'R', 'curb', ['cz_14135_a', 'cz_14335_a']],

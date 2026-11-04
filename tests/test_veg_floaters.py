@@ -41,8 +41,9 @@ def load_veg(hand):
         a = np.fromfile(hand / g["file"], dtype="<f4")
         off = 0
         for sp, n in g["species"].items():
-            parts.setdefault(sp, []).append(a[off : off + 7 * n])
-            off += 7 * n
+            st = veg.get("stride", {}).get(sp, 7)  # (A30: low plants carry their slope, stride 9)
+            parts.setdefault(sp, []).append(a[off : off + st * n].reshape(-1, st)[:, :7].reshape(-1))
+            off += st * n
     veg["species"] = {sp: np.concatenate(v) for sp, v in parts.items()}
     return veg
 
@@ -263,7 +264,7 @@ def road_overhangs(app):
             continue
         if sp == "shade":
             continue
-        if sp == "avc":  # the avenue's tall cypress: the crown spans the road by design (s7w_14255_a), only a trunk on the road counts
+        if sp in ("avc", "avc2"):  # the avenue's tall cypress: the crown spans the road by design (s7w_14255_a), only a trunk on the road counts
             out[sp] = sum(1 for x, _, z, *_ in np.array(a).reshape(-1, 7) if dist(x, z, 1.0) < 0.4)
             continue
         r0 = float(np.hypot(pts[:, 0], pts[:, 2]).max())

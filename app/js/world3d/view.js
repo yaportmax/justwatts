@@ -1221,6 +1221,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       { const dk = marks.deckAt(...ring[0]); if (dk != null && base + (f.h || 6) > dk - 12) continue; }  // the bridge's own anchorages and pylons (its model draws them); Fort Point under it stays
       // (a height Street View shows, handlist.js BUILDINGS, where OpenStreetMap has none)
       const R0 = f.rings[0], hb = BUILDINGS.find(([la, lo]) => { let c = false; for (let i = 0, j = R0.length - 1; i < R0.length; j = i++) if ((R0[i][0] > la) !== (R0[j][0] > la) && lo < (R0[j][1] - R0[i][1]) * (la - R0[i][0]) / (R0[j][0] - R0[i][0]) + R0[i][1]) c = !c; return c; });
+      if ([[37.82213, -122.52782], [37.82202, -122.52766]].some(([a_, o_]) => Math.abs(R0[0][0] - a_) < 3e-5 && Math.abs(R0[0][1] - o_) < 3e-5)) continue;  // (A27: the garage at the road's end is hand-built, build_conz.py; OpenStreetMap's second block is not in cz_14600_a)
       // (A25: Conzelman's far west, 13800 on: low barns, red roofs as at 13900; grey from about 14400: the garage, 14500, 14600)
       const low = R0[0][0] > 37.82126 && R0[0][0] < 37.82932 && R0[0][1] > -122.5395 && R0[0][1] < -122.52422;  // (west to Cronkhite's low white blocks as seen from 14500 right)
       list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: inHeadlands(...f.rings[0][0]), grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
@@ -1247,7 +1248,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const area = Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])), N = area / (step * step) * (k === 5 ? 0.4 : 1);
       for (let m = 0, cnt = Math.floor(N) + (hash2(i, j + c.y) < N % 1 ? 1 : 0); m < cnt; m++) {
         const x = xs[i] + (xs[i + 1] - xs[i]) * hash2(i * 13 + m, j), z = zs[j] + (zs[j + 1] - zs[j]) * hash2(j * 17 + m, i), h = gridHeight(c.grid, x, z);
-        if (h == null || h < 2 || vcls(x, z)) continue;
+        if (h == null || h < 2 || vcls(x, z) || (x > 12830 && x < 12900 && z > 10600 && z < 10725)) continue;  // (A29: not the dark round clump beyond the junction, cz_1755_a)
         const r = hash2(Math.round(x), Math.round(z)), sp = k === 5 ? (r < 0.7 ? 'bush' : 'shrub') : species('wood', TREE[k][3], h, proj.lat(z), proj.lon(x), r);
         const s = (0.8 + 0.45 * hash2(Math.round(z), Math.round(x))) * (k === 5 ? 1.6 : 1) * 1.2;
         list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -(0.85 + 0.3 * r), 0.86 + 0.28 * hash2(m, i + j), (hash2(j, i) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + 50 * s);
@@ -1449,7 +1450,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const vk = vcls(x, z); if (vk === CYPRESS || vk === EUC || vk === PAVED || (vk === SCRUB && hash2(Math.round(x * 7), Math.round(z * 7)) < 0.5 && (roadGap(x, z) ?? 9) > 3.5)) return { skip: true };  // under the groves and on the paving none; between the scrub's bushes some; the verges in full
     return { h, nx: N[3 * v], ny: N[3 * v + 1], nz: N[3 * v + 2], cv: c.cv[v], m: [mk[8 * v] / 255, mk[8 * v + 1] / 255, mk[8 * v + 2] / 255, mk[8 * v + 3] / 255] };
   }
-  const grass = createGrass({ THREE, scene, mat: mats.grass, sample: groundSample });
+  const grass = createGrass({ THREE, scene, mat: mats.grass, sample: (x, z) => ((x > 11412 && x < 11453 && z > 11450 && z < 11470) || (x > 11380 && z > 11368 && z < 11482 && x < 11493 - (z - 11380) * 0.414) ? null : groundSample(x, z)) });  // (A31: no grass clumps inside the tunnel at 11076, on the height grid they stood under its roof, w5_11070_r; none on the bare red bank north of it, dark tufts at w9_11070_r, or on the crest above: the height grid stands over the hand terrain there, flecks against the sky at w11_11030_a)
   // the scrub's bushes stand on the ground: not on a road, in a building, a bore or on a steep bank cut for a road; clear of
   // a road's paved edge by their whole reach (nothing over the paving; A11's bushes from 1.6 m at full size hung over the
   // road). A bush of scale sc whose leaves would reach within 0.25 m of the paving is moved out from the road till they

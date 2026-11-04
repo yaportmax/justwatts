@@ -36,9 +36,9 @@
   {
    "layer": "litter",
    "file": "tex/g_litter.webp",
-   "rep": 5.3,
-   "source": "https://polyhaven.com/a/sparse_grass",
-   "license": "CC0"
+   "rep": 12.0,
+   "source": "tools/blender/assets30.py scrub_tile, built in Blender",
+   "license": "own"
   }
  ],
  "note": "A19, private tools/blender/ground19.py",

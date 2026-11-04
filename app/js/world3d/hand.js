@@ -61,12 +61,14 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
       const g = await loader.loadAsync(base + `conz_${c.i}.glb`).catch(() => null); if (!g) return;
       g.scene.position.set(c.cx, 0, c.cz);
       g.scene.traverse(o => {
-        if (!o.isMesh) return; o.receiveShadow = true; o.castShadow = /beam|post|kerb/.test(o.name);
+        if (!o.isMesh) return; o.receiveShadow = !/^(posts_(hp|fork[wy]|line|yline)|tunwa_bk_day)/.test(o.name); o.castShadow = /beam|post|kerb/.test(o.name) && !/^posts_(hp|fork[wy]|line|yline|wa_bo_board)/.test(o.name);  // (A29: paint neither casts nor takes shadows: dark smudges on the crossing bars, b1103_1538)
         // (the ground is in the terrain shadows' height map: without it the corridor was a pit there, and the generated hill
         // past its edge threw a straight-edged shadow into it, Street View Conzelman 1400 ahead)
         if (/^(terrain|rock_ext|verge|road|lot)/.test(o.name)) o.layers.enable(HZ_LAYER);
         // (a lot's and the road's paving one surface: its triangles over a bumpy lidar lit alike; at the junctions the road's fans read as dark wedges and radial bands, s6_1755_l, 1790_r; A27: the road's steps are gone, 1785-1800 inner edge 0.10 m over 0.45 m remains, and face lighting still draws bands there, 1790_a, 1790_r)
         if (/^(lot|road)/.test(o.name) && o.geometry.attributes.normal) { const N = o.geometry.attributes.normal; for (let k = 0; k < N.count; k++) N.setXYZ(k, 0, 1, 0); N.needsUpdate = true; }
+        // (A29: the concrete's sunlit look in the morning photos, t4_13050_a, cz_11050_a: the game's sun leaves their road faces in shade; normals eased up, no extra cost)
+        if (/^posts_(bat|bunker|wc|hut|wblock|wa_)/.test(o.name) && o.geometry.attributes.normal) { const N = o.geometry.attributes.normal; for (let k = 0; k < N.count; k++) { const x = N.getX(k) * 0.45, y = N.getY(k) * 0.45 + 0.55, z = N.getZ(k) * 0.45, l = Math.hypot(x, y, z) || 1; N.setXYZ(k, x / l, y / l, z / l); } N.needsUpdate = true; }
         // (the ground round the road and the verges: jw-a19's photo-zoned ground textures, world space)
         if (/^(verge|terrain)/.test(o.name)) { o.material = groundMaterial({ lambert }); o.geometry.deleteAttribute('color'); return; }
         if (noExt && /^(terrain_ext|rock_ext|surf)/.test(o.name)) { o.visible = false; return; }
@@ -82,6 +84,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           else if (/asphalt|lot/.test(s.name)) grain(m, 0.11, [1.37, 9.7, 37.3]);
           // (galvanised steel: the sky's sheen on its shaded face, Street View: a light W-beam even with the sun behind it)
           if (/wbeam/.test(s.name)) m.emissive = new THREE.Color(0.10, 0.105, 0.11); 
+          if (/a31_bk_day/.test(s.name)) m.emissive = new THREE.Color(0.55, 0.56, 0.57);  // (A31: daylight through the tunnel, no sun on it)
           m = lambert(m); mats.set(s, m); }
         o.material = m;
       });
@@ -131,7 +134,9 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   // give way; onOwn() once that is known
   const ownCbs = [];
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-  const matAt = (a, i) => m4.compose(v.set(a[7 * i], a[7 * i + 1], a[7 * i + 2]), q.setFromAxisAngle(up, a[7 * i + 3]), s.set(a[7 * i + 4], a[7 * i + 5], a[7 * i + 6]));
+  const matAt = (a, i, st = 7) => { m4.compose(v.set(a[st * i], a[st * i + 1], a[st * i + 2]), q.setFromAxisAngle(up, a[st * i + 3]), s.set(a[st * i + 4], a[st * i + 5], a[st * i + 6]));
+    if (st === 9) { const e = m4.elements, kx = a[9 * i + 7], kz = a[9 * i + 8]; e[1] += kx * e[0] + kz * e[2]; e[5] += kx * e[4] + kz * e[6]; e[9] += kx * e[8] + kz * e[10]; }  // (A30: a low plant sheared to the slope under it, stride 9)
+    return m4; };
   // (a material per part: its range [from, to) metres, the instance outside it moved off screen in the vertex shader;
   // fade: 1 fades out over the range's far end, -1 fades in over its near end, FADE metres either side, by a screen-door
   // dither: lod0 and the impostors cross-faded with no pop)
@@ -170,7 +175,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   // The work runs in slices of about 3 ms with a pause between: no long task at a group's arrival. Nearest cells first: a cell not built yet is a hole
   // in lod1 near the rider, seen only at a ride's start.)
   let J = null, pumping = false, texDone = false, at = null, lx = 1e9, lz = 1e9, dirty = false; const state = { busy: true };
-  const groups = [], models = new Map(), loader = new GLTFLoader();
+  const groups = [], models = new Map(), loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   let t0 = 0; const breath = async () => { if (performance.now() - t0 < 3) return; await new Promise(r => setTimeout(r, 6)); t0 = performance.now(); };
   // (a species' model and materials once, shared by its groups: no second shader compile when a group arrives)
   const model = sp => models.get(sp) ?? models.set(sp, loader.loadAsync(base + `veg/${sp}.glb`).catch(() => null).then(g => { if (!g) return null;
@@ -185,20 +190,20 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     const buf = await fetch(base + G.file).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null); if (!buf) return;
     let off = 0; t0 = performance.now();
     for (const [sp, n] of Object.entries(G.species)) {
-      const a = new Float32Array(buf, off, n * 7); off += n * 28;
+      const st = J.stride?.[sp] || 7, a = new Float32Array(buf, off, n * st); off += n * st * 4;
       const M = await model(sp); if (!M) continue; t0 = performance.now();
       // lod1: every plant of the group, written once
       for (const p of M.parts[1]) {
         const im = new THREE.InstancedMesh(p.geo, p.mat, n);
-        for (let i = 0; i < n; i++) { im.setMatrixAt(i, matAt(a, i)); if (!(i & 255)) await breath(); }
+        for (let i = 0; i < n; i++) { im.setMatrixAt(i, matAt(a, i, st)); if (!(i & 255)) await breath(); }
         im.computeBoundingSphere(); im.castShadow = false; im.receiveShadow = true; group.add(im); await breath();
       }
       // lod0: the plants by cell, every cell built now, nearest first
       if (!M.parts[0].length) continue;
       const cells = new Map();
-      for (let i = 0; i < n; i++) { const cx = Math.floor(a[7 * i] / CELL), cz = Math.floor(a[7 * i + 2] / CELL), k = cx + ',' + cz; (cells.get(k) ?? cells.set(k, { ids: [], meshes: null, cx: (cx + 0.5) * CELL, cz: (cz + 0.5) * CELL }).get(k)).ids.push(i); }
+      for (let i = 0; i < n; i++) { const cx = Math.floor(a[st * i] / CELL), cz = Math.floor(a[st * i + 2] / CELL), k = cx + ',' + cz; (cells.get(k) ?? cells.set(k, { ids: [], meshes: null, cx: (cx + 0.5) * CELL, cz: (cz + 0.5) * CELL }).get(k)).ids.push(i); }
       await breath();
-      const S = { sp, a, near: M.near, parts: M.parts[0], mats: M.mats, cells: [...cells.values()] }; sets.push(S);
+      const S = { sp, a, st, near: M.near, parts: M.parts[0], mats: M.mats, cells: [...cells.values()] }; sets.push(S);
       const [px, pz] = at ?? [x, z], d2 = c => (c.cx - px) ** 2 + (c.cz - pz) ** 2;
       for (const c of [...S.cells].sort((p, q) => d2(p) - d2(q))) { build(S, c); await breath(); }
     }
@@ -226,7 +231,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     const R = S.near + FADE + CELL * 0.75 + 3, on = (c.cx - lx) ** 2 + (c.cz - lz) ** 2 < R * R;
     c.meshes = S.parts.map((p, k) => {
       const im = new THREE.InstancedMesh(p.geo, S.mats[k], c.ids.length);
-      c.ids.forEach((i, j) => im.setMatrixAt(j, matAt(S.a, i)));
+      c.ids.forEach((i, j) => im.setMatrixAt(j, matAt(S.a, i, S.st)));
       im.computeBoundingSphere(); im.castShadow = false; im.receiveShadow = true; im.visible = on; group.add(im); return im;  // (no cast shadows: on the steep faces they fell as black blots, cz_1105_l)
     });
   }
@@ -283,6 +288,7 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         vec2 buW = (p - gBoxW.xy) * gBoxW.zw; float inW = step(0.0, buW.x) * step(buW.x, 1.0) * step(0.0, buW.y) * step(buW.y, 1.0) * (1.0 - step(gBox.x + 140.0, p.x));
         if (inW > 0.5) w = texture2D(gSplatW, buW);
         // (breaks the soft zone edges up a little with the grass tile's own tone)
+        float rb31 = inW * smoothstep(11434.0, 11437.0, p.x) * (1.0 - smoothstep(11510.0, 11514.0, p.x)) * (1.0 - smoothstep(11441.0, 11444.0, p.y)) * smoothstep(11365.0, 11369.0, p.y);  // (A31: the red bank north of the tunnel is bare: facets read as face, no tufts: green leaf shapes on red, w5_11070_r)
         float steep = smoothstep(0.05, 0.34, 1.0 - n.y);  // (the lidar's 2 m mesh and the verges soften the cuts: 25 degrees and up reads as the face)
         vec2 side = abs(n.x) > abs(n.z) ? vGdW.zy : vGdW.xy;
         // (every layer from above on the flat and from the side on a steep face: no streaks down a bank)
@@ -296,13 +302,14 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         vec3 cFace = (texture2D(gCut, side / (gRep.y * 0.45)).rgb + texture2D(gCut, side.yx / (gRep.y * 1.15) + 0.37).rgb + texture2D(gCut, sr / (gRep.y * 0.7) + 0.71).rgb) / 3.0;
         // (cz_1105_a: pale weathered rock showing through the red in patches a metre or two across)
         cFace = mix(cFace, vec3(0.50, 0.44, 0.38) * (0.8 + 0.4 * texture2D(gNoise, side / 0.6).b), 0.14 * smoothstep(0.66, 0.74, texture2D(gNoise, side / 1.7 + 0.51).b));
-        vec3 cCut = mix(texture2D(gCut, p / gRep.y).rgb, cFace, steep);
+        vec3 cTop31 = (texture2D(gCut, p / (gRep.y * 0.45)).rgb + texture2D(gCut, p.yx / (gRep.y * 1.15) + 0.37).rgb + texture2D(gCut, p / (gRep.y * 0.7) + 0.71).rgb) / 3.0;  // (A31: the face's own mix, on the ground plane: no stretch on the bank's flat facets, w8_11050_r; no plain dirt, w9_11050_r)
+        vec3 cCut = mix(mix(texture2D(gCut, p / gRep.y).rgb, cTop31, rb31), cFace, steep);
         // (the tufts' clumps and blades from the game's noise texture: its values spread evenly, unlike a grass tile's)
         // (cz_1105_l: green scrub patches over about a quarter of the face)
         { float clump = smoothstep(0.52, 0.64, texture2D(gNoise, side / 7.0 + 0.13).r), blade = smoothstep(0.45, 0.65, texture2D(gNoise, side / 0.9).g);
           // (A22, a19g_1105_l: the tufts grey-green sage and dry grass, not lime: the grass tile half greyed, its green held back)
           vec3 tg = texture2D(gGrass, side / 0.9).rgb; vec3 tuft = mix(vec3(dot(tg, vec3(0.3, 0.55, 0.15))), tg, 0.45) * vec3(1.02, 1.08, 0.9);
-          cCut = mix(cCut, tuft, clump * blade * 0.8 * steep); }
+          cCut = mix(cCut, tuft, clump * blade * 0.8 * steep * (1.0 - rb31)); }
         // (the splat's alpha below 1: the chert dark grey-brown there, cz_1205_l, cz_1380_l)
         cCut = mix(cCut, vec3(dot(cCut, vec3(0.3, 0.55, 0.15))) * vec3(0.92, 0.86, 0.80) * 0.8, 0.5 * clamp((1.0 - w.a) / 0.6, 0.0, 1.0));  // (alpha no lower than 0.4: the browser may premultiply)
         // (far off the tiles' repeats show: a second, larger lookup mixed in with distance)

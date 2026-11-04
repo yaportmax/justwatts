@@ -173,28 +173,63 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   let CZ = compileSpec(proj, czSpec); const notCz = e => !CZ.owns(e[0], e[1]); setLaneHook((x, z, dx, dz) => { const l = Math.hypot(dx, dz) || 1; return CZ.lane(x, z, dx / l, dz / l); });
   let railsJson = null;
   // the hand-built scenery (hand.js); once in, the near tiles' roads are built again without that stretch
-  const HAND = loadHand({ scene, lambert: m => withSun(m), onLoad: () => { hz.touch(); handMask = null; for (const c of near.values()) if (c.sig) { if (c.sig.roads) { c.sig.roads = null; c.sig.furn = null; } if (c.sig.terrain && HAND.settled) c.sig.terrain = null; } poke(); } });
-  const HVEG = loadHandPlants({ scene, lambert: m => withSun(m) });
+  const HAND = loadHand({ scene, lambert: m => withSun(m), prepare: into => handBasePrepare().then(() => stageUploads(into)), onLoad: () => { hz.touch(); handMask = null; const B = HAND.lastBox, M = 130; for (const c of near.values()) if (c.sig) { const b = tileBox(c); if (B && b && (b[2] < B.min.x - M || b[0] > B.max.x + M || b[3] < B.min.z - M || b[1] > B.max.z + M)) continue;  /* (a tile this group does not reach keeps its ground and roads: building them again held a frame up and uploaded 15 MB in mid ride) */ if (c.sig.roads) { c.sig.roads = null; c.sig.furn = null; } if (c.sig.terrain && HAND.settled) c.sig.terrain = null; } poke(); } });
+  const HVEG = loadHandPlants({ scene, renderer, lambert: m => withSun(m) });
   // (A19: inside the hand list's corridor its own plants stand; the generated trees and scrub give way, built again once known)
   HVEG.onOwn(() => { for (const c of [...near.values(), ...far.values()]) c.sig.trees = null; scrub.invalidate(); poke(); });
-  const handAt = (x, z) => { if (!HAND.ready || !HAND.covers) return false; if (HAND.on(10030) && ((x - 11927) ** 2 + (z - 10713) ** 2 < 28 * 28 || (x - 11962) ** 2 + (z - 10718) ** 2 < 16 * 16)) return true; if (HAND.on(14490) && (x - 8934) ** 2 + (z - 11860) ** 2 < 46 * 46) return true;  // (A25: and at the fork at 14490: one hand-built surface, cz_14500_l)  // (A23: the generated stubs at the McCullough roundabout give way to the hand-built one)
+  const handAt = (x, z) => { if (!HAND.ready || !HAND.covers) return false; if (HAND.on(10030) && ((x - 11927) ** 2 + (z - 10713) ** 2 < 28 * 28 || (x - 11962) ** 2 + (z - 10718) ** 2 < 16 * 16)) return true; if (HAND.on(14490) && (x - 8934) ** 2 + (z - 11860) ** 2 < 46 * 46) return true; if (HAND.on(1750) && (x - 12870) ** 2 + (z - 10763) ** 2 < 16.5 * 16.5) return true;  // (A25: and at the fork at 14490: one hand-built surface, cz_14500_l)  // (A23: the generated stubs at the McCullough roundabout give way to the hand-built one)
     const q = CZ.at(x, z); return !!q && q.dd < 4 && HAND.on(q.s - 1) && HAND.on(q.s + 1); };
   // (a grid's quad inside the hand terrain's corridor: all four corners within 117 m of the line between the stretch's ends,
   // or on its extension past the corridor, hand.js extAt)
   // (A21: a 2 m raster of the corridor made once from the line's points every 4 m, so a tile's terrain build looks each
   // grid point up instead of searching the line: CZ.near per point had cost 460 to 690 ms a tile, perfride '|t' slices)
-  let handMask = null;
+  // (A28: the corridor's mask for all the chunks is made once, in slices, before the first group shows: each cell keeps its nearest row's station; a group's arrival only
+  // says which stations are in. Made whole at each group's arrival it held a frame up by 130 to 190 ms.)
+  let handMask = null, handBase = null;
+  function* handBaseSteps() {
+    const P = [], R = 117, C = 2, RS = s => s >= 10000 ? 67 : 117;  // (A23: west of McCullough the hand terrain's corridor is 70 m each side, 120 m on the east stretch)
+    for (const [s0, s1] of HAND.allRanges) for (let s = s0 + 3; s <= s1 - 3; s += 4) { const [la, lo] = CZ.latlon(s); P.push([...proj.xz(la, lo), RS(s), s]); }
+    yield;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    x0 -= R; z0 -= R; const nx = Math.ceil((x1 + R - x0) / C) + 1, nz = Math.ceil((z1 + R - z0) / C) + 1, sta = new Uint16Array(nx * nz);
+    // (A23: a point belongs to its nearest road row, as the hand terrain's own rule in build_conz.py: a wider circle of the east stretch must not mask ground that the west's narrower corridor leaves out: water showed through at 195 right. Distances squared per cell, nearest row's radius.)
+    const best = new Float32Array(nx * nz).fill(1e12), rad = new Float32Array(nx * nz), near_ = new Uint16Array(nx * nz), r = Math.ceil(R / C);
+    let n = 0;
+    for (const [x, z, Rq, st] of P) { const ci = Math.round((x - x0) / C), cj = Math.round((z - z0) / C);
+      for (let j = Math.max(0, cj - r); j <= Math.min(nz - 1, cj + r); j++) { const dz = z0 + j * C - z, row = j * nx; for (let i = Math.max(0, ci - r); i <= Math.min(nx - 1, ci + r); i++) { const dx = x0 + i * C - x, d = dx * dx + dz * dz; if (d < best[row + i]) { best[row + i] = d; rad[row + i] = Rq; near_[row + i] = st; } } }
+      if (++n % 16 === 0) yield; }
+    for (let k = 0; k < sta.length; k++) if (best[k] < rad[k] * rad[k]) sta[k] = near_[k];
+    handBase = { x0, z0, nx, nz, C, sta };
+  }
+  // (A28: a group's buffers sent to the GPU a few per frame before it shows: all at its first draw they were 15 MB in one frame, 170 to 220 ms. One attribute or index at a time
+  // through a mesh of its own, a real draw of one triangle into a 1 px target so the driver's copy is made too.)
+  let stageRT = null, stageMat = null;
+  async function stageUploads(into) {
+    stageRT ??= new THREE.WebGLRenderTarget(1, 1); stageMat ??= new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    let sent = 0; const S = new THREE.Scene(), seen = new Set(), mesh = new THREE.Mesh(new THREE.BufferGeometry(), stageMat); mesh.frustumCulled = false; S.add(mesh);
+    const send = async (attr, index) => {
+      if (!attr || seen.has(attr)) return; seen.add(attr);
+      const g = new THREE.BufferGeometry(); if (index) { g.setAttribute('position', index[1]); g.setIndex(attr); } else g.setAttribute('position', attr);
+      g.setDrawRange(0, 3); mesh.geometry = g;
+      const prev = renderer.getRenderTarget(); renderer.setRenderTarget(stageRT); renderer.render(S, camera); renderer.setRenderTarget(prev);
+      g.dispose();
+      if (ready && warm.userData.all > 0) await new Promise(r => setTimeout(r, 12)); else if (++sent % 16 === 0) await new Promise(r => setTimeout(r, 0));  // (no need to spread them under the loading screen)
+    };
+    const meshes = []; into.traverse(o => { if (o.isMesh) meshes.push(o); });
+    for (const o of meshes) { const G = o.geometry;
+      for (const n of Object.keys(G.attributes)) await send(G.attributes[n]);
+      if (G.index && G.attributes.position) await send(G.index, [true, G.attributes.position]); }
+  }
+  async function handBasePrepare() {
+    if (handBase) return; const g = handBaseSteps(); let t = performance.now();
+    for (;;) { if (g.next().done) return; if (performance.now() - t > 3) { await new Promise(r => setTimeout(r, 4)); t = performance.now(); } }
+  }
   function handCover() {
     if (handMask) return handMask;
-    const P = [], R = 117, C = 2, RS = s => s >= 10000 ? 67 : 117;  // (A23: west of McCullough the hand terrain's corridor is 70 m each side, 120 m on the east stretch)
-    for (const [s0, s1] of HAND.ranges) for (let s = s0 + 3; s <= s1 - 3; s += 4) { const [la, lo] = CZ.latlon(s); P.push([...proj.xz(la, lo), RS(s)]); }
-    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-    x0 -= R; z0 -= R; const nx = Math.ceil((x1 + R - x0) / C) + 1, nz = Math.ceil((z1 + R - z0) / C) + 1, m = new Uint8Array(nx * nz);
-    // (A23: a point belongs to its nearest road row, as the hand terrain's own rule in build_conz.py: a wider circle of the east stretch must not mask ground that the west's narrower corridor leaves out: water showed through at 195 right. Distances squared per cell, nearest row's radius.)
-    const best = new Float32Array(nx * nz).fill(1e12), rad = new Float32Array(nx * nz), r = Math.ceil(R / C);
-    for (const [x, z, Rq] of P) { const ci = Math.round((x - x0) / C), cj = Math.round((z - z0) / C);
-      for (let j = Math.max(0, cj - r); j <= Math.min(nz - 1, cj + r); j++) { const dz = z0 + j * C - z, row = j * nx; for (let i = Math.max(0, ci - r); i <= Math.min(nx - 1, ci + r); i++) { const dx = x0 + i * C - x, d = dx * dx + dz * dz; if (d < best[row + i]) { best[row + i] = d; rad[row + i] = Rq; } } } }
-    for (let k = 0; k < m.length; k++) if (best[k] < rad[k] * rad[k]) m[k] = 1;
+    if (!handBase) for (const _ of handBaseSteps());
+    const { x0, z0, nx, nz, C, sta } = handBase, on = new Uint8Array(65536), m = new Uint8Array(nx * nz);
+    for (const [s0, s1] of HAND.ranges) on.fill(1, s0, s1 + 1);
+    for (let k = 0; k < m.length; k++) if (on[sta[k]] && sta[k]) m[k] = 1;
     return (handMask = { x0, z0, nx, nz, C, m });
   }
   function handSkip(G) {

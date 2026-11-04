@@ -39,13 +39,13 @@ function foam(m) {
   return m;
 }
 
-export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoad = () => {} }) {
+export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoad = () => {}, prepare = null }) {
   const group = new THREE.Group(); group.name = 'hand'; scene.add(group);
   // (A23: streamed by stretch: a group of chunks loads when the rider comes within 1800 m of one of them; a ride elsewhere loads none. state.on(s): that station's
   // chunk is in the scene; state.want(x, z): called by view.js as the rider moves; onLoad after each group.)
-  const state = { group, covers: null, ready: false, settled: false, push: [], pushT: [], ranges: [], on: s => state.ranges.some(r => s >= r[0] && s <= r[1]), want(x, z) { state.at = [x, z]; state.pump?.(); }, notHere: () => !state.settled };
+  const state = { group, covers: null, ready: false, settled: false, push: [], ranges: [], on: s => state.ranges.some(r => s >= r[0] && s <= r[1]), want(x, z) { state.at = [x, z]; state.pump?.(); }, notHere: () => !state.settled };
   fetch(base + 'conz.json').then(r => r.ok ? r.json() : null).then(async j => {
-    if (!j) { state.settled = true; return; } state.covers = j.stations; state.runs = j.runs;
+    if (!j) { state.settled = true; return; } state.covers = j.stations; state.runs = j.runs; state.allRanges = j.chunks.map(c => [c.s0, c.s1]);
     // (the hand terrain past the corridor, build_conz.py ext_terrain: per row of its grid the runs [i0, n, ...] of points
     // where the generated ground gives way)
     // (__w3.handNoExt: without it, the generated ground there again: perf attribution)
@@ -57,7 +57,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
     const grp = c => c.s0 < 5000 ? 0 : c.s0 < 11322 ? 1 : c.s0 < 12822 ? 2 : 3, groups = new Map(); for (const c of j.chunks) { const k = grp(c); (groups.get(k) ?? groups.set(k, []).get(k)).push(c); }
     // (a group stays hidden until all its chunks are in, and counts as present only then: a late load shows the generated ground it replaces, never a part of the
     // corridor standing in it)
-    async function addChunk(c, into) {
+    async function addChunk(c, into, box) {
       const g = await loader.loadAsync(base + `conz_${c.i}.glb`).catch(() => null); if (!g) return;
       g.scene.position.set(c.cx, 0, c.cz);
       g.scene.traverse(o => {
@@ -65,7 +65,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
         // (the ground is in the terrain shadows' height map: without it the corridor was a pit there, and the generated hill
         // past its edge threw a straight-edged shadow into it, Street View Conzelman 1400 ahead)
         if (/^(terrain|rock_ext|verge|road|lot)/.test(o.name)) o.layers.enable(HZ_LAYER);
-        // (a lot's and the road's paving one surface: its triangles over a bumpy lidar lit alike; at the junctions the road's fans read as dark wedges and radial bands, s6_1755_l, 1790_r)
+        // (a lot's and the road's paving one surface: its triangles over a bumpy lidar lit alike; at the junctions the road's fans read as dark wedges and radial bands, s6_1755_l, 1790_r; A27: the road's steps are gone, 1785-1800 inner edge 0.10 m over 0.45 m remains, and face lighting still draws bands there, 1790_a, 1790_r)
         if (/^(lot|road)/.test(o.name) && o.geometry.attributes.normal) { const N = o.geometry.attributes.normal; for (let k = 0; k < N.count; k++) N.setXYZ(k, 0, 1, 0); N.needsUpdate = true; }
         // (the ground round the road and the verges: jw-a19's photo-zoned ground textures, world space)
         if (/^(verge|terrain)/.test(o.name)) { o.material = groundMaterial({ lambert }); o.geometry.deleteAttribute('color'); return; }
@@ -85,11 +85,11 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           m = lambert(m); mats.set(s, m); }
         o.material = m;
       });
-      into.add(g.scene);
+      into.add(g.scene); into.updateMatrixWorld(true); box.expandByObject(g.scene);
       // (the verges' and lots' triangles in world space: the generated ground is pushed under them as under the paving,
       // view.js buildRoads; else its coarse grid stands up through a level verge or a lot)
       into.updateMatrixWorld(true); g.scene.updateMatrixWorld(true);
-      g.scene.traverse(o => { if (!o.isMesh || !/^(verge|lot|terrain)/.test(o.name)) return; const out = /^terrain/.test(o.name) ? state.pushT : state.push, P = o.geometry.attributes.position, I = o.geometry.index, v = new THREE.Vector3();
+      g.scene.traverse(o => { if (!o.isMesh || !/^(verge|lot)/.test(o.name)) return; const out = state.push, P = o.geometry.attributes.position, I = o.geometry.index, v = new THREE.Vector3();
         for (let k = 0, n = I ? I.count : P.count; k < n; k++) { v.fromBufferAttribute(P, I ? I.getX(k) : k).applyMatrix4(o.matrixWorld); out.push(v.x, v.y, v.z); } });
     }
     let busy = false; const D2 = 1800 * 1800;
@@ -104,7 +104,9 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
         for (const [k, cs] of groups) { if (!cs.some(c => (c.cx - x) ** 2 + (c.cz - z) ** 2 < D2)) continue; groups.delete(k);
           cs.sort((a, b) => ((a.cx - x) ** 2 + (a.cz - z) ** 2) - ((b.cx - x) ** 2 + (b.cz - z) ** 2));
           const into = new THREE.Group(); into.visible = false; group.add(into);
-          for (const c of cs) await addChunk(c, into);
+          // (lastBox: what this group covers, view.js builds again only the tiles it touches; prepare: slow work done in slices before the group shows)
+          const box = new THREE.Box3(); for (const c of cs) await addChunk(c, into, box);
+          await prepare?.(into); state.lastBox = box;
           into.visible = true; for (const c of cs) { shown.add(c.i); state.ranges.push([c.s0, c.s1]); }
           state.ready = true; onLoad(state); }
       } finally { busy = false; state.busy = false; state.settled = true; }
@@ -122,7 +124,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 // near. Which lod a plant draws in is decided on the GPU by its
 // distance to the camera (veg.json lod: { sp: [lod0 metres, last metres] }); update(x, z) only moves that uniform and
 // toggles near cells: no matrices are rewritten after load.
-export function loadVeg({ scene, base = '/world/hand/', lambert = m => m }) {
+export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert = m => m }) {
   const group = new THREE.Group(); group.name = 'handVeg'; scene.add(group);
   const sets = [], CELL = 32, cam = { value: new THREE.Vector3(1e9, 0, 1e9) }; let own = null;
   // owns(x, z): inside the corridor this list owns (veg.json own: a 2 m bit grid), where the generated scrub and trees
@@ -167,7 +169,7 @@ export function loadVeg({ scene, base = '/world/hand/', lambert = m => m }) {
   // veg/g<k>.bin little-endian floats [x, y, z, rotY, sx, sy, sz] species after species, load when the rider comes within 1800 m of one of its chunks.
   // The work runs in slices of about 3 ms with a pause between: no long task at a group's arrival. Nearest cells first: a cell not built yet is a hole
   // in lod1 near the rider, seen only at a ride's start.)
-  let J = null, pumping = false, at = null, lx = 1e9, lz = 1e9, dirty = false; const state = { busy: true };
+  let J = null, pumping = false, texDone = false, at = null, lx = 1e9, lz = 1e9, dirty = false; const state = { busy: true };
   const groups = [], models = new Map(), loader = new GLTFLoader();
   let t0 = 0; const breath = async () => { if (performance.now() - t0 < 3) return; await new Promise(r => setTimeout(r, 6)); t0 = performance.now(); };
   // (a species' model and materials once, shared by its groups: no second shader compile when a group arrives)
@@ -206,6 +208,10 @@ export function loadVeg({ scene, base = '/world/hand/', lambert = m => m }) {
   async function pump() {
     if (pumping || !J || !at) return; pumping = true;
     try {
+      // (A28: every species' model and its textures on the GPU when the first group is wanted, under the loading screen for a ride that starts here: a texture is about 15 MB, sent
+      // with its mips at the species' first draw it held a frame up by 170 to 220 ms; one species per pause when the rider comes from further off)
+      if (!texDone) { texDone = true; const sps = new Set(); for (const G of groups) if (G) for (const sp of Object.keys(G.species)) sps.add(sp);
+        for (const sp of sps) { const M = await model(sp); if (!M || !renderer) continue; for (const p of [...M.parts[0], ...M.parts[1]]) if (p.src.map) renderer.initTexture(p.src.map); await new Promise(r => setTimeout(r, 30)); } }
       for (let k = 0; k < groups.length; k++) { const G = groups[k]; if (!G || !G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < D2)) continue;
         groups[k] = null; await addGroup(G, at[0], at[1]); k = -1; }
     } finally { pumping = false; state.busy = false; }

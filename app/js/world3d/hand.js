@@ -349,8 +349,10 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         if (p.x > 8935.0 && p.x < 8995.0 && p.y > 11625.0 && p.y < 11695.0) {  // (A31: shade pools under the picnic's cypress crowns, cz_14255_l, 14275_l: bright grass and shade, the plants cast no shadows)
           float s31 = 0.0; vec3 Q[7]; Q[0] = vec3(8949.0, 11651.0, 7.5); Q[1] = vec3(8953.0, 11660.0, 6.5); Q[2] = vec3(8957.0, 11647.0, 6.5); Q[3] = vec3(8962.0, 11636.0, 6.0); Q[4] = vec3(8964.0, 11652.0, 8.5); Q[5] = vec3(8969.0, 11667.0, 8.0); Q[6] = vec3(8972.0, 11682.0, 8.0);
           float n31 = texture2D(gNoise, p / 5.5).r * 0.55 + texture2D(gNoise, p / 1.7).g * 0.45;
-          for (int k = 0; k < 7; k++) s31 = max(s31, 1.0 - smoothstep(Q[k].z * 0.55, Q[k].z * 1.05, length(p - Q[k].xy) + (n31 - 0.5) * 5.0));
-          c *= mix(1.0, 0.56, s31); }
+          for (int k = 0; k < 7; k++) s31 = max(s31, 0.75 * (1.0 - smoothstep(Q[k].z * 0.12, Q[k].z * 0.5, length(p - Q[k].xy) + (n31 - 0.5) * 3.0)));
+          vec2 T32[4]; T32[0] = vec2(8950.5, 11647.6); T32[1] = vec2(8951.5, 11650.1); T32[2] = vec2(8952.3, 11652.8); T32[3] = vec2(8951.2, 11655.7);  // (A32, cz_14255_l: the trunks' long shadows toward the road, the lawn bright between them)
+          for (int k = 0; k < 4; k++) { vec2 d32 = p - T32[k]; float u32 = clamp(dot(d32, vec2(-0.93, 0.36)), 0.0, 13.0); s31 = max(s31, (1.0 - smoothstep(0.5, 1.2, length(d32 - vec2(-0.93, 0.36) * u32) + (n31 - 0.5) * 0.7)) * (1.0 - u32 / 22.0)); }
+          c *= mix(vec3(1.28, 1.42, 1.0), vec3(0.62, 0.7, 0.58), s31); }
         diffuseColor.rgb *= c;
       }`);
   };

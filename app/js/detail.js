@@ -2,6 +2,7 @@
 // a course (map first, profile under it, numbers, an optional workout, Ride). DOM only; rides start through app.js.
 // Course thumbs for list rows live here too: a small route map over the ride map's tiles, a slim profile under it,
 // drawn when a row first scrolls into view (tiles are cached by map.js; a course without GPS shows its profile).
+import { betaOk } from './beta.js';
 import { esc, fmtT, distText, stepWatts } from './core.js';
 import { drawMap } from './map.js';
 import { inWorld } from './world.js';
@@ -85,7 +86,7 @@ export function createDetail({ $, store, fit, css, units, ftp, compile, estimate
   function pick(v) { if (cur?.kind !== 'workout') return; cur.pick = v; store.set('hw.wkCourse', v); renderWorkout(); }
   // ride a workout on a pick: '' flat, 'ow' open world from the last start, or a course id
   async function rideOn(w, p) {
-    if (p === 'ow') { try { return await rideWorld(owStart(), w); } catch (e) { toast(e.message || 'Could not load the roads'); return false; } }
+    if (p === 'ow') { if (!await betaOk()) return false; try { return await rideWorld(owStart(), w); } catch (e) { toast(e.message || 'Could not load the roads'); return false; } }
     return ride(courses.byId(p), w);
   }
   const rideDefault = w => rideOn(w, lastPick());

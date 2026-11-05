@@ -142,7 +142,7 @@
     <p class="et">No ride loaded</p>
     <div class="starts">
       <button id="btnJust2" class="start"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M8.5 7.2v5.6l4.4-2.8z"/></svg><b>Just ride</b><small>No plan, flat</small></button>
-      <button id="owStart" class="start"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg><b>Open world: Marin</b><small>Any road, pick a start</small></button>
+      <button id="owStart" class="start"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg><b>Open world: Marin <span class="beta">Beta</span></b><small>Any road, pick a start</small></button>
       <button data-go="workouts" class="start"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15l4-5 3 3 3-6 4 8"/></svg><b>Pick a workout</b><small>Workouts and courses</small></button>
     </div>
   </div>
@@ -396,6 +396,13 @@
   </div>
 </div>
 <div class="modal" id="detModal"><div class="panel dlg detdlg" role="dialog" aria-label="Details" id="detDlg"></div></div>
+<div class="modal" id="betaModal">
+  <div class="panel dlg" role="dialog" aria-labelledby="betaTitle">
+    <div class="dhead"><b id="betaTitle">Open world is in beta</b></div>
+    <p class="hint">This is still a work in progress.</p>
+    <div class="dfoot"><button id="betaNo">Cancel</button><button id="betaYes" class="pri">Continue</button></div>
+  </div>
+</div>
 <div class="modal" id="owModal">
   <div class="panel dlg owdlg" role="dialog" aria-labelledby="owTitle">
     <div class="dhead"><b id="owTitle">Open world</b><button id="owClose" class="x" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>

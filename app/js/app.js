@@ -17,6 +17,7 @@ import { drawMap, lineDist, pointAt } from './map.js';
 import { checkCourse, buildCourse } from './course.js';
 import { createWorld, PRESETS as WORLD_PRESETS } from './world.js';
 import { createPicker } from './worldpick.js';
+import { betaOk } from './beta.js';
 import { createConnect } from './connect.js';
 import { createDetail } from './detail.js';
 import { createListSort } from './listsort.js';
@@ -522,7 +523,7 @@ function placeRiders(list) {
   }).filter(Boolean);
 }
 const picker = createPicker({ $, store, world, wOptions: (cur, free) => courses.wOptions(cur, free), go: rideWorld });
-$('#owStart').onclick = () => picker.open();
+$('#owStart').onclick = async () => { if (await betaOk()) picker.open(); };
 // the workout and course dialogs (detail.js)
 const detail = createDetail({ $, store, fit, css, units: () => settings.units, ftp: () => settings.ftp, compile, estimate, drawChart, courses, workouts: () => allWorkouts(),
   presets: WORLD_PRESETS, ride: (c, w) => loadRide(w, c), rideWorld: (p, w) => startWorld({ ...p, name: p.id ? p.name : 'Open world' }, w), openPicker: wid => picker.open(wid),

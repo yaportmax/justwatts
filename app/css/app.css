@@ -906,3 +906,4 @@ html:fullscreen body:has(#v-ride.on){--hh:0px}
   #rideOn.hud>.crs{left:8px;right:8px;bottom:118px;height:80px;flex-direction:row}#rideOn.hud>.crs .crsp{width:40%}
   #rideOn.hud>.controls{left:8px;right:8px;bottom:8px;grid-template-columns:1fr;gap:4px;padding:4px}
 }
+.beta{font-size:10px;font-weight:600;padding:1px 5px;border-radius:4px;border:1px solid currentColor;opacity:.75;vertical-align:middle}

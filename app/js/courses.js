@@ -94,7 +94,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     if (openWorld && (src === 'all' || src === 'jw') && hit(cf.q.trim().toLowerCase(), 'Open world: Marin', 'Just Watts')) {
       const card = document.createElement('div'); card.className = 'lrow ow';
       card.innerHTML = `<div class="owic"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg></div>
-        <div class="lmain"><div class="t">Open world: Marin <span class="beta">Beta</span></div><div class="p">Any road, pick a start</div></div>${authorCell('Just Watts')}<div class="m num r">Any</div><div class="m num r"></div>
+        <div class="lmain"><div class="t">Open world: Marin</div><div class="p"><span class="beta">Beta</span> Any road, pick a start</div></div>${authorCell('Just Watts')}<div class="m num r">Any</div><div class="m num r"></div>
         <div class="lact"><button class="pri" data-a="ride">Ride</button></div>`;
       box.appendChild(card);
       card.onclick = () => openWorld('');

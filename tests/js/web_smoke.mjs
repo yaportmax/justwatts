@@ -183,7 +183,7 @@ out.picks.courseWorkout = await load(() => D.ride(), r => r.course?.name === 'Ha
 out.picks.courseFree = await load(() => rowOf('The climb').querySelector('[data-a=ride]').onclick(), r => r.course?.name === 'The climb' && !r.steps?.length);
 // course rows: a map thumb for courses with GPS, the profile for the synthetic ones; Open world is the first row
 out.picks.thumbs = { map: String(rowOf('Hawk Hill, Marin').innerHTML).includes('<canvas class="tmap">'), nomap: String(rowOf('The climb').innerHTML).includes('cthumb nomap'),
-  ow: !!rowOf('Open world: Marin') && String(rowOf('Open world: Marin').className) === 'lrow ow', jr: String($('#jrCourse').innerHTML).includes('<option value="ow">Open world: Marin</option>') };
+  ow: !!rowOf('Open world: Marin') && String(rowOf('Open world: Marin').className) === 'lrow ow', jr: String($('#jrCourse').innerHTML).includes('<option value="ow">Open world: Marin (beta)</option>') };
 // FTP tests never take a course
 out.picks.test = await load(() => $('#ftpModal').onclick({ target: { closest: () => ({ dataset: { t: 't-ramp' } }) } }), r => /ramp/i.test(r.name));
 // Just ride: flat in one click, or on the course picked next to it

@@ -114,6 +114,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           // (lastBox: what this group covers, view.js builds again only the tiles it touches; prepare: slow work done in slices before the group shows)
           const box = new THREE.Box3(); for (const c of cs) await addChunk(c, into, box);
           await prepare?.(into); state.lastBox = box;
+          into.updateMatrixWorld(true); into.updateMatrixWorld = () => {};  // (A32: never moves. three.js walks every child each frame whatever matrixWorldAutoUpdate says: 1.5 ms a frame over 8000 objects)
           into.visible = true; for (const c of cs) { shown.add(c.i); state.ranges.push([c.s0, c.s1]); }
           state.ready = true; onLoad(state); }
       } finally { busy = false; state.busy = false; state.settled = true; }
@@ -132,7 +133,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 // distance to the camera (veg.json lod: { sp: [lod0 metres, last metres] }); update(x, z) only moves that uniform and
 // toggles near cells: no matrices are rewritten after load.
 export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert = m => m }) {
-  const group = new THREE.Group(); group.name = 'handVeg'; scene.add(group);
+  const group = new THREE.Group(); group.name = 'handVeg'; scene.add(group); group.updateMatrixWorld = () => {};  // (A32: every plant mesh an identity matrix at the origin: not walked each frame)
   const sets = [], CELL = 32, cam = { value: new THREE.Vector3(1e9, 0, 1e9) }; let own = null;
   // owns(x, z): inside the corridor this list owns (veg.json own: a 2 m bit grid), where the generated scrub and trees
   // give way; onOwn() once that is known

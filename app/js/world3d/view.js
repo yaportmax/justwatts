@@ -1979,7 +1979,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       veilP = p;
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
       const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
-      if (veilAt && (((onRail ? spawn : ready) && now - veilAt > 600) || now - veilAt > 30000)) { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      if (veilAt && (((onRail ? spawn : ready && jobs.size === 0) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: and the tiles' queue empty: the bushes by the road came in seconds after the veil lifted) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);

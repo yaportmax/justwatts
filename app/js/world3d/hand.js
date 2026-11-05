@@ -351,7 +351,7 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         // (the zone alone: it gives the face top, a clean line along the road; the terrain mesh's slope inside it is not
         // trusted, its flat facets showed as grass teeth in the face)
         // (the face's top edge ragged as the photo's, scrub and grass reaching down into it: the zone's soft edge broken by noise)
-        float wc = smoothstep(0.4, 0.6, w.g + (texture2D(gNoise, p / 4.3).r - 0.5) * 0.9 * (1.0 - step(0.999, w.g))), wd = w.r * (1.0 - wc), wl = w.b * (1.0 - wc);
+        float wc = smoothstep(0.4, 0.6, w.g + (texture2D(gNoise, p / mix(4.3, 1.3, inW)).r - 0.5) * mix(0.9, 0.6, inW) * (1.0 - step(0.999, w.g)))  /* (A32, west: metre-wide noise stretched up the banks into lime leaf shapes at the cuts' foot, n19_11605_r) */, wd = w.r * (1.0 - wc), wl = w.b * (1.0 - wc);
         vec3 c = cGrass;
         c = mix(c, cLit, clamp(wl, 0.0, 1.0));
         c = mix(c, cDirt, clamp(wd, 0.0, 1.0));

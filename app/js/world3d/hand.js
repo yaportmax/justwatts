@@ -311,7 +311,8 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           cFace *= mix(0.62, 1.22, r32a * 0.55 + r32b * 0.45) * mix(0.78, 1.06, r32c); }
         vec3 cTop31 = (texture2D(gCut, p / (gRep.y * 0.45)).rgb + texture2D(gCut, p.yx / (gRep.y * 1.15) + 0.37).rgb + texture2D(gCut, p / (gRep.y * 0.7) + 0.71).rgb) / 3.0;  // (A31: the face's own mix, on the ground plane: no stretch on the bank's flat facets, w8_11050_r; no plain dirt, w9_11050_r)
         // (A32, w61_11010_r, cz_11050_r: the banks' stone in thin slanted layers, broken along them, loose stones between; on the bank's flat facets too)
-        if (rb31 > 0.0) { vec2 q32 = mat2(0.87, -0.5, 0.5, 0.87) * p; float s32 = smoothstep(0.3, 0.62, texture2D(gNoise, vec2(q32.x / 13.0, q32.y / 1.5) + 0.41).r), t32 = smoothstep(0.32, 0.6, texture2D(gNoise, vec2(q32.x / 3.4, q32.y / 0.5) + 0.77).g), u32 = smoothstep(0.34, 0.62, texture2D(gNoise, p / 0.38 + 0.11).b);
+        if (rb31 > 0.0) { vec2 q32 = mat2(0.87, -0.5, 0.5, 0.87) * p + (vec2(texture2D(gNoise, p / 19.0 + 0.3).r, texture2D(gNoise, p / 7.0 + 0.6).g) - 0.5) * 9.0;  // (warped: straight rows read as a weave, n11_11050_r)
+          float s32 = smoothstep(0.3, 0.62, texture2D(gNoise, vec2(q32.x / 13.0, q32.y / 1.5) + 0.41).r), t32 = smoothstep(0.32, 0.6, texture2D(gNoise, vec2(q32.x / 3.4, q32.y / 0.5) + 0.77).g), u32 = smoothstep(0.34, 0.62, texture2D(gNoise, p / 0.38 + 0.11).b);
           cTop31 *= mix(0.66, 1.24, s32 * 0.5 + t32 * 0.5) * mix(0.76, 1.08, u32); }
         vec3 cCut = mix(mix(texture2D(gCut, p / gRep.y).rgb, cTop31, rb31), cFace, steep);
         // (the tufts' clumps and blades from the game's noise texture: its values spread evenly, unlike a grass tile's)
@@ -319,9 +320,10 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         { float clump = smoothstep(0.52, 0.64, texture2D(gNoise, side / 7.0 + 0.13).r), blade = smoothstep(0.45, 0.65, texture2D(gNoise, side / 0.9).g);
           // (A22, a19g_1105_l: the tufts grey-green sage and dry grass, not lime: the grass tile half greyed, its green held back)
           vec3 tg = texture2D(gGrass, side / 0.9).rgb; vec3 tuft = mix(vec3(dot(tg, vec3(0.3, 0.55, 0.15))), tg, 0.45) * vec3(1.02, 1.08, 0.9);
-          cCut = mix(cCut, tuft, clump * blade * 0.8 * steep * (1.0 - rb31)); }
+          cCut = mix(cCut, tuft, clump * blade * 0.8 * steep * (1.0 - rb31) * mix(0.35, 1.0, clamp((w.a - 0.4) / 0.6, 0.0, 1.0))); }  // (A32, n11_11605_r: fewer pale tufts on the dark rock)
         // (the splat's alpha below 1: the chert dark grey-brown there, cz_1205_l, cz_1380_l)
-        cCut = mix(cCut, vec3(dot(cCut, vec3(0.3, 0.55, 0.15))) * vec3(0.92, 0.86, 0.80) * 0.8, 0.5 * clamp((1.0 - w.a) / 0.6, 0.0, 1.0));  // (alpha no lower than 0.4: the browser may premultiply)
+        cCut = mix(cCut, vec3(dot(cCut, vec3(0.3, 0.55, 0.15))) * vec3(0.92, 0.86, 0.80) * 0.62, 0.8 * clamp((1.0 - w.a) / 0.6, 0.0, 1.0));  // (A32: darker, n11_11605_r)
+        //  // (alpha no lower than 0.4: the browser may premultiply)
         // (far off the tiles' repeats show: a second, larger lookup mixed in with distance)
         float far = smoothstep(40.0, 160.0, length(vGdW - cameraPosition));
         cGrass = mix(cGrass, texture2D(gGrass, p / (gRep.z * 7.3)).rgb, far * 0.6); cLit = mix(cLit, texture2D(gLitter, p / (gRep.w * 6.1)).rgb, far * 0.6);

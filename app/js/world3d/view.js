@@ -149,7 +149,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // came are built again
   let veg = null;
   const vcls = (x, z) => veg ? veg.at(proj.lat(z), proj.lon(x)) : 0;
-  Promise.all([loadVeg(), loadHandVeg()]).then(([v, hand]) => {
+  Promise.all([loadVeg(), null]).then(([v, hand]) => {
     if (dead || !v) return;
     if (!v.cut) { v.cut = true; for (const { pts, w } of CUTS) v.paint(pts, w, BARE); }  // (the hand list's exposed cuts: bare earth; once, the grid is shared)
     v.hand(hand);  // (Conzelman Road's hand list, A18: over the imagery's classes)
@@ -1279,7 +1279,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const b = tileBox(c), sphere = new THREE.Sphere(new THREE.Vector3((b[0] + b[2]) / 2, (y0 + y1) / 2, (b[1] + b[3]) / 2), Math.hypot(b[2] - b[0], b[3] - b[1], y1 - y0) / 2);
     c.farImp = impostorMesh(IMP, list, sphere); c.farImp.userData.ownMat = true; setPart(c, 'trees', c.farImp);
   }
-  let farDirty = false, lastStream = 0, ready = false;
+  let farDirty = false, lastStream = 0, ready = false, plantsIn = false;
   const poke = () => { lastStream = 0; };
   // the dev-only live edit API (edit.js): __w3 = { edit: true } before the view starts gives window.__edit
   if (globalThis.__w3?.edit) {
@@ -1347,7 +1347,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const c of far.values()) if (c.farImp) imps.push([c.farImp, 100 + Math.hypot(c.x + 0.5 - tileX(lon, FAR_Z), c.y + 0.5 - tileY(lat, FAR_Z))]);
       imps.sort((u, w) => u[1] - w[1]).forEach(([m], i) => { m.renderOrder = 1 + i; }); }
     if (tun.dirty) { tun.dirty = false; jobs.add('tunnels', 30, rebuildTunnels); }
-    ready = [...near.values()].filter(c => c.lod === 0).every(c => c.built) && !HAND.notHere();  // (the loading screen waits for the hand chunks at the rider's place too; a group further off loads during the ride, with grass and scrub still running)
+    plantsIn ||= !HVEG.busy;  // (the first plants under the loading screen too: they popped in on the bare ground about 10 s after it lifted; the veil's own 30 s limit still holds)
+    ready = plantsIn && [...near.values()].filter(c => c.lod === 0).every(c => c.built) && !HAND.notHere();  // (the loading screen waits for the hand chunks at the rider's place too; a group further off loads during the ride, with grass and scrub still running)
   }
 
   // the near tiles the course runs through: key -> the distances along it it is there (every 10 m), once per course

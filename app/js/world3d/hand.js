@@ -250,7 +250,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   function want(x, z) { at = [x, z]; if (!J) return; if (wanted()) { state.busy = true; pump(); } }
   const owns = (x, z) => { if (!own) return false; const i = Math.floor((x - own.x0) / own.g), k = Math.floor((z - own.z0) / own.g);
     if (i < 0 || k < 0 || i >= own.w || k >= own.h) return false; const b = k * own.w + i; return !!(own.u[b >> 3] & (1 << (b & 7))); };
-  return { group, update, want, owns, get busy() { return state.busy; }, onOwn: f => { if (own) f(); else ownCbs.push(f); } };
+  return { group, update, want, owns, get busy() { return state.busy; }, get first() { return !!state.first; }, onOwn: f => { if (own) f(); else ownCbs.push(f); } };
 }
 
 // A19 ground for the hand-built stretch: Poly Haven CC0 scans (private tools/blender/ground19.py; /world/hand/ground.json:

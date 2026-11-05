@@ -306,6 +306,9 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         vec3 cFace = (texture2D(gCut, side / (gRep.y * 0.45)).rgb + texture2D(gCut, side.yx / (gRep.y * 1.15) + 0.37).rgb + texture2D(gCut, sr / (gRep.y * 0.7) + 0.71).rgb) / 3.0;
         // (cz_1105_a: pale weathered rock showing through the red in patches a metre or two across)
         cFace = mix(cFace, vec3(0.50, 0.44, 0.38) * (0.8 + 0.4 * texture2D(gNoise, side / 0.6).b), 0.14 * smoothstep(0.66, 0.74, texture2D(gNoise, side / 1.7 + 0.51).b));
+        // (A32, n9_505_a, w61_11010_r: the photos' cuts ribbed and broken: ribs down the fall line a few metres apart, crossed fractures, small dark gaps between stones; no extra geometry)
+        { float r32a = smoothstep(0.34, 0.68, texture2D(gNoise, vec2(side.x / 5.5, side.y / 34.0) + 0.21).r), r32b = smoothstep(0.38, 0.72, texture2D(gNoise, vec2(sr.x / 1.7, sr.y / 9.0) + 0.33).g), r32c = smoothstep(0.3, 0.6, texture2D(gNoise, side / 0.42 + 0.17).b);
+          cFace *= mix(0.62, 1.22, r32a * 0.55 + r32b * 0.45) * mix(0.78, 1.06, r32c); }
         vec3 cTop31 = (texture2D(gCut, p / (gRep.y * 0.45)).rgb + texture2D(gCut, p.yx / (gRep.y * 1.15) + 0.37).rgb + texture2D(gCut, p / (gRep.y * 0.7) + 0.71).rgb) / 3.0;  // (A31: the face's own mix, on the ground plane: no stretch on the bank's flat facets, w8_11050_r; no plain dirt, w9_11050_r)
         vec3 cCut = mix(mix(texture2D(gCut, p / gRep.y).rgb, cTop31, rb31), cFace, steep);
         // (the tufts' clumps and blades from the game's noise texture: its values spread evenly, unlike a grass tile's)

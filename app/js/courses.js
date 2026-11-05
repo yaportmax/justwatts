@@ -31,7 +31,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
   const upText = m => isMetric(units()) ? `${Math.round(m)} m` : `${Math.round(m * FT)} ft`;
   const info = c => `${distText(c.dist / 1000, units())} · ${upText(c.gain)} up`;
   // <option>s for a course picker: Flat (no course), Open world (opens its start picker: value 'ow'), then every course
-  const options = cur => `<option value="">Flat</option>` + (openWorld ? '<option value="ow">Open world: Marin</option>' : '') + all().map(c => `<option value="${esc(c.id)}"${c.id === cur ? ' selected' : ''}>${esc(c.name)} · ${info(c)}</option>`).join('');
+  const options = cur => `<option value="">Flat</option>` + (openWorld ? '<option value="ow">Open world: Marin (beta)</option>' : '') + all().map(c => `<option value="${esc(c.id)}"${c.id === cur ? ' selected' : ''}>${esc(c.name)} · ${info(c)}</option>`).join('');
   // <option>s for a workout picker on a course: free ride, then my workouts, then the library by category
   function wOptions(cur, free = 'Free ride on this course') {
     const groups = new Map();
@@ -94,7 +94,7 @@ export function createCourses({ $, store, toast, fit, css, units, ride, workouts
     if (openWorld && (src === 'all' || src === 'jw') && hit(cf.q.trim().toLowerCase(), 'Open world: Marin', 'Just Watts')) {
       const card = document.createElement('div'); card.className = 'lrow ow';
       card.innerHTML = `<div class="owic"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c-2.5 2.2-2.5 11.8 0 14M10 3c2.5 2.2 2.5 11.8 0 14"/></svg></div>
-        <div class="lmain"><div class="t">Open world: Marin</div><div class="p">Any road, pick a start</div></div>${authorCell('Just Watts')}<div class="m num r">Any</div><div class="m num r"></div>
+        <div class="lmain"><div class="t">Open world: Marin <span class="beta">Beta</span></div><div class="p">Any road, pick a start</div></div>${authorCell('Just Watts')}<div class="m num r">Any</div><div class="m num r"></div>
         <div class="lact"><button class="pri" data-a="ride">Ride</button></div>`;
       box.appendChild(card);
       card.onclick = () => openWorld('');

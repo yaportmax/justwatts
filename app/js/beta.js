@@ -2,5 +2,5 @@
 export function betaOk() {
   const box = document.querySelector('#betaModal'), yes = box.querySelector('#betaYes'), no = box.querySelector('#betaNo');
   box.classList.add('on');
-  return new Promise(done => { const end = v => { box.classList.remove('on'); yes.onclick = no.onclick = null; done(v); }; yes.onclick = () => end(true); no.onclick = () => end(false); });
+  return new Promise(done => { const key = e => { if (e.key === 'Escape') end(false); }, end = v => { box.classList.remove('on'); yes.onclick = no.onclick = null; document.removeEventListener('keydown', key); done(v); }; yes.onclick = () => end(true); no.onclick = () => end(false); document.addEventListener('keydown', key); });
 }

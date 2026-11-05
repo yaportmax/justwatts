@@ -1,6 +1,7 @@
 // Open world start (the Marin Headlands): a named start (a chip or its pin on the map) or a tap inside the world (the nearest road),
 // a workout to run on top or none, Ride.
 import { esc } from './core.js';
+import { betaOk } from './beta.js';
 import { loadML } from './ridemap.js';
 import { MAP_STYLES } from './map.js';
 import { PRESETS, DEM, BOUNDS, inWorld } from './world.js';
@@ -45,7 +46,8 @@ export function createPicker({ $, store, world, wOptions, go }) {
     map.on('click', e => inWorld(e.lngLat.lat, e.lngLat.lng) ? pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }) : hint('Outside the Headlands world', true));
   }
   // wid: the workout to ride there ('' free ride); jumpTo(start): mid-ride, go there instead (app.js: world.teleport)
-  function open(wid = '', jumpTo = null) {
+  async function open(wid = '', jumpTo = null) {
+    if (!jumpTo && !await betaOk()) return;  // (every way into a new open world ride; not a jump mid-ride)
     box.classList.add('on'); busy = false; jump = jumpTo;
     $('#owWk').innerHTML = wOptions(wid, 'Free ride'); $('#owWk').value = wid;
     $('#owAttr').textContent = osm.attr + ' · Terrain © Mapzen, AWS';

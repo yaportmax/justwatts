@@ -70,7 +70,7 @@ export function createDetail({ $, store, fit, css, units, ftp, compile, estimate
   }
   function renderWorkout() {
     const { w, cw, pick } = cur, f = ftp(), e = estimate(cw, f), m = meta(w), own = w.id.startsWith('c-');
-    const opts = [['', 'Flat', ''], ['ow', 'Open world: Marin', 'Any road'], ...courses.all().map(c => [c.id, c.name, distText(c.dist / 1000, units())])];
+    const opts = [['', 'Flat', ''], ['ow', 'Open world: Marin (beta)', 'Any road'], ...courses.all().map(c => [c.id, c.name, distText(c.dist / 1000, units())])];
     dlg.innerHTML = `<div class="dhead"><div class="dtitle"><b>${esc(w.name)}</b><div class="sub">${[m.author, m.source, w.category].filter(Boolean).map(esc).join(' · ')}${m.level ? ' ' + m.level : ''}</div></div>${X}</div>
       ${w.purpose ? `<p class="dpur">${esc(w.purpose)}</p>` : ''}
       <canvas class="dchart" data-cv="chart"></canvas>

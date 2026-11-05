@@ -223,14 +223,14 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
         for (const sp of sps) { const M = await model(sp); if (!M || !renderer) continue; for (const p of [...M.parts[0], ...M.parts[1]]) if (p.src.map) renderer.initTexture(p.src.map); await new Promise(r => setTimeout(r, 30)); } }
       for (let k = 0; k < groups.length; k++) { const G = groups[k]; if (!G || !G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < D2)) continue;
         groups[k] = null; await addGroup(G, at[0], at[1]); k = -1; }
-    } finally { pumping = false; state.busy = false; }
+    } finally { pumping = false; state.busy = false; state.first = true; }  // (first: the plants at the rider's place are in; busy can read false before a position has come)
   }
   const wanted = () => groups.some(G => G && G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < D2));
   fetch(base + 'veg.json').then(r => r.ok ? r.json() : null).then(j => {
     if (!j) return; J = j; groups.push(...(j.groups || []));
     if (j.own) { const b = atob(j.own.bits), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); own = { ...j.own, u }; for (const f of ownCbs) f(); }
     if (at) pump();
-  }).catch(() => {}).finally(() => { if (!at || !J || !wanted()) state.busy = false; });
+  }).catch(() => {}).finally(() => { if (!at || !J || !wanted()) state.busy = false; if (!J) state.first = true; });
   function build(S, c) {
     const R = S.near + FADE + CELL * 0.75 + 3, on = (c.cx - lx) ** 2 + (c.cz - lz) ** 2 < R * R;
     c.meshes = S.parts.map((p, k) => {

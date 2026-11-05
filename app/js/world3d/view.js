@@ -1347,7 +1347,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const c of far.values()) if (c.farImp) imps.push([c.farImp, 100 + Math.hypot(c.x + 0.5 - tileX(lon, FAR_Z), c.y + 0.5 - tileY(lat, FAR_Z))]);
       imps.sort((u, w) => u[1] - w[1]).forEach(([m], i) => { m.renderOrder = 1 + i; }); }
     if (tun.dirty) { tun.dirty = false; jobs.add('tunnels', 30, rebuildTunnels); }
-    plantsIn ||= !HVEG.busy;  // (the first plants under the loading screen too: they popped in on the bare ground about 10 s after it lifted; the veil's own 30 s limit still holds)
+    plantsIn ||= !!HVEG.first;  // (the first plants under the loading screen too: they popped in on the bare ground about 10 s after it lifted; the veil's own 30 s limit still holds)
     ready = plantsIn && [...near.values()].filter(c => c.lod === 0).every(c => c.built) && !HAND.notHere();  // (the loading screen waits for the hand chunks at the rider's place too; a group further off loads during the ride, with grass and scrub still running)
   }
 

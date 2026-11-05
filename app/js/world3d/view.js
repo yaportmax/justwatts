@@ -38,7 +38,7 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // grass radius and clumps per square metre, ground detail (bump, close-up noise), the full trees' radius, the scrub's
 // radius and its full models' radius
 export const QUALITY = [
-  { name: 'high', shadow: 1536, span: 70, pr: 1.5, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38] },
+  { name: 'high', shadow: 1536, span: 70, pr: 1.25, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38] },
   { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30] },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18] },
 ];
@@ -88,7 +88,7 @@ const TYRE = 0.04;
 const ARCHED = [{ at: [37.8380, -122.4830], walls: [[[37.83810, -122.48318], [10, 0.04, 1.3], [3, 0.1, 2]], [[37.83790, -122.48288], [22, 0.02, 1], [4, 0.6, 1]]] }];
 
 // life: the cars, walkers and birds (life.js), off by default (they cost frames; __w3.life turns them on for checks)
-export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, quality = 0, time = 'golden', sound = true, fog = true, kit = null, life: lifeOn = !!globalThis.__w3?.life }) {
+export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, onQuality = () => {}, quality = 0, time = 'golden', sound = true, fog = true, kit = null, life: lifeOn = !!globalThis.__w3?.life }) {
   let q = Math.max(0, Math.min(2, quality)), dead = false, raf = 0;
   const canvas = document.createElement('canvas'); canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block'; container.appendChild(canvas);
   const tags = document.createElement('div'); tags.className = 'w3tags'; container.appendChild(tags);
@@ -104,7 +104,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   if (!renderer.capabilities.isWebGL2) { renderer.dispose(); canvas.remove(); tags.remove(); veil.remove(); throw new Error('no WebGL2'); }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = [THREE.PCFSoftShadowMap, THREE.PCFShadowMap, THREE.BasicShadowMap][globalThis.__w3?.smType ?? 0]; renderer.shadowMap.autoUpdate = false;
   renderer.info.autoReset = false;
   canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); fail(new Error('WebGL context lost')); });
 
@@ -1550,14 +1550,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const d of [port - 0.5, L - port + 0.5]) { const i = D.findIndex(v => v >= d); if (i > 0 && D[i] - d > 0.3 && d - D[i - 1] > 0.3) { const f = (d - D[i - 1]) / (D[i] - D[i - 1]); P.splice(i, 0, [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * f, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * f]); Y.splice(i, 0, Y[i - 1] + (Y[i] - Y[i - 1]) * f); D.splice(i, 0, d); } }
       // half width, the walls' height, the arch's rise over them (0: a flat roof)
       // (a box no taller than the road over it allows)
-      const w = st.w / 2 + (one || arch ? 1 : 2), H = box ? (arch ? 1.4 : Math.max(3.2, Math.min(5.2, cover - 0.9))) : one ? 2 : 2.2, rise = box && !arch ? 0 : one || arch ? w : w * 0.75;
-      // the bore as straight pieces of up to 40 m (for the ground to leave out): [x0, z0, x1, z1, floor0, floor1, half width, height]
+      const w = st.w / 2 + (one || arch ? 1 : 2), H = box ? (arch ? 1.4 : Math.max(2.6, Math.min(5.2, cover - 0.9))) : one ? 2 : 2.2, rise = box && !arch ? 0 : one || arch ? w : w * 0.75;
+      // the bore as straight pieces of up to 40 m, an underpass's of 8 m (it bends with its road: Alexander under US-101, user 2026-11-05) (for the ground to leave out): [x0, z0, x1, z1, floor0, floor1, half width, height]
       const segs = []; let i0 = P.findIndex((_, i) => D[i] >= port - 0.5);  // (the same points as the lining's rings, below)
-      for (let i = i0 + 1; i0 >= 0 && i < P.length && D[i0] < L - port + 0.5; i++) if (D[i] - D[i0] >= 40 || i === P.length - 1 || D[i + 1] > L - port + 0.6) {
+      for (let i = i0 + 1; i0 >= 0 && i < P.length && D[i0] < L - port + 0.5; i++) if (D[i] - D[i0] >= (box ? 8 : 40) || i === P.length - 1 || D[i + 1] > L - port + 0.6) {
         segs.push([P[i0][0], P[i0][1], P[i][0], P[i][1], Y[i0], Y[i], w + 0.3, H + rise + 0.6]); i0 = i;
       }
       let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity; for (const [x, z] of P) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); }
-      list.push({ P, D, Y, h0, h1, w, L, segs, cuts: [], port, box, lift: railLift(r), bb: [bx0 - w - 5, bz0 - w - 5, bx1 + w + 5, bz1 + w + 5] });
+      list.push({ P, D, Y, h0, h1, w, L, segs, cuts: [], port, box, cover, lift: railLift(r), bb: [bx0 - w - 5, bz0 - w - 5, bx1 + w + 5, bz1 + w + 5] });
       const k0 = B.idx.length; ribbon(B, P, { ...st, hAt: () => 0, deck: [h0, h1], rail: (x, z) => tunRail(x, z), lift: railLift(r), step: 6 }); cuts.push([k0, B.idx.length, port, L]);  // (its top as its rail's: rail.js)
       // a ring: walls up to the arch (or the flat roof), and the floor under the road (closed, so nothing outside shows through)
       const SEG = 12, R = w, ring = [];
@@ -1668,7 +1668,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         continue;
       }
       if (box) {  // an underpass: a square headwall the depth of the road over it, a coping, wing walls
-        const top = H + 1.6, wing = R + 3.5, sh = new THREE.Shape(); sh.moveTo(-wing, -1); sh.lineTo(wing, -1); sh.lineTo(wing, top); sh.lineTo(-wing, top); sh.lineTo(-wing, -1);
+        // (A33: no higher than the road over it: its top stood through Alexander Avenue as a slab, user 2026-11-05)
+        // (and no higher than the road over it along the headwall itself: the road slopes, the cover is the middle's)
+        let cap = Math.min(H + 1.6, T.cover - 0.35); { const ry0 = yaw + (dir > 0 ? Math.PI : 0), cx = Math.cos(ry0), sx = Math.sin(ry0);
+          for (let o = -(R + 3.5); o <= R + 3.5; o += 1) { const px = x + o * cx, pz = z - o * sx, t = roadTopOn(px, pz, y + T.cover); if (t != null && t - y > H) cap = Math.min(cap, t - y - 0.35); } }
+        const top = Math.max(H + 0.3, cap), wing = R + 3.5, sh = new THREE.Shape(); sh.moveTo(-wing, -1); sh.lineTo(wing, -1); sh.lineTo(wing, top); sh.lineTo(-wing, top); sh.lineTo(-wing, -1);
         const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H); hole.lineTo(-R, H); hole.lineTo(-R, -0.5); sh.holes.push(hole);
         for (const g of [new THREE.ExtrudeGeometry(sh, { depth: 0.8, bevelEnabled: false }).translate(0, 0, -0.8), new THREE.BoxGeometry(2 * wing + 0.6, 0.35, 1.1).translate(0, top + 0.15, -0.4)]) add(g, x, y, z, yaw + (dir > 0 ? Math.PI : 0));
         continue;
@@ -1894,7 +1898,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
 
   /* ---------- the frame ---------- */
-  let last = performance.now(), size = '', ft = [], slow = 0, fast = 0, lastGov = 0, frames = 0, fpsT = performance.now(), fps = 0;
+  let last = performance.now(), size = '', ft = [], slow = 0, fast = 0, raised = false, lastGov = 0, frames = 0, fpsT = performance.now(), fps = 0;
   function resize() {
     const w = container.clientWidth, h = container.clientHeight, k = `${w}x${h}x${q}`;
     if (!w || !h || k === size) return !!(w && h); size = k;
@@ -1949,8 +1953,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (jobs.size > 3) { ft = []; lastGov = now; return; }  // still building tiles: judge the steady ride, not the loading
     ft.push(dt); if (now - lastGov < 2500) return; lastGov = now;
     ft.sort((a, b) => a - b); const med = ft[ft.length >> 1] || 0; ft = [];
-    if (med > 1 / 42) { slow++; fast = 0; } else { slow = 0; if (med < 1 / 75) fast++; }
-    if (slow >= 2 && q < 2) { q++; slow = 0; applyQuality(); }
+    if (med > 1 / 50) { slow++; fast = 0; } else { slow = 0; if (med < 1 / 75) fast++; }
+    // (A33: the level kept for the next ride, onQuality: a slower machine starts where it ended, not on high again; one step back up a ride when it runs fast for 20 s)
+    if (slow >= 2 && q < 2) { q++; slow = 0; fast = 0; applyQuality(); onQuality(q); }
+    else if (fast >= 8 && q > 0 && !raised) { q--; fast = 0; raised = true; applyQuality(); onQuality(q); }
     else if (slow >= 4 && q === 2) fail(new Error('too slow'));
   }
   function frame(now) {
@@ -2061,7 +2067,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (now - seaAt > 1000) { seaAt = now; sea = seaShare(p[0], p[1]); }
       audioDt += dt; if (audioDt > 0.1) { audio.update({ dt: audioDt, v, cad: st.cad || 0, sea, inside: dark }); audioDt = 0; }
       // the shadow map every other frame (the box only moves when it is drawn, so the old one stays true until then)
-      if (frames % (globalThis.__w3?.smEvery ?? 2) === 0) { sky.update(camera, me.group.position, 0, QUALITY[q].span, true); renderer.shadowMap.needsUpdate = true; }
+      if (frames % (globalThis.__w3?.smEvery ?? 3) === 0) { sky.update(camera, me.group.position, 0, QUALITY[q].span, true); renderer.shadowMap.needsUpdate = true; }
       // once the world round the start is built: every program it needs built now, not when a part of it first comes
       // into view or into the shadow box on the ride (each one held a frame up by a quarter of a second): the scene's
       // materials compiled, and one shadow map drawn over 20 km

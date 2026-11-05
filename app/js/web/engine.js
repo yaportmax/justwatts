@@ -391,7 +391,7 @@ export class Engine {
     if (r.course) {
       const c = r.course, cs = r.cs;
       ride.course = { name: c.name, dist_m: c.dist, gain_m: c.gain, done_m: r1(Math.min(cs.d, c.dist)), odo_m: r1(cs.d), ele_m: r1(eleAt(c, cs.d)),
-        climbed_m: r1(cs.up), grade: gradeAt(c, cs.d), speed_kmh: r1(cs.v * 3.6), end: cs.end, profile: r.prof, open: !!c.open, n: c.ele.length };
+        climbed_m: r1(cs.up), grade: gradeAt(c, cs.d), speed_kmh: r.paused ? 0 : r1(cs.v * 3.6), end: cs.end, profile: r.prof, open: !!c.open, n: c.ele.length };
     }
     if (r.steps) {
       const at = stepAt({ steps: r.steps }, r.el); ride.total_s = r.total;

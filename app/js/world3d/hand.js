@@ -297,10 +297,36 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         float steep = smoothstep(0.05, 0.34, 1.0 - n.y);  // (the lidar's 2 m mesh and the verges soften the cuts: 25 degrees and up reads as the face)
         vec2 side = abs(n.x) > abs(n.z) ? vGdW.zy : vGdW.xy;
         // (every layer from above on the flat and from the side on a steep face: no streaks down a bank)
-        vec3 cDirt = mix(texture2D(gDirt, p / gRep.x).rgb, texture2D(gDirt, side / gRep.x).rgb, steep);
-        vec3 cGrass = mix(texture2D(gGrass, p / gRep.z).rgb, texture2D(gGrass, side / gRep.z).rgb, steep);
-        vec3 cLit = mix(texture2D(gLitter, p / gRep.w).rgb, texture2D(gLitter, side / gRep.w).rgb, steep);
-        // (cz_1105_l, cz_1245_l: the chert fractured every way, not the scan's level strata: a finer lookup and a crossed one
+        // (A33, perf: each layer only where it shows: the cut, dirt and litter lookups skipped where their weight is nil; same picture, a third of the texture reads on most of the ground)
+        // (inside a drawn cut zone the face from about 15 degrees of true surface slope: the zone bounds it along the road,
+        // the slope where it ends up the hill)
+        // (the zone alone: it gives the face top, a clean line along the road; the terrain mesh's slope inside it is not
+        // trusted, its flat facets showed as grass teeth in the face)
+        // (the face's top edge ragged as the photo's, scrub and grass reaching down into it: the zone's soft edge broken by noise)
+        float wc = smoothstep(0.4, 0.6, w.g + (texture2D(gNoise, p / mix(4.3, 1.3, inW)).r - 0.5) * mix(0.9, 0.6, inW) * (1.0 - step(0.999, w.g)))  /* (A32, west: metre-wide noise stretched up the banks into lime leaf shapes at the cuts' foot, n19_11605_r) */, wd = w.r * (1.0 - wc), wl = w.b * (1.0 - wc);
+        vec3 cGrass = texture2D(gGrass, p / gRep.z).rgb; if (steep > 0.002) cGrass = mix(cGrass, texture2D(gGrass, side / gRep.z).rgb, steep);
+        float far = smoothstep(40.0, 160.0, length(vGdW - cameraPosition));
+        cGrass = mix(cGrass, texture2D(gGrass, p / (gRep.z * 7.3)).rgb, far * 0.6);
+        { float sk = smoothstep(0.5, 0.68, texture2D(gNoise, p / 2.3 + 0.17).g) * smoothstep(0.36, 0.6, texture2D(gNoise, p / 13.0 + 0.41).r);
+          cGrass = mix(cGrass, vec3(dot(cGrass, vec3(0.3, 0.55, 0.15))) * vec3(0.8, 0.92, 0.66), sk * 0.75); }
+        cGrass = mix(cGrass, cGrass * vec3(0.94, 1.14, 0.66) * 1.06, inW * clamp((1.0 - w.a) / 0.5, 0.0, 1.0) * (1.0 - w.r) * (1.0 - w.g));
+        { vec2 bu = (p - gBox.xy) * gBox.zw; float outBox = smoothstep(0.0, 0.04, max(max(-bu.x, bu.x - 1.0), max(-bu.y, bu.y - 1.0))) * (1.0 - inW);
+          float streak = smoothstep(0.45, 0.7, texture2D(gNoise, vec2(p.x / 38.0, p.y / 9.0) + 0.29).g);
+          cGrass = mix(cGrass, cGrass * vec3(0.78, 1.1, 0.62) * (1.0 - 0.35 * streak), outBox); }
+        vec3 c = cGrass;
+        if (wl > 0.002) {
+        vec3 cLit = texture2D(gLitter, p / gRep.w).rgb; if (steep > 0.002) cLit = mix(cLit, texture2D(gLitter, side / gRep.w).rgb, steep);
+        cLit = mix(cLit, texture2D(gLitter, p / (gRep.w * 6.1)).rgb, far * 0.6);
+        { float m1 = texture2D(gNoise, p / 9.0 + 0.3).g, m3 = texture2D(gNoise, p / 3.7 + 0.11).b;
+          cLit = mix(cLit, vec3(0.2, 0.25, 0.12), smoothstep(0.35, 0.75, m1) * 0.55);
+          cLit = mix(cLit, vec3(0.27, 0.30, 0.19), smoothstep(0.4, 0.8, m3) * 0.45);
+          cLit *= mix(1.0, 0.72, smoothstep(0.6, 0.95, w.b)); cLit *= mix(1.0, 0.62, inW * smoothstep(0.75, 1.0, w.b)); if (inW > 0.5) { cLit = mix(cLit, vec3(0.36, 0.38, 0.28), smoothstep(0.2, 0.85, texture2D(gNoise, p / 6.0 + 0.23).r) * 0.2); cLit = mix(cLit, vec3(0.13, 0.16, 0.09), smoothstep(0.2, 0.9, texture2D(gNoise, p / 2.6 + 0.67).g) * 0.2); } }
+          c = mix(c, cLit, clamp(wl, 0.0, 1.0)); }
+        if (wd > 0.002) {
+        vec3 cDirt = texture2D(gDirt, p / gRep.x).rgb; if (steep > 0.002) cDirt = mix(cDirt, texture2D(gDirt, side / gRep.x).rgb, steep);
+        cDirt = mix(cDirt, cDirt * vec3(0.92, 0.6, 0.6), clamp((1.0 - w.a) / 0.5, 0.0, 1.0));
+          c = mix(c, cDirt, clamp(wd, 0.0, 1.0)); }
+        if (wc > 0.002) {
         // mixed; grey-green tufts in clumps over it)
         // (three lookups at different angles and scales: the scan's level strata averaged out into fractured rock)
         vec2 sr = mat2(0.62, -0.78, 0.78, 0.62) * side;
@@ -324,39 +350,7 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           cCut = mix(cCut, tuft, clump * blade * 0.8 * steep * (1.0 - rb31) * mix(0.35, 1.0, clamp((w.a - 0.4) / 0.6, 0.0, 1.0))); }  // (A32, n11_11605_r: fewer pale tufts on the dark rock)
         // (the splat's alpha below 1: the chert dark grey-brown there, cz_1205_l, cz_1380_l)
         cCut = mix(cCut, vec3(dot(cCut, vec3(0.3, 0.55, 0.15))) * vec3(0.92, 0.86, 0.80) * 0.62, 0.8 * clamp((1.0 - w.a) / 0.6, 0.0, 1.0));  // (A32: darker, n11_11605_r)
-        //  // (alpha no lower than 0.4: the browser may premultiply)
-        // (far off the tiles' repeats show: a second, larger lookup mixed in with distance)
-        float far = smoothstep(40.0, 160.0, length(vGdW - cameraPosition));
-        cGrass = mix(cGrass, texture2D(gGrass, p / (gRep.z * 7.3)).rgb, far * 0.6); cLit = mix(cLit, texture2D(gLitter, p / (gRep.w * 6.1)).rgb, far * 0.6);
-        // (A22, coordinator: the scrub floor from afar: broad soft grey-green and fresh green patches over the fine tile, no fine worm marks;
-        // the splat's own value (NAIP) darkens the real bush patches)
-        { float m1 = texture2D(gNoise, p / 9.0 + 0.3).g, m3 = texture2D(gNoise, p / 3.7 + 0.11).b;
-          cLit = mix(cLit, vec3(0.2, 0.25, 0.12), smoothstep(0.35, 0.75, m1) * 0.55);
-          cLit = mix(cLit, vec3(0.27, 0.30, 0.19), smoothstep(0.4, 0.8, m3) * 0.45);
-          cLit *= mix(1.0, 0.72, smoothstep(0.6, 0.95, w.b)); cLit *= mix(1.0, 0.62, inW * smoothstep(0.75, 1.0, w.b)); if (inW > 0.5) { cLit = mix(cLit, vec3(0.36, 0.38, 0.28), smoothstep(0.2, 0.85, texture2D(gNoise, p / 6.0 + 0.23).r) * 0.2); cLit = mix(cLit, vec3(0.13, 0.16, 0.09), smoothstep(0.2, 0.9, texture2D(gNoise, p / 2.6 + 0.67).g) * 0.2); } }
-        // (A22: a red bare patch from the photos: the dirt tile, redder, where the splat's alpha marks it)
-        cDirt = mix(cDirt, cDirt * vec3(0.92, 0.6, 0.6), clamp((1.0 - w.a) / 0.5, 0.0, 1.0));
-        // (A22, coordinator round 2: Street View's slope scrub reads as faint irregular grey-green specks in the grass, not plants:
-        // two noise scales, the coarse one leaving bare grass between the speckled patches)
-        { float sk = smoothstep(0.5, 0.68, texture2D(gNoise, p / 2.3 + 0.17).g) * smoothstep(0.36, 0.6, texture2D(gNoise, p / 13.0 + 0.41).r);
-          cGrass = mix(cGrass, vec3(dot(cGrass, vec3(0.3, 0.55, 0.15))) * vec3(0.8, 0.92, 0.66), sk * 0.75); }
-        // (A26, west map only: alpha below 1 with neither dirt nor cut marks a bright lawn: the battery's mounds, the avenue, s7w_14255_a)
-        cGrass = mix(cGrass, cGrass * vec3(0.94, 1.14, 0.66) * 1.06, inW * clamp((1.0 - w.a) / 0.5, 0.0, 1.0) * (1.0 - w.r) * (1.0 - w.g));
-        // (A22, a22_1105_r: past the splat's box (jw-a21's terrain_ext, the ridge over the ravine) Street View's grass is vivid
-        // green with darker scrub streaks down the fall line, not the tile's olive)
-        { vec2 bu = (p - gBox.xy) * gBox.zw; float outBox = smoothstep(0.0, 0.04, max(max(-bu.x, bu.x - 1.0), max(-bu.y, bu.y - 1.0))) * (1.0 - inW);
-          float streak = smoothstep(0.45, 0.7, texture2D(gNoise, vec2(p.x / 38.0, p.y / 9.0) + 0.29).g);
-          cGrass = mix(cGrass, cGrass * vec3(0.78, 1.1, 0.62) * (1.0 - 0.35 * streak), outBox); }
-        // (inside a drawn cut zone the face from about 15 degrees of true surface slope: the zone bounds it along the road,
-        // the slope where it ends up the hill)
-        // (the zone alone: it gives the face top, a clean line along the road; the terrain mesh's slope inside it is not
-        // trusted, its flat facets showed as grass teeth in the face)
-        // (the face's top edge ragged as the photo's, scrub and grass reaching down into it: the zone's soft edge broken by noise)
-        float wc = smoothstep(0.4, 0.6, w.g + (texture2D(gNoise, p / mix(4.3, 1.3, inW)).r - 0.5) * mix(0.9, 0.6, inW) * (1.0 - step(0.999, w.g)))  /* (A32, west: metre-wide noise stretched up the banks into lime leaf shapes at the cuts' foot, n19_11605_r) */, wd = w.r * (1.0 - wc), wl = w.b * (1.0 - wc);
-        vec3 c = cGrass;
-        c = mix(c, cLit, clamp(wl, 0.0, 1.0));
-        c = mix(c, cDirt, clamp(wd, 0.0, 1.0));
-        c = mix(c, cCut, clamp(wc, 0.0, 1.0));
+          c = mix(c, cCut, clamp(wc, 0.0, 1.0)); }
         if (p.x > 8935.0 && p.x < 8995.0 && p.y > 11625.0 && p.y < 11695.0) {  // (A31: shade pools under the picnic's cypress crowns, cz_14255_l, 14275_l: bright grass and shade, the plants cast no shadows)
           float s31 = 0.0; vec3 Q[7]; Q[0] = vec3(8949.0, 11651.0, 7.5); Q[1] = vec3(8953.0, 11660.0, 6.5); Q[2] = vec3(8957.0, 11647.0, 6.5); Q[3] = vec3(8962.0, 11636.0, 6.0); Q[4] = vec3(8964.0, 11652.0, 8.5); Q[5] = vec3(8969.0, 11667.0, 8.0); Q[6] = vec3(8972.0, 11682.0, 8.0);
           float n31 = texture2D(gNoise, p / 5.5).r * 0.55 + texture2D(gNoise, p / 1.7).g * 0.45;

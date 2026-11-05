@@ -965,7 +965,7 @@ class RideEngine:
                 c, cs = r.course, r.cs
                 ride["course"] = {"name": c["name"], "dist_m": c["dist"], "gain_m": c["gain"], "done_m": _r1(min(cs["d"], c["dist"])),
                                   "odo_m": _r1(cs["d"]), "ele_m": _r1(ele_at(c, cs["d"])), "climbed_m": _r1(cs["up"]),
-                                  "grade": grade_at(c, cs["d"]), "speed_kmh": _r1(cs["v"] * 3.6), "end": cs["end"],
+                                  "grade": grade_at(c, cs["d"]), "speed_kmh": 0 if r.paused else _r1(cs["v"] * 3.6), "end": cs["end"],
                                   "profile": r.prof, "open": bool(c.get("open")), "n": len(c["ele"])}
             if r.steps:
                 at = step_at(r.steps, r.el)

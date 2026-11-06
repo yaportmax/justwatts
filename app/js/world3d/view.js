@@ -1987,7 +1987,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       veilP = p;
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
       const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
-      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() : ready && HVEG.first && underMe(p) && jobs.size < 2) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) : ready && HVEG.first && underMe(p) && jobs.size < 2) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);

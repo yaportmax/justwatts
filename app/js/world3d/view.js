@@ -1580,7 +1580,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (!box && n && Math.floor(D[i] / 9) !== Math.floor(D[keep[n - 1]] / 9)) for (const s of one ? [0] : [-1, 1]) { const th = s ? (s > 0 ? 0.62 : Math.PI - 0.62) : Math.PI / 2; lamps.push([P[i][0] + nx * Math.cos(th) * R * 0.97, y + H + Math.sin(th) * rise * 0.97, P[i][1] + nz * Math.cos(th) * R * 0.97, Math.atan2(dx, dz), s]); }
         if (n) for (let k = 0; k < N - 1; k++) { const p0 = base + (n - 1) * N + k, p1 = base + n * N + k; IX.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1); }
         if (one) {
-          for (const [cx, cy] of WALK) { walk.pos.push(P[i][0] + nx * cx * ns, y + cy, P[i][1] + nz * cx * ns); walk.col.push(...(cy < 0.3 ? [0.62, 0.6, 0.56] : [0.24, 0.24, 0.25])); }
+          for (const [cx, cy] of WALK) { walk.pos.push(P[i][0] + nx * cx * ns, y + cy, P[i][1] + nz * cx * ns); walk.col.push(...(cy < 0.3 ? [0.62, 0.6, 0.56] : [0.5, 0.49, 0.47])); }
           if (n) for (const [k0, k1] of [[0, 2], [3, 9], [10, 16]]) for (let k = k0; k < k1; k++) { const p0 = wb + (n - 1) * WALK.length + k, p1 = p0 + WALK.length; walk.idx.push(p0, p1, p0 + 1, p0 + 1, p1, p1 + 1); }
         }
         if (n === 0 || n === keep.length - 1) ports.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1, box, rise, arch, one, list.at(-1), n === 0 ? P[0] : P.at(-1)]);
@@ -1987,7 +1987,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       veilP = p;
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
       const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
-      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() : ready && HVEG.first && underMe(p)) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() : ready && HVEG.first && underMe(p) && jobs.size < 2) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);
@@ -2024,7 +2024,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       camYaw = camYaw == null ? look : camYaw + ((look - camYaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 2.2);
       const fx = Math.sin(camYaw), fz = -Math.cos(camYaw);
       if (mode === 'chase') {
-        tmp.set(p[0] - fx * chase[0], y + chase[1], p[1] - fz * chase[0]);
+        // (A33: closer in round the bridge's tower legs: 6.5 m back the camera stood inside a leg while the walk rounds it, a ride on the east sidewalk)
+        let back = chase[0]; if (marks.ggb) { const k = onDeck(proj.lat(p[1]), proj.lon(p[0])), ds = k ? Math.abs(Math.abs(k.s) - GGB.towers) : 99; if (ds < 32) back *= 0.38 + 0.62 * Math.max(0, (ds - 12) / 20); }
+        tmp.set(p[0] - fx * back, y + chase[1], p[1] - fz * back);
         const tn = tunnelAt(tmp.x, tmp.z, y) ?? tunnelAt(p[0], p[1], y), g = tn ? null : groundAt(tmp.x, tmp.z); if (g != null && tmp.y < g + 1.4) tmp.y = g + 1.4;
         if (tn) tmp.y = Math.min(tmp.y, y + 3.2);
         camPos.lerp(tmp, camInit ? Math.min(1, dt * 6) : 1); camInit = true;

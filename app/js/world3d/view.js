@@ -2030,7 +2030,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       { const tn = tunnelAt(p[0], p[1], eleAt(d)); if (tn) { const k = tn.k * tn.k * (3 - 2 * tn.k), sx = tn.x + rx * 1.4, sz = tn.z + rz * 1.4; p = [p[0] + (sx - p[0]) * k, p[1] + (sz - p[1]) * k]; } }
       if (veilP && Math.hypot(p[0] - veilP[0], p[1] - veilP[1]) > 150) { veilAt = now; veil.style.transition = 'none'; veil.style.opacity = '1'; }  // a jump: cover it again
       veilP = p;
-      { const busy = !veilAt && (jobs.size > 2 || !!HAND.busy || !!HVEG.busy || !ready);
+      // (A34: only for what is missing round the rider: far groups and tiles loading in the background kept it up the whole ride, lv1/lv2 1:40)
+      { const busy = !veilAt && (!!HAND.notHere?.() || !ready);
         if (busy) { idleSince = 0; busySince ||= now; if (!busyOn && now - busySince > 500) { busyOn = true; busyTag.style.opacity = '1'; } }
         else { busySince = 0; idleSince ||= now; if (busyOn && now - idleSince > 1000) { busyOn = false; busyTag.style.opacity = '0'; } } }
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
@@ -2038,7 +2039,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (veilAt) { const nl = [...near.values()].filter(c => c.lod === 0), part = k => nl.length ? nl.filter(c => c.parts[k] !== undefined).length / nl.length : 0;
         showSteps([['Map and roads', nl.length ? nl.filter(c => c.tile !== undefined).length / nl.length : 0], ['Ground', nl.length ? nl.filter(c => c.built).length / nl.length : 0], ['Road surfaces', part('roads')],
           ['Hand-built roads', HAND.notHere() ? 0.5 : 1], ['Trees', part('trees')], ['Buildings', part('bldg')], ['Plants', HVEG.first ? 1 : 0.3], ['Finishing', jobs.size < 2 ? 1 : Math.max(0, 1 - jobs.size / 40)]]); }
-      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) && jobs.size < 2 : ready && HVEG.first && underMe(p) && jobs.size < 2) && now - veilAt > 600) || now - veilAt > 60000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) && jobs.size < 2 : ready && HVEG.first && underMe(p) && jobs.size < 2) && (!ready || (warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 4)) && now - veilAt > 600) || now - veilAt > 60000))  /* (A34: and the programs and the long shadow warm-up done under it: a 1.1 s frame just after it lifted, prof_start) */  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);

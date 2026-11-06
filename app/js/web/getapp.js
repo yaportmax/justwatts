@@ -20,7 +20,7 @@ export function detectOS(nav = globalThis.navigator) {
 }
 export function order(os) { return os === 'mac' ? ['mac', 'windows'] : ['windows', 'mac']; }
 
-function dialog(os) {
+export function dialog(os) {
   let m = document.getElementById('appModal');
   if (!m) {
     m = document.createElement('div');
@@ -52,4 +52,32 @@ export function initGetApp({ doc = globalThis.document, nav = globalThis.navigat
   return true;
 }
 
-if (globalThis.document) initGetApp();
+// The browser's name for the no-Bluetooth banner: Safari and Firefox ship no Web Bluetooth (on iPhone and iPad no browser
+// does: all of them are Safari underneath)
+export function browserName(nav = globalThis.navigator) {
+  const ua = String(nav?.userAgent || '');
+  if (/Firefox|FxiOS/.test(ua)) return 'Firefox';
+  if (/CriOS/.test(ua)) return 'Chrome';
+  if (/EdgiOS|Edg\//.test(ua)) return 'Edge';
+  if (/Safari/.test(ua) && !/Chrome|Chromium|Android/.test(ua)) return 'Safari';
+  return 'This browser';
+}
+
+// The banner when there is no Web Bluetooth: what to do on this device. Returns its HTML (null: Bluetooth is there).
+export function bluetoothNotice(nav = globalThis.navigator) {
+  if (nav?.bluetooth) return null;
+  const os = detectOS(nav), b = browserName(nav), cant = `<b>${b} can't connect to Bluetooth trainers.</b>`;
+  if (os === 'ios') return `${cant} On iPhone and iPad no browser can, Chrome included. Use the Bluefy app from the App Store, or ride on a computer.`;
+  if (os === 'android') return `${cant} Open justwatts.com in Chrome.`;
+  return `${cant} Switch to Chrome or Edge, or <a href="/download" data-a="getapp">download the desktop app</a>.`;
+}
+
+export function initBluetoothNotice({ doc = globalThis.document, nav = globalThis.navigator } = {}) {
+  const el = doc?.getElementById('webNotice'), html = MODE === 'web' && !globalThis.JustWattsNative ? bluetoothNotice(nav) : null;
+  if (!el || !html) return false;
+  el.innerHTML = html; el.style.display = '';
+  el.querySelector('[data-a=getapp]')?.addEventListener('click', e => { e.preventDefault(); dialog(detectOS(nav)); });
+  return true;
+}
+
+if (globalThis.document) { initGetApp(); initBluetoothNotice(); }

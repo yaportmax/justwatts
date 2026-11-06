@@ -50,6 +50,13 @@ els.clear(); el('getApp'); m.initGetApp({ nav: WIN, loc: { pathname: '/download'
 assert.ok(els.get('appModal').innerHTML.indexOf('data-os="windows"') < els.get('appModal').innerHTML.indexOf('data-os="mac"'));
 // phones and tablets, and inside the app: no link
 for (const nav of [IPAD, IPHONE, ANDROID]) { els.clear(); link = el('getApp'); assert.equal(m.initGetApp({ nav, loc: { pathname: '/' } }), false); assert.ok(link.removed); }
+// no Web Bluetooth: the banner names the browser and says what to do on that device (Chrome or Edge or the desktop app; Bluefy on iOS)
+const SAFARI = { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15', platform: 'MacIntel', maxTouchPoints: 0 };
+assert.match(m.bluetoothNotice(SAFARI), /Safari can't connect.*Chrome or Edge.*desktop app/);
+assert.match(m.bluetoothNotice({ ...IPHONE, userAgent: IPHONE.userAgent + ' CriOS/126.0' }), /Chrome can't connect.*Bluefy/);
+assert.match(m.bluetoothNotice({ userAgent: 'Mozilla/5.0 (Android 14; Mobile; rv:128.0) Gecko/128.0 Firefox/128.0', platform: 'Linux armv8l' }), /Firefox can't connect.*in Chrome/);
+assert.equal(m.bluetoothNotice({ ...WIN, bluetooth: {} }), null);
+{ els.clear(); const n = el('webNotice'); n.style = { display: 'none' }; n.querySelector = () => null; assert.equal(m.initBluetoothNotice({ nav: SAFARI }), true); assert.equal(n.style.display, ''); assert.match(n.innerHTML, /Safari/); }
 globalThis.JustWattsNative = {};
 els.clear(); link = el('getApp'); assert.equal(m.initGetApp({ nav: WIN, loc: { pathname: '/download' } }), false); assert.ok(link.removed);
 console.log(JSON.stringify({ getapp: 'ok' }));

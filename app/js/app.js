@@ -1094,7 +1094,7 @@ const fileBaseOf = r => `${new Date(r.start || r.samples[0][0]).toISOString().sl
 /* ---------- web build only: backup ---------- */
 if (WEB) {
   document.body.classList.add('web');
-  if (!navigator.bluetooth) $('#webNotice').style.display = '';
+  // (the no-Bluetooth banner: web/getapp.js, per browser and device)
   // rides and settings live in IndexedDB (the backend); custom workouts and imported courses in localStorage
   $('#bkExport').onclick = async () => { const j = await (await F('/api/backup')).json(); j.local = { custom, courses: store.get('hw.courses', []) }; download(`justwatts-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(j), 'application/json'); };
   $('#bkImport').onclick = () => $('#bkFile').click();

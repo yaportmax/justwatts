@@ -62,7 +62,7 @@ def test_web_mode_ride_with_reload(dist, node):
     p = subprocess.run([node, str(REPO / "tests/js/web_smoke.mjs"), str(dist)], capture_output=True, text=True, timeout=120)
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
-    assert out["mode"] == "web" and out["webClass"] and out["notice"] == ""   # Web Bluetooth notice shown in node
+    assert out["mode"] == "web" and out["webClass"]   # (the no-Bluetooth banner: getapp_test.mjs)
     assert out["welcome"] == {"closed": True, "seen": "true"}                  # the first run's welcome, once
     assert out["before"]["samples"] == 47
     rs = out["resumed"]                                                      # the "reload": IndexedDB snapshot + journal

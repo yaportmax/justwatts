@@ -89,6 +89,8 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           // (galvanised steel: the sky's sheen on its shaded face, Street View: a light W-beam even with the sun behind it)
           if (/wbeam/.test(s.name)) m.emissive = new THREE.Color(0.10, 0.105, 0.11); 
           if (/a31_bk_day/.test(s.name)) m.emissive = new THREE.Color(0.55, 0.56, 0.57);  // (A31: daylight through the tunnel, no sun on it)
+          // (A34: the dark information boards near black, 0.5 %, read as holes cut in the view, lv2 0:29 and 1:40: a painted dark brown-green, still dark)
+          if (/^(sign_board|a31_bo_board)/.test(s.name)) m.color.setRGB(0.045, 0.055, 0.045);
           m = lambert(m); mats.set(s, m); }
         o.material = m;
       });
@@ -108,7 +110,11 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
     state.pump = async () => {
       if (busy || !state.at) return; const [x, z] = state.at; busy = true; state.busy = true;
       try {
-        for (const [k, cs] of groups) { if (!cs.some(c => (c.cx - x) ** 2 + (c.cz - z) ** 2 < D2)) continue; groups.delete(k);
+        // (A34: the nearest wanted group first, chosen again after each from where the rider is now: in file order the groups round the start
+        // could come last, the loading screen held 20 s on the live site, lv2)
+        for (;;) { const [x, z] = state.at; let k = null, best = D2;
+          for (const [kk, cs_] of groups) for (const c of cs_) { const d = (c.cx - x) ** 2 + (c.cz - z) ** 2; if (d < best) { best = d; k = kk; } }
+          if (k == null) break; const cs = groups.get(k); groups.delete(k);
           cs.sort((a, b) => ((a.cx - x) ** 2 + (a.cz - z) ** 2) - ((b.cx - x) ** 2 + (b.cz - z) ** 2));
           const into = new THREE.Group(); into.visible = false; group.add(into);
           // (lastBox: what this group covers, view.js builds again only the tiles it touches; prepare: slow work done in slices before the group shows)
@@ -294,6 +300,11 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         vec4 w = texture2D(gSplat, (p - gBox.xy) * gBox.zw);
         vec2 buW = (p - gBoxW.xy) * gBoxW.zw; float inW = step(0.0, buW.x) * step(buW.x, 1.0) * step(0.0, buW.y) * step(buW.y, 1.0) * (1.0 - step(gBox.x + 140.0, p.x));
         if (inW > 0.5) w = texture2D(gSplatW, buW);
+        // (A34: past both splats, the roads built after Conzelman (McCullough, East Road): the clamped edge texel smeared across them as lime
+        // stripes and blotches, mccullough70400; grass with dark scrub litter in patches from the noise instead, no cut, no dirt)
+        { vec2 buE = (p - gBox.xy) * gBox.zw; float outAll = (1.0 - inW) * step(0.0001, max(max(-buE.x, buE.x - 1.0), max(-buE.y, buE.y - 1.0)));
+          float sN = texture2D(gNoise, p / 23.0 + 0.37).r * 0.6 + texture2D(gNoise, p / 7.0 + 0.61).g * 0.4;
+          w = mix(w, vec4(0.0, 0.0, smoothstep(0.44, 0.64, sN) * 0.8, 1.0), outAll); }
         // (breaks the soft zone edges up a little with the grass tile's own tone)
         float rb31 = inW * smoothstep(11434.0, 11437.0, p.x) * (1.0 - smoothstep(11510.0, 11514.0, p.x)) * (1.0 - smoothstep(11441.0, 11444.0, p.y)) * smoothstep(11365.0, 11369.0, p.y);  // (A31: the red bank north of the tunnel is bare: facets read as face, no tufts: green leaf shapes on red, w5_11070_r)
         float steep = smoothstep(0.05, 0.34, 1.0 - n.y);  // (the lidar's 2 m mesh and the verges soften the cuts: 25 degrees and up reads as the face)
@@ -318,7 +329,7 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         cGrass = mix(cGrass, cGrass * vec3(0.94, 1.14, 0.66) * 1.06, inW * clamp((1.0 - w.a) / 0.5, 0.0, 1.0) * (1.0 - w.r) * (1.0 - w.g));
         { vec2 bu = (p - gBox.xy) * gBox.zw; float outBox = smoothstep(0.0, 0.04, max(max(-bu.x, bu.x - 1.0), max(-bu.y, bu.y - 1.0))) * (1.0 - inW);
           float streak = smoothstep(0.45, 0.7, texture2D(gNoise, vec2(p.x / 38.0, p.y / 9.0) + 0.29).g);
-          cGrass = mix(cGrass, cGrass * vec3(0.78, 1.1, 0.62) * (1.0 - 0.35 * streak), outBox); }
+          cGrass = mix(cGrass, cGrass * vec3(0.9, 0.95, 0.66) * (1.0 - 0.2 * streak), outBox); }  // (A34: drier olive, the lime read too bright against Street View, mccullough70400, east80700)
         vec3 c = cGrass;
         if (wl > 0.002) {
         vec3 cLit = textureGrad(gLitter, p / gRep.w, dPx / gRep.w, dPy / gRep.w).rgb; if (steep > 0.002) cLit = mix(cLit, textureGrad(gLitter, side / gRep.w, dSx / gRep.w, dSy / gRep.w).rgb, steep);

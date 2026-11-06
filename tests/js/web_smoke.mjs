@@ -81,7 +81,6 @@ const out = {};
 // ---------- boot 1: ride, then "crash" mid-ride ----------
 let hw = await boot(1);
 out.mode = hw.mode; out.webClass = document.body.classList.contains('web');
-out.notice = $('#webNotice').style.display;            // no navigator.bluetooth in node
 // the first run: the welcome (Garmin, my own FTP, the defaults); the defaults close it, never shown again
 await until(() => $('#welModal').classList.contains('on'), 'welcome');
 $('#welModal').onclick({ target: { closest: () => ({ dataset: { w: 'defaults' } }) } });

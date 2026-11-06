@@ -1485,7 +1485,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const reach = (gap - 0.25) / (REACH * w), top = Infinity;
     const hh = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => { const q = gridHeight(g, x + dx, z + dz), s = q == null ? null : standOn(c, x + dx, z + dz, q) ?? c.bankS?.get(bkey(x + dx, z + dz)); return s ?? h; });
     const gx = Math.max(-1.5, Math.min(1.5, (hh[0] - hh[1]) / 2)), gz = Math.max(-1.5, Math.min(1.5, (hh[2] - hh[3]) / 2));
-    return { h, reach, top, grad: [gx, gz], gap };
+    // (A33: a steep bank by a road mostly grass with scrub in patches, a third of the bushes kept: Street View Bunker Road and McCullough Road, a dark wall of brush read on the cuts)
+    const bank = gap < 40 && Math.hypot(gx, gz) > 0.45; if (bank && hash2(Math.round(x * 0.25), Math.round(z * 0.25) + 31) > 0.3) return { skip: true };
+    return { h, reach: bank ? Math.min(reach, 0.55) : reach, top: bank ? 0.45 : top, grad: [gx, gz], gap };
   }
   const scrub = createScrub({ THREE, scene, geos: scrubGeometries(), mat: mats.scrub, fade: scrubFade, cls: vcls, hgt: (x, z) => veg ? veg.scrubH(proj.lat(z), proj.lon(x)) : null, ground: scrubGround, dense: (x, z) => !!veg?.handAt(proj.lat(z), proj.lon(x), 'brush') });
 

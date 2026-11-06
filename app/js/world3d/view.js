@@ -1340,8 +1340,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (c.tile === undefined) continue;
       const along = route?.get(c.k)?.find(D => D >= d0 - 60), dist = Math.hypot(c.x + 0.5 - rx, c.y + 0.5 - ry);
       const pri = (along != null ? Math.min(dist, Math.max(0, along - d0) / 1500) : dist + 1.5) + c.lod * 3;
+      const own = Math.floor(rx) === c.x && Math.floor(ry) === c.y, late = own ? 0.2 : 6.2;  // (A33: the tile under the rider gets its trees and buildings straight after its own roads: the start screen waits for them)
       // (a new route, a U-turn: what is queued moves to its new place, nothing built or half built is dropped)
-      if (route !== c.route) { c.route = route; for (const [s, o] of [['t', 0], ['r', 0.1], ['u', 0.15], ['b', 6.2 + c.lod], ['v', 6.3 + c.lod], ['f', 6.4 + c.lod]]) jobs.reprio(c.k + '|' + s, pri + o); }
+      if (route !== c.route) { c.route = route; for (const [s, o] of [['t', 0], ['r', 0.1], ['u', 0.15], ['b', late + c.lod], ['v', late + 0.1 + c.lod], ['f', late + 0.2 + c.lod]]) jobs.reprio(c.k + '|' + s, pri + o); }
       // (the ground, roads, banks and buildings do not depend on the detail: a tile coming nearer is not built again;
       // its trees are, the same cards as they were drawn (stream.js sigs), and the furniture is added at detail 0)
       // (the roads and their barriers again once the rails are in: junctions, the hand list; and once the pads are)
@@ -1349,9 +1350,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (c.sig.terrain !== S.terrain && (HAND.settled || c.z !== NEAR_Z)) { c.sig.terrain = S.terrain; jobs.add(c.k + '|t', pri, () => buildTerrain(c)); }
       // (the roads once the hand-built stretch has loaded or failed: built once, not again when it arrives)
       if (c.ver != null && HAND.settled && c.sig.roads !== S.roads) { c.sig.roads = S.roads; jobs.add(c.k + '|r', pri + 0.1, () => buildRoads(c)); }
-      if (c.ver != null && c.sig.trees !== S.trees) { c.sig.trees = S.trees; jobs.add(c.k + '|v', pri + 6.3 + c.lod, () => buildTrees(c)); }
-      if (c.ver != null && c.sig.bldg !== S.bldg) { c.sig.bldg = S.bldg; jobs.add(c.k + '|b', pri + 6.2 + c.lod, () => buildBuildings(c)); }
-      if (c.ver != null && c.sig.furn !== S.furn) { c.sig.furn = S.furn; jobs.add(c.k + '|f', pri + 6.4 + c.lod, () => buildFurniture(c)); }
+      if (c.ver != null && c.sig.trees !== S.trees) { c.sig.trees = S.trees; jobs.add(c.k + '|v', pri + late + 0.1 + c.lod, () => buildTrees(c)); }
+      if (c.ver != null && c.sig.bldg !== S.bldg) { c.sig.bldg = S.bldg; jobs.add(c.k + '|b', pri + late + c.lod, () => buildBuildings(c)); }
+      if (c.ver != null && c.sig.furn !== S.furn) { c.sig.furn = S.furn; jobs.add(c.k + '|f', pri + late + 0.2 + c.lod, () => buildFurniture(c)); }
       if (c.ver != null && c.sig.tun !== S.tun) { c.sig.tun = S.tun; jobs.add(c.k + '|u', pri + 0.15, () => buildTunnels(c)); }
       // (waiting to ease in, its far tile gone or not drawn: shown as it is)
       if (c.ease && c.ease.t0 == null && !far.get(parentOf(c.k))?.parts.terrain) { easeApply(c, 1); c.ease = null; c.group.visible = true; }

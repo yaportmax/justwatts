@@ -1218,6 +1218,7 @@ $('#ftpModal').onclick = e => {
 };
 function showSettings() {
   showUnits(); $('#beeps').value = settings.beeps ? '1' : '0';
+  { const l = courses.map.lookNow?.(); if (l) { $('#lkKit').value = l.kit; $('#lkSkin').value = l.skin; $('#lkHelmet').value = l.helmet; $('#lkBike').value = l.bike; } }
   renderLib(); renderBuilder();
 }
 // Settings: the left index scrolls to a section and follows the scroll
@@ -1230,6 +1231,7 @@ if (globalThis.IntersectionObserver) {
   }, { rootMargin: '0px 0px -60% 0px' });
   $$('.sset').forEach(x => io.observe(x));
 }
+for (const [id, part] of [['lkKit', 'kit'], ['lkSkin', 'skin'], ['lkHelmet', 'helmet'], ['lkBike', 'bike']]) $('#' + id).onchange = e => courses.map.setLook?.(part, +e.target.value);  // (A33: the rider's look)
 $('#beeps').onchange = e => { settings.beeps = e.target.value === '1'; saveSettings(['beeps']); };
 if (VIEWS.includes(globalThis.location?.hash?.slice(1)) && globalThis.location.hash !== '#workouts') setTimeout(() => show(viewOf(globalThis.location.hash), false), 0);
 globalThis.addEventListener?.('popstate', () => show(viewOf(globalThis.location?.hash), false));

@@ -183,7 +183,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
       const m = await import('./world3d/view.js');
       if (!cur || kind() !== 'world') return;
       wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, onQuality: q => store.set('hw.worldQ', q), quality: store.get('hw.worldQ', null),
-        time: store.get('hw.worldTime', 'day'), sound: soundOn(), fog: store.get('hw.worldFog', true) !== false, kit: KITS[store.get('hw.worldKit', 0) % KITS.length] });
+        time: store.get('hw.worldTime', 'day'), sound: soundOn(), fog: store.get('hw.worldFog', true) !== false, kit: KITS[store.get('hw.worldKit', 0) % KITS.length], look: look() });
       wv.update(worldState());
     } catch (e) { worldFail(e?.message || String(e)); }
     finally { wvBusy = false; }
@@ -308,7 +308,13 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
   function toggleFog() { if (!wv) return false; store.set('hw.worldFog', wv.setFog(!wv.fog())); return true; }
   // kit colours for the rider in the world
   const KITS = [0xf2c230, 0xd94b3d, 0x2f7fd9, 0x2fbf71, 0xf2f2ee, 0x1d232b, 0xe8609a, 0xf08a24];
+  // (A33: the rider's look, Settings > Ride: skin, helmet and bike from short lists; the jersey is hw.worldKit)
+  const SKINS = [0xf1c7a4, 0xd9a47e, 0xb67d57, 0x8a5a3c, 0x5e3b27], HELMETS = [0xf2f2f0, 0x1d1f24, 0xd94b3d, 0x2f7fd9], BIKES = [0x2a2f36, 0x141518, 0xe8e8e4, 0xc8322a, 0x2a5fb8];
+  const pick = (L, k) => L[Math.max(0, Math.min(L.length - 1, +store.get(k, 0) || 0))];
+  function look() { return { skin: pick(SKINS, 'hw.riderSkin'), helmet: pick(HELMETS, 'hw.riderHelmet'), bike: pick(BIKES, 'hw.riderBike') }; }
+  function setLook(part, i) { if (part === 'kit') { store.set('hw.worldKit', i); wv?.setKit(KITS[i % KITS.length]); return; } store.set({ skin: 'hw.riderSkin', helmet: 'hw.riderHelmet', bike: 'hw.riderBike' }[part], i); wv?.setLook?.(look()); }
+  function lookNow() { return { kit: store.get('hw.worldKit', 0) % KITS.length, skin: +store.get('hw.riderSkin', 0) || 0, helmet: +store.get('hw.riderHelmet', 0) || 0, bike: +store.get('hw.riderBike', 0) || 0 }; }
   function cycleKit() { if (!wv) return false; const k = (store.get('hw.worldKit', 0) + 1) % KITS.length; store.set('hw.worldKit', k); wv.setKit(KITS[k]); return true; }
   $('#mapFocus').onclick = toggleFocus;
-  return { update, toggleFocus, setOthers, toggleCamera, cycleTime, toggleSound, toggleFog, cycleKit, focused: () => placedOn, worldStats: () => wv?.stats() ?? null, view: () => cur ? kind() : null };
+  return { update, toggleFocus, setOthers, toggleCamera, cycleTime, toggleSound, toggleFog, cycleKit, setLook, lookNow, focused: () => placedOn, worldStats: () => wv?.stats() ?? null, view: () => cur ? kind() : null };
 }

@@ -451,6 +451,8 @@ export function makeRider(THREE, { kit = 0xf2c230, kit2 = 0x1b1f25, accent = nul
     group, state: s,
     // dt seconds, cadence rpm, v m/s, grade a fraction (0.08 is 8 percent up)
     update(dt, cadence, v, grade = 0) { stance(s, dt, cadence, v, grade); pose(); },
+    // a new skin, helmet or bike colour at any time
+    setLook(l = {}) { if (!mat) return; for (const k of ['skin', 'helmet', 'bike']) if (l[k] != null) scheme[k] = l[k]; const next = useMaterial(THREE, cols()); dropMaterial(mat); mat = next; mesh.material = mat.m; },
     // a new jersey colour (and accent) at any time
     setKit(kitHex, accentHex) {
       if (!mat) return;

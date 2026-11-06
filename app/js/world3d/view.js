@@ -102,7 +102,7 @@ export function guessQuality(renderer) {
   if (/Intel|Apple/i.test(gpu) || cores <= 4 || mem <= 4) return 1;
   return 0;
 }
-export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, onQuality = () => {}, quality = 0, time = 'golden', sound = true, fog = true, kit = null, life: lifeOn = !!globalThis.__w3?.life }) {
+export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, onQuality = () => {}, quality = 0, time = 'golden', sound = true, fog = true, kit = null, look = null, life: lifeOn = !!globalThis.__w3?.life }) {
   let q = 0, dead = false, raf = 0;
   const canvas = document.createElement('canvas'); canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block'; container.appendChild(canvas);
   const tags = document.createElement('div'); tags.className = 'w3tags'; container.appendChild(tags);
@@ -1807,7 +1807,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
 
   /* ---------- riders ---------- */
-  const me = makeRider(THREE, { kit: kit ?? 0xf2c230, kit2: 0x1b1f25 }); scene.add(me.group);
+  const me = makeRider(THREE, { kit: kit ?? 0xf2c230, kit2: 0x1b1f25, ...(look || {}) }); scene.add(me.group);
   const others = new Map();  // id -> { r, tag, x, z, yaw, seen }
   const TUN_LIGHT = new THREE.Color(0.6, 0.5, 0.36), hemiBase = [new THREE.Color(), new THREE.Color()]; let hemiKey = null;
   let grade = 0, dark = 0, sunSeen = 1, sunSeenAt = 0, camOver = null, sea = 0, seaAt = 0, lifeDt = 0, audioDt = 0;
@@ -2164,6 +2164,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // Karl the fog's banks on or off
     setFog(on) { return sky.setBanks(on); }, fog: () => sky.banksOn,
     setKit(kit, accent) { me.setKit?.(kit, accent); },
+    setLook(l) { me.setLook?.(l); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
     stats: () => ({ wait: { plantsIn: HVEG.first, handHere: !HAND.notHere(), handBusy: !!HAND.busy, plantsBusy: !!HVEG.busy, veil: veilAt > 0 }, fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size + (HVEG.busy ? 1 : 0) + (HAND.busy || HAND.pending?.() ? 1 : 0), ready: ready && warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 10, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow, long: jobs.long }),

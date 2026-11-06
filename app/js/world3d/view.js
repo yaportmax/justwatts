@@ -276,7 +276,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (c.group.visible && far.get(parentOf(k))?.skipped?.has(k)) { leaving.get(k) && disposeObj(leaving.get(k).group); leaving.set(k, c); } else disposeObj(c.group);
   }
   // (A33: the tile under the rider fine and its roads drawn: off the Conzelman line the veil lifted on the tiles' ground alone, McCullough Road's start showed no road and trees over a coarse hill)
-  const underMe = p => { const c0 = near.get(key(NEAR_Z, ...tileOf(p[0], p[1]))); return !!c0 && c0.lod === 0 && c0.built && 'roads' in c0.parts; };
+  const underMe = p => { const c0 = near.get(key(NEAR_Z, ...tileOf(p[0], p[1]))); return !!c0 && c0.lod === 0 && c0.built && !!c0.parts.roads; };  // (a drawn road: the rider is on one; null was a placeholder before the grid)
   function setPart(c, name, obj) { if (c.parts[name]) disposeObj(c.parts[name]); c.parts[name] = obj; if (obj) c.group.add(obj); if (c.ease) easePart(c, name, obj); }
   // easing a near tile in: every vertex of its parts (ground, roads and banks, buildings) starts at the far tile's ground
   // under it, as far over or under it as it is over its own ground, and comes to its place over EASE ms: a morph target

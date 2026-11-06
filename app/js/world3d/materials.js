@@ -424,8 +424,8 @@ export function roadMaterial() {
 // with that row zeroed
 const CLIP_GLSL = `vec3 jwClip = vec3(instanceMatrix[0].w, instanceMatrix[1].w, instanceMatrix[2].w);
         if (jwClip.z > 0.0) {
-          mat3 jwM = mat3(instanceMatrix); vec3 jwW = jwM * transformed; float jwP = dot(jwW.xz, jwClip.xy) - (jwClip.z - 1.0);
-          if (jwP > 0.0 && jwW.y < 4.8) { jwW.xz -= jwClip.xy * jwP; transformed = inverse(jwM) * jwW; }
+          mat3 jwM = mat3(instanceMatrix); vec3 jwW = jwM * transformed; float jwP = dot(jwW.xz, jwClip.xy) - (jwClip.z - floor(jwClip.z / 1000.0) * 1000.0 - 1.0);
+          if (jwP > 0.0 && jwW.y < 4.8 + floor(jwClip.z / 1000.0) * 0.1) { jwW.xz -= jwClip.xy * jwP; transformed = inverse(jwM) * jwW; }
         }`;
 const CLIP_M = `#ifdef USE_INSTANCING
 mat4 jwIM = instanceMatrix; jwIM[0].w = 0.0; jwIM[1].w = 0.0; jwIM[2].w = 0.0;

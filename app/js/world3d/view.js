@@ -909,12 +909,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           let moved = false; if (L > 0.2) for (const d of [2, 4, 6, 8]) { const nx = x + gx / L * d, nz = z + gz / L * d; if (!(c.bankH.get(bkey(nx, nz)) < -1e8)) { x = nx; z = nz; moved = true; break; } }
           if (!moved) continue;
         }
-        const f = fitTree(dim, h, r, roadGap(x, z)); if (!f) continue;
+        // (A33: a road over the tree's foot raises the clearance by as much: on Simmonds Road a tree below the road hung its leaves at the rider's height)
+        const g00 = roadGap(x, z), ry = g00 != null && g00 < 12 ? roadTopNear(x, z) : null, foot0 = hAt(x, z), lift = ry != null && foot0 != null ? Math.max(0, Math.min(20, ry - foot0)) : 0;
+        const f = fitTree(dim, h, r, g00, lift); if (!f) continue;
         const tr = 0.5 * f.s; let lo2 = Infinity; for (const [dx, dz] of [[tr, 0], [-tr, 0], [0, tr], [0, -tr]]) { const q = hAt(x + dx, z + dz); if (q != null) lo2 = Math.min(lo2, q); }
         // (a low crown reaching the paving: the way to the road, down the gap's slope; its leaves under the clearance end
         // f.clip metres out that way, A15)
         let clip = null;
-        if (f.clip != null) { const g0 = roadGap(x, z), gx = (roadGap(x + 1, z) ?? g0) - (roadGap(x - 1, z) ?? g0), gz = (roadGap(x, z + 1) ?? g0) - (roadGap(x, z - 1) ?? g0), L = Math.hypot(gx, gz); if (L > 0.2) clip = [-gx / L, -gz / L, f.clip]; }
+        if (f.clip != null) { const g0 = roadGap(x, z), gx = (roadGap(x + 1, z) ?? g0) - (roadGap(x - 1, z) ?? g0), gz = (roadGap(x, z + 1) ?? g0) - (roadGap(x, z - 1) ?? g0), L = Math.hypot(gx, gz); if (L > 0.2) clip = [-gx / L, -gz / L, f.clip, lift + (foot0 != null && lo2 < foot0 ? foot0 - lo2 : 0)]; }
         add(sp, x, z, f.s, hash2(Math.round(x * 3), Math.round(z * 3)), 0, f.hf, lo2, clip);
       }
     }
@@ -1034,7 +1036,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       m.computeBoundingSphere();
       // (a low crown by a road: its clip in the matrices' bottom rows, after the bounds; materials.js CLIP_GLSL, A15)
       const IM = m.instanceMatrix.array; a = 0;
-      for (const [, t] of items) { const cl = t[7]; if (cl) { IM[16 * a + 3] = cl[0]; IM[16 * a + 7] = cl[1]; IM[16 * a + 11] = cl[2] + 1; } a++; }
+      for (const [, t] of items) { const cl = t[7]; if (cl) { IM[16 * a + 3] = cl[0]; IM[16 * a + 7] = cl[1]; IM[16 * a + 11] = cl[2] + 1 + 1000 * Math.round((cl[3] || 0) * 10); } a++; }
     };
     for (const set of c.treeSets || []) {
       if (!set.fine) continue;
@@ -1415,6 +1417,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     return best;
   }
   // how far a point is outside the nearest drawn road's edge (negative: on it), null with no road within 10 m
+  // the height of the nearest drawn road's surface to a point (within 12 m), null without one
+  function roadTopNear(x, z) {
+    const [tx, ty] = tileOf(x, z), R = near.get(key(NEAR_Z, tx, ty))?.surf; if (!R) return null;
+    const S = R.S, cx = Math.floor(x / 10), cz = Math.floor(z / 10); let bd = 12, best = null;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of R.cells.get(`${cx + a},${cz + b}`) || []) {
+      const ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2)) : 0;
+      const d = Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) - S[k + 6]; if (d < bd) { bd = d; best = S[k + 1] + (S[k + 4] - S[k + 1]) * t; } }
+    return best;
+  }
   function roadGap(x, z) {
     const [tx, ty] = tileOf(x, z), R0 = near.get(key(NEAR_Z, tx, ty))?.surf; if (!R0) return null;
     // (and the next tile's roads within 6 m: a road drawn by it reaches over the tile's edge)

@@ -128,11 +128,11 @@ export function parseTrees(buf) {
 // ending 0.2 m short of the paving (clip: that distance from the trunk; view.js and the prop shader, A15), as Street View's
 // pruned roadside trees (Center Road 0a_0030: the gums' crowns broad and low over the verge, over the road only high up).
 export const CLEAR = 4.5;
-export function fitTree(dim, h, r, gap = null) {
+export function fitTree(dim, h, r, gap = null, lift = 0) {
   const sy = h / dim.H, sx = Math.min(sy / 0.6, Math.max(r / dim.R, sy / 1.6));
   if (gap != null) {
     if (gap < 1) return null;
-    if (sx * dim.R > gap && dim.base * sy < CLEAR) return { s: sx, hf: sy / sx, clip: gap - 0.2 };
+    if (sx * dim.R > gap && dim.base * sy < CLEAR + lift) return { s: sx, hf: sy / sx, clip: gap - 0.2 };
   }
   return { s: sx, hf: sy / sx };
 }

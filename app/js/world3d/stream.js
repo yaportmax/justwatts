@@ -68,6 +68,7 @@ export function jobQueue(now = () => performance.now()) {
     },
     slow, long,
     get size() { return q.length; },
+    ids: () => q.map(j => j.id + (j.it ? '*' + Math.round(j.ms) + ':' + (j.lab ?? '') : '')),
     has: id => q.some(j => j.id === id),
   };
 }

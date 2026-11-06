@@ -2041,7 +2041,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const lat = proj.lat(p[1]), lon = proj.lon(p[0]);
       stream(lat, lon, now);
       const PF = globalThis.__w3?.prof, pm = PF ? [c0] : null, mark = PF ? () => pm.push(performance.now()) : () => {}, gq0 = PF && globalThis.__w3.gpu ? gpuTime.begin() : null;
-      jobs.run(globalThis.__w3?.budget ?? (q >= 2 ? 2.5 : 4)); mark();  // (__w3.budget: tools that only want it built)
+      jobs.run(globalThis.__w3?.budget ?? (veilAt ? 40 : q >= 2 ? 2.5 : 4));  // (A33: under the start screen nothing is seen: build flat out, a slow device's start took over 30 s at 4 ms a frame) mark();  // (__w3.budget: tools that only want it built)
       if (easing.size) easeStep(performance.now());
       marks.update(camera, dt);
       // the full trees follow the rider: split a tile again after 60 m, unless it is all far away and already all simple
@@ -2167,7 +2167,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setLook(l) { me.setLook?.(l); },
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
-    stats: () => ({ wait: { plantsIn: HVEG.first, handHere: !HAND.notHere(), handBusy: !!HAND.busy, plantsBusy: !!HVEG.busy, veil: veilAt > 0 }, fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size + (HVEG.busy ? 1 : 0) + (HAND.busy || HAND.pending?.() ? 1 : 0), ready: ready && warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 10, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow, long: jobs.long }),
+    stats: () => ({ jobIds: jobs.ids?.().slice(0, 16), wait: { plantsIn: HVEG.first, handHere: !HAND.notHere(), handBusy: !!HAND.busy, plantsBusy: !!HVEG.busy, veil: veilAt > 0 }, fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size + (HVEG.busy ? 1 : 0) + (HAND.busy || HAND.pending?.() ? 1 : 0), ready: ready && warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 10, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow, long: jobs.long }),
     setQuality(n) { q = Math.max(0, Math.min(QUALITY.length - 1, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point

@@ -275,6 +275,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (map === far) { for (const [nk, n] of leaving) if (parentOf(nk) === k) { disposeObj(n.group); leaving.delete(nk); } disposeObj(c.group); return; }
     if (c.group.visible && far.get(parentOf(k))?.skipped?.has(k)) { leaving.get(k) && disposeObj(leaving.get(k).group); leaving.set(k, c); } else disposeObj(c.group);
   }
+  // (A33: the tile under the rider fine and its roads drawn: off the Conzelman line the veil lifted on the tiles' ground alone, McCullough Road's start showed no road and trees over a coarse hill)
+  const underMe = p => { const c0 = near.get(key(NEAR_Z, ...tileOf(p[0], p[1]))); return !!c0 && c0.lod === 0 && c0.built && 'roads' in c0.parts; };
   function setPart(c, name, obj) { if (c.parts[name]) disposeObj(c.parts[name]); c.parts[name] = obj; if (obj) c.group.add(obj); if (c.ease) easePart(c, name, obj); }
   // easing a near tile in: every vertex of its parts (ground, roads and banks, buildings) starts at the far tile's ground
   // under it, as far over or under it as it is over its own ground, and comes to its place over EASE ms: a morph target
@@ -738,7 +740,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (nor over a car park or a pad: it lies on the ground eased up to the road's edge within 3 m (A12: a strip up the
       // lidar's ground over the carve hid Mitchell Road's lot and Conzelman 0a_2030's turnout under grass))
       const inLot = (x, z) => lotRings.some(r => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) if ((r[i][1] > z) !== (r[j][1] > z) && x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c; return c; });
-      const block = (x, z, ey) => { if (lotRings.length && inLot(x, z) && Math.abs((ground(x, z) ?? ey) - ey) < 3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
+      // (A33: nor past this tile's own grid: the next tile may not be in yet, its ground then read as the road's level, and the strip stood up a hillside's height with a sheer outer side, two pillars on Bunker Road; that tile draws its own)
+      const block = (x, z, ey) => { if (gridHeight(g, x, z) == null) return true; if (lotRings.length && inLot(x, z) && Math.abs((ground(x, z) ?? ey) - ey) < 3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
         const S = SI.S, ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, tu = L2 ? ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2 : 0, t = Math.max(0, Math.min(1, tu));
         if (tu > -0.05 && tu < 1.05 && Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) < S[k + 6] && Math.abs(S[k + 1] + (S[k + 4] - S[k + 1]) * t - ey) < 8) return true; } return false; };
       // one edge's strips (banks.js): into the banks' geometry; nothing grows where a strip stands off the ground (grass,
@@ -1984,7 +1987,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       veilP = p;
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
       const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
-      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() : ready && HVEG.first) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() : ready && HVEG.first && underMe(p)) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);

@@ -213,7 +213,9 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         // past the grass: the hills mottled, dots of scrub and their shade, drier and greener patches
         { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk) * (1.0 - jwKnown * 0.75) * (1.0 - jwPav);
           vec4 ms = jwN(vW.xz / 19.0 + 0.21); float sp = ms.g, sp2 = ms.r, pt = jwN(vW.xz / 2400.0 + 0.53).r;
-          c *= 1.0 - far * open * (0.22 * smoothstep(0.6, 0.78, sp) + 0.12 * smoothstep(0.58, 0.8, sp2));
+          // (A33: the dots fade where a pixel spans more than a few metres of ground: far off they read as grit, user 2026-11-05)
+          float pxm = length(fwidth(vW.xz)), dotK = 1.0 - smoothstep(1.2, 4.0, pxm);
+          c *= 1.0 - far * open * dotK * (0.22 * smoothstep(0.6, 0.78, sp) + 0.12 * smoothstep(0.58, 0.8, sp2));
           c = mix(c, c * vec3(0.9, 1.0, 0.82), far * open * 0.6 * smoothstep(0.5, 0.75, pt));
           c = mix(c, c * vec3(1.08, 1.02, 0.94), far * open * 0.5 * (1.0 - smoothstep(0.3, 0.55, pt))); }
         ${detail ? `
@@ -224,10 +226,12 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         #define JWF(q) (fwd > 0.0 ? mix(jwN(vW.xz q), mix(jwN(vW.xy q), jwN(vW.zy q), fdx), fwd) : jwN(vW.xz q))
         float f1 = JWF(/ 9.0).r, f2 = JWF(/ 2.3).g;
         c *= 1.0 + near * ((f1 - 0.5) * 0.16 + (f2 - 0.5) * 0.1 * (1.0 - rk * 0.5));
-        float hb = (f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * jwN(vW.xz / 3.5).b * 0.25 + jwScrub * (1.0 - jwNear) * jwN(vW.xz / 3.1 + 0.37).g * 1.4;
+        // (A33: the scrub's and rock's relief laid across a steep face too, gentler, and gone where a pixel spans more than a metre: projected from above it stretched into a fine crosshatch on the banks, user 2026-11-05)
+        float bmpK = 1.0 - smoothstep(0.25, 1.0, length(fwidth(vW.xz)));
+        float hb = ((f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * JWF(/ 3.5).b * 0.25 + jwScrub * (1.0 - jwNear) * JWF(/ 3.1 + 0.37).g * 0.6) * bmpK;
         vec3 dpx = dFdx(vW), dpy = dFdy(vW); float dhx = dFdx(hb), dhy = dFdy(hb);
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
-        vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.55 + rk * 0.25) * near;
+        vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.14 + rk * 0.1) * near;  /* (A33: gentler: at 0.55 it lit the hills in black blots and pixel speckle that crawled as the camera moved, user 2026-11-05) */
         if (abs(det) > 1e-9 && dot(bumpV, bumpV) > 1e-18) nW = normalize(bumpV);  // never a NaN (bloom would smear it)` : ''}
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');

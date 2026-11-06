@@ -296,6 +296,8 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         float rb31 = inW * smoothstep(11434.0, 11437.0, p.x) * (1.0 - smoothstep(11510.0, 11514.0, p.x)) * (1.0 - smoothstep(11441.0, 11444.0, p.y)) * smoothstep(11365.0, 11369.0, p.y);  // (A31: the red bank north of the tunnel is bare: facets read as face, no tufts: green leaf shapes on red, w5_11070_r)
         float steep = smoothstep(0.05, 0.34, 1.0 - n.y);  // (the lidar's 2 m mesh and the verges soften the cuts: 25 degrees and up reads as the face)
         vec2 side = abs(n.x) > abs(n.z) ? vGdW.zy : vGdW.xy;
+        // (A33: the lookups inside the per-layer branches take their mip level from these, taken outside them: derivatives inside a branch some pixels skip are undefined, and on a Mac the ground lost its mipmaps, grit far off, user 2026-11-05)
+        vec2 dPx = dFdx(p), dPy = dFdy(p), dSx = dFdx(side), dSy = dFdy(side); mat2 mSR = mat2(0.62, -0.78, 0.78, 0.62); vec2 dRx = mSR * dSx, dRy = mSR * dSy;
         // (every layer from above on the flat and from the side on a steep face: no streaks down a bank)
         // (A33, perf: each layer only where it shows: the cut, dirt and litter lookups skipped where their weight is nil; same picture, a third of the texture reads on most of the ground)
         // (inside a drawn cut zone the face from about 15 degrees of true surface slope: the zone bounds it along the road,
@@ -306,47 +308,49 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         float wc = smoothstep(0.4, 0.6, w.g + (texture2D(gNoise, p / mix(4.3, 1.3, inW)).r - 0.5) * mix(0.9, 0.6, inW) * (1.0 - step(0.999, w.g)))  /* (A32, west: metre-wide noise stretched up the banks into lime leaf shapes at the cuts' foot, n19_11605_r) */, wd = w.r * (1.0 - wc), wl = w.b * (1.0 - wc);
         vec3 cGrass = texture2D(gGrass, p / gRep.z).rgb; if (steep > 0.002) cGrass = mix(cGrass, texture2D(gGrass, side / gRep.z).rgb, steep);
         float far = smoothstep(40.0, 160.0, length(vGdW - cameraPosition));
+        // (A33: metres of ground under one pixel; each fine pattern fades to its mean once it is a few pixels across: far off it read as grit, user 2026-11-05)
+        float pxm = length(fwidth(vGdW.xz)); float aaS = 1.0 - smoothstep(0.35, 1.0, pxm), aaM = 1.0 - smoothstep(1.0, 3.0, pxm);
         cGrass = mix(cGrass, texture2D(gGrass, p / (gRep.z * 7.3)).rgb, far * 0.6);
         { float sk = smoothstep(0.5, 0.68, texture2D(gNoise, p / 2.3 + 0.17).g) * smoothstep(0.36, 0.6, texture2D(gNoise, p / 13.0 + 0.41).r);
-          cGrass = mix(cGrass, vec3(dot(cGrass, vec3(0.3, 0.55, 0.15))) * vec3(0.8, 0.92, 0.66), sk * 0.75); }
+          cGrass = mix(cGrass, vec3(dot(cGrass, vec3(0.3, 0.55, 0.15))) * vec3(0.8, 0.92, 0.66), sk * 0.75 * aaS); }
         cGrass = mix(cGrass, cGrass * vec3(0.94, 1.14, 0.66) * 1.06, inW * clamp((1.0 - w.a) / 0.5, 0.0, 1.0) * (1.0 - w.r) * (1.0 - w.g));
         { vec2 bu = (p - gBox.xy) * gBox.zw; float outBox = smoothstep(0.0, 0.04, max(max(-bu.x, bu.x - 1.0), max(-bu.y, bu.y - 1.0))) * (1.0 - inW);
           float streak = smoothstep(0.45, 0.7, texture2D(gNoise, vec2(p.x / 38.0, p.y / 9.0) + 0.29).g);
           cGrass = mix(cGrass, cGrass * vec3(0.78, 1.1, 0.62) * (1.0 - 0.35 * streak), outBox); }
         vec3 c = cGrass;
         if (wl > 0.002) {
-        vec3 cLit = texture2D(gLitter, p / gRep.w).rgb; if (steep > 0.002) cLit = mix(cLit, texture2D(gLitter, side / gRep.w).rgb, steep);
-        cLit = mix(cLit, texture2D(gLitter, p / (gRep.w * 6.1)).rgb, far * 0.6);
-        { float m1 = texture2D(gNoise, p / 9.0 + 0.3).g, m3 = texture2D(gNoise, p / 3.7 + 0.11).b;
+        vec3 cLit = textureGrad(gLitter, p / gRep.w, dPx / gRep.w, dPy / gRep.w).rgb; if (steep > 0.002) cLit = mix(cLit, textureGrad(gLitter, side / gRep.w, dSx / gRep.w, dSy / gRep.w).rgb, steep);
+        cLit = mix(cLit, textureGrad(gLitter, p / (gRep.w * 6.1), dPx / (gRep.w * 6.1), dPy / (gRep.w * 6.1)).rgb, far * 0.6);
+        { float m1 = textureGrad(gNoise, p / 9.0 + 0.3, dPx / 9.0, dPy / 9.0).g, m3 = textureGrad(gNoise, p / 3.7 + 0.11, dPx / 3.7, dPy / 3.7).b;
           cLit = mix(cLit, vec3(0.2, 0.25, 0.12), smoothstep(0.35, 0.75, m1) * 0.55);
-          cLit = mix(cLit, vec3(0.27, 0.30, 0.19), smoothstep(0.4, 0.8, m3) * 0.45);
-          cLit *= mix(1.0, 0.72, smoothstep(0.6, 0.95, w.b)); cLit *= mix(1.0, 0.62, inW * smoothstep(0.75, 1.0, w.b)); if (inW > 0.5) { cLit = mix(cLit, vec3(0.36, 0.38, 0.28), smoothstep(0.2, 0.85, texture2D(gNoise, p / 6.0 + 0.23).r) * 0.2); cLit = mix(cLit, vec3(0.13, 0.16, 0.09), smoothstep(0.2, 0.9, texture2D(gNoise, p / 2.6 + 0.67).g) * 0.2); } }
+          cLit = mix(cLit, vec3(0.27, 0.30, 0.19), smoothstep(0.4, 0.8, m3) * 0.45 * aaS);
+          cLit *= mix(1.0, 0.72, smoothstep(0.6, 0.95, w.b)); cLit *= mix(1.0, 0.62, inW * smoothstep(0.75, 1.0, w.b)); if (inW > 0.5) { cLit = mix(cLit, vec3(0.36, 0.38, 0.28), smoothstep(0.2, 0.85, textureGrad(gNoise, p / 6.0 + 0.23, dPx / 6.0, dPy / 6.0).r) * 0.2); cLit = mix(cLit, vec3(0.13, 0.16, 0.09), smoothstep(0.2, 0.9, textureGrad(gNoise, p / 2.6 + 0.67, dPx / 2.6, dPy / 2.6).g) * 0.2); } }
           c = mix(c, cLit, clamp(wl, 0.0, 1.0)); }
         if (wd > 0.002) {
-        vec3 cDirt = texture2D(gDirt, p / gRep.x).rgb; if (steep > 0.002) cDirt = mix(cDirt, texture2D(gDirt, side / gRep.x).rgb, steep);
+        vec3 cDirt = textureGrad(gDirt, p / gRep.x, dPx / gRep.x, dPy / gRep.x).rgb; if (steep > 0.002) cDirt = mix(cDirt, textureGrad(gDirt, side / gRep.x, dSx / gRep.x, dSy / gRep.x).rgb, steep);
         cDirt = mix(cDirt, cDirt * vec3(0.92, 0.6, 0.6), clamp((1.0 - w.a) / 0.5, 0.0, 1.0));
           c = mix(c, cDirt, clamp(wd, 0.0, 1.0)); }
         if (wc > 0.002) {
         // mixed; grey-green tufts in clumps over it)
         // (three lookups at different angles and scales: the scan's level strata averaged out into fractured rock)
         vec2 sr = mat2(0.62, -0.78, 0.78, 0.62) * side;
-        vec3 cFace = (texture2D(gCut, side / (gRep.y * 0.45)).rgb + texture2D(gCut, side.yx / (gRep.y * 1.15) + 0.37).rgb + texture2D(gCut, sr / (gRep.y * 0.7) + 0.71).rgb) / 3.0;
+        vec3 cFace = (textureGrad(gCut, side / (gRep.y * 0.45), dSx / (gRep.y * 0.45), dSy / (gRep.y * 0.45)).rgb + textureGrad(gCut, side.yx / (gRep.y * 1.15) + 0.37, dSx.yx / (gRep.y * 1.15), dSy.yx / (gRep.y * 1.15)).rgb + textureGrad(gCut, sr / (gRep.y * 0.7) + 0.71, dRx / (gRep.y * 0.7), dRy / (gRep.y * 0.7)).rgb) / 3.0;
         // (cz_1105_a: pale weathered rock showing through the red in patches a metre or two across)
-        cFace = mix(cFace, vec3(0.50, 0.44, 0.38) * (0.8 + 0.4 * texture2D(gNoise, side / 0.6).b), 0.14 * smoothstep(0.66, 0.74, texture2D(gNoise, side / 1.7 + 0.51).b));
+        cFace = mix(cFace, vec3(0.50, 0.44, 0.38) * (0.8 + 0.4 * textureGrad(gNoise, side / 0.6, dSx / 0.6, dSy / 0.6).b), 0.14 * smoothstep(0.66, 0.74, textureGrad(gNoise, side / 1.7 + 0.51, dSx / 1.7, dSy / 1.7).b));
         // (A32, n9_505_a, w61_11010_r: the photos' cuts ribbed and broken: ribs down the fall line a few metres apart, crossed fractures, small dark gaps between stones; no extra geometry)
-        if (steep > 0.01) { float r32a = smoothstep(0.34, 0.68, texture2D(gNoise, vec2(side.x / 5.5, side.y / 34.0) + 0.21).r), r32b = smoothstep(0.38, 0.72, texture2D(gNoise, vec2(sr.x / 1.7, sr.y / 9.0) + 0.33).g), r32c = smoothstep(0.3, 0.6, texture2D(gNoise, side / 0.42 + 0.17).b);
+        if (steep > 0.01) { float r32a = smoothstep(0.34, 0.68, textureGrad(gNoise, vec2(side.x / 5.5, side.y / 34.0) + 0.21, vec2(dSx.x / 5.5, dSx.y / 34.0), vec2(dSy.x / 5.5, dSy.y / 34.0)).r), r32b = smoothstep(0.38, 0.72, textureGrad(gNoise, vec2(sr.x / 1.7, sr.y / 9.0) + 0.33, vec2(dRx.x / 1.7, dRx.y / 9.0), vec2(dRy.x / 1.7, dRy.y / 9.0)).g), r32c = smoothstep(0.3, 0.6, textureGrad(gNoise, side / 0.42 + 0.17, dSx / 0.42, dSy / 0.42).b);
           cFace *= mix(0.62, 1.22, r32a * 0.55 + r32b * 0.45) * mix(0.78, 1.06, r32c); }
-        vec3 cTop31 = (texture2D(gCut, p / (gRep.y * 0.45)).rgb + texture2D(gCut, p.yx / (gRep.y * 1.15) + 0.37).rgb + texture2D(gCut, p / (gRep.y * 0.7) + 0.71).rgb) / 3.0;  // (A31: the face's own mix, on the ground plane: no stretch on the bank's flat facets, w8_11050_r; no plain dirt, w9_11050_r)
+        vec3 cTop31 = (textureGrad(gCut, p / (gRep.y * 0.45), dPx / (gRep.y * 0.45), dPy / (gRep.y * 0.45)).rgb + textureGrad(gCut, p.yx / (gRep.y * 1.15) + 0.37, dPx.yx / (gRep.y * 1.15), dPy.yx / (gRep.y * 1.15)).rgb + textureGrad(gCut, p / (gRep.y * 0.7) + 0.71, dPx / (gRep.y * 0.7), dPy / (gRep.y * 0.7)).rgb) / 3.0;  // (A31: the face's own mix, on the ground plane: no stretch on the bank's flat facets, w8_11050_r; no plain dirt, w9_11050_r)
         // (A32, w61_11010_r, cz_11050_r: the banks' stone in thin slanted layers, broken along them, loose stones between; on the bank's flat facets too)
-        if (rb31 > 0.0) { vec2 q32 = mat2(0.87, -0.5, 0.5, 0.87) * p + (vec2(texture2D(gNoise, p / 19.0 + 0.3).r, texture2D(gNoise, p / 7.0 + 0.6).g) - 0.5) * 9.0;  // (warped: straight rows read as a weave, n11_11050_r)
-          float s32 = smoothstep(0.3, 0.62, texture2D(gNoise, vec2(q32.x / 13.0, q32.y / 1.5) + 0.41).r), t32 = smoothstep(0.32, 0.6, texture2D(gNoise, vec2(q32.x / 3.4, q32.y / 0.5) + 0.77).g), u32 = smoothstep(0.34, 0.62, texture2D(gNoise, p / 0.38 + 0.11).b);
+        if (rb31 > 0.0) { vec2 q32 = mat2(0.87, -0.5, 0.5, 0.87) * p + (vec2(textureGrad(gNoise, p / 19.0 + 0.3, dPx / 19.0, dPy / 19.0).r, textureGrad(gNoise, p / 7.0 + 0.6, dPx / 7.0, dPy / 7.0).g) - 0.5) * 9.0;  // (warped: straight rows read as a weave, n11_11050_r)
+          float s32 = smoothstep(0.3, 0.62, textureGrad(gNoise, vec2(q32.x / 13.0, q32.y / 1.5) + 0.41, vec2(dPx.x / 13.0, dPx.y / 1.5), vec2(dPy.x / 13.0, dPy.y / 1.5)).r), t32 = smoothstep(0.32, 0.6, textureGrad(gNoise, vec2(q32.x / 3.4, q32.y / 0.5) + 0.77, vec2(dPx.x / 3.4, dPx.y / 0.5), vec2(dPy.x / 3.4, dPy.y / 0.5)).g), u32 = smoothstep(0.34, 0.62, textureGrad(gNoise, p / 0.38 + 0.11, dPx / 0.38, dPy / 0.38).b);
           cTop31 *= mix(0.66, 1.24, s32 * 0.5 + t32 * 0.5) * mix(0.76, 1.08, u32); }
-        vec3 cCut = mix(mix(texture2D(gCut, p / gRep.y).rgb, cTop31, rb31), cFace, steep);
+        vec3 cCut = mix(mix(textureGrad(gCut, p / gRep.y, dPx / gRep.y, dPy / gRep.y).rgb, cTop31, rb31), cFace, steep);
         // (the tufts' clumps and blades from the game's noise texture: its values spread evenly, unlike a grass tile's)
         // (cz_1105_l: green scrub patches over about a quarter of the face)
-        { float clump = smoothstep(0.52, 0.64, texture2D(gNoise, side / 7.0 + 0.13).r), blade = smoothstep(0.45, 0.65, texture2D(gNoise, side / 0.9).g);
+        { float clump = smoothstep(0.52, 0.64, textureGrad(gNoise, side / 7.0 + 0.13, dSx / 7.0, dSy / 7.0).r), blade = smoothstep(0.45, 0.65, textureGrad(gNoise, side / 0.9, dSx / 0.9, dSy / 0.9).g);
           // (A22, a19g_1105_l: the tufts grey-green sage and dry grass, not lime: the grass tile half greyed, its green held back)
-          vec3 tg = texture2D(gGrass, side / 0.9).rgb; vec3 tuft = mix(vec3(dot(tg, vec3(0.3, 0.55, 0.15))), tg, 0.45) * vec3(1.02, 1.08, 0.9);
+          vec3 tg = textureGrad(gGrass, side / 0.9, dSx / 0.9, dSy / 0.9).rgb; vec3 tuft = mix(vec3(dot(tg, vec3(0.3, 0.55, 0.15))), tg, 0.45) * vec3(1.02, 1.08, 0.9);
           cCut = mix(cCut, tuft, clump * blade * 0.8 * steep * (1.0 - rb31) * mix(0.35, 1.0, clamp((w.a - 0.4) / 0.6, 0.0, 1.0))); }  // (A32, n11_11605_r: fewer pale tufts on the dark rock)
         // (the splat's alpha below 1: the chert dark grey-brown there, cz_1205_l, cz_1380_l)
         cCut = mix(cCut, vec3(dot(cCut, vec3(0.3, 0.55, 0.15))) * vec3(0.92, 0.86, 0.80) * 0.62, 0.8 * clamp((1.0 - w.a) / 0.6, 0.0, 1.0));  // (A32: darker, n11_11605_r)

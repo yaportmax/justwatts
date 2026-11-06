@@ -117,13 +117,16 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
       view: { at: pointAt(cur.ll, cur.D, cur.done), m: 1600 }, others });
   }
   // other riders as 3D markers: a dot and "name watts", friends and group mates highlighted
+  // (A34: a marker's check whether the terrain hides it reads the terrain's coordinates back from the GPU every frame (readPixels): 7 s of
+  // an 18 s live profile, the ride's frames at 50 ms for ten seconds after the start; the chase camera never puts a hill in front of them)
+  const noOcclusion = m => { m._updateOpacity = () => {}; return m; };
   function syncMarks() {
     if (!map || !ready || !globalThis.maplibregl) return;
     const keep = new Set();
     for (const o of shown()) {
       keep.add(o.id);
       let m = marks.get(o.id);
-      if (!m) { const el = document.createElement('div'); el.className = 'rmo'; m = new globalThis.maplibregl.Marker({ element: el, anchor: 'left', offset: [-6, 0] }).setLngLat([o.lon, o.lat]).addTo(map); marks.set(o.id, m); }
+      if (!m) { const el = document.createElement('div'); el.className = 'rmo'; m = noOcclusion(new globalThis.maplibregl.Marker({ element: el, anchor: 'left', offset: [-6, 0] })).setLngLat([o.lon, o.lat]).addTo(map); marks.set(o.id, m); }
       const el = m.getElement(); el.classList.toggle('hi', !!o.hi);  // classList: MapLibre adds its own classes
       if (!el.firstChild) el.innerHTML = '<i></i><span></span>';
       el.lastChild.textContent = o.label;
@@ -232,7 +235,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
       map = new ml.Map({ container: v3, style: spec(), attributionControl: false, interactive: false, fadeDuration: 0, maxPitch: 75,
         center: [cur.ll[0][1], cur.ll[0][0]], zoom: 14, pitch: 60, transformRequest: url => ({ url, referrerPolicy: 'strict-origin' }) });  // OSM needs the origin
       const dot = document.createElement('div'); dot.className = 'rmapdot';
-      rider = new ml.Marker({ element: dot }).setLngLat([cur.ll[0][1], cur.ll[0][0]]).addTo(map);
+      rider = noOcclusion(new ml.Marker({ element: dot })).setLngLat([cur.ll[0][1], cur.ll[0][0]]).addTo(map);
       map.on('load', () => { ready = true; draw(); syncMarks(); });
       map.on('error', e => console.warn('map:', e?.error?.message || e));
     } catch (e) {

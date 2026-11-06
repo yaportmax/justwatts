@@ -42,7 +42,7 @@ QUIET_PATHS = ("/api/state", "/api/health",
 # open world fetches OpenStreetMap roads from Overpass (roads.js OVERPASS).
 MAP_TILES = "https://tile.openstreetmap.org https://server.arcgisonline.com https://tile.opentopomap.org https://a.tile-cyclosm.openstreetmap.fr"
 OVERPASS = "https://overpass-api.de https://maps.mail.ru"
-CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; "
        f"img-src 'self' data: blob: {MAP_TILES}; connect-src 'self' blob: {MAP_TILES} https://s3.amazonaws.com {OVERPASS}; "
        "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 # headers a reverse proxy or tunnel adds: such a request came from the network, not this computer

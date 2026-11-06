@@ -44,7 +44,7 @@ def test_vercel_headers(dist):
     v = json.loads((dist / "vercel.json").read_text())
     h = {x["key"]: x["value"] for x in v["headers"][0]["headers"]}
     csp = h["Content-Security-Policy"]
-    assert "default-src 'self'" in csp and "script-src 'self' 'wasm-unsafe-eval' https://www.googletagmanager.com;" in csp and "worker-src 'self';" in csp
+    assert "default-src 'self'" in csp and "script-src 'self' 'wasm-unsafe-eval' https://www.googletagmanager.com;" in csp and "worker-src 'self' blob:;" in csp
     connect = re.search(r"connect-src ([^;]+);", csp).group(1).split()                 # map tiles, terrain, GA4 only
     ga = {"https://*.google-analytics.com", "https://*.analytics.google.com", "https://www.googletagmanager.com"}
     assert connect[:2] == ["'self'", "blob:"] and all(h.startswith("https://") and ("*" not in h or h in ga) for h in connect[2:])

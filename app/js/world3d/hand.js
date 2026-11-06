@@ -5,6 +5,9 @@
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { GLTFLoader } from '../../vendor/three-0.180.0/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from '../../vendor/three-0.180.0/addons/libs/meshopt_decoder.module.js';
+// (A34: the meshes' decoding in two workers, off the main thread: each chunk and plant group arriving after the loading screen had held
+// frames at 50 ms for about ten seconds on the live site, lw1/lw2 20 to 30 s; CSP worker-src blob: in web/vercel.json)
+try { if (typeof Worker !== 'undefined' && !globalThis.__w3?.noMeshoptWorkers) MeshoptDecoder.useWorkers(Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1))); } catch {}
 import { textures } from './tex.js';
 import { HZ_LAYER } from './horizon.js';
 

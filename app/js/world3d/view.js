@@ -1340,7 +1340,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (left out only in the near tiles whose own trees are drawn: no tile without trees while its own are built)
       if (c.farImp) { const U = c.farImp.material.userData.u, u = U.nearBox.value, R = Math.max(0, rings.at(-1)), X = Math.floor(tileX(lon, NEAR_Z)), Y = Math.floor(tileY(lat, NEAR_Z));
         u.set(proj.x(lonOf(X - R, NEAR_Z)), proj.z(latOf(Y - R, NEAR_Z)), proj.x(lonOf(X + R + 1, NEAR_Z)), proj.z(latOf(Y + R + 1, NEAR_Z)));
-        let bits = 0; for (let j = 0; j <= 2 * R; j++) for (let i = 0; i <= 2 * R; i++) { const n = near.get(key(NEAR_Z, X - R + i, Y - R + j)); if (n && n.group.visible && !n.ease && (n.parts.trees !== undefined || n.tile === null)) bits |= 1 << (j * (2 * R + 1) + i); }
+        let bits = 0; for (let j = 0; j <= 2 * R; j++) for (let i = 0; i <= 2 * R; i++) { const n = near.get(key(NEAR_Z, X - R + i, Y - R + j)); if (n) bits |= 1 << (j * (2 * R + 1) + i); }  // (A33: left out in every near tile, built or not: on the coarse far grid a valley's trees stood tens of metres over it, floating crowns at McCullough Road's start; a near tile's own trees come in a moment later)
         U.nearBits.value = bits; U.nearN.value = 2 * R + 1; }
     }
     farDirty = false;

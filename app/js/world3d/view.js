@@ -39,7 +39,7 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // radius and its full models' radius
 // (A33: no generated scrub bushes or filler shrubs: they came in only within a few dozen metres and the Headlands' open hills had round trees that are not there, user 2026-11-05;
 // the ground's own scrub colour stays, the lidar's trees and the hand list's plants stay)
-const SCRUB_ON = true, SHRUBS_ON = false;
+const SCRUB_ON = false, SHRUBS_ON = false;  // (the generated scrub too: it grew in within a hundred metres, jarring, user 2026-11-05)
 export const QUALITY = [
   { name: 'high', shadow: 1536, span: 70, pr: 1.25, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38] },
   { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30] },
@@ -747,7 +747,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // with a sheer side there, pillars on Bunker Road; cut off at the edge instead, its outer side stood sheer)
       const gx0 = Math.min(g.xs[0], g.xs[g.segs]) + 0.01, gx1 = Math.max(g.xs[0], g.xs[g.segs]) - 0.01, gz0 = Math.min(g.zs[0], g.zs[g.segs]) + 0.01, gz1 = Math.max(g.zs[0], g.zs[g.segs]) - 0.01;
       const cl = (x, z) => [Math.max(gx0, Math.min(gx1, x)), Math.max(gz0, Math.min(gz1, z))];
-      const ground = (x, z) => gridHeight(g, ...cl(x, z)), raw = (x, z) => gridHeight(g, ...cl(x, z), g.raw), n1 = g.segs + 1;
+      // (past it the next near tile's own fine grid when that is in: clamped heights there stood the strips' outer sides sheer, slabs along the tile edges, user 2026-11-05)
+      const nb = (x, z, w) => { const [tx, ty] = tileOf(x, z), n = near.get(key(NEAR_Z, tx, ty)); return n && n !== c && n.lod === 0 && n.grid ? gridHeight(n.grid, x, z, w ? n.grid.raw : n.grid.hs) : null; };
+      const ground = (x, z) => gridHeight(g, x, z) ?? nb(x, z, false) ?? gridHeight(g, ...cl(x, z)), raw = (x, z) => gridHeight(g, x, z, g.raw) ?? nb(x, z, true) ?? gridHeight(g, ...cl(x, z), g.raw), n1 = g.segs + 1;
       const osm = new Map(), ok = (x, z) => `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
       for (const line of t.rails || []) for (const [x, z] of resample(line.map(([la, lo]) => proj.xz(la, lo)), 2)) (osm.get(ok(x, z)) ?? osm.set(ok(x, z), []).get(ok(x, z))).push([x, z]);
       // (a mapped rail beside this edge: from a metre and a half inside it to 6 m out, within 4 m along)

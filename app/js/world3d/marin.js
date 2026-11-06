@@ -215,9 +215,11 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   }
   for (let s = 1112; s <= S1 - 8; s += 32) {
     const top = deckH(s) - 4.75, e = GGB.deckW / 2 - 0.4, L = D(s, -e, 0), R = D(s, e, 0), at = (p, y) => new THREE.Vector3(p.x, y, p.z);
-    for (const p of [L, R]) { const o = new THREE.Mesh(new THREE.BoxGeometry(1.2, top + 20, 1.6), orange); o.position.set(p.x, (top - 20) / 2, p.z); o.rotation.y = p.yaw; o.castShadow = true; o.receiveShadow = true; bridge.add(o); }
+    // (1208's east leg stood on the bike path's mapped line)
+    for (const p of s === 1208 ? [L] : [L, R]) { const o = new THREE.Mesh(new THREE.BoxGeometry(1.2, top + 20, 1.6), orange); o.position.set(p.x, (top - 20) / 2, p.z); o.rotation.y = p.yaw; o.castShadow = true; o.receiveShadow = true; bridge.add(o); }
     strut(at(L, top - 0.6), at(R, top - 0.6), 1.2);
-    for (let y = top - 0.6; y - 9 > -20; y -= 9) { strut(at(L, y), at(R, y - 9), 0.45); strut(at(R, y), at(L, y - 9), 0.45); strut(at(L, y - 9), at(R, y - 9), 0.5); }
+    // (A33: no X bracing in the two towers the paths pass through, the Vista Point Trail at 1336 and the bike path at 1208 (OpenStreetMap); the rider rode through the members, user 2026-11-05)
+    if (s !== 1208 && s !== 1336) for (let y = top - 0.6; y - 9 > -20; y -= 9) { strut(at(L, y), at(R, y - 9), 0.45); strut(at(R, y), at(L, y - 9), 0.45); strut(at(L, y - 9), at(R, y - 9), 0.5); }
   }
   // a member from point p to point q, w thick
   function strut(p, q, w) { const o = new THREE.Mesh(new THREE.BoxGeometry(w, w, p.distanceTo(q)), orange); o.position.copy(p).add(q).multiplyScalar(0.5); o.lookAt(q); o.castShadow = true; o.receiveShadow = true; bridge.add(o); return o; }

@@ -54,7 +54,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
       E.runs.forEach((r, jj) => { for (let k = 0; k + 1 < r.length; k += 2) M.fill(1, jj * E.nx + r[k], jj * E.nx + r[k] + r[k + 1]); });
       state.extAt = (x, z) => { const i = Math.round((x - E.x0) / E.step), jj = Math.round((z - E.z0) / E.step); return i >= 0 && i < E.nx && jj >= 0 && jj < E.nz && M[jj * E.nx + i] === 1; }; }
     const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder), mats = new Map();
-    const grp = c => c.s0 < 5000 ? 0 : c.s0 < 11322 ? 1 : c.s0 < 12822 ? 2 : 3, groups = new Map(); for (const c of j.chunks) { const k = grp(c); (groups.get(k) ?? groups.set(k, []).get(k)).push(c); }
+    const grp = c => c.s0 >= 20000 ? 100 + Math.floor(c.s0 / 1000) : c.s0 < 5000 ? 0 : c.s0 < 11322 ? 1 : c.s0 < 12822 ? 2 : 3,  /* (A33: the other roads a group per kilometre: all of them one group loaded 85 MB at once and the ride stalled) */ groups = new Map(); for (const c of j.chunks) { const k = grp(c); (groups.get(k) ?? groups.set(k, []).get(k)).push(c); }
     // (a group stays hidden until all its chunks are in, and counts as present only then: a late load shows the generated ground it replaces, never a part of the
     // corridor standing in it)
     async function addChunk(c, into, box) {

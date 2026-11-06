@@ -108,7 +108,11 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const tags = document.createElement('div'); tags.className = 'w3tags'; container.appendChild(tags);
   // a cover over the world until the tiles round the rider are built (at the start and after a jump to another place):
   // never the rider on the bare ground with the road drawn in over them a moment later
-  const veil = document.createElement('div'); veil.className = 'w3veil'; veil.textContent = 'Loading';
+  const veil = document.createElement('div'); veil.className = 'w3veil';
+  // (A33: what is loading, step by step, and how far each is: the user wanted to see it, and to be let in only to a finished place)
+  veil.innerHTML = '<div style="display:grid;gap:10px;min-width:240px"><div style="font-size:15px;font-weight:600;color:#e6eaf0;letter-spacing:.02em">Building the world</div><div class="w3steps" style="display:grid;gap:6px;font-size:12px"></div><div style="height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden"><i class="w3bar" style="display:block;height:100%;width:0;background:#4aa3ff;transition:width .3s"></i></div></div>';
+  const vSteps = veil.querySelector('.w3steps'), vBar = veil.querySelector('.w3bar'); let vLast = '';
+  const showSteps = list => { const html = list.map(([name, f]) => `<div style="display:flex;justify-content:space-between;gap:16px;color:${f >= 1 ? '#7fd48a' : '#aab3bf'}"><span>${name}</span><span>${f >= 1 ? 'done' : Math.round(f * 100) + '%'}</span></div>`).join(''); if (html !== vLast) { vSteps.innerHTML = html; vLast = html; } vBar.style.width = Math.round(100 * list.reduce((a, [, f]) => a + Math.min(1, f), 0) / list.length) + '%'; };
   veil.style.cssText = 'position:absolute;inset:0;display:grid;place-items:center;background:var(--bg,#0f1115);color:var(--mut,#8a93a0);font-size:13px;letter-spacing:.04em;pointer-events:none;transition:opacity .5s';
   container.appendChild(veil); let veilAt = performance.now(), veilP = null;
   // (A33: and while the world is still building round the rider after the cover is off: a small sign, after half a second of it, gone a second after; user 2026-11-05)
@@ -2031,7 +2035,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         else { busySince = 0; idleSince ||= now; if (busyOn && now - idleSince > 1000) { busyOn = false; busyTag.style.opacity = '0'; } } }
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
       const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
-      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) : ready && HVEG.first && underMe(p) && jobs.size < 2) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      if (veilAt) { const nl = [...near.values()].filter(c => c.lod === 0), part = k => nl.length ? nl.filter(c => c.parts[k] !== undefined).length / nl.length : 0;
+        showSteps([['Map and roads', nl.length ? nl.filter(c => c.tile !== undefined).length / nl.length : 0], ['Ground', nl.length ? nl.filter(c => c.built).length / nl.length : 0], ['Road surfaces', part('roads')],
+          ['Hand-built roads', HAND.notHere() ? 0.5 : 1], ['Trees', part('trees')], ['Buildings', part('bldg')], ['Plants', HVEG.first ? 1 : 0.3], ['Finishing', jobs.size < 2 ? 1 : Math.max(0, 1 - jobs.size / 40)]]); }
+      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) && jobs.size < 2 : ready && HVEG.first && underMe(p) && jobs.size < 2) && now - veilAt > 600) || now - veilAt > 60000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);

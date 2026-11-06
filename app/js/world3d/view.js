@@ -722,7 +722,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // closed, runs under 6 m left out
     const rails = [], bk = { pos: [], cut: [], vg: [], idx: [], ends: [] }, bankRuns = [], bankH = new Map(), bankS = new Map(), bankG = new Set();
     if (sides.length && ridden(g) && !globalThis.__w3?.noBanks) {  // (__w3.noBanks: profiling)
-      const ground = (x, z) => gridHeight(g, x, z) ?? groundAt(x, z), raw = (x, z) => gridHeight(g, x, z, g.raw), n1 = g.segs + 1;
+      // (A33: past this tile's grid its own edge heights, not the next tile's ground: that tile may be coarse or not in yet, and a strip stood up a hillside's height
+      // with a sheer side there, pillars on Bunker Road; cut off at the edge instead, its outer side stood sheer)
+      const gx0 = Math.min(g.xs[0], g.xs[g.segs]) + 0.01, gx1 = Math.max(g.xs[0], g.xs[g.segs]) - 0.01, gz0 = Math.min(g.zs[0], g.zs[g.segs]) + 0.01, gz1 = Math.max(g.zs[0], g.zs[g.segs]) - 0.01;
+      const cl = (x, z) => [Math.max(gx0, Math.min(gx1, x)), Math.max(gz0, Math.min(gz1, z))];
+      const ground = (x, z) => gridHeight(g, ...cl(x, z)), raw = (x, z) => gridHeight(g, ...cl(x, z), g.raw), n1 = g.segs + 1;
       const osm = new Map(), ok = (x, z) => `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
       for (const line of t.rails || []) for (const [x, z] of resample(line.map(([la, lo]) => proj.xz(la, lo)), 2)) (osm.get(ok(x, z)) ?? osm.set(ok(x, z), []).get(ok(x, z))).push([x, z]);
       // (a mapped rail beside this edge: from a metre and a half inside it to 6 m out, within 4 m along)
@@ -740,8 +744,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (nor over a car park or a pad: it lies on the ground eased up to the road's edge within 3 m (A12: a strip up the
       // lidar's ground over the carve hid Mitchell Road's lot and Conzelman 0a_2030's turnout under grass))
       const inLot = (x, z) => lotRings.some(r => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) if ((r[i][1] > z) !== (r[j][1] > z) && x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c; return c; });
-      // (A33: nor past this tile's own grid: the next tile may not be in yet, its ground then read as the road's level, and the strip stood up a hillside's height with a sheer outer side, two pillars on Bunker Road; that tile draws its own)
-      const block = (x, z, ey) => { if (gridHeight(g, x, z) == null) return true; if (lotRings.length && inLot(x, z) && Math.abs((ground(x, z) ?? ey) - ey) < 3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
+      const block = (x, z, ey) => { if (lotRings.length && inLot(x, z) && Math.abs((ground(x, z) ?? ey) - ey) < 3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
         const S = SI.S, ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, tu = L2 ? ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2 : 0, t = Math.max(0, Math.min(1, tu));
         if (tu > -0.05 && tu < 1.05 && Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) < S[k + 6] && Math.abs(S[k + 1] + (S[k + 4] - S[k + 1]) * t - ey) < 8) return true; } return false; };
       // one edge's strips (banks.js): into the banks' geometry; nothing grows where a strip stands off the ground (grass,

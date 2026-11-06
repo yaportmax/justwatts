@@ -182,7 +182,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     try {
       const m = await import('./world3d/view.js');
       if (!cur || kind() !== 'world') return;
-      wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, onQuality: q => store.set('hw.worldQ', q), quality: store.get('hw.worldQ', 0),
+      wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, onQuality: q => store.set('hw.worldQ', q), quality: store.get('hw.worldQ', null),
         time: store.get('hw.worldTime', 'day'), sound: soundOn(), fog: store.get('hw.worldFog', true) !== false, kit: KITS[store.get('hw.worldKit', 0) % KITS.length] });
       wv.update(worldState());
     } catch (e) { worldFail(e?.message || String(e)); }

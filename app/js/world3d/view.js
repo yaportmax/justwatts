@@ -37,17 +37,22 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // (segs) and upsampling near the rider (up), draw distance, post-processing (bloom, MSAA samples, fog volume steps),
 // grass radius and clumps per square metre, ground detail (bump, close-up noise), the full trees' radius, the scrub's
 // radius and its full models' radius
+// (A33: no generated scrub bushes or filler shrubs: they came in only within a few dozen metres and the Headlands' open hills had round trees that are not there, user 2026-11-05;
+// the ground's own scrub colour stays, the lidar's trees and the hand list's plants stay)
+const SCRUB_ON = true, SHRUBS_ON = false;
 export const QUALITY = [
   { name: 'high', shadow: 1536, span: 70, pr: 1.25, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38] },
   { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30] },
   { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18] },
+  // (A33: lowest, for weak computers and phones: fewer pixels, no grass, little scrub, a shorter view; the governor settles here and never gives up)
+  { name: 'lowest', shadow: 0, span: 0, pr: 0.6, trees: 0.2, rings: [1, 1], far: 1, segs: 64, up: 1, view: 14000, post: false, bloom: false, msaa: 0, grass: [12, 0.5], detail: false, treeNear: 70, scrub: [30, 10] },
 ];
 const CAP = 22000;  // trees per tile at full share (a denser tile is thinned evenly)
 // trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
 // wood (mixed, broadleaf, needleleaf), and ground no tree grows on (rock, sand, water). [class, metres between trees,
 // share of the spots kept, leaf type]
 const treeCode = f => ({ grass: 1, farm: 2, urban: 3, park: 4, scrub: 5, rock: 9, sand: 9, water: 9 })[f.k] ?? (f.k === 'wood' ? (f.lt === 'b' ? 7 : f.lt === 'n' ? 8 : 6) : 0);
-const TREE = [null, ['grass', 70, 0.6], ['farm', 90, 0.6], ['urban', 14, 0.65], ['park', 24, 1], ['scrub', 8, 1], ['wood', 11, 1, 'm'], ['wood', 11, 1, 'b'], ['wood', 11, 1, 'n'], null];
+const TREE = [null, ['grass', 140, 0.4], ['farm', 140, 0.4], ['urban', 32, 0.5], ['park', 40, 0.8], ['scrub', 8, 1], ['wood', 15, 1, 'm'], ['wood', 15, 1, 'b'], ['wood', 15, 1, 'n'], null];  // (A33: thinner: rows of round trees where Street View has open grass and a few, user 2026-11-05)
 const OCC = 512;  // the road mask per tile: cells of about 3.8 m (no grass, trees or shrubs on a road)
 const PORT = 12;  // metres of open cut before a tunnel's portal
 // the barriers' kinds (handlist.js): k; off: their posts' line out from the paved edge (m); gap: a post every gap metres;
@@ -88,8 +93,17 @@ const TYRE = 0.04;
 const ARCHED = [{ at: [37.8380, -122.4830], walls: [[[37.83810, -122.48318], [10, 0.04, 1.3], [3, 0.1, 2]], [[37.83790, -122.48288], [22, 0.02, 1], [4, 0.6, 1]]] }];
 
 // life: the cars, walkers and birds (life.js), off by default (they cost frames; __w3.life turns them on for checks)
+export function guessQuality(renderer) {
+  let gpu = ''; try { const gl = renderer.getContext(), x = gl.getExtension('WEBGL_debug_renderer_info'); gpu = String(x ? gl.getParameter(x.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)); } catch {}
+  const nav = globalThis.navigator || {}, ua = nav.userAgent || '', phone = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (nav.maxTouchPoints > 1 && /Macintosh/.test(ua) && !globalThis.matchMedia?.('(pointer:fine)').matches);
+  const cores = nav.hardwareConcurrency || 4, mem = nav.deviceMemory || 8;
+  if (/SwiftShader|llvmpipe|Software|Microsoft Basic/i.test(gpu)) return 3;
+  if (phone || /Mali|Adreno|PowerVR|Apple A\d|Videocore/i.test(gpu)) return 2;
+  if (/Intel|Apple/i.test(gpu) || cores <= 4 || mem <= 4) return 1;
+  return 0;
+}
 export function createWorldView({ container, baked, getOthers = () => [], onFail = () => {}, onQuality = () => {}, quality = 0, time = 'golden', sound = true, fog = true, kit = null, life: lifeOn = !!globalThis.__w3?.life }) {
-  let q = Math.max(0, Math.min(2, quality)), dead = false, raf = 0;
+  let q = 0, dead = false, raf = 0;
   const canvas = document.createElement('canvas'); canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block'; container.appendChild(canvas);
   const tags = document.createElement('div'); tags.className = 'w3tags'; container.appendChild(tags);
   // a cover over the world until the tiles round the rider are built (at the start and after a jump to another place):
@@ -97,12 +111,19 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
   const veil = document.createElement('div'); veil.className = 'w3veil'; veil.textContent = 'Loading';
   veil.style.cssText = 'position:absolute;inset:0;display:grid;place-items:center;background:var(--bg,#0f1115);color:var(--mut,#8a93a0);font-size:13px;letter-spacing:.04em;pointer-events:none;transition:opacity .5s';
   container.appendChild(veil); let veilAt = performance.now(), veilP = null;
+  // (A33: and while the world is still building round the rider after the cover is off: a small sign, after half a second of it, gone a second after; user 2026-11-05)
+  const busyTag = document.createElement('div'); busyTag.className = 'w3busy'; busyTag.textContent = 'Loading';
+  busyTag.style.cssText = 'position:absolute;left:50%;top:132px;transform:translateX(-50%);padding:4px 12px;border-radius:999px;background:rgba(15,17,21,.62);color:#c9d1db;font-size:12px;letter-spacing:.04em;pointer-events:none;opacity:0;transition:opacity .3s;z-index:2';
+  container.appendChild(busyTag); let busySince = 0, idleSince = 0, busyOn = false;
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', logarithmicDepthBuffer: true, failIfMajorPerformanceCaveat: false });
   } catch (e) { canvas.remove(); tags.remove(); veil.remove(); throw e; }
   if (!renderer.capabilities.isWebGL2) { renderer.dispose(); canvas.remove(); tags.remove(); veil.remove(); throw new Error('no WebGL2'); }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // (A33: the level to start at: the one kept from the last ride, else a guess from the device: software rendering the lowest, a phone or tablet low,
+  // an integrated or Apple chip on a small machine medium, else high; the governor moves it from there)
+  q = quality != null && quality >= 0 ? Math.min(QUALITY.length - 1, Math.round(quality)) : guessQuality(renderer);
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = [THREE.PCFSoftShadowMap, THREE.PCFShadowMap, THREE.BasicShadowMap][globalThis.__w3?.smType ?? 0]; renderer.shadowMap.autoUpdate = false;
   renderer.info.autoReset = false;
@@ -276,7 +297,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (c.group.visible && far.get(parentOf(k))?.skipped?.has(k)) { leaving.get(k) && disposeObj(leaving.get(k).group); leaving.set(k, c); } else disposeObj(c.group);
   }
   // (A33: the tile under the rider fine and its roads drawn: off the Conzelman line the veil lifted on the tiles' ground alone, McCullough Road's start showed no road and trees over a coarse hill)
-  const underMe = p => { const c0 = near.get(key(NEAR_Z, ...tileOf(p[0], p[1]))); return !!c0 && c0.lod === 0 && c0.built && !!c0.parts.roads; };  // (a drawn road: the rider is on one; null was a placeholder before the grid)
+  const underMe = p => { const c0 = near.get(key(NEAR_Z, ...tileOf(p[0], p[1]))); return !!c0 && c0.lod === 0 && c0.built && !!c0.parts.roads && c0.parts.trees !== undefined && c0.parts.bldg !== undefined; };  /* (A33: and its trees and buildings: Bunker Road's start was bare for half a minute) */  // (a drawn road: the rider is on one; null was a placeholder before the grid)
   function setPart(c, name, obj) { if (c.parts[name]) disposeObj(c.parts[name]); c.parts[name] = obj; if (obj) c.group.add(obj); if (c.ease) easePart(c, name, obj); }
   // easing a near tile in: every vertex of its parts (ground, roads and banks, buildings) starts at the far tile's ground
   // under it, as far over or under it as it is over its own ground, and comes to its place over EASE ms: a morph target
@@ -963,6 +984,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const p = (patch - 0.55) * 1.6 + north * 0.5 + Math.max(0, c.cv[v]) * 0.9 + (mk[8 * v + 1] > 0 ? -0.2 : 0) + (hlT ? 0.45 : 0);
         if (hash2(ix * 3, iz * 5) > p) continue;
         const r = hash2(ix, iz * 3);
+        if (!SHRUBS_ON) continue;
         add(r < (hlT ? 0.92 : 0.78) ? 'bush' : 'shrub', px, pz, (0.7 + 0.8 * hash2(iz, ix + 1)) * (hlT ? 1.6 : 1), r); shrubs++;
         if (shrubs % 600 === 0) yield;
       }
@@ -1252,7 +1274,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     yield;
     for (let j = 0; j < R; j++) for (let i = 0; i < R; i++) {
       if (i === 0 && j % 16 === 15) yield;
-      const k = ras[j * (R + 1) + i]; if (k < 5 || k > 8) continue;  // scrub and woods
+      const k = ras[j * (R + 1) + i]; if (k < (SHRUBS_ON ? 5 : 6) || k > 8) continue;  // scrub and woods
       const area = Math.abs((xs[i + 1] - xs[i]) * (zs[j + 1] - zs[j])), N = area / (step * step) * (k === 5 ? 0.4 : 1);
       for (let m = 0, cnt = Math.floor(N) + (hash2(i, j + c.y) < N % 1 ? 1 : 0); m < cnt; m++) {
         const x = xs[i] + (xs[i + 1] - xs[i]) * hash2(i * 13 + m, j), z = zs[j] + (zs[j + 1] - zs[j]) * hash2(j * 17 + m, i), h = gridHeight(c.grid, x, z);
@@ -1345,7 +1367,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (left out only in the near tiles whose own trees are drawn: no tile without trees while its own are built)
       if (c.farImp) { const U = c.farImp.material.userData.u, u = U.nearBox.value, R = Math.max(0, rings.at(-1)), X = Math.floor(tileX(lon, NEAR_Z)), Y = Math.floor(tileY(lat, NEAR_Z));
         u.set(proj.x(lonOf(X - R, NEAR_Z)), proj.z(latOf(Y - R, NEAR_Z)), proj.x(lonOf(X + R + 1, NEAR_Z)), proj.z(latOf(Y + R + 1, NEAR_Z)));
-        let bits = 0; for (let j = 0; j <= 2 * R; j++) for (let i = 0; i <= 2 * R; i++) { const n = near.get(key(NEAR_Z, X - R + i, Y - R + j)); if (n) bits |= 1 << (j * (2 * R + 1) + i); }  // (A33: left out in every near tile, built or not: on the coarse far grid a valley's trees stood tens of metres over it, floating crowns at McCullough Road's start; a near tile's own trees come in a moment later)
+        let bits = 0; for (let j = 0; j <= 2 * R; j++) for (let i = 0; i <= 2 * R; i++) { const n = near.get(key(NEAR_Z, X - R + i, Y - R + j)); if (n && ((Math.abs(i - R) <= 1 && Math.abs(j - R) <= 1) || (n.group.visible && !n.ease && (n.parts.trees !== undefined || n.tile === null)))) bits |= 1 << (j * (2 * R + 1) + i); }  // (A33: the 3x3 round the rider always left out (floating crowns at McCullough Road's start on the coarse far grid); further out only once a tile's own trees are drawn, else no trees there for half a minute)
         U.nearBits.value = bits; U.nearN.value = 2 * R + 1; }
     }
     farDirty = false;
@@ -1488,7 +1510,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (h0 == null || !(v >= 0 && v < n * n)) return null;
     // (on a strip's steep face too where the lidar has scrub (cellBushes decides): Street View Conzelman 0a_1030, the cut
     // above the road under scrub; leaning with the face (below))
-    const h = standOn(c, x, z, h0) ?? c.bankS?.get(bkey(x, z)); if (h == null) return { skip: true };
+    const h = standOn(c, x, z, h0); if (h == null) return { skip: true };  // (A33: none on a strip's steep face: they stood off its facets, floating bushes on jagged walls, user 2026-11-05)
     if (c.bankG?.has(bkey(x, z))) return { skip: true };
     if (onTunnel(x, z, h)) return { skip: true };
     // (the road cuts bare (Street View: red chert) where the lidar does not say what grows there; where it does, it decides
@@ -1930,7 +1952,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     renderer.shadowMap.enabled = Q.shadow > 0; sky.sun.castShadow = Q.shadow > 0;
     if (Q.shadow) { sky.sun.shadow.mapSize.set(Q.shadow, Q.shadow); sky.sun.shadow.map?.dispose(); sky.sun.shadow.map = null; }
     camera.far = Q.view; camera.updateProjectionMatrix();
-    sky.set(sky.time); post.build({ ...Q, ...(globalThis.__w3?.post || {}) }); sky.setVolume(post.fog); grass.set(...Q.grass); scrub.set(...Q.scrub); VEG.near.value = Q.scrub[0];
+    sky.set(sky.time); post.build({ ...Q, ...(globalThis.__w3?.post || {}) }); sky.setVolume(post.fog); grass.set(...Q.grass); scrub.set(...Q.scrub); VEG.near.value = SCRUB_ON ? Q.scrub[0] : 0;
     size = ''; poke();
     scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   }
@@ -1974,9 +1996,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     ft.sort((a, b) => a - b); const med = ft[ft.length >> 1] || 0; ft = [];
     if (med > 1 / 50) { slow++; fast = 0; } else { slow = 0; if (med < 1 / 75) fast++; }
     // (A33: the level kept for the next ride, onQuality: a slower machine starts where it ended, not on high again; one step back up a ride when it runs fast for 20 s)
-    if (slow >= 2 && q < 2) { q++; slow = 0; fast = 0; applyQuality(); onQuality(q); }
+    if (slow >= 2 && q < QUALITY.length - 1) { q++; slow = 0; fast = 0; applyQuality(); onQuality(q); }
     else if (fast >= 8 && q > 0 && !raised) { q--; fast = 0; raised = true; applyQuality(); onQuality(q); }
-    else if (slow >= 4 && q === 2) fail(new Error('too slow'));
+    // (at the lowest it stays: a slow device keeps the world, not the flat map)
   }
   function frame(now) {
     raf = 0; if (dead) return;
@@ -2001,6 +2023,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       { const tn = tunnelAt(p[0], p[1], eleAt(d)); if (tn) { const k = tn.k * tn.k * (3 - 2 * tn.k), sx = tn.x + rx * 1.4, sz = tn.z + rz * 1.4; p = [p[0] + (sx - p[0]) * k, p[1] + (sz - p[1]) * k]; } }
       if (veilP && Math.hypot(p[0] - veilP[0], p[1] - veilP[1]) > 150) { veilAt = now; veil.style.transition = 'none'; veil.style.opacity = '1'; }  // a jump: cover it again
       veilP = p;
+      { const busy = !veilAt && (jobs.size > 2 || !!HAND.busy || !!HVEG.busy || !ready);
+        if (busy) { idleSince = 0; busySince ||= now; if (!busyOn && now - busySince > 500) { busyOn = true; busyTag.style.opacity = '1'; } }
+        else { busySince = 0; idleSince ||= now; if (busyOn && now - idleSince > 1000) { busyOn = false; busyTag.style.opacity = '0'; } } }
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
       const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
       if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) : ready && HVEG.first && underMe(p) && jobs.size < 2) && now - veilAt > 600) || now - veilAt > 30000))  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
@@ -2013,7 +2038,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const lat = proj.lat(p[1]), lon = proj.lon(p[0]);
       stream(lat, lon, now);
       const PF = globalThis.__w3?.prof, pm = PF ? [c0] : null, mark = PF ? () => pm.push(performance.now()) : () => {}, gq0 = PF && globalThis.__w3.gpu ? gpuTime.begin() : null;
-      jobs.run(globalThis.__w3?.budget ?? (q === 2 ? 2.5 : 4)); mark();  // (__w3.budget: tools that only want it built)
+      jobs.run(globalThis.__w3?.budget ?? (q >= 2 ? 2.5 : 4)); mark();  // (__w3.budget: tools that only want it built)
       if (easing.size) easeStep(performance.now());
       marks.update(camera, dt);
       // the full trees follow the rider: split a tile again after 60 m, unless it is all far away and already all simple
@@ -2025,11 +2050,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const dbg = globalThis.__w3 || {};  // dev switches for profiling: { noGrass, noScrub, life, noImp, noHi, noSm, noTerrain, gpu }
       life.show(lifeOn);
       if (dbg.noImp || dbg.noHi || dbg.noSm || dbg.noTerrain || dbg.noFurn) { renderer.shadowMap.enabled = !dbg.noSm; for (const c of near.values()) { if (c.imp) c.imp.visible = !dbg.noImp; if (c.parts.furn) c.parts.furn.visible = !dbg.noFurn; if (c.parts.terrain && dbg.noTerrain) c.parts.terrain.visible = false; for (const t of c.treeSets || []) if (t.hi && dbg.noHi) t.hi.visible = false; } }
-      mark(); if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 2); if (ready && !dbg.noScrub) scrub.update(camPos.x || p[0], camPos.z || p[1], q === 2 ? 1 : 1.5, Math.min(40, QUALITY[q].span)); mark();
+      mark(); if (ready && !dbg.noGrass) grass.update(camPos.x || p[0], camPos.z || p[1], q >= 2 ? 1 : 2); if (ready && SCRUB_ON && !dbg.noScrub) scrub.update(camPos.x || p[0], camPos.z || p[1], q >= 2 ? 1 : 1.5, Math.min(40, QUALITY[q].span)); mark();
       WIND.time.value += dt; WIND.gust.value = 0.55 + 0.35 * Math.sin(now / 7300) * Math.sin(now / 3100);
       syncOthers(dt, now); arrows();
       lifeDt += dt;
-      if (lifeOn && !dbg.noLife && (q < 2 || frames % 2 === 0)) life.update(lifeDt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt,
+      if (lifeOn && !dbg.noLife && (q < 2 || frames % (q >= 3 ? 3 : 2) === 0)) life.update(lifeDt, { rider: { x: p[0], y, z: p[1], v, yaw }, ground: groundAt,
         riders: [{ x: p[0], z: p[1], v }, ...[...others.values()].map(e => ({ x: e.r.group.position.x, z: e.r.group.position.z, v: e.v || 0 }))], roads: () => {
         const out = []; for (const c of near.values()) if (c.lod === 0 && c.drive) for (const r of c.drive) if (Math.hypot(r.P[0][0] - p[0], r.P[0][2] - p[1]) < 900 || Math.hypot(r.P.at(-1)[0] - p[0], r.P.at(-1)[2] - p[1]) < 900) out.push(r);
         return out; } }), lifeDt = 0;
@@ -2139,7 +2164,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // world sound on or off
     setSound(on) { return audio.set(on); }, sound: () => audio.on,
     stats: () => ({ wait: { plantsIn: HVEG.first, handHere: !HAND.notHere(), handBusy: !!HAND.busy, plantsBusy: !!HVEG.busy, veil: veilAt > 0 }, fps, quality: QUALITY[q].name, near: near.size, far: far.size, jobs: jobs.size + (HVEG.busy ? 1 : 0) + (HAND.busy || HAND.pending?.() ? 1 : 0), ready: ready && warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 10, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, grass: grass.count, scrub: scrub.count, life: life.counts, cpu: { js: +cpu.js.toFixed(2), draw: +cpu.draw.toFixed(2), max: +cpu.max.toFixed(1) }, gpu: gpuTime.stat, slow: jobs.slow, long: jobs.long }),
-    setQuality(n) { q = Math.max(0, Math.min(2, n)); applyQuality(); },
+    setQuality(n) { q = Math.max(0, Math.min(QUALITY.length - 1, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
     debug: () => ({ scene, camera, THREE, renderer, horizon: hz, sky, post, gpuMs: gpuTime.ms, me: me.group.position.toArray(), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), raw: (c => c?.grid ? gridHeight(c.grid, x, z, c.grid.raw) : null)(near.get(key(NEAR_Z, ...tileOf(x, z)))), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown) == null ? null : profY(dShown) + TYRE, lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z),

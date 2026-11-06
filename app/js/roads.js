@@ -70,6 +70,7 @@ export class RoadGraph {
     for (const w of ways) {
       if (this.ways.has(w.id)) continue;
       this.ways.add(w.id);
+      if (w.up && (w.hw === 'service' || w.hw === 'track' || !w.name)) continue;  // (A33: an unpaved service road or unnamed dirt way is no route: a ride turned onto a dirt track, user 2026-11-05; the world still draws it)
       for (let i = 0; i < w.nodes.length; i++) {
         const id = w.nodes[i];
         let n = this.nodes.get(id); if (!n) this.nodes.set(id, n = { id, lat: w.pts[i][0], lon: w.pts[i][1], adj: [] });

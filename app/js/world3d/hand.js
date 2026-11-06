@@ -134,6 +134,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 // toggles near cells: no matrices are rewritten after load.
 export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert = m => m }) {
   const group = new THREE.Group(); group.name = 'handVeg'; scene.add(group); group.updateMatrixWorld = () => {};  // (A32: every plant mesh an identity matrix at the origin: not walked each frame)
+  const DROP = new Set(['brush', 'brushg', 'mat_o', 'mat_g', 'mat_l', 'mat_d', 'mat_r']);  // (and the scrub carpets: they read as rows of corn up the slopes, user 2026-11-05)
   const sets = [], CELL = 32, cam = { value: new THREE.Vector3(1e9, 0, 1e9) }; let own = null;
   // owns(x, z): inside the corridor this list owns (veg.json own: a 2 m bit grid), where the generated scrub and trees
   // give way; onOwn() once that is known
@@ -196,6 +197,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     let off = 0; t0 = performance.now();
     for (const [sp, n] of Object.entries(G.species)) {
       const st = J.stride?.[sp] || 7, a = new Float32Array(buf, off, n * st); off += n * st * 4;
+      if (DROP.has(sp)) continue;  // (A33: the round brush domes by the road dropped, user 2026-11-05: 'these bushes so bad just remove them')
       const M = await model(sp); if (!M) continue; t0 = performance.now();
       // lod1: every plant of the group, written once
       for (const p of M.parts[1]) {

@@ -161,6 +161,9 @@ export class Plan {
       let j = k; while (j > 1 && this.wayAt(j)?.rb) j--;
       const inB = this.inBearing(j), exits = o.filter(x => !x.w.rb).map(x => ({ ...x, b: Math.abs(turn(inB, this.g.outBearing(this.seq[k].id, x.to))) })).sort(by(x => x.b));
       const round = o.find(x => x.w.rb);
+      // (A33: the road we came in on, by name, before the straightest: at Conzelman's roundabout with McCullough a ride up Conzelman turned down McCullough, user 2026-11-05)
+      const inW = this.wayAt(j - 1), sameEx = inW?.name && exits.find(x => x.w.name === inW.name);
+      if (sameEx) return sameEx.to;
       if (exits.length && (exits[0].b <= 60 || !round || k - j > 30)) return exits[0].to;
       if (round) return round.to;
     }

@@ -587,6 +587,7 @@ export function buildingMaterial() {
           vec2 q = vec2(vBw.x / bay, vBw.y / fh), cell = floor(q), f = fract(q);
           float ground = step(cell.y, 0.5) * step(-0.5, cell.y);
           float s = ground > 0.5 ? mod(style + floor(mod(cell.x * 7.0 + style, 3.0)) * (style == 6.0 ? 0.0 : 1.0), 8.0) : style;
+          if (style == 5.0 && ground > 0.5) s = mod(cell.x * 7.0, 5.0) < 1.0 ? 0.0 : 5.0;  // (A37: siding's ground floor its sashes and now and then a door, not shop or lobby glass, fieldroad_0b_0830)
           vec2 org = vec2(mod(s, 4.0), floor(s / 4.0) + ground * 2.0);
           vec2 uv = (org + vec2(f.x, 1.0 - f.y)) / 4.0;
           vec4 w = textureGrad(tWin, uv, dFdx(q) / 4.0 * vec2(1.0, -1.0), dFdy(q) / 4.0 * vec2(1.0, -1.0));

@@ -311,12 +311,25 @@ export function furnitureGeometries() {
     // a stop sign (MUTCD R1-1, 30 inches across its flats): a red octagon, a narrow white border, STOP in white letters
     // 10 inches high; its back grey
     stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [oct(0.412, 0.02, 0.01), white], [oct(0.392, 0.02, 0.03), red], [oct(0.412, 0.008, -0.004), grey], ...stopLetters().map(g => [g, white])]),
+    // (A37, handlist.js SIGNS) a warning sign (MUTCD W-series, 30 in): a yellow diamond with a black border and a black
+    // symbol, its centre 2.25 m up, on a grey post from 0.6 m under the ground (the hand ground may stand over the grid's);
+    // warnp: with a yellow plate (24 by 18 in) under it; board: a park's board, dark brown, on two timber posts
+    warn: merge(warnSign(false)),
+    warnp: merge(warnSign(true)),
+    board: merge([[B(0.1, 2.3, 0.1, -0.55, 0.55, 0), wood], [B(0.1, 2.3, 0.1, 0.55, 0.55, 0), wood], [B(1.35, 0.85, 0.06, 0, 1.25, 0.06), col(0x3a2a1e)], [B(1.2, 0.7, 0.01, 0, 1.25, 0.095), col(0x4a3a2c)], [B(1.0, 0.06, 0.012, 0, 1.45, 0.1), col(0xd8cfb8)]]),
     limit: merge([[C(0.035, 0.035, 2.4, 6), grey], [B(0.6, 0.76, 0.03, 0, 2.15, 0.03), white], [B(0.5, 0.06, 0.035, 0, 2.38, 0.04), dark], [B(0.3, 0.26, 0.035, 0, 2.05, 0.04), dark]]),
     fence: merge([[B(0.12, 1.25, 0.12, 0, 0.62, 0), wood], [B(0.12, 1.25, 0.12, 3, 0.62, 0), wood], ...[0.45, 0.8, 1.12].map(y => [B(3, 0.1, 0.04, 1.5, y, 0.06), wood])]),
     picket: merge([...Array.from({ length: 12 }, (_, i) => [B(0.09, 0.95, 0.025, 0.12 + i * 0.25, 0.47, 0), white]), [B(3, 0.07, 0.04, 1.5, 0.3, -0.03), white], [B(3, 0.07, 0.04, 1.5, 0.75, -0.03), white]]),
     signal: merge([[C(0.1, 0.08, 4.4), grey], ...signalHead(3.55)]),
     signalHead: merge(signalHead(0)),
   };
+  function warnSign(plate) {
+    const yel = col(0xe6b41e), blk = col(0x1c1c1c), y = 2.25, dia = (r, d, z, c) => [new THREE.CylinderGeometry(r, r, d, 4).rotateX(Math.PI / 2).translate(0, y, z), c];
+    const out = [[C(0.035, 0.035, y + 0.6, 6).translate(0, -0.6, 0), grey], dia(0.54, 0.02, 0.01, blk), dia(0.5, 0.02, 0.025, yel), dia(0.54, 0.008, -0.004, grey),
+      [B(0.07, 0.42, 0.004, -0.09, y, 0.037), blk], [B(0.07, 0.42, 0.004, 0.09, y, 0.037), blk], [B(0.17, 0.08, 0.004, -0.09, y + 0.2, 0.037), blk], [B(0.17, 0.08, 0.004, 0.09, y - 0.2, 0.037), blk]];
+    if (plate) out.push([B(0.61, 0.46, 0.02, 0, y - 0.82, 0.02), yel], [B(0.61, 0.46, 0.008, 0, y - 0.82, 0.005), grey], [B(0.42, 0.05, 0.004, 0, y - 0.82, 0.032), blk]);
+    return out;
+  }
   // a signal head centred at height y: backplate, the housing, red, amber and green lamps under their visors
   function signalHead(y0) {
     return [[B(0.62, 1.32, 0.03, 0, y0, -0.02), dark], [B(0.38, 1.1, 0.28, 0, y0, 0.13), col(0x2a2c2e)],
@@ -486,6 +499,29 @@ export function buildingGeometry(list) {
       if (area > 120 && fill > 0.6) for (let i = 0, n = 1 + Math.floor(h(19) * 3); i < n; i++) {
         const s = (h(30 + i) - 0.5) * L * 0.5, t = (h(40 + i) - 0.5) * w * 0.5, p = P(s, t, 0), sz = 0.8 + 1.4 * h(50 + i);
         box(p[0], top, p[2], sz, 0.9 + 1.2 * h(60 + i), sz * (0.6 + 0.6 * h(70 + i)), ux, uz, col(i ? 0xa6a39e : 0xbdb9b2));
+      }
+    }
+    // (A37: a fort building's front toward its road (b.front, view.js): Fort Baker's long two storey barracks round Murray
+    // Circle with their two storey verandas, white posts, a floor at each storey, a roof over (Street View
+    // murraycircle_0a_0230, s3_murraycircle_1a_0430); elsewhere (Fort Barry, Cronkhite, the cottages) a small entry porch
+    // with steps, posts and a lean-to (fieldroad_0b_0830, w_bunker3))
+    if (lid && b.front) {
+      const fx = b.front[0], fz = b.front[1], tside = -uz * fx + ux * fz, sside = ux * fx + uz * fz;
+      let len, off, Q, au, av;
+      if (Math.abs(tside) * L >= Math.abs(sside) * w * 0.8) { const sd = Math.sign(tside) || 1; len = L; off = w / 2; Q = (a, o) => P(a, sd * (off + o), 0); au = ux; av = uz; }
+      else { const sd = Math.sign(sside) || 1; len = w; off = L / 2; Q = (a, o) => P(sd * (off + o), a, 0); au = -uz; av = ux; }
+      const wh = col(0xf2f0ea), deck = col(0xb8b2a6), y0 = Math.max(b.base, Math.min(b.gy ?? b.base, b.base + hw - 3.2)), slab = (a0, a1, o0, o1, ya, th, k) => { const c = Q((a0 + a1) / 2, (o0 + o1) / 2); box(c[0], ya, c[2], Math.abs(a1 - a0) / 2, th, Math.abs(o1 - o0) / 2, au, av, k); };
+      if (b.baker && b.h >= 5.5 && len > 15) {
+        const D = 2.6, a0 = -len / 2 + 0.6, a1 = len / 2 - 0.6, yr = Math.min(y0 + 6.6, b.base + hw - 0.2);
+        slab(a0, a1, 0, D, y0 + 0.35, 0.18, deck); slab(a0, a1, 0, D, y0 + 3.3, 0.18, deck); slab(a0 - 0.2, a1 + 0.2, -0.1, D + 0.25, yr, 0.16, rc);
+        for (let a = a0; a <= a1 + 0.01; a += (a1 - a0) / Math.max(1, Math.round((a1 - a0) / 3.0))) { const c = Q(a, D - 0.12); box(c[0], y0, c[2], 0.13, yr - y0, 0.13, au, av, wh); }
+        for (const yy of [y0 + 3.48 + 0.85, y0 + 0.53 + 0.85]) slab(a0, a1, D - 0.2, D - 0.06, yy, 0.1, wh);  // the rails
+        slab(a0, a1, D - 0.15, D - 0.11, y0 + 3.5, 0.82, col(0xdcd8cf));  // (the upper balustrade read as one pale band from the road: its balusters a few cm apart)
+      } else if (len > 5 && b.h < 8) {
+        const W2 = Math.min(3.6, len * 0.4) / 2, ac = (h(80) - 0.5) * Math.max(0, len - 2 * W2 - 2) * 0.8, D = 1.8;
+        slab(ac - W2, ac + W2, 0, D, y0 + 0.2, 0.3, deck); slab(ac - W2 - 0.2, ac + W2 + 0.2, -0.1, D + 0.25, y0 + 2.75, 0.12, rc);
+        for (const a of [ac - W2 + 0.1, ac + W2 - 0.1]) { const c = Q(a, D - 0.1); box(c[0], y0, c[2], 0.07, 2.75, 0.07, au, av, wh); }
+        slab(ac - 0.7, ac + 0.7, D, D + 0.9, y0 + 0.0, 0.25, deck);  // a step
       }
     }
   }

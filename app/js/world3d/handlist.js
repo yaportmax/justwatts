@@ -313,3 +313,21 @@ export const CUTS = [
   // (its upper part: the lidar's bare steep cells 8 to 15 m north of the road's middle, the bank below them under cover)
   { pts: [[37.840014, -122.480517], [37.840021, -122.48063], [37.840037, -122.480744], [37.840041, -122.480857]], w: 6 },
 ];
+
+// SIGNS (A37): roadside signs Street View shows and OpenStreetMap has not (its only traffic_sign nodes in the Headlands are
+// the two county signs on the bridge; its stop signs are drawn from highway=stop): [lat, lon, the heading of the traffic
+// that reads it, kind, plate]. Kinds (props.js): 'warn' a yellow diamond warning sign (W-series, 30 in) on a post, plate:
+// a yellow plate under it; 'limit' a white regulatory sign; 'board' a park's dark brown board on two posts. Placed from the
+// all-roads survey's ahead photos (cache/roads, fov 90) and review pairs: the ray through the sign's pixel column out to its
+// size's distance (a 30 in diamond 1.07 m across its points) or to the road's edge plus its set back (work/bldg/signs).
+export const SIGNS = [
+  [37.835957, -122.484203, 237, 'warn', 1],   // Alexander Avenue toward the US-101 underpass: two-way traffic, a plate under it (cz_21655_a, pano 8ClWPo4_2ExXLpKITmockQ)
+  [37.836231, -122.502993, 47, 'warn', 1],    // Bunker Road at the Rodeo Lagoon crossing: pedestrian crossing, the arrow plate (cz_33225_a, HL46wXHW9bOsyuHGuhP2PQ)
+  [37.836269, -122.502966, 47, 'board'],      // and the park's board beyond it (cz_33225_a)
+  [37.823122, -122.528772, 353, 'warn'],      // Field Road north of the Point Bonita junction (cz_40260_a, Q5Q5Ma2w724gadRWYebD-w)
+  [37.835130, -122.477152, 106, 'warn', 1],   // New Breitung Road at Fort Baker's crossing: pedestrian crossing, plate (cz_320040_a, Fdi1g_fJOolhTkHRF_Bhew)
+  [37.836956, -122.480802, 186, 'warn'],      // McReynolds Road (cz_220110_a, xDQZMZrH8d5ScTp50wHznA)
+  [37.839062, -122.484602, 304, 'warn'],      // Bunker Road's bend above the bay, for the climb (its back seen from w_bunker0, nVjM6IkE4RR9WpRUKrobJQ)
+  [37.839000, -122.484648, 124, 'limit'],     // and the small white sign on the right going down (w_bunker0)
+  [37.835174, -122.477702, 206, 'board'],     // Center Road: the park's dark board on the lawn (w_center0, JYjnBNb58VPlnO2ezvq9cQ)
+];

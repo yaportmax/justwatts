@@ -13,7 +13,7 @@ import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_L
 import { compileSpec, specPaint, SECTIONS as CZ_SECTIONS, RAILS as CZ_RAILS, LOTS as CZ_LOTS, CROSSWALKS as CZ_WALKS } from './conzelman.js';
 import { createEdit } from './edit.js';
 import { loadHand, loadVeg as loadHandPlants, loadScrub } from './hand.js';
-import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS } from './handlist.js';
+import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS, SIGNS } from './handlist.js';
 import { LIDAR_BLDG } from './bldglidar.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
@@ -498,7 +498,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     // (v: 1 a road's cells (its half width and 1.2 m, the cells coarser than a verge), 2 a car park's or a building's)
     const mark = (x, z, r, v = 1) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = Math.max(occ[b * OCC + a], v); };
-    const handT = [], czPaint = [], lanes = [], drive = [], lines = [], tops = [], surf = [], sides = [], gends = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
+    const handT = [], czPaint = [], lanes = [], drive = [], lines = [], handLines = [], tops = [], surf = [], sides = [], gends = [], tbox = [Math.min(g.xs[0], g.xs[g.segs]), Math.min(g.zs[0], g.zs[g.segs]), Math.max(g.xs[0], g.xs[g.segs]), Math.max(g.zs[0], g.zs[g.segs])];
     // ways that go on as one road drawn as one ribbon (no seam where OpenStreetMap splits a road), corners rounded
     t.chained ??= chainWays(t.roads, r => r.fl & 3 ? null : `${r.hw}|${r.ln}|${r.fl}|${r.wd}`);
     // where one road's ways of different layouts meet, the width eases from one to the other (no step)
@@ -614,6 +614,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const BB = pts.hand ? builder() : B, i0 = BB.idx.length, centre = ribbon(BB, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : 5, joints: t.joints.get(ri), drape: trail, mk, flares: fl, wAt: RI?.widthOf && !trail ? RI.widthOf : null, xs: !trail && !dk ? CZ.edges : null });
       const spec = centre.some(q => q.sp); if (spec && !pts.hand) czPaint.push(centre);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
+      if (pts.hand && !trail && centre.length > 1) handLines.push({ P: centre, w: st.w, hw: r.hw, lm: st.lm, hand: true });  // (A37: the hand-built stretch's centre for the stop signs on it: OpenStreetMap's highway=stop there had no road to stand by)
       if (pts.hand) { for (const v of BB.idx) handT.push(BB.pos[3 * v], BB.pos[3 * v + 1], BB.pos[3 * v + 2]); centre.forEach((q, i) => { mark(q[0], q[2], q[3] + 1.2); lanes.push(q[0], q[2], q[3]); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, q[3] + 1.2); } }); continue; }
       tops.push([i0, B.idx.length, trail]);
       if (!spec && !st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk, lm: st.lm, b: st.b, park: !!(r.fl & 256), st });
@@ -841,7 +842,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     yield;
     c.rails = rails; c.bankRuns = bankRuns; c.bankH = bankH; c.bankS = bankS; c.bankG = bankG;  // (the runs: the seams check, debug().seamData)
     { const T = []; for (const [a, b, trail] of tops) if (trail === true) for (let k = a; k < b; k++) { const v = B.idx[k]; T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]); } c.trailPts = T; }
-    c.surf = roadIndex(surf); c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c));  // no grass or scrub on the roads
+    c.surf = roadIndex(surf); c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; c.handLines = handLines; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c));  // no grass or scrub on the roads
     if (!B.n) return setPart(c, 'roads', null);
     yield;
     const d = B.done(), geo = new THREE.BufferGeometry();
@@ -1086,20 +1087,21 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
      signs where a small road meets another, a speed limit now and then, ranch fences along farm roads, picket fences
      in front of houses. Fine tiles only; one draw per kind. ---------- */
   function* buildFurniture(c) {
-    const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines?.length) return setPart(c, 'furn', null);
+    const t = c.tile; if (!t || !c.grid || c.lod > 0 || !c.lines) return setPart(c, 'furn', null);  // (A37: a tile all hand-built roads still gets its signs)
+    const LL = c.lines.concat(c.handLines || []);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], warn: [], warnp: [], board: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
     const cell = new Map(), ck = (x, z) => `${Math.floor(x / 10)},${Math.floor(z / 10)}`;
-    c.lines.forEach((L, li) => L.P.forEach(p => { const k = ck(p[0], p[2]); (cell.get(k) ?? cell.set(k, []).get(k)).push(li); }));
+    LL.forEach((L, li) => L.P.forEach(p => { const k = ck(p[0], p[2]); (cell.get(k) ?? cell.set(k, []).get(k)).push(li); }));
     // the nearest point of a drawn road's centre to (x, z) within r metres: [point [x, y, z, half width, ...], its line,
     // its direction (dx, dz)], or null
     const nearLine = (x, z, r) => { let best = null, bd = r * r;
       for (let u = -1; u <= 1; u++) for (let w = -1; w <= 1; w++) for (const li of cell.get(`${Math.floor(x / 10) + u},${Math.floor(z / 10) + w}`) || []) {
-        const Q = c.lines[li].P; for (let k = 0; k < Q.length; k++) { const d = (Q[k][0] - x) ** 2 + (Q[k][2] - z) ** 2; if (d < bd) { bd = d; const a = Q[Math.max(0, k - 1)], b = Q[Math.min(Q.length - 1, k + 1)]; best = [Q[k], c.lines[li], [b[0] - a[0], b[2] - a[2]]]; } }
+        const Q = LL[li].P; for (let k = 0; k < Q.length; k++) { const d = (Q[k][0] - x) ** 2 + (Q[k][2] - z) ** 2; if (d < bd) { bd = d; const a = Q[Math.max(0, k - 1)], b = Q[Math.min(Q.length - 1, k + 1)]; best = [Q[k], LL[li], [b[0] - a[0], b[2] - a[2]]]; } }
       }
       return best; };
     // OpenStreetMap's marked crossings (only where it tags them marked, bake_world.mjs): across the road at its nearest
@@ -1121,11 +1123,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const r = hd * Math.PI / 180, fx = Math.sin(r), fz = -Math.cos(r), [x0, z0] = proj.xz(la, lo), x = x0 - fx * back, z = z0 - fz * back, hit = nearLine(x, z, 4); if (!hit) continue;
       const [q, L] = hit, half = q[3] ?? L.w / 2, nx = -fz, nz = fx, two = L.lm === 2 || !!o.half, yaw = Math.atan2(-fx, -fz);
       // (on the road's centre line that far back, the right half's middle, along it: the approach may curve)
-      if (o.legend) { const d = o.legend + 1.4, h2 = nearLine(x - fx * d, z - fz * d, 6); if (h2) { const [p2, L2, e2] = h2, el = Math.hypot(e2[0], e2[1]) || 1, ex = e2[0] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), ez = e2[1] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), hf2 = (p2[3] ?? L2.w / 2) / 2;
+      if (o.legend && !L.hand) { const d = o.legend + 1.4, h2 = nearLine(x - fx * d, z - fz * d, 6); if (h2) { const [p2, L2, e2] = h2, el = Math.hypot(e2[0], e2[1]) || 1, ex = e2[0] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), ez = e2[1] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), hf2 = (p2[3] ?? L2.w / 2) / 2;
         put('stopword', p2[0] - ez * hf2, p2[1] + 0.03, p2[2] + ex * hf2, Math.atan2(-ex, -ez)); } }
       { const sx = x + nx * (half + 0.8), sz = z + nz * (half + 0.8); put('stop', sx, Math.min(q[1] - 0.25, (hAt(sx, sz) ?? q[1]) - 0.1), sz, yaw); }  // (its foot in the ground: never over a fill's slope)
-      put('stopbar', x + nx * (two ? half / 2 : 0), q[1] + 0.03, z + nz * (two ? half / 2 : 0), yaw, (two ? half : 2 * half) / 3.2);
+      if (!L.hand) put('stopbar', x + nx * (two ? half / 2 : 0), q[1] + 0.03, z + nz * (two ? half / 2 : 0), yaw, (two ? half : 2 * half) / 3.2);  // (a hand-built road paints its own)
     }
+    // (A37: the hand list's roadside signs, Street View: facing the traffic that reads them, on the lidar's ground under them
+    // (the grid's carved ground lay 2.7 m under the hand-built bank at Bunker Road's crossing: the sign was buried))
+    for (const [la, lo, hd, kind, plate] of SIGNS.filter(inTile)) { const r = hd * Math.PI / 180, [x, z] = proj.xz(la, lo), y = raw(x, z) ?? hAt(x, z); if (y == null) continue; put(kind === 'warn' && plate ? 'warnp' : kind, x, y - 0.05, z, Math.atan2(-Math.sin(r), Math.cos(r))); }
     for (const [li, L] of c.lines.entries()) {
       if (li % 4 === 3) yield;
       const P = L.P, n = P.length, hw = i => P[i][3] ?? L.w / 2, big = /motorway|trunk|primary|secondary|tertiary/.test(L.hw), small = /residential|unclassified|living|road|service/.test(L.hw);
@@ -1174,7 +1179,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const POST = { wbeam: ['tpost', 0.8], wbeamg: ['gpost', 0.8], cable: ['kpost', 1], cablev: ['kpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
     for (const R of c.rails || []) { const P = POST[R.kind]; if (P) for (const [x, y, z, yaw] of R.posts) { const bot = Math.min(y, hAt(x, z) ?? y) - 0.3; items[P[0]].push([x, bot, z, yaw, y + P[1] - bot]); } }
     // (the feet of what stands on the ground: the seams check)
-    c.feet = ['pole', 'stop', 'lamp', 'limit', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
+    c.feet = ['pole', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'board', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3();
     // every kind in one batched draw
@@ -1277,7 +1282,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         { let cx = 0, cz = 0; for (const p of ring.slice(0, -1)) { cx += p[0]; cz += p[1]; } pts.push([cx / (ring.length - 1), cz / (ring.length - 1)]); }
         for (const p of pts) { const h = hAt(p[0], p[1]); if (h != null) { m += h; k++; gx = Math.max(gx, h); base = Math.min(base, h); } } m = k ? m / k : base;
         const top = Math.max(m + lb[0], gx + Math.min(2.4, lb[0]));
-        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: true });
+        // (A37: its front: toward the nearest named road within 40 m, bldglidar.js, for its porch or veranda, props.js)
+        // (Fort Baker's: toward its parade ground, the middle of Murray Circle (cache/roads lines.json): its barracks' verandas
+        // face the parade, a lane behind them, murraycircle_0a_0230)
+        const baker = R0[0][0] > 37.832 && R0[0][0] < 37.841 && R0[0][1] > -122.4825 && R0[0][1] < -122.474;
+        let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
+        if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
+        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: true, front, baker, gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         continue;
       }
       list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });

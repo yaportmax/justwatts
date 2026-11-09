@@ -24,10 +24,10 @@ function windowAtlas() {
   const S = 128, c = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(S * 4, S * 4) : Object.assign(document.createElement('canvas'), { width: S * 4, height: S * 4 }), g = c.getContext('2d', { willReadFrequently: true });
   g.fillStyle = '#fff'; g.fillRect(0, 0, S * 4, S * 4);
   const glass = [];  // rects drawn as glass after the facade
-  const win = (ox, oy, x, y, w, h, { frame = '#3b3a38', sill = true, mull = 0, shut = null, arch = false } = {}) => {
+  const win = (ox, oy, x, y, w, h, { frame = '#3b3a38', sill = true, mull = 0, shut = null, arch = false, rail = false, fw = 3 } = {}) => {
     if (shut) { g.fillStyle = shut; g.fillRect(ox + x - w * 0.42, oy + y, w * 0.38, h); g.fillRect(ox + x + w * 1.04, oy + y, w * 0.38, h); }
-    g.fillStyle = frame; g.fillRect(ox + x - 3, oy + y - 3, w + 6, h + 6);
-    glass.push([ox + x, oy + y, w, h, mull, arch]);
+    g.fillStyle = frame; g.fillRect(ox + x - fw, oy + y - fw, w + 2 * fw, h + 2 * fw);
+    glass.push([ox + x, oy + y, w, h, mull || (rail ? -1 : 0), arch]);
     if (sill) { g.fillStyle = '#d8d4cc'; g.fillRect(ox + x - 6, oy + y + h + 2, w + 12, 6); }
   };
   const cell = (k, row) => [(k % 4) * S, (row + Math.floor(k / 4)) * S];
@@ -37,7 +37,9 @@ function windowAtlas() {
   [x, y] = cell(2, 0); win(x, y, 14, 34, 100, 54, { mull: 3, sill: false, frame: '#2b2d30' });    // band of glass
   [x, y] = cell(3, 0); win(x, y, 22, 28, 36, 66, {}); win(x, y, 70, 28, 36, 66, {});               // pair
   [x, y] = cell(4, 0); win(x, y, 30, 22, 68, 80, { mull: 2, sill: false, frame: '#e9e6df' });     // bay window, light trim
-  [x, y] = cell(5, 0); g.fillStyle = '#e4e0d8'; g.fillRect(x, y + 104, S, 24); win(x, y, 38, 30, 52, 62, { frame: '#6b4a36' }); // wood trim, stringcourse
+  // (A37: the forts' white clapboard barracks: a tall narrow two-pane sash in a broad white frame, one a bay, Street View
+  // fieldroad_0b_0830, murraycircle_0a_0230; it was a wide brown-framed pane over a stringcourse, read as big blue-grey glass)
+  [x, y] = cell(5, 0); win(x, y, 47, 22, 34, 72, { frame: '#f4f2ec', rail: true, fw: 6, sill: false }); g.fillStyle = '#f4f2ec'; g.fillRect(x + 38, y + 98, 52, 6);  // white sash
   [x, y] = cell(6, 0); win(x, y, 6, 8, 116, 112, { mull: 2, sill: false, frame: '#4a5058' });     // office curtain wall
   [x, y] = cell(7, 0); win(x, y, 36, 34, 56, 56, { arch: true, frame: '#7a6a58' });               // arched
   // ground floors
@@ -48,7 +50,7 @@ function windowAtlas() {
   [x, y] = cell(3, 2); g.fillStyle = '#8a8580'; g.fillRect(x + 12, y + 30, 104, 98);               // garage door
   for (let k = 0; k < 6; k++) { g.fillStyle = '#9b9690'; g.fillRect(x + 14, y + 36 + k * 15, 100, 8); }
   [x, y] = cell(4, 2); win(x, y, 20, 26, 88, 102, { mull: 3, sill: false, frame: '#3a3d40' });    // cafe front
-  [x, y] = cell(5, 2); win(x, y, 40, 30, 48, 98, { sill: false, frame: '#2d4a3a' });              // green door
+  [x, y] = cell(5, 2); win(x, y, 47, 30, 34, 72, { frame: '#f4f2ec', rail: true, fw: 6, sill: false }); g.fillStyle = '#f4f2ec'; g.fillRect(x + 38, y + 106, 52, 6);  // (A37) the same sash on the ground floor
   [x, y] = cell(6, 2); win(x, y, 6, 20, 116, 108, { mull: 2, sill: false, frame: '#4a5058' });    // office lobby
   [x, y] = cell(7, 2); win(x, y, 36, 34, 56, 56, { frame: '#7a6a58' });
   const img = g.getImageData(0, 0, S * 4, S * 4), d = img.data;
@@ -58,7 +60,8 @@ function windowAtlas() {
       if (arch) { const r = w / 2, cy = gy + r; if (yy < cy && Math.hypot(xx - gx - r, yy - cy) > r) continue; }
       const o = (yy * S * 4 + xx) * 4, t = (yy - gy) / h;
       let m = false; for (let k = 1; k <= mull; k++) if (Math.abs(xx - gx - w * k / (mull + 1)) < 2) m = true;
-      if (mull && Math.abs(yy - gy - h * 0.45) < 2) m = true;
+      if (mull > 0 && Math.abs(yy - gy - h * 0.45) < 2) m = true;
+      if (mull < 0 && (Math.abs(yy - gy - h * 0.5) < 3 || Math.abs(xx - gx - w * 0.5) < 2 || Math.abs(yy - gy - h * 0.25) < 1.5 || Math.abs(yy - gy - h * 0.75) < 1.5)) { d[o] = d[o + 1] = d[o + 2] = 238; d[o + 3] = 0; continue; }  // (a sash's white meeting rail and muntins, six over six: the facade's colour)
       if (m) { d[o] = d[o + 1] = d[o + 2] = 70; continue; }
       d[o] = 40 + 30 * t; d[o + 1] = 52 + 30 * t; d[o + 2] = 64 + 26 * t; d[o + 3] = 255;
     }

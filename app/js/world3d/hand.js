@@ -225,6 +225,8 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     const out_ = { near, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, near + FADE, { fade: 1, meshNormals: !!J.mesh_normals?.[sp] })) };
     // (A35: the bush-tree's leaves a muted olive: as the tall shrubs along Field, Bunker and McCullough they read cartoon lime against Street View's)
     if (/^lime/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.58, 0.6, 0.44));
+    // (A36: the sage read near white beside Conzelman, Street View cz 2025-03 a darker grey green)
+    if (sp === 'sage') for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.5, 0.58, 0.45));
     return out_;
   })).get(sp);
   async function addGroup(G, x, z) {
@@ -323,7 +325,19 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGdW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGdN = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vGdW; varying vec3 vGdN; uniform vec4 gBox; uniform vec4 gRep; uniform vec4 gBoxW; uniform sampler2D gSplatW;
-      uniform sampler2D gSplat, gDirt, gCut, gGrass, gLitter, gNoise, gScrub; uniform vec4 gScrubBox;`)
+      uniform sampler2D gSplat, gDirt, gCut, gGrass, gLitter, gNoise, gScrub; uniform vec4 gScrubBox;
+      // (A36: the scrub's bushes as round mounds a metre or two across, packed as Street View's coyote brush: a cell each, its centre and size
+      // from a hash; the tallest mound under the pixel gives the height and its slope, the slope bends the light, hawk_r9: painted cover read as lawn)
+      float jwSW = 0.0; vec2 jwSG = vec2(0.0);
+      vec2 jwH2(vec2 q) { q = mod(q, 289.0); vec3 p3 = fract(vec3(q.xyx) * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
+      vec4 jwBush(vec2 p, float dens) {
+        vec2 q = p / 1.4, ic = floor(q); float best = 0.0, id = 0.0; vec2 g = vec2(0.0);
+        for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+          vec2 c = ic + vec2(float(i), float(j)), h = jwH2(c), h2 = jwH2(c + 17.0); if (h2.y > dens) continue;
+          vec2 d = p - (c + 0.15 + h * 0.7) * 1.4; float r = 0.7 + 0.6 * h2.x, t = 1.0 - dot(d, d) / (r * r);
+          if (t > 0.0) { float H = r * (0.7 + 0.5 * fract(h.x * 7.13)), tp = pow(max(t, 0.04), 0.4), hh = H * tp;  // (puffy: steep sides, a round top)
+            if (hh > best) { best = hh; id = h.x; g = -0.8 * H * tp / max(t, 0.04) * d / (r * r); } } }
+        return vec4(best, g, id); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
       {
         // (the face's own slope from the surface itself, not the mesh's normals: a smoothed or exported-up normal had hidden
@@ -384,7 +398,22 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           vec3 cS = mix(vec3(0.085, 0.105, 0.055), vec3(0.125, 0.135, 0.095), smoothstep(0.45, 0.75, s2));
           cS *= mix(0.5, 1.12, clumpS) * mix(1.0, mix(0.82, 1.12, s3), aaS);
           float cv = smoothstep(0.12, 0.8, cov + (s2 - 0.5) * 0.7 + (s1 - 0.5) * 0.35); cv = max(cv, 0.45 * smoothstep(0.62, 0.8, s1) * sIn);  // (A35: ragged edges and scattered bushes in the grass, cz300: hard-edged grass patches)
-          c = mix(c, cS, cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31)); }
+          float sw = cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31) * (1.0 - steep * 0.7);
+          if (sw > 0.002) { float bf = 1.0 - smoothstep(0.2, 0.8, pxm);  // (the mounds fade to their mean once one is a few pixels across)
+            vec2 pw = p + (vec2(textureGrad(gNoise, p / 0.8 + 0.41, dPx / 0.8, dPy / 0.8).r, textureGrad(gNoise, p / 0.8 + 0.83, dPx / 0.8, dPy / 0.8).g) - 0.5) * 0.45 * aaS;  // (ragged leafy outlines)
+            vec4 bu = jwBush(pw, mix(0.82, 1.0, smoothstep(0.3, 0.9, cov)));
+            float top = smoothstep(0.1, 1.0, bu.x), gap = 1.0 - smoothstep(0.0, 0.1, bu.x), foot = smoothstep(0.0, 0.35, bu.x);
+            // (A36, hawkR: Street View's coyote brush a fresh mid green, one bush in four or five grey sage; red-brown dirt and dry grass between)
+            vec3 cB = mix(vec3(0.062, 0.09, 0.04), vec3(0.085, 0.098, 0.07), step(0.9, bu.w)) * mix(0.8, 1.2, fract(bu.w * 13.7));
+            { float l1 = textureGrad(gNoise, p / 0.27 + 0.29, dPx / 0.27, dPy / 0.27).r, l2 = textureGrad(gNoise, p / 0.7 + 0.53, dPx / 0.7, dPy / 0.7).g;
+              cB *= mix(1.0, mix(0.35, 1.45, smoothstep(0.2, 0.8, l1 * 0.6 + l2 * 0.4)), aaS); }  // (the leaves: lit sprays and dark holes in each bush)
+            cB *= mix(0.3, 1.0, foot) * mix(0.6, 1.25, top);
+            vec3 cG = mix(vec3(0.16, 0.10, 0.06), vec3(0.17, 0.15, 0.09), smoothstep(0.35, 0.65, s1)) * mix(0.75, 1.1, s3);  // (dirt and dry grass in the gaps)
+            cB = mix(cB, cG, gap);
+            vec3 cFar = mix(vec3(0.055, 0.085, 0.032), vec3(0.08, 0.095, 0.058), smoothstep(0.45, 0.75, s2)) * mix(0.62, 1.12, clumpS);  // (the bushes' and gaps' mean, so near and far brush are one colour)
+            cS = mix(cFar, cB, bf); sw = max(sw, bf * smoothstep(0.4, 0.55, cov) * (1.0 - steep * 0.7) * (1.0 - rb31));
+            jwSW = sw * bf * (1.0 - gap) * 1.6; jwSG = clamp(bu.yz, vec2(-2.5), vec2(2.5)); }
+          c = mix(c, cS, sw); }
         if (wc > 0.002) {
         // mixed; grey-green tufts in clumps over it)
         // (three lookups at different angles and scales: the scan's level strata averaged out into fractured rock)
@@ -418,8 +447,10 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           for (int k = 0; k < 4; k++) { vec2 d32 = p - T32[k]; float u32 = clamp(dot(d32, vec2(-0.93, 0.36)), 0.0, 13.0); s31 = max(s31, (1.0 - smoothstep(0.5, 1.2, length(d32 - vec2(-0.93, 0.36) * u32) + (n31 - 0.5) * 0.7)) * (1.0 - u32 / 22.0)); }
           c *= mix(vec3(1.28, 1.42, 1.0), vec3(0.62, 0.7, 0.58), s31); }
         diffuseColor.rgb *= c;
-      }`);
+      }`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      if (jwSW > 0.001) normal = normalize(normal + (viewMatrix * vec4(-jwSG.x, 0.0, -jwSG.y, 0.0)).xyz * jwSW);`);
   };
-  m.customProgramCacheKey = () => 'jw-hand-ground19';
+  m.customProgramCacheKey = () => 'jw-hand-ground20';
   groundShared = lambert(m); return groundShared;
 }

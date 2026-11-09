@@ -326,10 +326,50 @@ export const RAILS = [
   [14095, 14340, 'L', 'curb', ['cz_14095_a', 'cz_14335_a']],
   [14095, 14230, 'R', 'curb', ['cz_14135_a', 'cz_14335_a']],
   [1620, 1660, 'L', 'fence', ['bG-yRGz0ANgxTlMMDSSedg', 'iy5B7QVWHxtRG7LthBtw0w']],
+  // (A37: the other roads' rails and curbs off the all-roads survey's ahead photos (cz_<station>_a, 2025-03), ends to the
+  // nearest 5 to 10 m; 'wbeam' the W-beam on dark timber posts. Review pairs w_bunker0, w_bunker2, w_mccullough1, w_mitchell0,
+  // w_east0, w_east2, w_center0, w_murray0.)
+  // Bunker Road, Rodeo Valley (30000 at Rodeo Lagoon's west end, east to the Baker-Barry tunnel)
+  [30320, 30615, 'R', 'wbeam', ['cz_30300_a', 'cz_30345_a', 'cz_30570_a', 'cz_30600_a']],  // (along the lagoon, none by 30630)
+  [30768, 30880, 'L', 'wbeam', ['cz_30755_a', 'cz_30825_a', 'cz_30870_a']],  // (the bridge over the lagoon's arm)
+  [30765, 30905, 'R', 'wbeam', ['cz_30755_a', 'cz_30840_a', 'cz_30900_a']],
+  [31150, 31490, 'L', 'wbeam', ['cz_31145_a', 'cz_31320_a', 'cz_31475_a']],
+  [31712, 31830, 'L', 'wbeam', ['cz_31715_a', 'cz_31800_a', 'cz_31820_a']],
+  // Bunker Road, Fort Baker's side (90000 at the tunnel's east portal, down under US-101 to Fort Baker)
+  [90100, 90280, 'L', 'wbeam', ['cz_90105_a', 'cz_90180_a', 'cz_90270_a']],  // (to the underpass's portal)
+  [90318, 90715, 'L', 'wbeam', ['cz_90320_a', 'cz_90545_a', 'cz_90705_a']],
+  [90725, 90955, 'L', 'curb', ['cz_90735_a', 'cz_90800_a', 'cz_90850_a']],
+  [90872, 90925, 'R', 'curb', ['cz_90870_a', 'cz_90900_a']], [90942, 90960, 'R', 'curb', ['cz_90930_a']],  // (open at McReynolds Road, 90933)
+  // McCullough Road (70000 at Conzelman), the bend above the Bunker Road end
+  [70975, 71150, 'R', 'wbeam', ['cz_70965_a', 'cz_71035_a', 'cz_71130_a']],
+  // Mitchell Road along the lagoon to Bunker Road
+  [100668, 100778, 'R', 'wbeam', ['cz_100650_a', 'cz_100680_a', 'cz_100740_a', 'cz_100780_a']],
+  // East Road (80000 at Alexander, down to Fort Baker): a concrete curb both sides nearly all the way
+  [80100, 80195, 'L', 'curb', ['cz_80110_a', 'cz_80170_a']], [80228, 81430, 'L', 'curb', ['cz_80260_a', 'cz_80450_a', 'cz_80600_a', 'cz_80875_a', 'cz_81110_a', 'cz_81395_a']],  // (open at the lot, 80200)
+  [80100, 80140, 'R', 'curb', ['cz_80110_a']], [80186, 81370, 'R', 'curb', ['cz_80230_a', 'cz_80485_a', 'cz_80600_a', 'cz_80975_a', 'cz_81170_a']],  // (open at East Road 2, 80178)
+  // Center Road across Fort Baker's parade
+  [280020, 280030, 'L', 'curb', ['cz_280015_a']], [280042, 280074, 'L', 'curb', ['cz_280035_a', 'cz_280055_a']], [280098, 280240, 'L', 'curb', ['cz_280090_a', 'cz_280150_a', 'cz_280215_a']],  // (open at the service road 280034, New Breitung Road 280086)
+  [280020, 280238, 'R', 'curb', ['cz_280035_a', 'cz_280090_a', 'cz_280180_a']],
+  // Murray Circle (110000 at East Road's end), the post's ring road: curbs both sides (110300 to 110600 no survey photo: w_murray0 shows them)
+  [110012, 110288, 'L', 'curb', ['cz_110045_a', 'cz_110150_a', 'cz_110240_a']], [110310, 110760, 'L', 'curb', ['w_murray0', 'cz_110625_a', 'cz_110740_a']],  // (open at Kober Street, 110298)
+  [110012, 110088, 'R', 'curb', ['cz_110075_a']], [110102, 110288, 'R', 'curb', ['cz_110120_a', 'cz_110210_a', 'cz_110255_a']], [110310, 110700, 'R', 'curb', ['w_murray0', 'cz_110625_a']],
+  // Simmonds Road: a curb on the hill side from Fort Barry through the cypresses, open where Rosenstock Road's two ends meet it (50399, 50941)
+  [50010, 50392, 'R', 'curb', ['cz_50015_a', 'cz_50170_a', 'cz_50300_a', 'cz_50360_a']],
+  [50410, 50932, 'R', 'curb', ['cz_50435_a', 'cz_50590_a', 'cz_50710_a', 'cz_50840_a', 'cz_50900_a', 'w_simmonds1']], [50950, 50970, 'R', 'curb', ['cz_50965_a']],
+  // (A37 round 2) fences, each its offset past the paved edge last (m): wire on timber posts along Bunker Road by the stables
+  // (cz_31880_a to cz_31970_a, left, about 2 m out) and Field Road above Point Bonita (cz_40195_a to cz_40465_a); the low
+  // cable along Rodeo Lagoon on Mitchell Road (cz_100035_a, cz_100065_a: the gravel verge's outer edge, 2.1 m); chain-link by
+  // Field Road's houses and the pumping station (w_field1, w_field2 right: the road's left)
+  [31895, 31995, 'L', 'wire', ['cz_31910_a', 'cz_31940_a', 'cz_31970_a'], 2.0],
+  [40200, 40470, 'L', 'wire', ['cz_40230_a', 'cz_40330_a', 'cz_40445_a'], 1.8],
+  [100025, 100135, 'R', 'wirelow', ['cz_100035_a', 'cz_100065_a'], 2.1],
+  [40700, 40810, 'L', 'chain', ['cz_40720_a', 'cz_40750_a', 'w_field1'], 2.5],
+  [41080, 41225, 'L', 'chain', ['cz_41115_a', 'cz_41185_a', 'w_field2'], 2.5],
 ];
 // CROSSWALKS: [station] the zebra across the road there (view.js draws it across the paved width): Battery Spencer's
 // (1316: 1300 ahead about 13 m on, 1325 behind about 5 m back) and the one at 1626 (1620 ahead, 4 to 5 m on)
-export const CROSSWALKS = [1316, 1626, 10061, 10968, 11070, 14272, 11575, 12925];
+export const CROSSWALKS = [1316, 1626, 10061, 10968, 11070, 14272, 11575, 12925,
+  31840, 32010, 100443, 100635, 50243, 280006];  // (A37: Bunker Road cz_31820_a, cz_32000_a; Mitchell Road cz_100435_a, cz_100620_a; Simmonds Road cz_50235_a; Center Road cz_280000_a)
 export const LOTS = [
   // the junction's mouth on the right at 1745 to 1752 and the road east to Fort Baker's way (Street View 1740 ahead), traced on USDA NAIP
   // (added last below: rings are indexed by the build)

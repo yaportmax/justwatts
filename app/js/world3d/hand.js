@@ -147,7 +147,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 export function loadScrub({ scene, base = '/world/hand/', lambert = m => m }) {
   const group = new THREE.Group(); group.name = 'handScrub'; scene.add(group);
   const mat = groundMaterial({ base, lambert });  // (A35: the ground's own material: its scrub cover paints the shell, one surface with relief)
-  let groups = null, at = null, busy = false; const D2 = 1800 * 1800;
+  let groups = null, at = null, busy = false, D2 = 1800 * 1800;
   fetch(base + 'scrub.json').then(r => r.ok ? r.json() : null).then(j => { if (j) { groups = j.groups; pump(); } }).catch(() => {});
   async function pump() {
     if (busy || !groups || !at) return; busy = true;
@@ -161,7 +161,7 @@ export function loadScrub({ scene, base = '/world/hand/', lambert = m => m }) {
         await new Promise(r => setTimeout(r, 16)); k = -1; }
     } finally { busy = false; }
   }
-  return { group, want(x, z) { at = [x, z]; pump(); } };
+  return { group, want(x, z, r = 1800) { at = [x, z]; D2 = r * r; pump(); } };  // (A36: r: only the groups by the rider while the world loads, 124 MB in all)
 }
 
 export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert = m => m }) {
@@ -398,8 +398,8 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           vec3 cS = mix(vec3(0.085, 0.105, 0.055), vec3(0.125, 0.135, 0.095), smoothstep(0.45, 0.75, s2));
           cS *= mix(0.5, 1.12, clumpS) * mix(1.0, mix(0.82, 1.12, s3), aaS);
           float cv = smoothstep(0.12, 0.8, cov + (s2 - 0.5) * 0.7 + (s1 - 0.5) * 0.35); cv = max(cv, 0.45 * smoothstep(0.62, 0.8, s1) * sIn);  // (A35: ragged edges and scattered bushes in the grass, cz300: hard-edged grass patches)
-          float sw = cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31) * (1.0 - steep * 0.7);
-          if (sw > 0.002) { float bf = 1.0 - smoothstep(0.2, 0.8, pxm);  // (the mounds fade to their mean once one is a few pixels across)
+          float sw = cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31) * (1.0 - smoothstep(0.85, 1.0, steep) * 0.7);  // (A37: brush on the steep slopes too, only the cut faces bare: Street View hawk)
+          if (sw > 0.002) { float bf = (1.0 - smoothstep(0.2, 0.8, pxm)) * smoothstep(0.2, 0.6, texture2D(gScrub, sb).g * sIn);  // (the mounds fade to their mean once one is a few pixels across; A37: only where the lidar sees real shrubs, scrubcover G, review1 w_center0 lawns took them as scales)
             vec2 pw = p + (vec2(textureGrad(gNoise, p / 0.8 + 0.41, dPx / 0.8, dPy / 0.8).r, textureGrad(gNoise, p / 0.8 + 0.83, dPx / 0.8, dPy / 0.8).g) - 0.5) * 0.45 * aaS;  // (ragged leafy outlines)
             vec4 bu = jwBush(pw, mix(0.9, 1.0, smoothstep(0.3, 0.9, cov)));
             float top = smoothstep(0.1, 1.0, bu.x), gap = 1.0 - smoothstep(0.0, 0.1, bu.x), foot = smoothstep(0.0, 0.35, bu.x);
@@ -451,6 +451,6 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
       if (jwSW > 0.001) normal = normalize(normal + (viewMatrix * vec4(-jwSG.x, 0.0, -jwSG.y, 0.0)).xyz * jwSW);`);
   };
-  m.customProgramCacheKey = () => 'jw-hand-ground20';
+  m.customProgramCacheKey = () => 'jw-hand-ground21';
   groundShared = lambert(m); return groundShared;
 }

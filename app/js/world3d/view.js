@@ -14,6 +14,7 @@ import { compileSpec, specPaint, SECTIONS as CZ_SECTIONS, RAILS as CZ_RAILS, LOT
 import { createEdit } from './edit.js';
 import { loadHand, loadVeg as loadHandPlants, loadScrub } from './hand.js';
 import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS } from './handlist.js';
+import { LIDAR_BLDG } from './bldglidar.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -1261,7 +1262,25 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if ([[37.82213, -122.52782], [37.82202, -122.52766]].some(([a_, o_]) => Math.abs(R0[0][0] - a_) < 3e-5 && Math.abs(R0[0][1] - o_) < 3e-5)) continue;  // (A27: the garage at the road's end is hand-built, build_conz.py; OpenStreetMap's second block is not in cz_14600_a)
       // (A25: Conzelman's far west, 13800 on: low barns, red roofs as at 13900; grey from about 14400: the garage, 14500, 14600)
       const low = R0[0][0] > 37.82126 && R0[0][0] < 37.82932 && R0[0][1] > -122.5395 && R0[0][1] < -122.52422;  // (west to Cronkhite's low white blocks as seen from 14500 right)
-      list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: inHeadlands(...f.rings[0][0]), grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
+      // (A37: the Headlands' heights and roofs from the lidar and the aerial, bldglidar.js: single storey cottages on Bunker Road
+      // at about 3.2 m to the eaves, w_bunker3; Cronkhite's barracks two storeys under red roofs, w_mitchell1; the Field Road
+      // house two storeys and a steep roof, w_field0. Walls to the eaves over the footprint's mean ground; a hand height,
+      // BUILDINGS, agrees with it where both are)
+      const fort = inHeadlands(...R0[0]);
+      let lb = null;
+      if (fort) { let a = 0, o = 0; const n = R0.length - 1; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; } lb = LIDAR_BLDG.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5)) || null; }
+      if (lb) {
+        // (on a hillside the walls run down to the lowest ground; the eaves at the lidar's height over the mean ground (the
+        // roof's own height above the sea), a storey (2.4 m) at least over the highest, so no slope covers a roof or more than the storey below it: a Sausalito house
+        // half in its hill, alexanderavenue_0b_1830; the ground at the corners, the walls' middles and the footprint's middle)
+        let m = 0, k = 0, gx = -Infinity; const pts = ring.slice(0, -1).flatMap((p, i, a) => { const q = a[(i + 1) % a.length]; return [p, [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]]; });
+        { let cx = 0, cz = 0; for (const p of ring.slice(0, -1)) { cx += p[0]; cz += p[1]; } pts.push([cx / (ring.length - 1), cz / (ring.length - 1)]); }
+        for (const p of pts) { const h = hAt(p[0], p[1]); if (h != null) { m += h; k++; gx = Math.max(gx, h); base = Math.min(base, h); } } m = k ? m / k : base;
+        const top = Math.max(m + lb[0], gx + Math.min(2.4, lb[0]));
+        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: true });
+        continue;
+      }
+      list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
     }
     if (!list.length) return setPart(c, 'bldg', null);
     const grp = new THREE.Group();
@@ -1339,7 +1358,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // along the route, not in rings: a tile the course runs through first, sooner the sooner the rider gets there (a
     // tile 1.5 km on counts as one tile away), the rest by distance after them; in each the ground and the road before
     // anything else, the trees, buildings and furniture after every tile's ground and roads
-    HAND.want(...proj.xz(lat, lon)); HVEG.want(...proj.xz(lat, lon)); HSCRUB.want(...proj.xz(lat, lon));
+    HAND.want(...proj.xz(lat, lon)); HVEG.want(...proj.xz(lat, lon)); HSCRUB.want(...proj.xz(lat, lon), veilAt ? 350 : 1800);
     const rx = tileX(lon, NEAR_Z), ry = tileY(lat, NEAR_Z), route = routeTiles(), d0 = dShown;
     for (const c of near.values()) {
       if (c.tile === undefined) continue;
@@ -1599,7 +1618,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const d of [port - 0.5, L - port + 0.5]) { const i = D.findIndex(v => v >= d); if (i > 0 && D[i] - d > 0.3 && d - D[i - 1] > 0.3) { const f = (d - D[i - 1]) / (D[i] - D[i - 1]); P.splice(i, 0, [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * f, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * f]); Y.splice(i, 0, Y[i - 1] + (Y[i] - Y[i - 1]) * f); D.splice(i, 0, d); } }
       // half width, the walls' height, the arch's rise over them (0: a flat roof)
       // (a box no taller than the road over it allows)
-      const w = st.w / 2 + (one || arch ? 1 : 2), H = box ? (arch ? 1.4 : Math.max(2.6, Math.min(5.2, cover - 0.9))) : one ? 2 : 2.2, rise = box && !arch ? 0 : one || arch ? w : w * 0.75;
+      // (A37: a Headlands box, Alexander Avenue under US-101: the opening the road's width and a little, 14 ft 2 in clear as
+      // its sign says, w_alexander0; it was 4 m wider and lower)
+      const hlBox = box && !arch && inHeadlands(proj.lat(mid[1]), proj.lon(mid[0]));
+      const w = st.w / 2 + (one || arch ? 1 : hlBox ? 0.9 : 2), H = box ? (arch ? 1.4 : hlBox ? Math.max(2.6, Math.min(4.3, cover - 1.2)) : Math.max(2.6, Math.min(5.2, cover - 0.9))) : one ? 2 : 2.2, rise = box && !arch ? 0 : one || arch ? w : w * 0.75;
       // the bore as straight pieces of up to 40 m, an underpass's of 8 m (it bends with its road: Alexander under US-101, user 2026-11-05) (for the ground to leave out): [x0, z0, x1, z1, floor0, floor1, half width, height]
       const segs = []; let i0 = P.findIndex((_, i) => D[i] >= port - 0.5);  // (the same points as the lining's rings, below)
       for (let i = i0 + 1; i0 >= 0 && i < P.length && D[i0] < L - port + 0.5; i++) if (D[i] - D[i0] >= (box ? 8 : 40) || i === P.length - 1 || D[i + 1] > L - port + 0.6) {
@@ -1629,7 +1651,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           for (const [cx, cy] of WALK) { walk.pos.push(P[i][0] + nx * cx * ns, y + cy, P[i][1] + nz * cx * ns); walk.col.push(...(cy < 0.3 ? [0.62, 0.6, 0.56] : [0.5, 0.49, 0.47])); }
           if (n) for (const [k0, k1] of [[0, 2], [3, 9], [10, 16]]) for (let k = k0; k < k1; k++) { const p0 = wb + (n - 1) * WALK.length + k, p1 = p0 + WALK.length; walk.idx.push(p0, p1, p0 + 1, p0 + 1, p1, p1 + 1); }
         }
-        if (n === 0 || n === keep.length - 1) ports.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1, box, rise, arch, one, list.at(-1), n === 0 ? P[0] : P.at(-1)]);
+        if (n === 0 || n === keep.length - 1) ports.push([P[i][0], y, P[i][1], Math.atan2(dx, dz), R, H, n === 0 ? -1 : 1, box, rise, arch, one, list.at(-1), n === 0 ? P[0] : P.at(-1), hlBox]);
       });
     }
     if (!B.n) { if (tun.group) disposeObj(tun.group); tun.group = null; tun.list = list; return; }
@@ -1666,14 +1688,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     // portals: a headwall with an arched opening at the end of the cut, wider and taller than the bore; all their parts
     // in one draw (attribute pl: a part's own position, for the courses in the portal shader)
-    const pp = [], pn = [], pl = [], m4 = new THREE.Matrix4(), nm = new THREE.Matrix3();
-    const add = (g, x, y, z, ry) => {
+    const pp = [], pn = [], pl = [], m4 = new THREE.Matrix4(), nm = new THREE.Matrix3(), PW = [[], [], []];
+    const add = (g, x, y, z, ry, white) => {
+      const [pp, pn, pl] = white ? PW : [pp0, pn0, pl0];
       const ng = g.index ? g.toNonIndexed() : g; ng.computeVertexNormals(); m4.makeRotationY(ry).setPosition(x, y, z); nm.getNormalMatrix(m4);
       const p = ng.attributes.position, n = ng.attributes.normal, v = new THREE.Vector3();
       for (let i = 0; i < p.count; i++) { pl.push(p.getX(i), p.getY(i), p.getZ(i)); v.fromBufferAttribute(p, i).applyMatrix4(m4); pp.push(v.x, v.y, v.z); v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize(); pn.push(v.x, v.y, v.z); }
       if (ng !== g) ng.dispose(); g.dispose();
     };
-    for (const [x, y, z, yaw, R, H, dir, box, rise, arch, one, T, end] of ports) {
+    const [pp0, pn0, pl0] = [pp, pn, pl];
+    for (const [x, y, z, yaw, R, H, dir, box, rise, arch, one, T, end, hl] of ports) {
       if (arch || one) {
         // a flat headwall with a round-arched opening, a coping, wing walls splayed out from it and sloping down (Street
         // View: the Baker-Barry tunnel's portals, Bunker Road under US-101); at a one-lane tunnel a signal each side of
@@ -1723,7 +1747,20 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           for (let o = -(R + 3.5); o <= R + 3.5; o += 1) { const px = x + o * cx, pz = z - o * sx, t = roadTopOn(px, pz, y + T.cover); if (t != null && t - y > H) cap = Math.min(cap, t - y - 0.35); } }
         const top = Math.max(H + 0.3, cap), wing = R + 3.5, sh = new THREE.Shape(); sh.moveTo(-wing, -1); sh.lineTo(wing, -1); sh.lineTo(wing, top); sh.lineTo(-wing, top); sh.lineTo(-wing, -1);
         const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H); hole.lineTo(-R, H); hole.lineTo(-R, -0.5); sh.holes.push(hole);
-        for (const g of [new THREE.ExtrudeGeometry(sh, { depth: 0.8, bevelEnabled: false }).translate(0, 0, -0.8), new THREE.BoxGeometry(2 * wing + 0.6, 0.35, 1.1).translate(0, top + 0.15, -0.4)]) add(g, x, y, z, yaw + (dir > 0 ? Math.PI : 0));
+        const ry = yaw + (dir > 0 ? Math.PI : 0), parts = [new THREE.ExtrudeGeometry(sh, { depth: 0.8, bevelEnabled: false }).translate(0, 0, -0.8), new THREE.BoxGeometry(2 * wing + 0.6, 0.35, 1.1).translate(0, top + 0.15, -0.4)];
+        // (A37: a Headlands box's wing walls, white painted concrete as the headwall: splayed out from the opening's sides
+        // along the way, their top the bank behind them (the ground there, 0.6 m at least, no higher than the headwall), as
+        // Street View shows Alexander Avenue's south portal, w_alexander0)
+        if (hl) {
+          const cs = Math.cos(ry), sn = Math.sin(ry), Wd = (lx, lz) => [x + lx * cs + lz * sn, z - lx * sn + lz * cs];
+          for (const k of [1, -1]) {
+            const wl = 9, wa = 0.5, x0 = k * (R + 0.3), n = 9, ws = new THREE.Shape(), tops = [];
+            for (let j = 0; j <= n; j++) { const s = wl * j / n, [px, pz] = Wd(x0 + k * s * Math.sin(wa), -0.8 - s * Math.cos(wa)), g = groundAt(px, pz); tops.push([s, Math.max(0.6, Math.min(top, (g ?? y) - y + 0.3))]); }
+            ws.moveTo(0, -1); ws.lineTo(wl, -1); for (let j = n; j >= 0; j--) ws.lineTo(...tops[j]); ws.lineTo(0, -1);
+            parts.push(new THREE.ExtrudeGeometry(ws, { depth: 0.5, bevelEnabled: false }).translate(0, 0, -0.25).rotateY(Math.atan2(Math.cos(wa), k * Math.sin(wa))).translate(x0, 0, -0.8));
+          }
+        }
+        for (const g of parts) add(g, x, y, z, ry, hl);
         continue;
       }
       const top = H + rise + 5, wing = R + 5, sh = new THREE.Shape(); sh.moveTo(-wing, -1); sh.lineTo(wing, -1); sh.lineTo(wing, top - 3); sh.lineTo(R + 2, top); sh.lineTo(-R - 2, top); sh.lineTo(-wing, top - 3); sh.lineTo(-wing, -1);
@@ -1744,6 +1781,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (pp.length) {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pp, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(pn, 3)); g.setAttribute('pl', new THREE.Float32BufferAttribute(pl, 3)); g.computeBoundingSphere();
       const pm = new THREE.Mesh(g, mats.portal); pm.castShadow = true; pm.receiveShadow = true; grp.add(pm);
+    }
+    if (PW[0].length) {
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(PW[0], 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(PW[1], 3)); g.setAttribute('pl', new THREE.Float32BufferAttribute(PW[2], 3)); g.computeBoundingSphere();
+      const pm = new THREE.Mesh(g, mats.portalW); pm.castShadow = true; pm.receiveShadow = true; grp.add(pm);
     }
     if (heads.length) {
       const hm = new THREE.InstancedMesh(FURN.signalHead, mats.furn, heads.length), q4 = new THREE.Quaternion(), unit = new THREE.Vector3(1, 1, 1);
@@ -1967,7 +2008,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   applyQuality();
   // the materials a tile or a tunnel brings in later, compiled up front in the background (a first use would otherwise
   // hold up a frame for 100 ms or more)
-  mats.underpass = withSun(new THREE.MeshLambertMaterial({ color: 0xbdb6a8, emissive: 0x3a3832, side: THREE.DoubleSide }));  // the light bounced in from the openings
+  mats.underpass = withSun(new THREE.MeshLambertMaterial({ color: 0xd2cfc8, emissive: 0x3a3936, side: THREE.DoubleSide }));  // the light bounced in from the openings (A37: painted white inside, w_alexander0)
+  mats.portalW = withSun(portalMaterial()); mats.portalW.color.set(0xe6e3dc);  // (A37: a Headlands box's headwall and wings, white painted concrete, w_alexander0)
   { const g = new THREE.Group(), geo = new THREE.BoxGeometry(1, 1, 1); for (const m of [mats.underpass, mats.tunnel, mats.portal, mats.pillar, mats.walk]) g.add(new THREE.Mesh(geo, m));
     renderer.compileAsync?.(g, camera, scene).catch(() => {}).finally(() => geo.dispose()); }
   // and the instanced ones a tile or the scrub brings in later (the street lamps' pools of light, the scrub and the full

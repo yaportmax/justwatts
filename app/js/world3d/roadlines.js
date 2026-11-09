@@ -42,13 +42,37 @@ export const ROADS = [
 // (A33: a starting cross-section per road from its OpenStreetMap class, until the survey's reads replace it: two lanes, the yellow pair down the
 // middle and white edge lines on the through roads; a street in the forts: paving only. Offsets right of the line looking along it.)
 const CLS = { secondary: [3.9, 3.6, true], unclassified: [3.4, 3.1, true], tertiary: [3.6, 3.3, true], residential: [3.3, 0, false], service: [2.6, 0, false], cycleway: [1.5, 0, false] };
+// (A37) a road's own survey read where its class's guess is wrong: rows [metres from the road's start, L, R (the paved edges,
+// right of its line), edge (the white edge lines at -edge and +edge, the double yellow between; null: no paint)], eased
+// between, the last held to the end. Street View is truth.
+export const ROAD_FIX = {
+  // (Simmonds Road: one narrow unmarked lane, about 4.5 m kerb to edge through Fort Barry and 3.5 to 4 m past it, no paint
+  // at all: w_simmonds0, w_simmonds1, cz_50015_a to cz_51590_a)
+  'Simmonds Road': [[0, -2.4, 2.4, null], [390, -2.4, 2.4, null], [430, -1.9, 1.9, null]],
+  // (East Road: about 8 m curb to curb, the cut's curb 4 to 4.5 m right of the line on the lidar (cache/lidar_fine, 80200 to
+  // 81160), the edge lines 0.3 to 0.4 m inside the curbs: w_east0, w_east2, cz_80450_a, cz_80600_a)
+  'East Road': [[0, -4.0, 4.0, 3.65]],
+};
+// (A37) legends painted on the other roads (the hand build's glyphs, build_conz.py GLYPH): [glyph, station, metres right of
+// the line to its centre, flip (true: for traffic against the stations), src]
+export const ROAD_TEXT = [
+  ['25', 80052, 1.9, false, 'cz_80045_a'], ['MPH', 80061, 1.9, false, 'cz_80045_a'],
+  ['MPH', 80580, -1.9, true, 'w_east0'], ['25', 80571, -1.9, true, 'w_east0'],
+  ['15', 90142, -1.8, true, 'w_bunker0'], ['MPH', 90136, -1.8, true, 'w_bunker0'], ['STOP', 90129, -1.8, true, 'w_bunker0 (the tunnel signal)'],
+  ['MPH', 90136, 1.8, false, 'w_bunker0 (its 15 behind the pano)'],
+  ['25', 71348, 1.7, false, 'cz_71340_a'],
+  ['STOP', 100770, 1.7, false, 'cz_100760_a, cz_100780_a'],
+  ['STOP', 51632, 0.0, false, 'cz_51620_a'],
+  ['STOP', 41843, 1.7, false, 'cz_41835_a'],
+  ['15', 40341, 1.7, false, 'cz_40330_a'], ['MPH', 40350, 1.7, false, 'cz_40330_a'], ['PED', 40175, 1.7, false, 'cz_40165_a'], ['PED', 41705, -1.7, true, 'cz_41695_a'],
+];
 export function autoSections(roads = ROADS) {
   const out = [];
   for (const r of roads) {
-    const [h, e, cl] = CLS[r.hw] || CLS.residential, len = (r.line.length - 1) * 5;
-    const lines = cl ? [[-e, 'w'], [-0.1, 'y'], [0.1, 'y'], [e, 'w']] : [];
-    const row = s => ({ s, L: -h, R: h, lines, zones: [], ride: Math.max(0.6, h - 1.3), rideUp: -Math.max(0.6, h - 1.3), src: ['auto: ' + r.name] });
-    out.push(row(r.base), row(r.base + len - 1), { s: r.base + len, gap: true, L: 0, R: 0, lines: [] });
+    const [h0, e0, cl] = CLS[r.hw] || CLS.residential, len = (r.line.length - 1) * 5, fx = ROAD_FIX[r.name];
+    const row = (s, L, R, e) => ({ s, L, R, lines: e ? [[-e, 'w'], [-0.1, 'y'], [0.1, 'y'], [e, 'w']] : [], zones: [], ride: e ? e - 1.0 : Math.max(0.6, R - 1.3), rideUp: e ? -(e - 1.0) : -Math.max(0.6, -L - 1.3), src: ['auto: ' + r.name] });
+    const rows = (fx ?? [[0, -h0, h0, cl ? e0 : null]]).filter(([m]) => m < len - 1), last = rows.at(-1);
+    out.push(...rows.map(([m, L, R, e]) => row(r.base + m, L, R, e)), row(r.base + len - 1, last[1], last[2], last[3]), { s: r.base + len, gap: true, L: 0, R: 0, lines: [] });
   }
   return out;
 }

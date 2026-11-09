@@ -385,20 +385,26 @@ export function buildingGeometry(list) {
     // (b.fort: the Headlands' army posts, Fort Baker, Barry and Cronkhite: white clapboard under red tile or grey roofs,
     // gabled or hipped barracks, halls and houses, the big ones too, Street View)
     // (A33: a pitched roof only over a footprint that nearly fills its box: at 0.7 the roof over an L hung past its walls, red roofs slicing through houses at Fort Baker, user 2026-11-05)
-    const house = b.fort ? b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9, barn = !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
-    const top = b.base + b.h, wi = Math.floor(h(1) * WALLS.length), wc = b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    // (A37: b.rh, the lidar's ridge over the eaves, bldglidar.js: pitched where it rises, flat where it does not, w_bunker3, w_field0)
+    const lid = b.rh != null;
+    const house = b.fort ? (!lid || b.rh >= 0.4) && b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9, barn = !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
+    // (a footprint too ragged for one roof over its box (an L, a T, the Fort Baker barracks) but pitched by the lidar: a
+    // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
+    // roof half way up its rise)
+    const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40;
+    const hw = lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     const style = b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];
       const A = [p[0], b.base - 1, p[1]], B = [q[0], b.base - 1, q[1]], C = [q[0], top, q[1]], D = [p[0], top, p[1]];
-      const a = [run, -1, style, 0], bb = [run + L, -1, style, 0], c = [run + L, b.h, style, 0], d = [run, b.h, style, 0];
+      const a = [run, -1, style, 0], bb = [run + L, -1, style, 0], c = [run + L, hw, style, 0], d = [run, hw, style, 0];
       tri(A, C, B, k, [a, c, bb]); tri(A, D, C, k, [a, d, c]);
       run += L;
     }
-    const flat = (y, k, kind) => {
-      const tris = THREE.ShapeUtils.triangulateShape(r.map(p => new THREE.Vector2(p[0], p[1])), []);
-      for (const [a, b2, c] of tris) tri([r[a][0], y, r[a][1]], [r[c][0], y, r[c][1]], [r[b2][0], y, r[b2][1]], k, [[r[a][0], r[a][1], 0, kind], [r[c][0], r[c][1], 0, kind], [r[b2][0], r[b2][1], 0, kind]]);
+    const flat = (y, k, kind, rr = r) => {
+      const tris = THREE.ShapeUtils.triangulateShape(rr.map(p => new THREE.Vector2(p[0], p[1])), []);
+      for (const [a, b2, c] of tris) tri([rr[a][0], y, rr[a][1]], [rr[c][0], y, rr[c][1]], [rr[b2][0], y, rr[b2][1]], k, [[rr[a][0], rr[a][1], 0, kind], [rr[c][0], rr[c][1], 0, kind], [rr[b2][0], rr[b2][1], 0, kind]]);
     };
     const { c: [cx, cz], u: [ux, uz], L, W: w } = ob, P = (s, t, y) => [cx + ux * s - uz * t, y, cz + uz * s + ux * t], R = (s, y) => [s, y, 0, 1];
     if (house || barn) {
@@ -418,7 +424,8 @@ export function buildingGeometry(list) {
         }
       } else {
         // a gable roof along the long side, a hip roof on a squarish house, now and then a shed roof; pitches vary
-        const rh = Math.min(3.8, w * (0.26 + 0.24 * h(7))), shed = h(8) > 0.9, hip = !shed && (L < w * 1.35 || h(8) < 0.3), inset = hip ? Math.min(L / 2, w / 2) : 0;
+        // (A37: a steep roof the lidar measured a gable: the Field Road house's gable end to the road, w_field0)
+        const rh = lid ? Math.min(5.5, b.rh) : Math.min(3.8, w * (0.26 + 0.24 * h(7))), shed = !lid && h(8) > 0.9, hip = !shed && (lid ? b.rh < 2.5 && L < w * 1.35 : L < w * 1.35 || h(8) < 0.3), inset = hip ? Math.min(L / 2, w / 2) : 0;
         if (shed) {
           const a1 = P(-L / 2 - o, -w / 2 - o, e), a2 = P(L / 2 + o, -w / 2 - o, e), b1 = P(-L / 2 - o, w / 2 + o, e + rh * 0.7), b2 = P(L / 2 + o, w / 2 + o, e + rh * 0.7), sl = Math.hypot(w + 2 * o, rh * 0.7);
           quad(a2, a1, b1, b2, rc, [R(0, 0), R(L, 0), R(L, sl), R(0, sl)]);
@@ -447,6 +454,27 @@ export function buildingGeometry(list) {
         }
       }
       flat(top, wc, 2);  // the ceiling under the eaves (closes the box)
+    } else if (hipped) {
+      // the walls' line moved in d (r is anticlockwise: the inside on the left of each wall), mitred at the corners
+      const d = Math.min(2.5, b.rh * 1.3, Math.sqrt(area) * 0.18), rr = Math.min(b.rh, d * 0.9), n = r.length, inn = [];
+      for (let i = 0; i < n; i++) {
+        const a = r[(i - 1 + n) % n], p = r[i], q = r[(i + 1) % n];
+        const l1 = Math.hypot(p[0] - a[0], p[1] - a[1]) || 1, l2 = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+        const n1 = [-(p[1] - a[1]) / l1, (p[0] - a[0]) / l1], n2 = [-(q[1] - p[1]) / l2, (q[0] - p[0]) / l2];
+        let mx = n1[0] + n2[0], mz = n1[1] + n2[1]; const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml;
+        const k = Math.min(3, 1 / Math.max(0.33, mx * n1[0] + mz * n1[1]));
+        inn.push([p[0] + mx * d * k, p[1] + mz * d * k]);
+      }
+      // (the crown must still be the walls' shape the same way round: else the offset folded over, and a flat roof it is)
+      const ok = !THREE.ShapeUtils.isClockWise(inn.map(p => new THREE.Vector2(p[0], p[1]))) && Math.abs(THREE.ShapeUtils.area(inn.map(p => new THREE.Vector2(p[0], p[1])))) < area;
+      const ins = ok ? inn : r, ry = ok ? rr : 0.05, sl = Math.hypot(d, ry);
+      if (ok) for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, L = Math.hypot(r[j][0] - r[i][0], r[j][1] - r[i][1]);
+        const A = [r[i][0], top, r[i][1]], B = [r[j][0], top, r[j][1]], C = [ins[j][0], top + ry, ins[j][1]], D = [ins[i][0], top + ry, ins[i][1]];
+        tri(A, C, B, rc, [R(0, 0), R(L, sl), R(L, 0)]); tri(A, D, C, rc, [R(0, 0), R(0, sl), R(L, sl)]);
+      }
+      flat(top + ry, rc, 1, ins);
+      flat(top, wc, 2);
     } else {
       // a flat roof inside a parapet; boxes on the roof (plant, a stair head) on the bigger ones
       flat(top + 0.05, col(0x8c8a86, 0.9 + 0.2 * h(9)), 2);

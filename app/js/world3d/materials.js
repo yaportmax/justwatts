@@ -106,20 +106,34 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // between them; bare red-brown earth; the litter under the groves
   jwScrub = 0.0; jwKnown = known;
   if (known > 0.0) {
-    float sc = smoothstep(0.25, 0.75, vg.r + (fine - 0.5) * 0.35), br = smoothstep(0.3, 0.7, vg.b + (fine - 0.5) * 0.3), tr = smoothstep(0.3, 0.7, vg.g);
+    // (A37 theme 7: the patches' edges wander with the 40 to 160 m noise, soft, as Street View's brush masses on the hills
+    // (w_mccullough0, w_bunker1), not the cells' outline; bare earth held back to a softer share: the imagery's bare class on
+    // the open hills read as pink camouflage blotches, w_mccullough2, the hawk spot)
+    float wob = (patch80 - 0.5) * 0.3 + (patch160 - 0.5) * 0.2 + (fine - 0.5) * 0.2;
+    float sc = smoothstep(0.2, 0.8, vg.r + wob), br = smoothstep(0.35, 0.8, vg.b + wob * 0.8) * 0.7, tr = smoothstep(0.3, 0.7, vg.g);
     // (green: OpenStreetMap's lawns, a road's verge (banks.js): grass whatever the imagery's class)
-    float lg = smoothstep(0.3, 0.8, green); sc *= 1.0 - lg; br *= 1.0 - lg; tr *= 1.0 - lg;
-    vec3 grassC = mix(srgb(vec3(0.37, 0.46, 0.25)), srgb(vec3(0.44, 0.49, 0.30)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));  // (A36: Street View hawk 2019-04: the hill's grass a deeper spring green, the pale olive read as lime blotches against the brush)
+    // (A37: where the imagery shows brush the brush stays: a park polygon over Hawk Hill's summit cut a hard-edged pale
+    // patch of lawn out of its scrub, the hawk spot 37.82645,-122.49934 h221)
+    float lg = smoothstep(0.3, 0.8, green); sc *= 1.0 - lg * (1.0 - smoothstep(0.3, 0.7, vg.r)); br *= 1.0 - lg; tr *= 1.0 - lg;
+    vec3 grassC = mix(srgb(vec3(0.39, 0.46, 0.26)), srgb(vec3(0.46, 0.50, 0.31)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));  // (A36: Street View hawk 2019-04: the hill's grass a deeper spring green, the pale olive read as lime blotches against the brush) (A37: a touch less saturated: sunlit it read lime against w_mccullough2's olive spring grass)
     grassC = mix(grassC, srgb(vec3(0.36, 0.45, 0.25)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
     // (a road's verge and OpenStreetMap's lawns: fresh green grass, even (Street View Alexander Avenue 0a_1230: bright grass
     // round the rail's supports, its green pixels' median #627739 to #778b49; A11's verge took the imagery's olive and its
     // patches, read bare))
-    grassC = mix(grassC, srgb(vec3(0.43, 0.51, 0.27)) * (0.94 + 0.12 * small), lg * 0.7);
-    vec3 scrC = mix(srgb(vec3(0.38, 0.40, 0.30)), srgb(vec3(0.50, 0.51, 0.41)), smoothstep(0.3, 0.7, patch80 * 0.7 + fine * 0.3));  // grey olive to the sage's grey green
+    // (A37: a lawn only a little fresher than the hill's grass: OpenStreetMap's lawn edges read as hard pale lime patches)
+    grassC = mix(grassC, srgb(vec3(0.41, 0.50, 0.27)) * (0.94 + 0.12 * small), lg * 0.45);
+    // (the grass's own dry and lush drifts at 40 to 160 m: the far hills were one flat tone, w_mccullough1)
+    grassC *= vec3(1.0) + (patch160 - 0.5) * vec3(0.12, 0.08, 0.02) + (patch80 - 0.5) * 0.12;
+    // (A37: the brush darker olive and grey green, as NAIP's scrub cells' colours and Street View's brush masses: the
+    // pale grey olive (0.38 to 0.50) read as the grass's own tone from a few hundred metres)
+    vec3 scrC = mix(srgb(vec3(0.31, 0.35, 0.22)), srgb(vec3(0.44, 0.46, 0.33)), smoothstep(0.3, 0.7, patch80 * 0.6 + fine * 0.4));  // dark olive to the sage's grey green
     float bush = jwN(p / 3.1 + 0.37).g;
     scrC *= 0.78 + 0.4 * smoothstep(0.25, 0.75, bush);
+    // (A37: thickets of a dozen metres, lit and shaded: the brush's grain still there at a few hundred metres, where the
+    // bushes' own noise has blurred to one tone, w_mccullough0/1)
+    { vec4 th = jwN(p / 11.0 + 0.61); scrC *= 0.8 + 0.4 * smoothstep(0.3, 0.7, th.g * 0.7 + th.r * 0.3); }
     scrC = mix(scrC, scrC * 0.82, jwNear);  // near the camera its bushes stand on it: the shade under them
-    vec3 bareC = mix(srgb(vec3(0.49, 0.43, 0.37)), srgb(vec3(0.57, 0.46, 0.37)), smoothstep(0.3, 0.7, fine));
+    vec3 bareC = mix(srgb(vec3(0.46, 0.43, 0.34)), srgb(vec3(0.53, 0.46, 0.36)), smoothstep(0.3, 0.7, fine));  // (A37: dry earth and thin grass, not pink)
     // (the litter under the groves; in a fort's mown ground and OpenStreetMap's lawns grass under the trees, Street View
     // Fort Baker: the parade ground's lawn up to the eucalyptus' trunks)
     vec3 d = mix(grassC, scrC, sc); d = mix(d, bareC, br); d = mix(d, srgb(vec3(0.24, 0.22, 0.17)), tr * (1.0 - smoothstep(0.2, 0.6, max(town, green))));
@@ -147,7 +161,9 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // (A11: and wherever the imagery shows bare earth on a slope of about 35 degrees or more, carved or not: the cuts above
   // and below the roads as the lidar's grid has them, Street View: the red cut across Conzelman 3a_0430's bend, the scar
   // over Alexander Avenue's cut, upper Conzelman's left cut toward McCullough; texture on the ground, no face of its own)
-  float bare = max(cut * max(smoothstep(0.42, 0.66, slope + (mid - 0.5) * 0.3), smoothstep(0.3, 0.7, vg.b) * known), smoothstep(0.3, 0.7, vg.b) * known * smoothstep(0.14, 0.26, slope + (mid - 0.5) * 0.08));
+  // (A37: off the road cuts the imagery's bare class shows red earth only on the steepest ground (about 40 degrees on),
+  // and broken: on the open hills it was dry grass read as bare, pink blotches, w_mccullough2)
+  float bare = max(cut * max(smoothstep(0.42, 0.66, slope + (mid - 0.5) * 0.3), smoothstep(0.3, 0.7, vg.b) * known), smoothstep(0.35, 0.75, vg.b + (patch80 - 0.5) * 0.3) * known * smoothstep(0.22, 0.34, slope + (mid - 0.5) * 0.08) * 0.85);
   // (on a face its noise is laid across the face, along it and up it: no streaks slanting up a cut)
   if (bare > 0.001) { float b1 = JWS(11.0, 0.4).r, b2 = JWS(3.7, 0.9).g;
     float bed = 0.5 + 0.5 * sin(h * 3.0 + (b1 - 0.5) * 6.0);
@@ -211,7 +227,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         // hollows a little darker (sky light does not reach the bottom of a gully)
         c *= 1.0 - clamp(vCv, 0.0, 1.0) * 0.25;
         // past the grass: the hills mottled, dots of scrub and their shade, drier and greener patches
-        { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk) * (1.0 - jwKnown * 0.75) * (1.0 - jwPav);
+        { float far = smoothstep(50.0, 220.0, dist), open = (1.0 - vMk.x) * (1.0 - vMk.w) * (1.0 - vMk.z) * (1.0 - rk) * (1.0 - jwKnown * 0.75 * (1.0 - jwScrub)) * (1.0 - jwPav);  /* (A37: and on the imagery's brush too: its dots and shade are what Street View's far brush looks like, w_mccullough1) */
           vec4 ms = jwN(vW.xz / 19.0 + 0.21); float sp = ms.g, sp2 = ms.r, pt = jwN(vW.xz / 2400.0 + 0.53).r;
           // (A33: the dots fade where a pixel spans more than a few metres of ground: far off they read as grit, user 2026-11-05)
           float pxm = length(fwidth(vW.xz)), dotK = 1.0 - smoothstep(1.2, 4.0, pxm);

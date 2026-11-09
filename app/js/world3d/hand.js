@@ -380,7 +380,7 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           float clumpS = smoothstep(0.3, 0.72, s1 * 0.65 + s2 * 0.35);
           vec3 cS = mix(vec3(0.085, 0.105, 0.055), vec3(0.125, 0.135, 0.095), smoothstep(0.45, 0.75, s2));
           cS *= mix(0.5, 1.12, clumpS) * mix(1.0, mix(0.82, 1.12, s3), aaS);
-          float cv = smoothstep(0.25, 0.65, cov + (s2 - 0.5) * 0.45);
+          float cv = smoothstep(0.12, 0.8, cov + (s2 - 0.5) * 0.7 + (s1 - 0.5) * 0.35); cv = max(cv, 0.45 * smoothstep(0.62, 0.8, s1) * sIn);  // (A35: ragged edges and scattered bushes in the grass, cz300: hard-edged grass patches)
           c = mix(c, cS, cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31)); }
         if (wc > 0.002) {
         // mixed; grey-green tufts in clumps over it)

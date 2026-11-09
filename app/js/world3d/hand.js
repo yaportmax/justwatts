@@ -141,6 +141,29 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 // near. Which lod a plant draws in is decided on the GPU by its
 // distance to the camera (veg.json lod: { sp: [lod0 metres, last metres] }); update(x, z) only moves that uniform and
 // toggles near cells: no matrices are rewritten after load.
+// A35: the coastal scrub as one canopy surface (private tools/blender/scrub_shell.py: the lidar's canopy over its ground where NAIP sees
+// plants, coloured from NAIP): scrub.json the head, scrub/s<k>.bin per road group (positions, rgb, triangles), streamed as loadHand's groups.
+// Lit as a solid mass with the asphalt's world-space grain for its leaves; no model, no texture.
+export function loadScrub({ scene, base = '/world/hand/', lambert = m => m }) {
+  const group = new THREE.Group(); group.name = 'handScrub'; scene.add(group);
+  const mat = groundMaterial({ base, lambert });  // (A35: the ground's own material: its scrub cover paints the shell, one surface with relief)
+  let groups = null, at = null, busy = false; const D2 = 1800 * 1800;
+  fetch(base + 'scrub.json').then(r => r.ok ? r.json() : null).then(j => { if (j) { groups = j.groups; pump(); } }).catch(() => {});
+  async function pump() {
+    if (busy || !groups || !at) return; busy = true;
+    try {
+      for (let k = 0; k < groups.length; k++) { const G = groups[k]; if (!G || !G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < D2)) continue; groups[k] = null;
+        const buf = await fetch(base + G.file).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null); if (!buf) continue;
+        const pos = new Float32Array(buf, 0, G.n * 3), cOff = G.n * 12, col = new Uint8Array(buf, cOff, G.n * 3), iOff = cOff + G.n * 3 + ((-G.n * 3) % 4 + 4) % 4, idx = new Uint32Array(buf, iOff, G.t * 3);
+        const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); { const c = new Float32Array(G.n * 3); for (let i = 0; i < c.length; i++) { const v = col[i] / 255; c[i] = v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; } geo.setAttribute('color', new THREE.BufferAttribute(c, 3)); }  /* (NAIP's sRGB to linear) */ geo.setIndex(new THREE.BufferAttribute(idx, 1));
+        geo.computeVertexNormals(); geo.computeBoundingSphere();
+        const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; m.castShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); group.add(m);
+        await new Promise(r => setTimeout(r, 16)); k = -1; }
+    } finally { busy = false; }
+  }
+  return { group, want(x, z) { at = [x, z]; pump(); } };
+}
+
 export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert = m => m }) {
   const group = new THREE.Group(); group.name = 'handVeg'; scene.add(group); group.updateMatrixWorld = () => {};  // (A32: every plant mesh an identity matrix at the origin: not walked each frame)
   const DROP = new Set(['brush', 'brushg', 'mat_o', 'mat_g', 'mat_l', 'mat_d', 'mat_r']);  // (and the scrub carpets: they read as rows of corn up the slopes, user 2026-11-05)
@@ -274,10 +297,13 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
   if (groundShared) return groundShared;
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff }), U = {
     gBox: { value: new THREE.Vector4(0, 0, 1, 1) }, gBoxW: { value: new THREE.Vector4(1e9, 1e9, 1, 1) }, gSplatW: { value: null }, gRep: { value: new THREE.Vector4(3, 7, 4, 6) },
-    gSplat: { value: null }, gDirt: { value: null }, gCut: { value: null }, gGrass: { value: null }, gLitter: { value: null } };
+    gSplat: { value: null }, gDirt: { value: null }, gCut: { value: null }, gGrass: { value: null }, gLitter: { value: null }, gScrub: { value: null }, gScrubBox: { value: new THREE.Vector4(0, 0, 1, 1) } };
   const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); blank.needsUpdate = true;
   const grey = new THREE.DataTexture(new Uint8Array([104, 120, 66, 255]), 1, 1); grey.colorSpace = THREE.SRGBColorSpace; grey.needsUpdate = true;
-  U.gSplat.value = blank; U.gSplatW.value = blank; for (const k of ['gDirt', 'gCut', 'gGrass', 'gLitter']) U[k].value = grey;
+  U.gSplat.value = blank; U.gSplatW.value = blank; U.gScrub.value = blank;
+  // (A35: the scrub's cover, scrub_shell.py: the lidar's low canopy where NAIP sees plants, 2.8 m cells over every hand road's corridor)
+  fetch(base + 'scrub.json').then(r => r.ok ? r.json() : null).then(j => { if (!j?.cover) return; const t = new THREE.TextureLoader().load(base + j.cover.file); t.flipY = false; t.colorSpace = THREE.NoColorSpace;
+    const b = j.cover.box; U.gScrubBox.value.set(b[0], b[1], 1 / (b[2] - b[0]), 1 / (b[3] - b[1])); U.gScrub.value = t; }).catch(() => {}); for (const k of ['gDirt', 'gCut', 'gGrass', 'gLitter']) U[k].value = grey;
   fetch(base + 'ground.json').then(r => r.ok ? r.json() : null).then(j => {
     if (!j) return; const L = new THREE.TextureLoader(), b = j.box; U.gBox.value.set(b[0], b[1], 1 / (b[2] - b[0]), 1 / (b[3] - b[1]));
     const sp = L.load(base + j.splat); sp.flipY = false; sp.colorSpace = THREE.NoColorSpace; U.gSplat.value = sp;
@@ -294,7 +320,7 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGdW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGdN = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vGdW; varying vec3 vGdN; uniform vec4 gBox; uniform vec4 gRep; uniform vec4 gBoxW; uniform sampler2D gSplatW;
-      uniform sampler2D gSplat, gDirt, gCut, gGrass, gLitter, gNoise;`)
+      uniform sampler2D gSplat, gDirt, gCut, gGrass, gLitter, gNoise, gScrub; uniform vec4 gScrubBox;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
       {
         // (the face's own slope from the surface itself, not the mesh's normals: a smoothed or exported-up normal had hidden
@@ -346,6 +372,16 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         vec3 cDirt = textureGrad(gDirt, p / gRep.x, dPx / gRep.x, dPy / gRep.x).rgb; if (steep > 0.002) cDirt = mix(cDirt, textureGrad(gDirt, side / gRep.x, dSx / gRep.x, dSy / gRep.x).rgb, steep);
         cDirt = mix(cDirt, cDirt * vec3(0.92, 0.6, 0.6), clamp((1.0 - w.a) / 0.5, 0.0, 1.0));
           c = mix(c, cDirt, clamp(wd, 0.0, 1.0)); }
+        // (A35: the coastal scrub over the grass where the lidar and NAIP see it: Street View's hillsides are solid grey-green brush, ours read as lawn;
+        // clumps a metre or two across lit on their tops and dark between, grey sage patches, the cover's edge broken by the noise; not on a cut face)
+        { vec2 sb = (p - gScrubBox.xy) * gScrubBox.zw; float sIn = step(0.0, sb.x) * step(sb.x, 1.0) * step(0.0, sb.y) * step(sb.y, 1.0);
+          float cov = texture2D(gScrub, sb).r * sIn;
+          float s1 = textureGrad(gNoise, p / 1.9 + 0.21, dPx / 1.9, dPy / 1.9).r, s2 = textureGrad(gNoise, p / 6.1 + 0.47, dPx / 6.1, dPy / 6.1).g, s3 = textureGrad(gNoise, p / 0.55 + 0.13, dPx / 0.55, dPy / 0.55).b;
+          float clumpS = smoothstep(0.3, 0.72, s1 * 0.65 + s2 * 0.35);
+          vec3 cS = mix(vec3(0.085, 0.105, 0.055), vec3(0.125, 0.135, 0.095), smoothstep(0.45, 0.75, s2));
+          cS *= mix(0.5, 1.12, clumpS) * mix(1.0, mix(0.82, 1.12, s3), aaS);
+          float cv = smoothstep(0.25, 0.65, cov + (s2 - 0.5) * 0.45);
+          c = mix(c, cS, cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31)); }
         if (wc > 0.002) {
         // mixed; grey-green tufts in clumps over it)
         // (three lookups at different angles and scales: the scan's level strata averaged out into fractured rock)

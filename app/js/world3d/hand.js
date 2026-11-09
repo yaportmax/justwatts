@@ -222,7 +222,10 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     g.scene.traverse(o => { if (!o.isMesh) return; parts[/lod1/.test(o.name) || /lod1/.test(o.parent?.name || '') ? 1 : 0].push({ geo: o.geometry.clone().applyMatrix4(o.matrixWorld), src: o.material }); });
     const near = parts[0].length ? near0 : 0;
     for (const p of parts[1]) p.mat = material(p.src, p.geo, near > 0 ? near - FADE : 0, far, { round: /brush|sage/.test(sp), fade: near > 0 ? -1 : 0 });
-    return { near, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, near + FADE, { fade: 1, meshNormals: !!J.mesh_normals?.[sp] })) };
+    const out_ = { near, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, near + FADE, { fade: 1, meshNormals: !!J.mesh_normals?.[sp] })) };
+    // (A35: the bush-tree's leaves a muted olive: as the tall shrubs along Field, Bunker and McCullough they read cartoon lime against Street View's)
+    if (/^lime/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.74, 0.76, 0.62));
+    return out_;
   })).get(sp);
   async function addGroup(G, x, z) {
     const buf = await fetch(base + G.file).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null); if (!buf) return;

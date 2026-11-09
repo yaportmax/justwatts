@@ -66,6 +66,36 @@ export const ROAD_TEXT = [
   ['STOP', 41843, 1.7, false, 'cz_41835_a'],
   ['15', 40341, 1.7, false, 'cz_40330_a'], ['MPH', 40350, 1.7, false, 'cz_40330_a'], ['PED', 40175, 1.7, false, 'cz_40165_a'], ['PED', 41705, -1.7, true, 'cz_41695_a'],
 ];
+// (A37) the shoulder: Street View's strip of short bright grass ('g') or gravel and dirt ('t' tan gravel, 'd' red-brown dirt;
+// 'b' brush to the edge)
+// between the paved edge (or its curb) and the scrub, width in metres; hand.js paints it on the verges and holds the brush
+// back behind it. Every road from Bunker Road on has a grass strip about a metre wide on both sides unless a row says
+// otherwise (review1 w_bunker1, w_field2, w_simmonds0, w_center0; the survey's ahead photos cz_30000_a to cz_280245_a); rows
+// [s0, s1, side 'L' | 'R' | 'B', kind, width] (the last row that covers a point wins; kind null: no shoulder).
+export const SHOULDER_DEFAULT = (s) => s >= 30000 ? ['g', 1.0] : null;
+export const SHOULDERS = [
+  // Conzelman down from Hawk Hill: dense brush right to a thin rocky lip at the edge on the right (cz_11110_a to cz_11245_a;
+  // the hand verge stands over the lidar there and buried the brush shell: a lawn in the game)
+  [11085, 11250, 'R', 'b', 40.0],
+  // Conzelman under the red cut west of McCullough: a red-brown dirt shoulder 1.5 to 2 m (w_conzelman3, cz_10090_a)
+  [10075, 10200, 'R', 'd', 1.8],
+  // Bunker Road: the wide dirt pull-off on the right by the McCullough junction (w_mccullough2), the dry grass strip left of it
+  [33240, 33330, 'L', 'd', 3.0], [33240, 33330, 'R', 'g', 0.8],  // (w_mccullough2 looks back west: its right is the road's left)
+  // Bunker Road through Fort Cronkhite's lawns: grass to the edge, wide (cz_33430_a to cz_33630_a)
+  [33400, 33640, 'B', 'g', 2.0],
+  // McCullough Road: red dirt on the downhill side at the bends (w_mccullough0, cz_70665_a)
+  [70370, 70460, 'L', 'd', 2.4], [70640, 70700, 'L', 'd', 1.6],
+  // Mitchell Road: the gravel strip along the lagoon side (cz_100125_a to cz_100435_a, w_mitchell1), lawn on the barracks side
+  [100000, 100500, 'R', 'd', 3.0], [100000, 100500, 'L', 'g', 1.5],
+  // East Road: gravel and dirt behind the bay-side curb (cz_80450_a to cz_80720_a)
+  [80420, 80780, 'L', 'd', 2.0],
+  // Center Road: the parade's lawn up to the curbs (w_center0)
+  [280000, 280250, 'B', 'g', 2.0],
+];
+export function shoulderAt(s, side) {
+  let r = SHOULDER_DEFAULT(s); for (const [a, b, sd, k, w] of SHOULDERS) if (s >= a && s <= b && (sd === 'B' || sd === side)) r = k ? [k, w] : null;
+  return r;
+}
 export function autoSections(roads = ROADS) {
   const out = [];
   for (const r of roads) {

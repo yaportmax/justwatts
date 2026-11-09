@@ -10,6 +10,37 @@ import { MeshoptDecoder } from '../../vendor/three-0.180.0/addons/libs/meshopt_d
 try { if (typeof Worker !== 'undefined' && !globalThis.__w3?.noMeshoptWorkers) MeshoptDecoder.useWorkers(Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1))); } catch {}
 import { textures } from './tex.js';
 import { HZ_LAYER } from './horizon.js';
+import { shoulderAt } from './roadlines.js';
+import { compileSpec } from './conzelman.js';
+import { makeProj } from './geo.js';
+
+// (A37) the shoulder on the verges: each verge vertex's distance from the paved edge (the chunk's road triangles' edges: the
+// nearest point of the paving from outside it is on its boundary, so every triangle edge serves) and its road's shoulder
+// (roadlines.js SHOULDERS by the nearest station and the verge's side) as attribute jwSh: x 1 at the edge to 0 at 8 m, y the
+// kind (0 grass, 0.5 tan gravel, 1 red dirt), z the width / 8. The hand terrain has none: no shoulder there.
+let SPEC_ = null; const PROJ_ = makeProj(37.93, -122.63), spec_ = () => SPEC_ ??= compileSpec(PROJ_);
+const SHK = { g: 0, t: 0.5, d: 1, b: -1 };  // (b: brush to the edge past a thin rocky lip, the cover forced on)
+function addShoulders(root, lambert) {
+  root.updateMatrixWorld(true); const v = new THREE.Vector3(), cells = new Map(), C = 4, S = [];
+  root.traverse(o => { if (!o.isMesh || !/^road\d/.test(o.name)) return; const P = o.geometry.attributes.position, I = o.geometry.index; if (!I) return;
+    const W = new Float32Array(P.count * 2); for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); W[2 * k] = v.x; W[2 * k + 1] = v.z; }
+    for (let t = 0; t + 2 < I.count; t += 3) for (let e = 0; e < 3; e++) { const a = I.getX(t + e), b = I.getX(t + (e + 1) % 3), n = S.length; S.push(W[2 * a], W[2 * a + 1], W[2 * b], W[2 * b + 1]);
+      const x0 = Math.floor(Math.min(W[2 * a], W[2 * b]) / C), x1 = Math.floor(Math.max(W[2 * a], W[2 * b]) / C), z0 = Math.floor(Math.min(W[2 * a + 1], W[2 * b + 1]) / C), z1 = Math.floor(Math.max(W[2 * a + 1], W[2 * b + 1]) / C);
+      for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) { const k = i + ',' + j; (cells.get(k) ?? cells.set(k, []).get(k)).push(n); } } });
+  if (!S.length) return;
+  const dist = (x, z) => { let best = 8; const ci = Math.floor(x / C), cj = Math.floor(z / C);
+    for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) for (const n of cells.get((ci + a) + ',' + (cj + b)) || []) {
+      const ax = S[n], az = S[n + 1], ex = S[n + 2] - ax, ez = S[n + 3] - az, L2 = ex * ex + ez * ez, f = L2 ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2)) : 0, d = Math.hypot(x - ax - ex * f, z - az - ez * f); if (d < best) best = d; }
+    return best; };
+  const Z = spec_();
+  // (the hand terrain too, its side of the line from the line's own direction there: where no verge is built, and Hawk Hill's
+  // brush ('b') up the slope past the verge, sh_hawk: the cover map has it as grass)
+  const sideOf = (x, z, s) => { const [a0, o0] = Z.latlon(s - 1), [a1, o1] = Z.latlon(s + 1), [x0, z0] = PROJ_.xz(a0, o0), [x1, z1] = PROJ_.xz(a1, o1); return (x - x0) * -(z1 - z0) + (z - z0) * (x1 - x0) > 0 ? 'R' : 'L'; };
+  root.traverse(o => { const ve = /^verge\d+[LR]$/.test(o.name); if (!o.isMesh || !(ve || /^terrain\d/.test(o.name))) return; const P = o.geometry.attributes.position, A = new Float32Array(P.count * 3);
+    for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); const q = Z.near(v.x, v.z, 40); if (!q || q.s < 0) continue; const sh = shoulderAt(q.s, ve ? o.name.slice(-1) : sideOf(v.x, v.z, q.s)); if (!sh || (!ve && q.d > 25 && sh[0] !== 'b')) continue;
+      A[3 * k] = 1 - dist(v.x, v.z) / 8; A[3 * k + 1] = SHK[sh[0]] ?? 0; A[3 * k + 2] = sh[1] / 8; }
+    o.geometry.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); o.material = groundMaterial({ lambert, shoulder: true }); });
+}
 
 // (a surface's grain in world space from the game's noise texture, no UVs needed: asphalt aggregate and its tone patches,
 // the verges' mottle; amp: how far the colour swings either way)
@@ -24,6 +55,39 @@ function grain(m, amp, scales) {
           diffuseColor.rgb *= 1.0 + ${amp.toFixed(3)} * (g - 0.5) * 2.0; }`);
   };
   m.customProgramCacheKey = () => 'jw-hand-grain-' + amp + scales.join(',');
+  return m;
+}
+
+// (A37 theme 8: each road's asphalt tone against Conzelman's, from Street View: the asphalt's pixel median in each pair
+// (low saturation, no paint, the bottom middle of the view) over the game's at the same pose, as a ratio to Conzelman's own
+// (its surface the reference), linear RGB, damped to 0.6 of the measured step (two to seven pairs a road, auto exposure):
+// review1 w_bunker0-2, w_mccullough0-1, w_field0-2, w_mitchell0-1, w_east0-2, w_center0, w_simmonds0-1, w_kirkpatrick0,
+// w_alexander0-1 and the A37 pairs; by the chunk's station base (allroads.py lines.json))
+const ASPH_TONE = { 20000: [1.27, 1.34, 1.36], 30000: [0.93, 0.96, 1.02], 90000: [0.93, 0.96, 1.02], 120000: [0.93, 0.96, 1.02], 40000: [0.91, 0.92, 0.93],
+  50000: [0.74, 0.77, 0.90], 70000: [1.14, 1.19, 1.24], 80000: [1.02, 1.05, 1.10], 360000: [1.02, 1.05, 1.10], 100000: [0.77, 0.77, 0.79],
+  110000: [0.75, 0.79, 0.91], 130000: [1.0, 0.99, 1.03], 280000: [1.13, 1.17, 1.20] };
+const asphTone = s0 => ASPH_TONE[Math.floor(s0 / 10000) * 10000] || null;
+// (A37 theme 8: the blacktop's wear in world space, Street View's on every road: darker tar patches metres across with crisp
+// edges, sealed cracks (black tar lines a hand wide, wandering), fine open cracks in some stretches, a lighter worn patch
+// now and then; sparse, as most of Street View's surface is plain (a first, denser pass read as a cracked cartoon, w_field1_ts1); each faded where a pixel spans more than its width (no shimmer far off). No wheel paths: the road mesh has
+// no across-the-road coordinate.)
+function asphaltWear(m) {
+  const T = textures(), f0 = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    f0.call(m, sh, r);
+    sh.uniforms.tWear = { value: T.noise };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vAw;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvAw = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vAw; uniform sampler2D tWear;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        { vec2 p = vAw.xz; float px = length(fwidth(p));
+          vec4 a = texture2D(tWear, p / 23.0 + 0.13), b = texture2D(tWear, p / 7.3 + 0.71), c = texture2D(tWear, p / 3.1 + 0.29);
+          float patchT = smoothstep(0.69, 0.715, a.g * 0.6 + b.r * 0.4);           // a tar patch
+          float worn = smoothstep(0.72, 0.76, a.b * 0.55 + b.g * 0.45) * (1.0 - patchT);  // a pale worn patch
+          float seam = (1.0 - smoothstep(0.004, 0.012 + px * 0.02, abs(b.b - 0.5))) * smoothstep(0.62, 0.74, a.r) * (1.0 - smoothstep(0.08, 0.3, px));
+          float crack = (1.0 - smoothstep(0.003, 0.008 + px * 0.02, abs(c.a - 0.5))) * smoothstep(0.7, 0.82, a.a) * (1.0 - smoothstep(0.04, 0.15, px));
+          diffuseColor.rgb *= (1.0 - 0.12 * patchT) * (1.0 + 0.05 * worn) * (1.0 - 0.3 * seam) * (1.0 - 0.15 * crack); }`);
+  };
+  const k0 = m.customProgramCacheKey; m.customProgramCacheKey = () => k0.call(m) + '|wear';
   return m;
 }
 
@@ -63,6 +127,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
     async function addChunk(c, into, box) {
       const g = await loader.loadAsync(base + `conz_${c.i}.glb`).catch(() => null); if (!g) return;
       g.scene.position.set(c.cx, 0, c.cz);
+      let hasVerge = false;
       g.scene.traverse(o => {
         if (!o.isMesh) return; o.receiveShadow = !/^(posts_(hp|fork[wy]|line|yline)|tunwa_bk_day)/.test(o.name); o.castShadow = /beam|post|kerb/.test(o.name) && !/^posts_(hp|fork[wy]|line|yline|wa_bo_board)/.test(o.name);  // (A29: paint neither casts nor takes shadows: dark smudges on the crossing bars, b1103_1538)
         // (the ground is in the terrain shadows' height map: without it the corridor was a pit there, and the generated hill
@@ -77,26 +142,29 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
         // (A29: the concrete's sunlit look in the morning photos, t4_13050_a, cz_11050_a: the game's sun leaves their road faces in shade; normals eased up, no extra cost)
         if (/^posts_(bunker|wc|hut|wblock|wa_|wall1045)/.test(o.name) && o.geometry.attributes.normal) { const N = o.geometry.attributes.normal; for (let k = 0; k < N.count; k++) { const x = N.getX(k) * 0.45, y = N.getY(k) * 0.45 + 0.55, z = N.getZ(k) * 0.45, l = Math.hypot(x, y, z) || 1; N.setXYZ(k, x / l, y / l, z / l); } N.needsUpdate = true; }
         // (the ground round the road and the verges: jw-a19's photo-zoned ground textures, world space)
-        if (/^(verge|terrain)/.test(o.name)) { o.material = groundMaterial({ lambert }); o.geometry.deleteAttribute('color'); return; }
+        if (/^(verge|terrain)/.test(o.name)) { o.material = groundMaterial({ lambert }); o.geometry.deleteAttribute('color'); if (/^verge/.test(o.name)) hasVerge = true; return; }
         if (noExt && /^(terrain_ext|rock_ext|surf)/.test(o.name)) { o.visible = false; return; }
         // (the surf at the ridge's foot: white water, see-through by its vertex alpha, build_conz.py surf)
         if (/^surf/.test(o.name)) { o.material = lambert(foam(new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 }))); o.receiveShadow = false; return; }
         // (the W-beam's folds lit face by face: smooth normals averaged its profile flat, a pale plank)
         if (/^beam/.test(o.name)) { o.geometry = o.geometry.toNonIndexed(); o.geometry.computeVertexNormals(); }
-        const s = o.material; let m = mats.get(s);
+        const s = o.material, tone = /^road/.test(o.name) && s.name === 'asphalt' ? asphTone(c.s0) : null, mk = tone ? s.name + '|' + tone : s; let m = mats.get(mk);  // (A37: a road's own asphalt tone)
         if (!m) { m = new THREE.MeshLambertMaterial({ color: s.color, vertexColors: !!o.geometry.attributes.color, side: THREE.DoubleSide, polygonOffset: /paint/.test(o.name), polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+          if (tone) m.color.multiply(new THREE.Color(...tone));
           // (the asphalt's grain: Street View 950 m, the paving mid grey with darker and lighter patches metres across and a fine
           // aggregate; the verges mottled)
           if (/lot_dirt|lot_gravel/.test(s.name)) grain(m, 0.32, [1.3, 5.3, 19.7]);
           else if (/asphalt|lot/.test(s.name)) grain(m, 0.11, [1.37, 9.7, 37.3]);
+          if (/^asphalt$|^lot$/.test(s.name)) asphaltWear(m);
           // (galvanised steel: the sky's sheen on its shaded face, Street View: a light W-beam even with the sun behind it)
           if (/wbeam/.test(s.name)) m.emissive = new THREE.Color(0.10, 0.105, 0.11); 
           if (/a31_bk_day/.test(s.name)) m.emissive = new THREE.Color(0.55, 0.56, 0.57);  // (A31: daylight through the tunnel, no sun on it)
           // (A34: the dark information boards near black, 0.5 %, read as holes cut in the view, lv2 0:29 and 1:40: a painted dark brown-green, still dark)
           if (/^(sign_board|a31_bo_board)/.test(s.name)) m.color.setRGB(0.045, 0.055, 0.045);
-          m = lambert(m); mats.set(s, m); }
+          m = lambert(m); mats.set(mk, m); }
         o.material = m;
       });
+      if (hasVerge) addShoulders(g.scene, lambert);
       into.add(g.scene); into.updateMatrixWorld(true); box.expandByObject(g.scene);
       // (the verges' and lots' triangles in world space: the generated ground is pushed under them as under the paving,
       // view.js buildRoads; else its coarse grid stands up through a level verge or a lot)
@@ -297,10 +365,15 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
 // box [x0, z0, x1, z1] in the game frame, a splat (r dirt, g chert cut, b scrub litter; the rest grass) and one tile per
 // layer, each tiled in world metres, no UVs). The cut shows only where the ground is steep (its side projection then);
 // a shallow cut zone stays grass. One shared material: groundMaterial({ lambert }) for the verges and the hand terrain.
-let groundShared = null;
-export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {}) {
-  if (groundShared) return groundShared;
-  const m = new THREE.MeshLambertMaterial({ color: 0xffffff }), U = {
+// (A37: shoulder: the verges' variant, their jwSh attribute's shoulder band; one set of uniforms and textures for both)
+let groundShared = null, groundSh = null, groundMk = null;
+export function groundMaterial({ base = '/world/hand/', lambert = m => m, shoulder = false } = {}) {
+  groundMk ??= groundMaker(base);
+  if (shoulder) return groundSh ??= lambert(groundMk(true));
+  return groundShared ??= lambert(groundMk(false));
+}
+function groundMaker(base) {
+  const U = {
     gBox: { value: new THREE.Vector4(0, 0, 1, 1) }, gBoxW: { value: new THREE.Vector4(1e9, 1e9, 1, 1) }, gSplatW: { value: null }, gRep: { value: new THREE.Vector4(3, 7, 4, 6) },
     gSplat: { value: null }, gDirt: { value: null }, gCut: { value: null }, gGrass: { value: null }, gLitter: { value: null }, gScrub: { value: null }, gScrubBox: { value: new THREE.Vector4(0, 0, 1, 1) } };
   const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); blank.needsUpdate = true;
@@ -319,24 +392,28 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
       U.gRep.value.setComponent(rep[t.layer], t.rep);
     }
   }).catch(() => {});
+  return SH => { const m = new THREE.MeshLambertMaterial({ color: 0xffffff }); if (SH) m.defines = { JW_SH: '' };
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U); sh.uniforms.gNoise = { value: textures().noise };
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGdW; varying vec3 vGdN;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGdW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGdN = normalize(mat3(modelMatrix) * objectNormal);');
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGdW; varying vec3 vGdN;\n#ifdef JW_SH\nattribute vec3 jwSh; varying vec3 vSh;\n#endif')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGdW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGdN = normalize(mat3(modelMatrix) * objectNormal);\n#ifdef JW_SH\nvSh = jwSh;\n#endif');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vGdW; varying vec3 vGdN; uniform vec4 gBox; uniform vec4 gRep; uniform vec4 gBoxW; uniform sampler2D gSplatW;
       uniform sampler2D gSplat, gDirt, gCut, gGrass, gLitter, gNoise, gScrub; uniform vec4 gScrubBox;
       // (A36: the scrub's bushes as round mounds a metre or two across, packed as Street View's coyote brush: a cell each, its centre and size
       // from a hash; the tallest mound under the pixel gives the height and its slope, the slope bends the light, hawk_r9: painted cover read as lawn)
-      float jwSW = 0.0; vec2 jwSG = vec2(0.0);
+      float jwSW = 0.0; vec2 jwSG = vec2(0.0); float jwBand = 0.0, jwBrush = 0.0;
+      #ifdef JW_SH
+      varying vec3 vSh;
+      #endif
       vec2 jwH2(vec2 q) { q = mod(q, 289.0); vec3 p3 = fract(vec3(q.xyx) * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
       vec4 jwBush(vec2 p, float dens) {
         vec2 q = p / 1.4, ic = floor(q); float best = 0.0, id = 0.0; vec2 g = vec2(0.0);
         for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
           vec2 c = ic + vec2(float(i), float(j)), h = jwH2(c), h2 = jwH2(c + 17.0); if (h2.y > dens) continue;
           vec2 d = p - (c + h) * 1.4; float r = 0.7 + 0.75 * h2.x, t = 1.0 - dot(d, d) / (r * r);
-          if (t > 0.0) { float H = r * (0.7 + 0.5 * fract(h.x * 7.13)), tp = pow(max(t, 0.04), 0.4), hh = H * tp;  // (puffy: steep sides, a round top)
-            if (hh > best) { best = hh; id = h.x; g = -0.8 * H * tp / max(t, 0.04) * d / (r * r); } } }
+          if (t > 0.0) { float H = r * (0.38 + 0.3 * fract(h.x * 7.13)), tp = pow(max(t, 0.04), 0.6), hh = H * tp;  // (puffy: steep sides, a round top)
+            if (hh > best) { best = hh; id = h.x; g = -1.2 * H * tp / max(t, 0.04) * d / (r * r); } } }
         return vec4(best, g, id); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
       {
@@ -377,6 +454,13 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           float streak = smoothstep(0.45, 0.7, texture2D(gNoise, vec2(p.x / 38.0, p.y / 9.0) + 0.29).g);
           cGrass = mix(cGrass, cGrass * vec3(0.9, 0.95, 0.66) * (1.0 - 0.2 * streak), outBox); }  // (A34: drier olive, the lime read too bright against Street View, mccullough70400, east80700)
         vec3 c = cGrass;
+        // (A37: the shoulder band, its outer edge ragged by the noise a few tenths of a metre: review1 w_bunker1, w_field2, w_mccullough0)
+        #ifdef JW_SH
+        { float shW = vSh.z * 8.0, shD = (1.0 - vSh.x) * 8.0;
+          if (shW > 0.05) { float nE = (textureGrad(gNoise, p / 2.1 + 0.19, dPx / 2.1, dPy / 2.1).r - 0.5) * 0.8 + (textureGrad(gNoise, p / 0.5 + 0.71, dPx / 0.5, dPy / 0.5).g - 0.5) * 0.4 * aaS;
+            if (vSh.y < -0.5) { jwBrush = 1.0 - smoothstep(shW - 0.5, shW + 0.5, shD + nE); jwBand = 1.0 - smoothstep(0.25, 0.55, shD + nE * 0.3); }  // (A37, Hawk Hill: the brush down to a rocky lip at the edge, cz_11110_a to cz_11245_a; the verge stands over the lidar there and buried the brush shell)
+            else jwBand = 1.0 - smoothstep(shW - 0.15, shW + 0.15, shD + nE * clamp(shW, 0.5, 1.2)); } }
+        #endif
         if (wl > 0.002) {
         vec3 cLit = textureGrad(gLitter, p / gRep.w, dPx / gRep.w, dPy / gRep.w).rgb; if (steep > 0.002) cLit = mix(cLit, textureGrad(gLitter, side / gRep.w, dSx / gRep.w, dSy / gRep.w).rgb, steep);
         cLit = mix(cLit, textureGrad(gLitter, p / (gRep.w * 6.1), dPx / (gRep.w * 6.1), dPy / (gRep.w * 6.1)).rgb, far * 0.6);
@@ -392,14 +476,14 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
         // (A35: the coastal scrub over the grass where the lidar and NAIP see it: Street View's hillsides are solid grey-green brush, ours read as lawn;
         // clumps a metre or two across lit on their tops and dark between, grey sage patches, the cover's edge broken by the noise; not on a cut face)
         { vec2 sb = (p - gScrubBox.xy) * gScrubBox.zw; float sIn = step(0.0, sb.x) * step(sb.x, 1.0) * step(0.0, sb.y) * step(sb.y, 1.0);
-          float cov = texture2D(gScrub, sb).r * sIn;
+          float cov = max(texture2D(gScrub, sb).r * sIn, 0.9 * jwBrush);
           float s1 = textureGrad(gNoise, p / 1.9 + 0.21, dPx / 1.9, dPy / 1.9).r, s2 = textureGrad(gNoise, p / 6.1 + 0.47, dPx / 6.1, dPy / 6.1).g, s3 = textureGrad(gNoise, p / 0.55 + 0.13, dPx / 0.55, dPy / 0.55).b;
           float clumpS = smoothstep(0.3, 0.72, s1 * 0.65 + s2 * 0.35);
           vec3 cS = mix(vec3(0.085, 0.105, 0.055), vec3(0.125, 0.135, 0.095), smoothstep(0.45, 0.75, s2));
           cS *= mix(0.5, 1.12, clumpS) * mix(1.0, mix(0.82, 1.12, s3), aaS);
           float cv = smoothstep(0.12, 0.8, cov + (s2 - 0.5) * 0.7 + (s1 - 0.5) * 0.35); cv = max(cv, 0.45 * smoothstep(0.62, 0.8, s1) * sIn);  // (A35: ragged edges and scattered bushes in the grass, cz300: hard-edged grass patches)
           float sw = cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31) * (1.0 - smoothstep(0.85, 1.0, steep) * 0.7);  // (A37: brush on the steep slopes too, only the cut faces bare: Street View hawk)
-          if (sw > 0.002) { float bf = (1.0 - smoothstep(0.2, 0.8, pxm)) * smoothstep(0.2, 0.6, texture2D(gScrub, sb).g * sIn);  // (the mounds fade to their mean once one is a few pixels across; A37: only where the lidar sees real shrubs, scrubcover G, review1 w_center0 lawns took them as scales)
+          if (sw > 0.002) { float bf = (1.0 - smoothstep(0.2, 0.8, pxm)) * smoothstep(0.2, 0.6, max(texture2D(gScrub, sb).g * sIn, jwBrush));  // (the mounds fade to their mean once one is a few pixels across; A37: only where the lidar sees real shrubs, scrubcover G, review1 w_center0 lawns took them as scales)
             vec2 pw = p + (vec2(textureGrad(gNoise, p / 0.8 + 0.41, dPx / 0.8, dPy / 0.8).r, textureGrad(gNoise, p / 0.8 + 0.83, dPx / 0.8, dPy / 0.8).g) - 0.5) * 0.45 * aaS;  // (ragged leafy outlines)
             vec4 bu = jwBush(pw, mix(0.9, 1.0, smoothstep(0.3, 0.9, cov)));
             float top = smoothstep(0.1, 1.0, bu.x), gap = 1.0 - smoothstep(0.0, 0.1, bu.x), foot = smoothstep(0.0, 0.35, bu.x);
@@ -412,8 +496,21 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
             cB = mix(cB, cG, gap);
             vec3 cFar = mix(vec3(0.055, 0.085, 0.032), vec3(0.08, 0.095, 0.058), smoothstep(0.45, 0.75, s2)) * mix(0.62, 1.12, clumpS);  // (the bushes' and gaps' mean, so near and far brush are one colour)
             cS = mix(cFar, cB, bf); sw = max(sw, bf * smoothstep(0.4, 0.55, cov) * (1.0 - steep * 0.7) * (1.0 - rb31));
-            jwSW = sw * bf * (1.0 - gap) * 1.6; jwSG = clamp(bu.yz, vec2(-2.5), vec2(2.5)); }
-          c = mix(c, cS, sw); }
+            jwSW = sw * bf * (1.0 - gap) * 0.45 * (1.0 - smoothstep(0.3, 0.9, pxm)); jwSG = clamp(bu.yz, vec2(-2.5), vec2(2.5)); }  // (A37: the bent light weak, and gone at a grazing angle: on the flat ground it drew the painted mounds as dark shingles, w_field1)
+          c = mix(c, cS, sw * (1.0 - jwBand)); jwSW *= 1.0 - jwBand; }
+        #ifdef JW_SH
+        // (A37: the shoulder's own surface: short saturated grass, or tan gravel, or red-brown dirt with a few tufts, the dirt
+        // greening into the scrub at its outer edge; Street View cz_33430_a, w_mitchell1, w_mccullough0, w_conzelman3)
+        if (jwBand > 0.002) {
+          float m1 = textureGrad(gNoise, p / 3.1 + 0.37, dPx / 3.1, dPy / 3.1).r, m2 = textureGrad(gNoise, p / 0.35 + 0.53, dPx / 0.35, dPy / 0.35).g, k = vSh.y < -0.5 ? 0.45 : vSh.y;
+          vec3 gS = textureGrad(gGrass, p / gRep.z, dPx / gRep.z, dPy / gRep.z).rgb; float gl = clamp(dot(gS, vec3(0.3, 0.55, 0.15)) / 0.35, 0.4, 1.6);
+          vec3 cSg = vec3(0.19, 0.27, 0.09) * mix(1.0, gl, aaS * 0.7) * mix(0.85, 1.15, m1);
+          vec3 cTan = mix(vec3(0.34, 0.31, 0.27), vec3(0.43, 0.39, 0.34), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
+          vec3 cRed = mix(vec3(0.33, 0.22, 0.16), vec3(0.41, 0.29, 0.21), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
+          vec3 cD = mix(cTan, cRed, smoothstep(0.6, 0.9, k));
+          cD = mix(cD, cSg, smoothstep(0.62, 0.8, m2) * 0.35 * aaS + smoothstep(0.55, 1.0, (1.0 - vSh.x) / max(vSh.z, 0.01)) * 0.45);
+          c = mix(c, mix(cSg, cD, smoothstep(0.2, 0.3, k)), jwBand); }
+        #endif
         if (wc > 0.002) {
         // mixed; grey-green tufts in clumps over it)
         // (three lookups at different angles and scales: the scan's level strata averaged out into fractured rock)
@@ -438,7 +535,7 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
           cCut = mix(cCut, tuft, clump * blade * 0.8 * steep * (1.0 - rb31) * mix(0.35, 1.0, clamp((w.a - 0.4) / 0.6, 0.0, 1.0))); }  // (A32, n11_11605_r: fewer pale tufts on the dark rock)
         // (the splat's alpha below 1: the chert dark grey-brown there, cz_1205_l, cz_1380_l)
         cCut = mix(cCut, vec3(dot(cCut, vec3(0.3, 0.55, 0.15))) * vec3(0.92, 0.86, 0.80) * 0.62, 0.8 * clamp((1.0 - w.a) / 0.6, 0.0, 1.0));  // (A32: darker, n11_11605_r)
-          c = mix(c, cCut, clamp(wc, 0.0, 1.0)); }
+          c = mix(c, cCut, clamp(wc * (1.0 - jwBand * (1.0 - steep)), 0.0, 1.0)); }
         if (p.x > 8935.0 && p.x < 8995.0 && p.y > 11625.0 && p.y < 11695.0) {  // (A31: shade pools under the picnic's cypress crowns, cz_14255_l, 14275_l: bright grass and shade, the plants cast no shadows)
           float s31 = 0.0; vec3 Q[7]; Q[0] = vec3(8949.0, 11651.0, 7.5); Q[1] = vec3(8953.0, 11660.0, 6.5); Q[2] = vec3(8957.0, 11647.0, 6.5); Q[3] = vec3(8962.0, 11636.0, 6.0); Q[4] = vec3(8964.0, 11652.0, 8.5); Q[5] = vec3(8969.0, 11667.0, 8.0); Q[6] = vec3(8972.0, 11682.0, 8.0);
           float n31 = texture2D(gNoise, p / 5.5).r * 0.55 + texture2D(gNoise, p / 1.7).g * 0.45;
@@ -451,6 +548,6 @@ export function groundMaterial({ base = '/world/hand/', lambert = m => m } = {})
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
       if (jwSW > 0.001) normal = normalize(normal + (viewMatrix * vec4(-jwSG.x, 0.0, -jwSG.y, 0.0)).xyz * jwSW);`);
   };
-  m.customProgramCacheKey = () => 'jw-hand-ground21';
-  groundShared = lambert(m); return groundShared;
+  m.customProgramCacheKey = () => 'jw-hand-ground22' + (SH ? 'sh' : '');
+  return m; };
 }

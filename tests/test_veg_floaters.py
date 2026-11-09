@@ -249,17 +249,47 @@ def road_overhangs(app):
                         d = min(d, float(np.hypot(*(P - e0 - k * w))))
         return d
 
+    G = {k: np.array(v) for k, v in g.items()}
+
+    def near_any(P, eps):
+        """(A37: the same test as dist(x, z, 1.0) < eps for any of the points, vectorised: thousands of trees now)"""
+        cells = {(int(x // 4) + i, int(z // 4) + k) for x, z in P for i in (-1, 0, 1) for k in (-1, 0, 1)}
+        T = [G[c] for c in cells if c in G]
+        if not T:
+            return False
+        T = np.concatenate(T)
+        A, B, C = T[:, 0][None], T[:, 1][None], T[:, 2][None]
+        Q = np.asarray(P, float)[:, None, :]
+        v0, v1, v2 = C - A, B - A, Q - A
+        den = v0[..., 0] * v1[..., 1] - v1[..., 0] * v0[..., 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            u = (v2[..., 0] * v1[..., 1] - v1[..., 0] * v2[..., 1]) / den
+            v = (v0[..., 0] * v2[..., 1] - v2[..., 0] * v0[..., 1]) / den
+        if np.any((den != 0) & (u >= 0) & (v >= 0) & (u + v <= 1)):
+            return True
+        for e0, e1 in ((A, B), (B, C), (C, A)):
+            w = e1 - e0
+            l = (w * w).sum(-1)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                k = np.where(l > 0, np.clip(((Q - e0) * w).sum(-1) / l, 0, 1), 0)
+            if np.any(np.hypot(*(Q - e0 - k[..., None] * w).transpose(2, 0, 1)) < eps):
+                return True
+        return False
+
     out = {}
     for sp, a in veg["species"].items():
         pts = np.concatenate([q[1] for q in model_parts(hand / "veg" / f"{sp}.glb")])
-        if sp == "oak":  # a one-sided crown: its own lod0 vertices at each plant's turn and width, not a circle round its trunk
+        # (A37: every tree, not only the oak: crowns may span the road high up, as Street View has them, w_east2, w_murray0; place_roads37 /
+        # export_veg37 fit each crown to its lod0 leaves at 4.5 m over the road)
+        if sp in ("mcyp", "mcyp2", "loak", "oak", "wood", "btree", "cypress", "cyp2", "cyp3", "cypt", "cypt2", "lime", "lime2", "bushtree", "euc", "euc2"):  # a one-sided crown: its own lod0 vertices at each plant's turn and width, not a circle round its trunk
             pts0 = np.concatenate([q[1] for q in model_parts(hand / "veg" / f"{sp}.glb") if "lod0" in q[0]])[::40]
             n = 0
             for x, _, z, r, sx, sy, sw in np.array(a).reshape(-1, 7):
                 c, s = np.cos(r), np.sin(r)
                 # (over the road only high up, 4 m and more: sb1_0545_a, the oak's limbs span the road)
                 low = pts0[pts0[:, 1] * sy < 4.0]
-                n += any(dist(x + px * sx * c + pz * sw * s, z - px * sx * s + pz * sw * c, 1.0) < 0.2 for px, _, pz in low)
+                if len(low):
+                    n += near_any(np.c_[x + low[:, 0] * sx * c + low[:, 2] * sw * s, z - low[:, 0] * sx * s + low[:, 2] * sw * c], 0.2)
             out[sp] = n
             continue
         if sp == "shade":

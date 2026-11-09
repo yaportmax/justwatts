@@ -115,8 +115,12 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     // (A37: where the imagery shows brush the brush stays: a park polygon over Hawk Hill's summit cut a hard-edged pale
     // patch of lawn out of its scrub, the hawk spot 37.82645,-122.49934 h221)
     float lg = smoothstep(0.3, 0.8, green); sc *= 1.0 - lg * (1.0 - smoothstep(0.3, 0.7, vg.r)); br *= 1.0 - lg; tr *= 1.0 - lg;
-    vec3 grassC = mix(srgb(vec3(0.39, 0.46, 0.26)), srgb(vec3(0.46, 0.50, 0.31)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));  // (A36: Street View hawk 2019-04: the hill's grass a deeper spring green, the pale olive read as lime blotches against the brush) (A37: a touch less saturated: sunlit it read lime against w_mccullough2's olive spring grass)
-    grassC = mix(grassC, srgb(vec3(0.36, 0.45, 0.25)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
+    // (A37 theme 8: Street View's lit hill grass measured, 2025-03 mostly: the brighter 45 % of the green to olive pixels in the
+    // view's middle band, median sRGB #9f9f6c over 12 pairs (w_mccullough0-2, w_bunker0-2, w_field1, w_simmonds0,
+    // w_conzelman1/3, w_east0, hawk) against the game's #66724f: a dry yellow olive, red as high as green; less the photos'
+    // exposure (about 1.15 on the same pairs' asphalt): grass as olive as that, a little lighter than before)
+    vec3 grassC = mix(srgb(vec3(0.47, 0.49, 0.31)), srgb(vec3(0.55, 0.55, 0.35)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
+    grassC = mix(grassC, srgb(vec3(0.41, 0.46, 0.28)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));  // (shaded slopes and hollows a little greener, A37)
     // (a road's verge and OpenStreetMap's lawns: fresh green grass, even (Street View Alexander Avenue 0a_1230: bright grass
     // round the rail's supports, its green pixels' median #627739 to #778b49; A11's verge took the imagery's olive and its
     // patches, read bare))

@@ -224,7 +224,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     for (const p of parts[1]) p.mat = material(p.src, p.geo, near > 0 ? near - FADE : 0, far, { round: /brush|sage/.test(sp), fade: near > 0 ? -1 : 0 });
     const out_ = { near, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, near + FADE, { fade: 1, meshNormals: !!J.mesh_normals?.[sp] })) };
     // (A35: the bush-tree's leaves a muted olive: as the tall shrubs along Field, Bunker and McCullough they read cartoon lime against Street View's)
-    if (/^lime/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.74, 0.76, 0.62));
+    if (/^lime/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.58, 0.6, 0.44));
     return out_;
   })).get(sp);
   async function addGroup(G, x, z) {

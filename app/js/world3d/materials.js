@@ -109,7 +109,7 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     float sc = smoothstep(0.25, 0.75, vg.r + (fine - 0.5) * 0.35), br = smoothstep(0.3, 0.7, vg.b + (fine - 0.5) * 0.3), tr = smoothstep(0.3, 0.7, vg.g);
     // (green: OpenStreetMap's lawns, a road's verge (banks.js): grass whatever the imagery's class)
     float lg = smoothstep(0.3, 0.8, green); sc *= 1.0 - lg; br *= 1.0 - lg; tr *= 1.0 - lg;
-    vec3 grassC = mix(srgb(vec3(0.41, 0.47, 0.31)), srgb(vec3(0.51, 0.52, 0.38)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));
+    vec3 grassC = mix(srgb(vec3(0.37, 0.46, 0.25)), srgb(vec3(0.44, 0.49, 0.30)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4));  // (A36: Street View hawk 2019-04: the hill's grass a deeper spring green, the pale olive read as lime blotches against the brush)
     grassC = mix(grassC, srgb(vec3(0.36, 0.45, 0.25)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.7));
     // (a road's verge and OpenStreetMap's lawns: fresh green grass, even (Street View Alexander Avenue 0a_1230: bright grass
     // round the rail's supports, its green pixels' median #627739 to #778b49; A11's verge took the imagery's olive and its

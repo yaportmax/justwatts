@@ -338,7 +338,7 @@ export function createWorld({ control, course, loader = createRoadLoader(), terr
       const k = plan ? plan.kAt(d) : 0, w = plan?.wayAt(k), j = jx, s = stretch();
       return { ll: s.L, ele: s.E, d: Math.max(0, d - s.a * STEP_M), n: s.L.length, o: s.a * STEP_M, road: w ? label(w) : '', wait: d >= (n - 1) * STEP_M - 30,  // at the end of the road loaded so far
         turn: j && { m: Math.max(0, Math.round(j.d - d)), dead: !j.opts.length, opts: j.opts.map(o => ({ to: o.to, a: Math.round(o.a), name: label(o.w), on: o.to === j.sel })) },
-        alts: j ? j.opts.filter(o => o.to !== j.sel).map(o => plan.peek(j.k, o.to)) : [] };
+        alts: j && plan ? j.opts.filter(o => o.to !== j.sel).map(o => plan.peek(j.k, o.to)) : [] };  // (no plan yet at a junction just after a start: 'plan is null' on the live site, Sausalito)
     },
     active: () => !!rid,
     // the loaded roads within m metres of a point (the minimap): [[lat, lon, lat, lon, rank]], one per segment

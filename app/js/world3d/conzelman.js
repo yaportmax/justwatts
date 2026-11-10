@@ -369,7 +369,7 @@ export const RAILS = [
 // CROSSWALKS: [station] the zebra across the road there (view.js draws it across the paved width): Battery Spencer's
 // (1316: 1300 ahead about 13 m on, 1325 behind about 5 m back) and the one at 1626 (1620 ahead, 4 to 5 m on)
 export const CROSSWALKS = [1316, 1626, 10061, 10968, 11070, 14272, 11575, 12925,
-  31840, 32010, 100443, 100635, 50243, 280006];  // (A37: Bunker Road cz_31820_a, cz_32000_a; Mitchell Road cz_100435_a, cz_100620_a; Simmonds Road cz_50235_a; Center Road cz_280000_a)
+  31840, 32010, 100443, 100635, 50243, 280006, 320008, 320058, 320132];  // (A37: New Breitung Road's three, cz_320000_a, cz_320040_a, cz_320120_a)  // (A37: Bunker Road cz_31820_a, cz_32000_a; Mitchell Road cz_100435_a, cz_100620_a; Simmonds Road cz_50235_a; Center Road cz_280000_a)
 export const LOTS = [
   // the junction's mouth on the right at 1745 to 1752 and the road east to Fort Baker's way (Street View 1740 ahead), traced on USDA NAIP
   // (added last below: rings are indexed by the build)
@@ -439,7 +439,7 @@ export function compileSpec(proj, spec = { SECTIONS, RAILS, LOTS, CROSSWALKS }) 
   }
   // the spec's rails as hand list entries ([lat, lon, heading, side, from, to, kind], handlist.js BARRIERS), and whether a
   // hand list pano lies on the spec's stretch (its entries there dropped: the spec wins)
-  const latlon = s => { let i = 0; while (i + 2 < S.length && S[i + 1] < s) i++; const f = Math.max(0, Math.min(1, (s - S[i]) / ((S[i + 1] - S[i]) || 1))); return [AL[i][0] + (AL[i + 1][0] - AL[i][0]) * f, AL[i][1] + (AL[i + 1][1] - AL[i][1]) * f]; };
+  const latlon = s => { let lo = 0, hi = S.length - 2; while (lo < hi) { const m = (lo + hi) >> 1; if (S[m + 1] < s) lo = m + 1; else hi = m; } const i = lo;  /* (A37: a binary search: the shoulder pass calls this for every ground vertex, 11 s of a 40 s start as a scan) */ const f = Math.max(0, Math.min(1, (s - S[i]) / ((S[i + 1] - S[i]) || 1))); return [AL[i][0] + (AL[i + 1][0] - AL[i][0]) * f, AL[i][1] + (AL[i + 1][1] - AL[i][1]) * f]; };
   const heading = s => { const [a0, o0] = latlon(s - 1), [a1, o1] = latlon(s + 1), R = Math.PI / 180, y = Math.sin((o1 - o0) * R) * Math.cos(a1 * R), xx = Math.cos(a0 * R) * Math.sin(a1 * R) - Math.sin(a0 * R) * Math.cos(a1 * R) * Math.cos((o1 - o0) * R); return (Math.atan2(y, xx) / R + 360) % 360; };
   const rails = spec.RAILS.map(([s0, s1, side, kind]) => { const [la, lo] = latlon(s0 + 1); return [la, lo, Math.round(heading(s0 + 1) * 10) / 10, side, -1, s1 - s0 - 1, kind]; });
   const owns = (la, lo) => { const [x, z] = proj.xz(la, lo), q = at(x, z); return !!q && q.dd < 10 && q.s < 20000 && !!cross(q.s); };  // (the other roads keep the hand list's barriers)

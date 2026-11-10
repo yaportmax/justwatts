@@ -18,11 +18,11 @@ import { LIDAR_BLDG } from './bldglidar.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
+import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { loadVeg, loadTrees, loadHandVeg, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
 import { createScrub, REACH, TOP } from './scrub.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
-import { textures } from './tex.js';
+import { textures, signAtlas, SIGN_CELL } from './tex.js';
 import { createSky, FOG_SUN, SEA } from './sky.js';
 import { createPost } from './post.js';
 import { createGrass } from './grass.js';
@@ -148,6 +148,7 @@ export function createWorldView({ container, baked, getOthers = () => [], onFail
     mesh: new THREE.MeshLambertMaterial({ color: 0x7a5c48, transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide }) };
   const scrubFade = { centre: { value: new THREE.Vector2() }, radius: { value: 150 } }; mats.scrub = propMaterial({ fade: scrubFade });
   mats.walk = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });  // a tunnel's walk and pipes
+  mats.signFace = new THREE.MeshLambertMaterial({ map: signAtlas(), alphaTest: 0.5, side: THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });  // (A37: the signs' faces, tex.js signAtlas)
   for (const m of Object.values(mats)) withSun(m);  // the hills' shadows at any distance (horizon.js)
   REDWOODS.forEach(([s, w, n, e], i) => REDWOOD.value[i].set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)));
   { const [s, w, n, e] = HEADLANDS; HL.value.set(proj.x(w), proj.z(n), proj.x(e), proj.z(s)); }
@@ -1091,7 +1092,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const LL = c.lines.concat(c.handLines || []);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], warn: [], warnp: [], board: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], warn: [], warnp: [], board: [], reg: [], blade: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
@@ -1130,7 +1131,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     // (A37: the hand list's roadside signs, Street View: facing the traffic that reads them, on the lidar's ground under them
     // (the grid's carved ground lay 2.7 m under the hand-built bank at Bunker Road's crossing: the sign was buried))
-    for (const [la, lo, hd, kind, plate] of SIGNS.filter(inTile)) { const r = hd * Math.PI / 180, [x, z] = proj.xz(la, lo), y = raw(x, z) ?? hAt(x, z); if (y == null) continue; put(kind === 'warn' && plate ? 'warnp' : kind, x, y - 0.05, z, Math.atan2(-Math.sin(r), Math.cos(r))); }
+    const faces = [];
+    for (const [la, lo, hd, kind, plate, sym, psym] of SIGNS.filter(inTile)) { const r = hd * Math.PI / 180, [x, z] = proj.xz(la, lo), y = raw(x, z) ?? hAt(x, z); if (y == null) continue; const yaw = Math.atan2(-Math.sin(r), Math.cos(r)); put(kind === 'warn' && plate ? 'warnp' : kind, x, y - 0.05, z, yaw);
+      // (A37 round 2: its face from the sign atlas, tex.js: the diamond's symbol, the plate's, a regulatory sign's words, a blade's name both sides)
+      const F = []; if (kind === 'warn') { F.push([SIGN_CELL[sym] ?? SIGN_CELL.blank, 0, 2.25, 1.1, 1.1, 0.04]); if (plate && psym) F.push([SIGN_CELL[psym], 0, 2.25 - 0.82, 0.651, 0.669, 0.036]); }
+      else if (kind === 'reg') F.push([SIGN_CELL[sym], 0, 2.1, 0.669, 0.651, 0.034]);
+      else if (kind === 'blade') F.push([SIGN_CELL[sym], 0, 2.2, 0.92, 0.2, 0.0135, 0.25], [SIGN_CELL[sym], 0, 2.2, 0.92, 0.2, -0.0135, 0.25]);
+      if (F.length) faces.push([x, y - 0.05, z, yaw, F]); }
+
     for (const [li, L] of c.lines.entries()) {
       if (li % 4 === 3) yield;
       const P = L.P, n = P.length, hw = i => P[i][3] ?? L.w / 2, big = /motorway|trunk|primary|secondary|tertiary/.test(L.hw), small = /residential|unclassified|living|road|service/.test(L.hw);
@@ -1179,7 +1187,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const POST = { wbeam: ['tpost', 0.8], wbeamg: ['gpost', 0.8], cable: ['kpost', 1], cablev: ['kpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
     for (const R of c.rails || []) { const P = POST[R.kind]; if (P) for (const [x, y, z, yaw] of R.posts) { const bot = Math.min(y, hAt(x, z) ?? y) - 0.3; items[P[0]].push([x, bot, z, yaw, y + P[1] - bot]); } }
     // (the feet of what stands on the ground: the seams check)
-    c.feet = ['pole', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'board', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
+    c.feet = ['pole', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'board', 'reg', 'blade', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3();
     // every kind in one batched draw
@@ -1189,6 +1197,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const k of kinds) { const gi = bm.addGeometry(FURN[k]); for (const [x, y, z, yaw, sy = 1, sx = 1] of items[k]) bm.setMatrixAt(bm.addInstance(gi), m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), sc.set(sx, sy, 1))); }
       bm.castShadow = QUALITY[q].shadow > 0; bm.receiveShadow = true; bm.computeBoundingSphere(); grp.add(bm);
     }
+    if (faces.length) { const fm = new THREE.Mesh(signFaceGeometry(faces), mats.signFace); fm.receiveShadow = true; grp.add(fm); }
     // the wires: hanging a little between the poles (three straight pieces each)
     if (wires.length) {
       const pos = [];

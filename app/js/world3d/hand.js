@@ -10,7 +10,7 @@ import { MeshoptDecoder } from '../../vendor/three-0.180.0/addons/libs/meshopt_d
 try { if (typeof Worker !== 'undefined' && !globalThis.__w3?.noMeshoptWorkers) MeshoptDecoder.useWorkers(Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1))); } catch {}
 import { textures } from './tex.js';
 import { HZ_LAYER } from './horizon.js';
-import { shoulderAt } from './roadlines.js';
+import { shoulderAt, cutAt } from './roadlines.js';
 import { compileSpec } from './conzelman.js';
 import { makeProj } from './geo.js';
 
@@ -19,27 +19,27 @@ import { makeProj } from './geo.js';
 // (roadlines.js SHOULDERS by the nearest station and the verge's side) as attribute jwSh: x 1 at the edge to 0 at 8 m, y the
 // kind (0 grass, 0.5 tan gravel, 1 red dirt), z the width / 8. The hand terrain has none: no shoulder there.
 let SPEC_ = null; const PROJ_ = makeProj(37.93, -122.63), spec_ = () => SPEC_ ??= compileSpec(PROJ_);
-const SHK = { g: 0, t: 0.5, d: 1, b: -1 };  // (b: brush to the edge past a thin rocky lip, the cover forced on)
+const SHK = { g: 0, t: 0.5, d: 1, b: -1 }, CTK = { r: [1, 0], g: [1, 0.5], p: [1, 1], x: [-1, 0] };  // (jwCt: x 1 a cut face, -1 none; y its tone)  // (b: brush to the edge past a thin rocky lip, the cover forced on)
 function addShoulders(root, lambert) {
   root.updateMatrixWorld(true); const v = new THREE.Vector3(), cells = new Map(), C = 4, S = [];
   root.traverse(o => { if (!o.isMesh || !/^road\d/.test(o.name)) return; const P = o.geometry.attributes.position, I = o.geometry.index; if (!I) return;
     const W = new Float32Array(P.count * 2); for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); W[2 * k] = v.x; W[2 * k + 1] = v.z; }
     for (let t = 0; t + 2 < I.count; t += 3) for (let e = 0; e < 3; e++) { const a = I.getX(t + e), b = I.getX(t + (e + 1) % 3), n = S.length; S.push(W[2 * a], W[2 * a + 1], W[2 * b], W[2 * b + 1]);
       const x0 = Math.floor(Math.min(W[2 * a], W[2 * b]) / C), x1 = Math.floor(Math.max(W[2 * a], W[2 * b]) / C), z0 = Math.floor(Math.min(W[2 * a + 1], W[2 * b + 1]) / C), z1 = Math.floor(Math.max(W[2 * a + 1], W[2 * b + 1]) / C);
-      for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) { const k = i + ',' + j; (cells.get(k) ?? cells.set(k, []).get(k)).push(n); } } });
+      for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) { const k = i * 100003 + j; (cells.get(k) ?? cells.set(k, []).get(k)).push(n); } } });
   if (!S.length) return;
-  const dist = (x, z) => { let best = 8; const ci = Math.floor(x / C), cj = Math.floor(z / C);
-    for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) for (const n of cells.get((ci + a) + ',' + (cj + b)) || []) {
-      const ax = S[n], az = S[n + 1], ex = S[n + 2] - ax, ez = S[n + 3] - az, L2 = ex * ex + ez * ez, f = L2 ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2)) : 0, d = Math.hypot(x - ax - ex * f, z - az - ez * f); if (d < best) best = d; }
-    return best; };
+  const dist = (x, z) => { let best = 64; const ci = Math.floor(x / C), cj = Math.floor(z / C);  /* (squared, numeric cell keys: A37 load profile) */
+    for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) { const L = cells.get((ci + a) * 100003 + cj + b); if (!L) continue; for (let m = 0; m < L.length; m++) { const n = L[m];
+      const ax = S[n], az = S[n + 1], ex = S[n + 2] - ax, ez = S[n + 3] - az, L2 = ex * ex + ez * ez, f = L2 ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2)) : 0, dx = x - ax - ex * f, dz = z - az - ez * f, d = dx * dx + dz * dz; if (d < best) best = d; } }
+    return Math.sqrt(best); };
   const Z = spec_();
   // (the hand terrain too, its side of the line from the line's own direction there: where no verge is built, and Hawk Hill's
   // brush ('b') up the slope past the verge, sh_hawk: the cover map has it as grass)
   const sideOf = (x, z, s) => { const [a0, o0] = Z.latlon(s - 1), [a1, o1] = Z.latlon(s + 1), [x0, z0] = PROJ_.xz(a0, o0), [x1, z1] = PROJ_.xz(a1, o1); return (x - x0) * -(z1 - z0) + (z - z0) * (x1 - x0) > 0 ? 'R' : 'L'; };
-  root.traverse(o => { const ve = /^verge\d+[LR]$/.test(o.name); if (!o.isMesh || !(ve || /^terrain\d/.test(o.name))) return; const P = o.geometry.attributes.position, A = new Float32Array(P.count * 3);
-    for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); const q = Z.near(v.x, v.z, 40); if (!q || q.s < 0) continue; const sh = shoulderAt(q.s, ve ? o.name.slice(-1) : sideOf(v.x, v.z, q.s)); if (!sh || (!ve && q.d > 25 && sh[0] !== 'b')) continue;
-      A[3 * k] = 1 - dist(v.x, v.z) / 8; A[3 * k + 1] = SHK[sh[0]] ?? 0; A[3 * k + 2] = sh[1] / 8; }
-    o.geometry.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); o.material = groundMaterial({ lambert, shoulder: true }); });
+  root.traverse(o => { const ve = /^verge\d+[LR]$/.test(o.name); if (!o.isMesh || !(ve || /^terrain\d/.test(o.name))) return; const P = o.geometry.attributes.position, A = new Float32Array(P.count * 3), B = new Float32Array(P.count * 2);
+    for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); const q = Z.near(v.x, v.z, 40); if (!q || q.s < 0) continue; const sd = ve ? o.name.slice(-1) : sideOf(v.x, v.z, q.s), ct = CTK[cutAt(q.s, sd, q.d)]; if (ct) { B[2 * k] = ct[0]; B[2 * k + 1] = ct[1]; } const sh = shoulderAt(q.s, sd); if (!sh || (!ve && q.d > 25 && sh[0] !== 'b')) continue;
+      A[3 * k] = q.d > 18 ? 0 : 1 - dist(v.x, v.z) / 8;  /* (A37: past 18 m of the line the edge is over 8 m away: no search) */ A[3 * k + 1] = SHK[sh[0]] ?? 0; A[3 * k + 2] = sh[1] / 8; }
+    o.geometry.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); o.geometry.setAttribute('jwCt', new THREE.BufferAttribute(B, 2)); o.material = groundMaterial({ lambert, shoulder: true }); });
 }
 
 // (a surface's grain in world space from the game's noise texture, no UVs needed: asphalt aggregate and its tone patches,
@@ -293,6 +293,8 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     const out_ = { near, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, near + FADE, { fade: 1, meshNormals: !!J.mesh_normals?.[sp] })) };
     // (A35: the bush-tree's leaves a muted olive: as the tall shrubs along Field, Bunker and McCullough they read cartoon lime against Street View's)
     if (/^lime/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.58, 0.6, 0.44));
+    // (A37: the Monterey cypress near black green in Street View, w_mitchell0, w_simmonds1: the plates read light lime when lit as built)
+    if (/^mcyp/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.62, 0.66, 0.6));
     // (A36: the sage read near white beside Conzelman, Street View cz 2025-03 a darker grey green)
     if (sp === 'sage') for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.5, 0.58, 0.45));
     return out_;
@@ -395,8 +397,8 @@ function groundMaker(base) {
   return SH => { const m = new THREE.MeshLambertMaterial({ color: 0xffffff }); if (SH) m.defines = { JW_SH: '' };
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U); sh.uniforms.gNoise = { value: textures().noise };
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGdW; varying vec3 vGdN;\n#ifdef JW_SH\nattribute vec3 jwSh; varying vec3 vSh;\n#endif')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGdW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGdN = normalize(mat3(modelMatrix) * objectNormal);\n#ifdef JW_SH\nvSh = jwSh;\n#endif');
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGdW; varying vec3 vGdN;\n#ifdef JW_SH\nattribute vec3 jwSh; varying vec3 vSh; attribute vec2 jwCt; varying vec2 vCt;\n#endif')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGdW = (modelMatrix * vec4(transformed, 1.0)).xyz; vGdN = normalize(mat3(modelMatrix) * objectNormal);\n#ifdef JW_SH\nvSh = jwSh; vCt = jwCt;\n#endif');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vGdW; varying vec3 vGdN; uniform vec4 gBox; uniform vec4 gRep; uniform vec4 gBoxW; uniform sampler2D gSplatW;
       uniform sampler2D gSplat, gDirt, gCut, gGrass, gLitter, gNoise, gScrub; uniform vec4 gScrubBox;
@@ -404,7 +406,7 @@ function groundMaker(base) {
       // from a hash; the tallest mound under the pixel gives the height and its slope, the slope bends the light, hawk_r9: painted cover read as lawn)
       float jwSW = 0.0; vec2 jwSG = vec2(0.0); float jwBand = 0.0, jwBrush = 0.0;
       #ifdef JW_SH
-      varying vec3 vSh;
+      varying vec3 vSh; varying vec2 vCt;
       #endif
       vec2 jwH2(vec2 q) { q = mod(q, 289.0); vec3 p3 = fract(vec3(q.xyx) * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }
       vec4 jwBush(vec2 p, float dens) {
@@ -442,6 +444,10 @@ function groundMaker(base) {
         // trusted, its flat facets showed as grass teeth in the face)
         // (the face's top edge ragged as the photo's, scrub and grass reaching down into it: the zone's soft edge broken by noise)
         float wc = smoothstep(0.4, 0.6, w.g + (texture2D(gNoise, p / mix(4.3, 1.3, inW)).r - 0.5) * mix(0.9, 0.6, inW) * (1.0 - step(0.999, w.g)))  /* (A32, west: metre-wide noise stretched up the banks into lime leaf shapes at the cuts' foot, n19_11605_r) */, wd = w.r * (1.0 - wc), wl = w.b * (1.0 - wc);
+        // (A37: roadlines.js CUTS: a face the splat lacks where the ground is steep (w_conzelman5, w_mccullough0), or none where it is grass (w_conzelman2))
+        #ifdef JW_SH
+        { float stC = smoothstep(0.12, 0.3, 1.0 - n.y); wc = mix(wc, max(wc, stC), clamp(vCt.x, 0.0, 1.0)) * (1.0 - clamp(-vCt.x, 0.0, 1.0)); wd = w.r * (1.0 - wc); wl = w.b * (1.0 - wc); }
+        #endif
         vec3 cGrass = texture2D(gGrass, p / gRep.z).rgb; if (steep > 0.002) cGrass = mix(cGrass, texture2D(gGrass, side / gRep.z).rgb, steep);
         float far = smoothstep(40.0, 160.0, length(vGdW - cameraPosition));
         // (A33: metres of ground under one pixel; each fine pattern fades to its mean once it is a few pixels across: far off it read as grit, user 2026-11-05)
@@ -535,6 +541,17 @@ function groundMaker(base) {
           cCut = mix(cCut, tuft, clump * blade * 0.8 * steep * (1.0 - rb31) * mix(0.35, 1.0, clamp((w.a - 0.4) / 0.6, 0.0, 1.0))); }  // (A32, n11_11605_r: fewer pale tufts on the dark rock)
         // (the splat's alpha below 1: the chert dark grey-brown there, cz_1205_l, cz_1380_l)
         cCut = mix(cCut, vec3(dot(cCut, vec3(0.3, 0.55, 0.15))) * vec3(0.92, 0.86, 0.80) * 0.62, 0.8 * clamp((1.0 - w.a) / 0.6, 0.0, 1.0));  // (A32: darker, n11_11605_r)
+        // (A37, review1 w_conzelman0/1: the faces were one red-brown smear; Street View's are red chert, grey chert and weathered pale
+        // grey-pink rock in patches metres across, fractured, with green clumps on the ledges)
+        { float tA = textureGrad(gNoise, p / 13.0 + 0.27, dPx / 13.0, dPy / 13.0).r, tB = textureGrad(gNoise, side / 4.5 + 0.61, dSx / 4.5, dSy / 4.5).g;
+          float L = dot(cCut, vec3(0.3, 0.55, 0.15)); vec3 cGrey = vec3(L) * vec3(0.95, 0.96, 1.0) * 1.2, cPale = mix(vec3(L) * 1.2, vec3(0.62, 0.50, 0.46), 0.6) * mix(0.8, 1.1, tA);
+          float gW = smoothstep(0.55, 0.75, tA * 0.7 + tB * 0.3) * 0.45, pW = smoothstep(0.66, 0.84, tB) * 0.3;
+          #ifdef JW_SH
+          if (vCt.x > 0.5) { gW = max(gW, step(0.25, vCt.y) * step(vCt.y, 0.75) * 0.8); pW = max(pW, step(0.75, vCt.y) * mix(0.35, 0.7, tB)); }
+          #endif
+          cCut = mix(cCut, cGrey, gW * (1.0 - rb31)); cCut = mix(cCut, cPale, pW * (1.0 - rb31));
+          float gc = smoothstep(0.56, 0.7, textureGrad(gNoise, side / 2.2 + 0.43, dSx / 2.2, dSy / 2.2).r) * smoothstep(0.35, 0.6, textureGrad(gNoise, p / 8.0 + 0.19, dPx / 8.0, dPy / 8.0).g);
+          cCut = mix(cCut, vec3(0.15, 0.21, 0.075) * mix(0.7, 1.25, tB), gc * 0.75 * (1.0 - rb31)); }
           c = mix(c, cCut, clamp(wc * (1.0 - jwBand * (1.0 - steep)), 0.0, 1.0)); }
         if (p.x > 8935.0 && p.x < 8995.0 && p.y > 11625.0 && p.y < 11695.0) {  // (A31: shade pools under the picnic's cypress crowns, cz_14255_l, 14275_l: bright grass and shade, the plants cast no shadows)
           float s31 = 0.0; vec3 Q[7]; Q[0] = vec3(8949.0, 11651.0, 7.5); Q[1] = vec3(8953.0, 11660.0, 6.5); Q[2] = vec3(8957.0, 11647.0, 6.5); Q[3] = vec3(8962.0, 11636.0, 6.0); Q[4] = vec3(8964.0, 11652.0, 8.5); Q[5] = vec3(8969.0, 11667.0, 8.0); Q[6] = vec3(8972.0, 11682.0, 8.0);

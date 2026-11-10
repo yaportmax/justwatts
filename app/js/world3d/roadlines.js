@@ -52,6 +52,9 @@ export const ROAD_FIX = {
   // (East Road: about 8 m curb to curb, the cut's curb 4 to 4.5 m right of the line on the lidar (cache/lidar_fine, 80200 to
   // 81160), the edge lines 0.3 to 0.4 m inside the curbs: w_east0, w_east2, cz_80450_a, cz_80600_a)
   'East Road': [[0, -4.0, 4.0, 3.65]],
+  // (A37: New Breitung Road at Fort Baker: a broken yellow centre line, no edge lines, curbs about 3.3 m either side (a fifth
+  // entry: a centre line alone, its kind as SECTIONS' lines): cz_320000_a to cz_320120_a, sg3_breitung)
+  'New Breitung Road': [[0, -3.3, 3.3, null, 'yd']],
 };
 // (A37) legends painted on the other roads (the hand build's glyphs, build_conz.py GLYPH): [glyph, station, metres right of
 // the line to its centre, flip (true: for traffic against the stations), src]
@@ -92,6 +95,19 @@ export const SHOULDERS = [
   // Center Road: the parade's lawn up to the curbs (w_center0)
   [280000, 280250, 'B', 'g', 2.0],
 ];
+// (A37) rock cuts the hand ground's splat lacks or has wrong, off the survey photos: [s0, s1, side, tone, o0, o1] metres from the
+// line; tone 'r' red chert, 'g' grey chert, 'p' weathered pale grey-pink, 'x' no cut (grass): hand.js's jwCt. The face shows
+// only where the ground is steep.
+export const CUTS = [
+  [956, 990, 'L', 'x', 0, 9],  // (w_conzelman2: the bank's foot left of the bend green and yellow grass to the kerb; the red face above it and before 955 stays, the Conzelman control)
+  [432, 482, 'L', 'p', 3, 32],  // (w_conzelman5: the tall pale grey-pink face on the left)
+  [70150, 70290, 'R', 'r', 3, 20], [70290, 70410, 'R', 'r', 3, 18],  // (cz_70150_a to cz_70395_a, w_mccullough0: the red cut right of the road)
+  [70095, 70135, 'R', 'g', 6, 22],  // (cz_70105_a, cz_70120_a: grey rock outcrops up the bank)
+  [70480, 70540, 'R', 'r', 6, 20],  // (cz_70505_a, cz_70530_a: a red scar high on the bank)
+  [70735, 70805, 'L', 'r', 3, 22],  // (cz_70745_a to cz_70795_a: the tall red-grey cut left at the bend)
+  [33690, 33835, 'R', 'r', 3, 14],  // (cz_33700_a to cz_33830_a: Bunker Road's low red cut)
+];
+export function cutAt(s, side, d) { let r = null; for (const [a, b, sd, t, o0, o1] of CUTS) if (s >= a && s <= b && sd === side && d >= o0 && d <= o1) r = t; return r; }
 export function shoulderAt(s, side) {
   let r = SHOULDER_DEFAULT(s); for (const [a, b, sd, k, w] of SHOULDERS) if (s >= a && s <= b && (sd === 'B' || sd === side)) r = k ? [k, w] : null;
   return r;
@@ -100,9 +116,9 @@ export function autoSections(roads = ROADS) {
   const out = [];
   for (const r of roads) {
     const [h0, e0, cl] = CLS[r.hw] || CLS.residential, len = (r.line.length - 1) * 5, fx = ROAD_FIX[r.name];
-    const row = (s, L, R, e) => ({ s, L, R, lines: e ? [[-e, 'w'], [-0.1, 'y'], [0.1, 'y'], [e, 'w']] : [], zones: [], ride: e ? e - 1.0 : Math.max(0.6, R - 1.3), rideUp: e ? -(e - 1.0) : -Math.max(0.6, -L - 1.3), src: ['auto: ' + r.name] });
+    const row = (s, L, R, e, cl) => ({ s, L, R, lines: e ? [[-e, 'w'], [-0.1, 'y'], [0.1, 'y'], [e, 'w']] : cl ? [[0, cl]] : [], zones: [], ride: e ? e - 1.0 : Math.max(0.6, R - 1.3), rideUp: e ? -(e - 1.0) : -Math.max(0.6, -L - 1.3), src: ['auto: ' + r.name] });
     const rows = (fx ?? [[0, -h0, h0, cl ? e0 : null]]).filter(([m]) => m < len - 1), last = rows.at(-1);
-    out.push(...rows.map(([m, L, R, e]) => row(r.base + m, L, R, e)), row(r.base + len - 1, last[1], last[2], last[3]), { s: r.base + len, gap: true, L: 0, R: 0, lines: [] });
+    out.push(...rows.map(([m, L, R, e, cl]) => row(r.base + m, L, R, e, cl)), row(r.base + len - 1, last[1], last[2], last[3], last[4]), { s: r.base + len, gap: true, L: 0, R: 0, lines: [] });
   }
   return out;
 }

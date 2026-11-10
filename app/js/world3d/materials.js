@@ -578,9 +578,9 @@ export function buildingMaterial() {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 bw;\nvarying vec4 vBw;\nvarying vec3 vW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBw = bw; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tWin, tNoise; uniform float lamps;\nvarying vec4 vBw;\nvarying vec3 vW;')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.7, 0.38) * jwWin * 0.75;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.7, 0.38) * jwWin * 0.75 + jwFill;')
       .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
-        float kind = floor(vBw.w + 0.5), style = floor(vBw.z + 0.5), jwWin = 0.0;
+        float kind = floor(vBw.w + 0.5), style = floor(vBw.z + 0.5), jwWin = 0.0; vec3 jwFill = vec3(0.0);
         float nz = texture2D(tNoise, vW.xz / 7.0 + vW.y / 5.0).r;
         if (kind == 0.0) {
           float fh = style >= 6.0 ? 3.7 : 3.0, bay = style == 2.0 || style == 6.0 ? 4.2 : 3.2;
@@ -593,6 +593,10 @@ export function buildingMaterial() {
           vec4 w = textureGrad(tWin, uv, dFdx(q) / 4.0 * vec2(1.0, -1.0), dFdy(q) / 4.0 * vec2(1.0, -1.0));
           vec3 wall = diffuseColor.rgb * (0.92 + 0.12 * nz);
           if (style == 5.0) wall *= 0.9 + 0.1 * step(0.5, fract(vBw.y / 0.22));   // clapboard / shingle siding
+          // (A37: white siding in the shade lit by the sky: Street View's shaded gables at Fort Barry median sRGB #87938f to
+          // #7e8d93, the game's #5d5f5c; its sunlit walls already right (#cbc5b5 against #c6c5bd at Murray Circle):
+          // fieldroad_0b_0830_tg6; a fill a little blue, about what the sky adds there, small against the sun)
+          if (style == 5.0) jwFill = wall * vec3(0.085, 0.095, 0.11);
           vec3 glass = w.rgb * 0.5;
           #ifdef USE_FOG
           vec3 vd = normalize(vViewPosition); glass = mix(glass, fogColor * 0.55, 0.25 + 0.5 * pow(1.0 - abs(vd.z), 3.0));
@@ -607,7 +611,7 @@ export function buildingMaterial() {
           diffuseColor.rgb *= 0.95 + 0.1 * nz;
         }`);
   };
-  m.customProgramCacheKey = () => 'jw-bldg-2';
+  m.customProgramCacheKey = () => 'jw-bldg-3';
   return m;
 }
 

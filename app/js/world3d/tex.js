@@ -182,3 +182,36 @@ function leafAtlas() {
 }
 // the uv rect [u0, v0, u1, v1] of a leaf atlas cell (v down the image), a little inside its edges
 export function leafCell(k, inset = 3) { const x = (k % 4) * 256, y = Math.floor(k / 4) * 256; return [(x + inset) / 1024, (y + inset) / 1024, (x + 256 - inset) / 1024, (y + 256 - inset) / 1024]; }
+
+// (A37) The roadside signs' faces (handlist.js SIGNS, view.js): a 4 x 3 atlas of 256 px cells drawn on a canvas, sRGB,
+// transparent outside each sign's shape. SIGN_CELL names a cell: a warning diamond's symbol (MUTCD W-series: black on
+// yellow), a plate under one, a white regulatory sign, a green street-name blade (white letters, its cell's top quarter).
+export const SIGN_CELL = { twoway: 0, ped: 1, slow: 2, blank: 3, p_twoway: 4, p_arrow: 5, p_ahead: 6, r_speed15: 8, r_parking: 9, b_bodsworth: 10 };
+let signTex = null;
+export function signAtlas() {
+  if (signTex) return signTex;
+  const S = 256, c = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(S * 4, S * 3) : Object.assign(document.createElement('canvas'), { width: S * 4, height: S * 3 }), g = c.getContext('2d');
+  const Y = '#e6b41e', K = '#161616', W = '#f2f2ee', at = k => [(k % 4) * S, Math.floor(k / 4) * S];
+  const diamond = (k, draw) => { const [x, y] = at(k); g.save(); g.translate(x + S / 2, y + S / 2);
+    const d = (r, f) => { g.beginPath(); g.moveTo(0, -r); g.lineTo(r, 0); g.lineTo(0, r); g.lineTo(-r, 0); g.closePath(); g.fillStyle = f; g.fill(); };
+    d(126, K); d(116, Y); g.fillStyle = K; g.strokeStyle = K; draw && draw(); g.restore(); };
+  const arrow = (x, y0, y1, w) => { const dir = Math.sign(y1 - y0); g.fillRect(x - w / 2, Math.min(y0, y1 - dir * 30) , w, Math.abs(y1 - y0) - 26); g.beginPath(); g.moveTo(x - 26, y1 - dir * 34); g.lineTo(x + 26, y1 - dir * 34); g.lineTo(x, y1); g.closePath(); g.fill(); };
+  diamond(SIGN_CELL.twoway, () => { arrow(-26, 62, -66, 18); arrow(26, -62, 66, 18); });
+  diamond(SIGN_CELL.ped, () => {  // a walking figure
+    g.beginPath(); g.arc(4, -64, 15, 0, 7); g.fill(); g.lineCap = 'round'; g.lineWidth = 17;
+    const L = (a, b, c2, d) => { g.beginPath(); g.moveTo(a, b); g.lineTo(c2, d); g.stroke(); };
+    L(0, -40, -6, 14); L(-6, 14, -34, 66); L(-6, 14, 22, 40); L(22, 40, 18, 72); L(0, -32, -30, -2); L(0, -32, 26, -6); L(26, -6, 40, 14); });
+  diamond(SIGN_CELL.slow, () => { g.font = 'bold 64px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('SLOW', 0, 4); });
+  diamond(SIGN_CELL.blank, null);
+  const plate = (k, draw, bg = Y, fg = K) => { const [x, y] = at(k); g.fillStyle = fg; g.fillRect(x + 8, y + 40, S - 16, S - 80); g.fillStyle = bg; g.fillRect(x + 16, y + 48, S - 32, S - 96); g.fillStyle = fg; g.save(); g.translate(x + S / 2, y + S / 2); draw(); g.restore(); };
+  const text = (t, yy, px) => { g.font = `bold ${px}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, 0, yy); };
+  plate(SIGN_CELL.p_twoway, () => { text('TWO WAY', -30, 50); text('TRAFFIC', 32, 50); });
+  plate(SIGN_CELL.p_arrow, () => { g.rotate(Math.PI * 0.75); arrow(0, -60, 64, 22); });
+  plate(SIGN_CELL.p_ahead, () => text('AHEAD', 0, 60));
+  { const reg = (k, draw) => { const [x, y] = at(k); g.fillStyle = K; g.fillRect(x + 40, y + 8, S - 80, S - 16); g.fillStyle = W; g.fillRect(x + 48, y + 16, S - 96, S - 32); g.fillStyle = K; g.save(); g.translate(x + S / 2, y + S / 2); draw(); g.restore(); };
+    reg(SIGN_CELL.r_speed15, () => { text('SPEED', -78, 34); text('LIMIT', -40, 34); text('15', 40, 104); });
+    reg(SIGN_CELL.r_parking, () => { text('NO', -60, 36); text('PARKING', -20, 30); g.fillRect(-60, 24, 120, 8); g.fillRect(-60, 50, 90, 8); g.fillRect(-60, 76, 110, 8); }); }
+  { const [x, y] = at(SIGN_CELL.b_bodsworth); g.fillStyle = '#1f6b45'; g.fillRect(x, y, S, 64); g.strokeStyle = W; g.lineWidth = 4; g.strokeRect(x + 4, y + 4, S - 8, 56); g.fillStyle = W; g.font = 'bold 36px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('Bodsworth Rd', x + S / 2, y + 33); }
+  signTex = new THREE.CanvasTexture(c); signTex.colorSpace = THREE.SRGBColorSpace; signTex.anisotropy = 8; signTex.generateMipmaps = true; signTex.minFilter = THREE.LinearMipmapLinearFilter;
+  return signTex;
+}

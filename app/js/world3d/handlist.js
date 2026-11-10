@@ -321,13 +321,19 @@ export const CUTS = [
 // all-roads survey's ahead photos (cache/roads, fov 90) and review pairs: the ray through the sign's pixel column out to its
 // size's distance (a 30 in diamond 1.07 m across its points) or to the road's edge plus its set back (work/bldg/signs).
 export const SIGNS = [
-  [37.835957, -122.484203, 237, 'warn', 1],   // Alexander Avenue toward the US-101 underpass: two-way traffic, a plate under it (cz_21655_a, pano 8ClWPo4_2ExXLpKITmockQ)
-  [37.836231, -122.502993, 47, 'warn', 1],    // Bunker Road at the Rodeo Lagoon crossing: pedestrian crossing, the arrow plate (cz_33225_a, HL46wXHW9bOsyuHGuhP2PQ)
-  [37.836269, -122.502966, 47, 'board'],      // and the park's board beyond it (cz_33225_a)
-  [37.823122, -122.528772, 353, 'warn'],      // Field Road north of the Point Bonita junction (cz_40260_a, Q5Q5Ma2w724gadRWYebD-w)
-  [37.835130, -122.477152, 106, 'warn', 1],   // New Breitung Road at Fort Baker's crossing: pedestrian crossing, plate (cz_320040_a, Fdi1g_fJOolhTkHRF_Bhew)
-  [37.836956, -122.480802, 186, 'warn'],      // McReynolds Road (cz_220110_a, xDQZMZrH8d5ScTp50wHznA)
-  [37.839062, -122.484602, 304, 'warn'],      // Bunker Road's bend above the bay, for the climb (its back seen from w_bunker0, nVjM6IkE4RR9WpRUKrobJQ)
-  [37.839000, -122.484648, 124, 'limit'],     // and the small white sign on the right going down (w_bunker0)
-  [37.835174, -122.477702, 206, 'board'],     // Center Road: the park's dark board on the lawn (w_center0, JYjnBNb58VPlnO2ezvq9cQ)
+  // (A37 round 2: each with its face as the photo shows it, tex.js SIGN_CELL: [..., kind, plate, symbol, plate's symbol];
+  // 'blank' where the photo is too far or shows its back)
+  [37.835957, -122.484203, 237, 'warn', 1, 'twoway', 'p_twoway'],   // Alexander Avenue toward the US-101 underpass: two-way traffic, TWO WAY TRAFFIC under it (cz_21655_a, pano 8ClWPo4_2ExXLpKITmockQ)
+  [37.836231, -122.502993, 47, 'warn', 1, 'ped', 'p_ahead'],        // Bunker Road at the Rodeo Lagoon crossing: pedestrian, AHEAD under it (cz_33225_a, HL46wXHW9bOsyuHGuhP2PQ; a plate over it too small to read)
+  [37.836269, -122.502966, 47, 'board'],                             // and the park's board beyond it (cz_33225_a)
+  [37.823122, -122.528772, 353, 'warn', 0, 'blank'],                 // Field Road north of the Point Bonita junction (cz_40260_a, Q5Q5Ma2w724gadRWYebD-w: too far to read)
+  [37.835130, -122.477152, 106, 'warn', 1, 'ped', 'p_arrow'],        // New Breitung Road at Fort Baker's crossing: pedestrian, the down-left arrow under it (cz_320040_a, Fdi1g_fJOolhTkHRF_Bhew)
+  [37.836956, -122.480802, 186, 'warn', 0, 'slow'],                  // McReynolds Road: a word sign, read as SLOW (cz_220110_a, xDQZMZrH8d5ScTp50wHznA)
+  [37.839062, -122.484602, 304, 'warn', 0, 'blank'],                 // Bunker Road's bend above the bay, for the climb (its back seen from w_bunker0, nVjM6IkE4RR9WpRUKrobJQ)
+  [37.839000, -122.484648, 124, 'reg', 0, 'r_speed15'],              // and the small white sign on the right going down: SPEED LIMIT 15 as the road's own 15 MPH legend there says (w_bunker0; too small to read)
+  [37.835174, -122.477702, 206, 'board'],                            // Center Road: the park's dark board on the lawn (w_center0, JYjnBNb58VPlnO2ezvq9cQ)
+  [37.829761, -122.524605, 96, 'blade', 0, 'b_bodsworth'],           // Simmonds Road at Bodsworth Road: the green name blade on a brown post (cz_50235_a, MBGCZxreWSsM1asejglpEQ)
+  [37.846221, -122.478126, 343, 'reg', 0, 'r_parking'],
+  [37.835193, -122.477454, 106, 'reg', 0, 'r_speed15'],              // New Breitung Road: SPEED LIMIT 15 on the right past the junction (cz_320020_a, 5QQ_nGRQCybbxRt0zhSZyw)
+  [37.834957, -122.476337, 106, 'warn', 0, 'ped'],                   // and its pedestrian sign at the far crossing (cz_320120_a, LelZQkE5Y4HLd8BAs56r0Q)              // Alexander Avenue's north end in Sausalito: a parking sign, its words too small to read (cz_20120_b, AYIZQ63UosET4K-nzqyhMw)
 ];

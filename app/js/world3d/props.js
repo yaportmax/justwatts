@@ -314,6 +314,10 @@ export function furnitureGeometries() {
     // (A37, handlist.js SIGNS) a warning sign (MUTCD W-series, 30 in): a yellow diamond with a black border and a black
     // symbol, its centre 2.25 m up, on a grey post from 0.6 m under the ground (the hand ground may stand over the grid's);
     // warnp: with a yellow plate (24 by 18 in) under it; board: a park's board, dark brown, on two timber posts
+    // (A37) a white regulatory sign (18 by 24 in) on a grey post, its centre 2.1 m up; a street-name blade (36 by 8 in, both
+    // faces) on a brown timber post, Street View cz_50235_a (Bodsworth Road at Simmonds)
+    reg: merge([[C(0.035, 0.035, 2.4 + 0.6, 6).translate(0, -0.6, 0), grey], [B(0.46, 0.61, 0.02, 0, 2.1, 0.02), white], [B(0.46, 0.61, 0.008, 0, 2.1, 0.005), grey]]),
+    blade: merge([[B(0.1, 2.7, 0.1, 0, 0.75, 0), col(0x5e3f2a)], [B(0.92, 0.2, 0.025, 0, 2.2, 0), col(0x1f6b45)]]),
     warn: merge(warnSign(false)),
     warnp: merge(warnSign(true)),
     board: merge([[B(0.1, 2.3, 0.1, -0.55, 0.55, 0), wood], [B(0.1, 2.3, 0.1, 0.55, 0.55, 0), wood], [B(1.35, 0.85, 0.06, 0, 1.25, 0.06), col(0x3a2a1e)], [B(1.2, 0.7, 0.01, 0, 1.25, 0.095), col(0x4a3a2c)], [B(1.0, 0.06, 0.012, 0, 1.45, 0.1), col(0xd8cfb8)]]),
@@ -531,4 +535,22 @@ export function buildingGeometry(list) {
   g.setAttribute('bw', new THREE.Float32BufferAttribute(bw, 4));
   g.computeVertexNormals(); g.computeBoundingSphere();
   return g;
+}
+
+// (A37) the signs' faces over their geometry (furnitureGeometries warn, warnp, reg, blade), textured from signAtlas (tex.js):
+// list [[x, y, z, yaw, cells: [[cell, centre x, centre y, width, height, z]]]] -> one geometry with position, normal, uv
+export function signFaceGeometry(list) {
+  const pos = [], nor = [], uv = [];
+  for (const [x, y, z, yaw, faces] of list) {
+    const cs = Math.cos(yaw), sn = Math.sin(yaw), P = (lx, ly, lz) => [x + lx * cs + lz * sn, y + ly, z - lx * sn + lz * cs], n = [sn, 0, cs];
+    for (const [k, cx, cy, w, h, lz, vh = 1] of faces) {
+      const u0 = (k % 4) / 4, v1 = 1 - Math.floor(k / 4) / 3, u1 = u0 + 0.25, v0 = v1 - vh / 3, back = lz < 0, nn = back ? n.map(q => -q) : n;
+      const A = P(cx - w / 2, cy - h / 2, lz), B = P(cx + w / 2, cy - h / 2, lz), C = P(cx + w / 2, cy + h / 2, lz), D = P(cx - w / 2, cy + h / 2, lz);
+      const [ua, ub] = back ? [u1, u0] : [u0, u1], tri = back ? [A, C, B, A, D, C] : [A, B, C, A, C, D], tuv = back ? [[ua, v0], [ub, v1], [ub, v0], [ua, v0], [ua, v1], [ub, v1]] : [[ua, v0], [ub, v0], [ub, v1], [ua, v0], [ub, v1], [ua, v1]];
+      tri.forEach((q, i) => { pos.push(...q); nor.push(...nn); uv.push(...tuv[i]); });
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.computeBoundingSphere(); return g;
 }

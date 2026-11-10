@@ -13,7 +13,7 @@ import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_L
 import { compileSpec, specPaint, SECTIONS as CZ_SECTIONS, RAILS as CZ_RAILS, LOTS as CZ_LOTS, CROSSWALKS as CZ_WALKS } from './conzelman.js';
 import { createEdit } from './edit.js';
 import { loadHand, loadVeg as loadHandPlants, loadScrub } from './hand.js';
-import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS, SIGNS } from './handlist.js';
+import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS, SIGNS, HAND_BLDG } from './handlist.js';
 import { LIDAR_BLDG } from './bldglidar.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
@@ -1272,6 +1272,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (!isFinite(base)) continue;
       { const dk = marks.deckAt(...ring[0]); if (dk != null && base + (f.h || 6) > dk - 12) continue; }  // the bridge's own anchorages and pylons (its model draws them); Fort Point under it stays
       // (a height Street View shows, handlist.js BUILDINGS, where OpenStreetMap has none)
+      { const R1 = f.rings[0], n1 = R1.length - 1; let a1 = 0, o1 = 0; for (let i = 0; i < n1; i++) { a1 += R1[i][0] / n1; o1 += R1[i][1] / n1; }
+        if (HAND_BLDG.some(([R]) => { let ca = 0, co = 0; for (const [la, lo] of R) { ca += la / R.length; co += lo / R.length; } return Math.hypot((ca - a1) * 111195, (co - o1) * 88000) < 12; })) continue; }  // (A37: a hand-placed building there instead: OpenStreetMap's within 12 m of its middle left out)
       const R0 = f.rings[0], hb = BUILDINGS.find(([la, lo]) => { let c = false; for (let i = 0, j = R0.length - 1; i < R0.length; j = i++) if ((R0[i][0] > la) !== (R0[j][0] > la) && lo < (R0[j][1] - R0[i][1]) * (la - R0[i][0]) / (R0[j][0] - R0[i][0]) + R0[i][1]) c = !c; return c; });
       if ([[37.82213, -122.52782], [37.82202, -122.52766]].some(([a_, o_]) => Math.abs(R0[0][0] - a_) < 3e-5 && Math.abs(R0[0][1] - o_) < 3e-5)) continue;  // (A27: the garage at the road's end is hand-built, build_conz.py; OpenStreetMap's second block is not in cz_14600_a)
       // (A25: Conzelman's far west, 13800 on: low barns, red roofs as at 13900; grey from about 14400: the garage, 14500, 14600)
@@ -1303,6 +1305,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
       list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
     }
+    // (A37: the hand list's buildings, HAND_BLDG: on the lidar's ground round them, the tile's own)
+    { const tb = tileBox(c); for (const [R, e, r, fl] of HAND_BLDG) { const ring = R.concat([R[0]]).map(([la, lo]) => proj.xz(la, lo)); let cx = 0, cz = 0; for (const p of R) { const [x, z] = proj.xz(...p); cx += x / R.length; cz += z / R.length; }
+      if (!(cx >= tb[0] && cx < tb[2] && cz >= tb[1] && cz < tb[3])) continue; let lo = Infinity, m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw) ?? hAt(p[0], p[1]); if (h != null) { lo = Math.min(lo, h); m += h; k++; } } if (!k) continue;
+      list.push({ ring, base: lo, h: m / k - lo + e, rh: r - e, roof: 2, seed: Math.round(cx * 13 + cz * 7), fort: true, metal: !!(fl & 1) }); } }
     if (!list.length) return setPart(c, 'bldg', null);
     const grp = new THREE.Group();
     for (let i = 0; i < list.length; i += 60) {

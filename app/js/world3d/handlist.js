@@ -337,3 +337,12 @@ export const SIGNS = [
   [37.835193, -122.477454, 106, 'reg', 0, 'r_speed15'],              // New Breitung Road: SPEED LIMIT 15 on the right past the junction (cz_320020_a, 5QQ_nGRQCybbxRt0zhSZyw)
   [37.834957, -122.476337, 106, 'warn', 0, 'ped'],                   // and its pedestrian sign at the far crossing (cz_320120_a, LelZQkE5Y4HLd8BAs56r0Q)              // Alexander Avenue's north end in Sausalito: a parking sign, its words too small to read (cz_20120_b, AYIZQ63UosET4K-nzqyhMw)
 ];
+
+// HAND_BLDG (A37): buildings placed by hand from Street View where OpenStreetMap's footprint is wrong: [ring [[lat, lon], ...]
+// (not closed), eave and ridge over the ground (m), flags (1: dark corrugated metal, no windows)]; OpenStreetMap's buildings
+// with their middle inside one are left out. East Road by Fort Baker: the tall dark corrugated shed right behind the curb
+// on the left going south, about 18 m along the road and 8 m deep, its walls about 5 m (review2 w_east1, pano
+// 5VVGm1ST0BUAYk9Eb6643w h155; East Road's line, cache/roads lines.json 80225 to 80245, 4.7 to 12.5 m left)
+export const HAND_BLDG = [
+  [[[37.8427508, -122.4777552], [37.8425863, -122.4776579], [37.8426147, -122.4775768], [37.8427818, -122.4776757]], 5.0, 5.6, 1],
+];

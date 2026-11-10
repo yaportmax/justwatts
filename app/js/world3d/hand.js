@@ -316,6 +316,12 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     const out_ = { near, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, near + FADE, { fade: 1, meshNormals: !!J.mesh_normals?.[sp] })) };
     // (A35: the bush-tree's leaves a muted olive: as the tall shrubs along Field, Bunker and McCullough they read cartoon lime against Street View's)
     if (/^lime/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.58, 0.6, 0.44));
+    // (A37 round 4, review2 w_simmonds1, w_mitchell0, w_east2: the hand roads' cypress and oak read near black cut-outs where Street View's are bright with
+    // light through them: lifted, and a share of their own colour as emissive so the shaded side is never black; the willow thicket bright yellow green, w_bunker1/2)
+    // (the emissive share only on a textured material: on the oak's vertex coloured fronds an untinted emissive washed them grey white, b2 w_east2)
+    const glow = (m, k) => { if (m.map && !m.vertexColors) { m.emissive.copy(m.color).multiplyScalar(k); m.emissiveMap = m.map; } else m.color.multiplyScalar(1 + k * 1.5); };
+    if (/^(mcyp|loak)/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) { m.color.multiplyScalar(1.3); glow(m, 0.22); }
+    if (/^willow/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) { m.color.multiply(new THREE.Color(0.95, 1.05, 0.62)); glow(m, 0.15); }
     // (A36: the sage read near white beside Conzelman, Street View cz 2025-03 a darker grey green)
     if (sp === 'sage') for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.5, 0.58, 0.45));
     return out_;
@@ -423,6 +429,11 @@ function groundMaker(base) {
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       varying vec3 vGdW; varying vec3 vGdN; uniform vec4 gBox; uniform vec4 gRep; uniform vec4 gBoxW; uniform sampler2D gSplatW;
       uniform sampler2D gSplat, gDirt, gCut, gGrass, gLitter, gNoise, gScrub; uniform vec4 gScrubBox;
+      // (A37, review2 w_conzelman0/1/4/5: the cut face from one side projection switched by the normal's larger axis stretched along faces
+      // near 45 degrees to it; both side projections now, blended by the normal, each with its own derivatives)
+      vec3 jwFace(vec2 sd, vec2 dx, vec2 dy, float rp) {
+        vec2 sr = mat2(0.62, -0.78, 0.78, 0.62) * sd, rx = mat2(0.62, -0.78, 0.78, 0.62) * dx, ry = mat2(0.62, -0.78, 0.78, 0.62) * dy;
+        return (textureGrad(gCut, sd / (rp * 0.45), dx / (rp * 0.45), dy / (rp * 0.45)).rgb + textureGrad(gCut, sd.yx / (rp * 1.15) + 0.37, dx.yx / (rp * 1.15), dy.yx / (rp * 1.15)).rgb + textureGrad(gCut, sr / (rp * 0.7) + 0.71, rx / (rp * 0.7), ry / (rp * 0.7)).rgb) / 3.0; }
       // (A36: the scrub's bushes as round mounds a metre or two across, packed as Street View's coyote brush: a cell each, its centre and size
       // from a hash; the tallest mound under the pixel gives the height and its slope, the slope bends the light, hawk_r9: painted cover read as lawn)
       float jwSW = 0.0; vec2 jwSG = vec2(0.0); float jwBand = 0.0, jwBrush = 0.0;
@@ -456,7 +467,7 @@ function groundMaker(base) {
         float steep = smoothstep(0.05, 0.34, 1.0 - n.y);  // (the lidar's 2 m mesh and the verges soften the cuts: 25 degrees and up reads as the face)
         vec2 side = abs(n.x) > abs(n.z) ? vGdW.zy : vGdW.xy;
         // (A33: the lookups inside the per-layer branches take their mip level from these, taken outside them: derivatives inside a branch some pixels skip are undefined, and on a Mac the ground lost its mipmaps, grit far off, user 2026-11-05)
-        vec2 dPx = dFdx(p), dPy = dFdy(p), dSx = dFdx(side), dSy = dFdy(side); mat2 mSR = mat2(0.62, -0.78, 0.78, 0.62); vec2 dRx = mSR * dSx, dRy = mSR * dSy;
+        vec2 dPx = dFdx(p), dPy = dFdy(p), dSx = dFdx(side), dSy = dFdy(side); vec2 sZY = vGdW.zy, sXY = vGdW.xy, dZYx = dFdx(sZY), dZYy = dFdy(sZY), dXYx = dFdx(sXY), dXYy = dFdy(sXY);  /* (A37: the triplanar face's, outside the branch) */ mat2 mSR = mat2(0.62, -0.78, 0.78, 0.62); vec2 dRx = mSR * dSx, dRy = mSR * dSy;
         // (every layer from above on the flat and from the side on a steep face: no streaks down a bank)
         // (A33, perf: each layer only where it shows: the cut, dirt and litter lookups skipped where their weight is nil; same picture, a third of the texture reads on most of the ground)
         // (inside a drawn cut zone the face from about 15 degrees of true surface slope: the zone bounds it along the road,
@@ -480,6 +491,9 @@ function groundMaker(base) {
         { vec2 bu = (p - gBox.xy) * gBox.zw; float outBox = smoothstep(0.0, 0.04, max(max(-bu.x, bu.x - 1.0), max(-bu.y, bu.y - 1.0))) * (1.0 - inW);
           float streak = smoothstep(0.45, 0.7, texture2D(gNoise, vec2(p.x / 38.0, p.y / 9.0) + 0.29).g);
           cGrass = mix(cGrass, cGrass * vec3(0.9, 0.95, 0.66) * (1.0 - 0.2 * streak), outBox); }  // (A34: drier olive, the lime read too bright against Street View, mccullough70400, east80700)
+        // (A37, review2 w_bunker1, w_field1/2, w_mccullough2: the hand ground's grass read lime and dark beside Street View's dry hill grass,
+        // #8c8561 by pixel medians beside the roads, #9f9f6c on the hills (the generated terrain's measure): half the saturation, drier, lighter)
+        { float L37 = dot(cGrass, vec3(0.3, 0.55, 0.15)); cGrass = mix(vec3(L37), cGrass, 0.5) * vec3(1.42, 1.32, 1.22); }
         vec3 c = cGrass;
         // (A37: the shoulder band, its outer edge ragged by the noise a few tenths of a metre: review1 w_bunker1, w_field2, w_mccullough0)
         #ifdef JW_SH
@@ -523,7 +537,7 @@ function groundMaker(base) {
             cB = mix(cB, cG, gap);
             vec3 cFar = mix(vec3(0.055, 0.085, 0.032), vec3(0.08, 0.095, 0.058), smoothstep(0.45, 0.75, s2)) * mix(0.62, 1.12, clumpS);  // (the bushes' and gaps' mean, so near and far brush are one colour)
             cS = mix(cFar, cB, bf); sw = max(sw, bf * smoothstep(0.4, 0.55, cov) * (1.0 - steep * 0.7) * (1.0 - rb31));
-            jwSW = sw * bf * (1.0 - gap) * 0.45 * (1.0 - smoothstep(0.3, 0.9, pxm)); jwSG = clamp(bu.yz, vec2(-2.5), vec2(2.5)); }  // (A37: the bent light weak, and gone at a grazing angle: on the flat ground it drew the painted mounds as dark shingles, w_field1)
+            jwSW = sw * bf * (1.0 - gap) * mix(0.45, 1.1, jwBrush) * (1.0 - smoothstep(0.3, 0.9, pxm));  /* (A37, hawkR: the brush rows' bushes lit as mounds) */ jwSG = clamp(bu.yz, vec2(-2.5), vec2(2.5)); }  // (A37: the bent light weak, and gone at a grazing angle: on the flat ground it drew the painted mounds as dark shingles, w_field1)
           c = mix(c, cS, sw * (1.0 - jwBand)); jwSW *= 1.0 - jwBand; }
         #ifdef JW_SH
         // (A37: the shoulder's own surface: short saturated grass, or tan gravel, or red-brown dirt with a few tufts, the dirt
@@ -531,10 +545,11 @@ function groundMaker(base) {
         if (jwBand > 0.002) {
           float m1 = textureGrad(gNoise, p / 3.1 + 0.37, dPx / 3.1, dPy / 3.1).r, m2 = textureGrad(gNoise, p / 0.35 + 0.53, dPx / 0.35, dPy / 0.35).g, k = vSh.y < -0.5 ? 0.45 : vSh.y;
           vec3 gS = textureGrad(gGrass, p / gRep.z, dPx / gRep.z, dPy / gRep.z).rgb; float gl = clamp(dot(gS, vec3(0.3, 0.55, 0.15)) / 0.35, 0.4, 1.6);
-          vec3 cSg = vec3(0.19, 0.27, 0.09) * mix(1.0, gl, aaS * 0.7) * mix(0.85, 1.15, m1);
-          vec3 cTan = mix(vec3(0.34, 0.31, 0.27), vec3(0.43, 0.39, 0.34), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
-          vec3 cRed = mix(vec3(0.33, 0.22, 0.16), vec3(0.41, 0.29, 0.21), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
-          vec3 cD = mix(cTan, cRed, smoothstep(0.6, 0.9, k));
+          vec3 cSg = vec3(0.21, 0.26, 0.11) * mix(1.0, gl, aaS * 0.7) * mix(0.85, 1.15, m1);
+          vec3 cTan = mix(vec3(0.29, 0.25, 0.21), vec3(0.36, 0.31, 0.26), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
+          vec3 cRed = mix(vec3(0.23, 0.18, 0.145), vec3(0.29, 0.225, 0.18), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
+          // (A37, review2 w_mccullough2, w_mitchell1: Street View's dirt shoulder grey-brown, #555149 to #877e70 by pixel medians, not salmon; darker at the asphalt)
+          vec3 cD = mix(cTan, cRed, smoothstep(0.6, 0.9, k)) * mix(0.78, 1.0, smoothstep(0.0, 1.2, (1.0 - vSh.x) * 8.0));
           cD = mix(cD, cSg, smoothstep(0.62, 0.8, m2) * 0.35 * aaS + smoothstep(0.55, 1.0, (1.0 - vSh.x) / max(vSh.z, 0.01)) * 0.45);
           c = mix(c, mix(cSg, cD, smoothstep(0.2, 0.3, k)), jwBand); }
         #endif
@@ -542,7 +557,8 @@ function groundMaker(base) {
         // mixed; grey-green tufts in clumps over it)
         // (three lookups at different angles and scales: the scan's level strata averaged out into fractured rock)
         vec2 sr = mat2(0.62, -0.78, 0.78, 0.62) * side;
-        vec3 cFace = (textureGrad(gCut, side / (gRep.y * 0.45), dSx / (gRep.y * 0.45), dSy / (gRep.y * 0.45)).rgb + textureGrad(gCut, side.yx / (gRep.y * 1.15) + 0.37, dSx.yx / (gRep.y * 1.15), dSy.yx / (gRep.y * 1.15)).rgb + textureGrad(gCut, sr / (gRep.y * 0.7) + 0.71, dRx / (gRep.y * 0.7), dRy / (gRep.y * 0.7)).rgb) / 3.0;
+        float wX = pow(abs(n.x), 4.0), wZ = pow(abs(n.z), 4.0), wb = wX / max(wX + wZ, 1e-4);
+        vec3 cFace = mix(jwFace(sXY, dXYx, dXYy, gRep.y), jwFace(sZY, dZYx, dZYy, gRep.y), wb);
         // (cz_1105_a: pale weathered rock showing through the red in patches a metre or two across)
         cFace = mix(cFace, vec3(0.50, 0.44, 0.38) * (0.8 + 0.4 * textureGrad(gNoise, side / 0.6, dSx / 0.6, dSy / 0.6).b), 0.14 * smoothstep(0.66, 0.74, textureGrad(gNoise, side / 1.7 + 0.51, dSx / 1.7, dSy / 1.7).b));
         // (A32, n9_505_a, w61_11010_r: the photos' cuts ribbed and broken: ribs down the fall line a few metres apart, crossed fractures, small dark gaps between stones; no extra geometry)

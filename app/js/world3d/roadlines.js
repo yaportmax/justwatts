@@ -69,7 +69,7 @@ export const ROAD_TEXT = [
   ['STOP', 41843, 1.7, false, 'cz_41835_a'],
   ['15', 40341, 1.7, false, 'cz_40330_a'], ['MPH', 40350, 1.7, false, 'cz_40330_a'], ['PED', 40175, 1.7, false, 'cz_40165_a'], ['PED', 41705, -1.7, true, 'cz_41695_a'],
 ];
-// (A37) the shoulder: Street View's strip of short bright grass ('g') or gravel and dirt ('t' tan gravel, 'd' red-brown dirt;
+// (A37; review2: narrower where the dirt read too wide, w_mitchell1, w_east0) the shoulder: Street View's strip of short bright grass ('g') or gravel and dirt ('t' tan gravel, 'd' red-brown dirt;
 // 'b' brush to the edge)
 // between the paved edge (or its curb) and the scrub, width in metres; hand.js paints it on the verges and holds the brush
 // back behind it. Every road from Bunker Road on has a grass strip about a metre wide on both sides unless a row says
@@ -87,11 +87,11 @@ export const SHOULDERS = [
   // Bunker Road through Fort Cronkhite's lawns: grass to the edge, wide (cz_33430_a to cz_33630_a)
   [33400, 33640, 'B', 'g', 2.0],
   // McCullough Road: red dirt on the downhill side at the bends (w_mccullough0, cz_70665_a)
-  [70370, 70460, 'L', 'd', 2.4], [70640, 70700, 'L', 'd', 1.6],
+  [70370, 70460, 'L', 'd', 1.6], [70640, 70700, 'L', 'd', 1.6],
   // Mitchell Road: the gravel strip along the lagoon side (cz_100125_a to cz_100435_a, w_mitchell1), lawn on the barracks side
-  [100000, 100500, 'R', 'd', 3.0], [100000, 100500, 'L', 'g', 1.5],
+  [100000, 100500, 'R', 'd', 2.0], [100000, 100500, 'L', 'g', 1.5],
   // East Road: gravel and dirt behind the bay-side curb (cz_80450_a to cz_80720_a)
-  [80420, 80780, 'L', 'd', 2.0],
+  [80420, 80780, 'L', 'd', 1.2],
   // Center Road: the parade's lawn up to the curbs (w_center0)
   [280000, 280250, 'B', 'g', 2.0],
 ];
@@ -100,7 +100,7 @@ export const SHOULDERS = [
 // only where the ground is steep.
 export const CUTS = [
   [956, 990, 'L', 'x', 0, 9],  // (w_conzelman2: the bank's foot left of the bend green and yellow grass to the kerb; the red face above it and before 955 stays, the Conzelman control)
-  [432, 482, 'L', 'p', 3, 32],  // (w_conzelman5: the tall pale grey-pink face on the left)
+  [432, 482, 'L', 'r', 3, 32],  // (w_conzelman5: the tall face on the left, red and grey fractured rock; review2: as 'p' it read a flat pink wall)
   [70150, 70290, 'R', 'r', 3, 20], [70290, 70410, 'R', 'r', 3, 18],  // (cz_70150_a to cz_70395_a, w_mccullough0: the red cut right of the road)
   [70095, 70135, 'R', 'g', 6, 22],  // (cz_70105_a, cz_70120_a: grey rock outcrops up the bank)
   [70480, 70540, 'R', 'r', 6, 20],  // (cz_70505_a, cz_70530_a: a red scar high on the bank)

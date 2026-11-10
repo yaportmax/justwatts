@@ -107,7 +107,7 @@ function asphaltWear(m) {
           float worn = smoothstep(0.72, 0.76, a.b * 0.55 + b.g * 0.45) * (1.0 - patchT);  // a pale worn patch
           float seam = (1.0 - smoothstep(0.004, 0.012 + px * 0.02, abs(b.b - 0.5))) * smoothstep(0.62, 0.74, a.r) * (1.0 - smoothstep(0.08, 0.3, px));
           float crack = (1.0 - smoothstep(0.003, 0.008 + px * 0.02, abs(c.a - 0.5))) * smoothstep(0.7, 0.82, a.a) * (1.0 - smoothstep(0.04, 0.15, px));
-          diffuseColor.rgb *= (1.0 - 0.12 * patchT) * (1.0 + 0.05 * worn) * (1.0 - 0.3 * seam) * (1.0 - 0.15 * crack); }`);
+          diffuseColor.rgb *= (1.0 - 0.1 * patchT) * (1.0 + 0.05 * worn) * (1.0 - 0.14 * seam) * (1.0 - 0.08 * crack); }`);  /* (review2: the sealed cracks at 30 % read as drawn lines, a cartoon, w_mccullough0, w_bunker3) */
   };
   const k0 = m.customProgramCacheKey; m.customProgramCacheKey = () => k0.call(m) + '|wear';
   return m;
@@ -270,6 +270,10 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   // fade: 1 fades out over the range's far end, -1 fades in over its near end, FADE metres either side, by a screen-door
   // dither: lod0 and the impostors cross-faded with no pop)
   const FADE = 5;
+  // (A37, review2: the hand roads' trees cast their shadows on the road and the ground, Street View's shade under the canopy, w_east0, w_east2, w_bunker3;
+  // trees only, their near model with its leaves' alpha: the shrubs and domes keep none, on the steep faces those fell as black blots, cz_1105_l)
+  const CAST = /^(oak|cyp|cypress|wood|btree|avc|mcyp|loak|willow)/, depths = new Map();
+  const depthFor = src => depths.get(src) ?? depths.set(src, new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: src.map || null, alphaTest: src.map ? 0.5 : 0, side: THREE.DoubleSide })).get(src);
   function material(src, geo, lo, hi, { round = false, fade = 0, meshNormals = false } = {}) {
     const m0 = new THREE.MeshLambertMaterial({ color: src.color, map: src.map, alphaTest: src.map ? 0.5 : 0, side: THREE.DoubleSide, vertexColors: !!geo.attributes.color });
     const range = { value: new THREE.Vector2(lo, hi) };
@@ -320,7 +324,9 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     // light through them: lifted, and a share of their own colour as emissive so the shaded side is never black; the willow thicket bright yellow green, w_bunker1/2)
     // (the emissive share only on a textured material: on the oak's vertex coloured fronds an untinted emissive washed them grey white, b2 w_east2)
     const glow = (m, k) => { if (m.map && !m.vertexColors) { m.emissive.copy(m.color).multiplyScalar(k); m.emissiveMap = m.map; } else m.color.multiplyScalar(1 + k * 1.5); };
-    if (/^(mcyp|loak)/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) { m.color.multiplyScalar(1.3); glow(m, 0.22); }
+    if (/^loak/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) { m.color.multiplyScalar(1.3); glow(m, 0.22); }
+    // (round 5: the cypress texture carries Street View's own colours and its deep inner shade: lit as built, no glow flattening it, w_mitchell0)
+    if (/^mcyp/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiplyScalar(1.15);
     if (/^willow/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) { m.color.multiply(new THREE.Color(0.95, 1.05, 0.62)); glow(m, 0.15); }
     // (A36: the sage read near white beside Conzelman, Street View cz 2025-03 a darker grey green)
     if (sp === 'sage') for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.5, 0.58, 0.45));
@@ -373,7 +379,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     c.meshes = S.parts.map((p, k) => {
       const im = new THREE.InstancedMesh(p.geo, S.mats[k], c.ids.length);
       c.ids.forEach((i, j) => im.setMatrixAt(j, matAt(S.a, i, S.st)));
-      im.computeBoundingSphere(); im.castShadow = false; im.receiveShadow = true; im.visible = on; group.add(im); return im;  // (no cast shadows: on the steep faces they fell as black blots, cz_1105_l)
+      im.computeBoundingSphere(); im.castShadow = CAST.test(S.sp); if (im.castShadow) im.customDepthMaterial = depthFor(p.src); im.receiveShadow = true; im.visible = on; group.add(im); return im;
     });
   }
   // every frame: the camera uniform; near cells shown (only after 3 m of travel: the extra 3 m in R covers it)
@@ -448,7 +454,16 @@ function groundMaker(base) {
           vec2 d = p - (c + h) * 1.4; float r = 0.7 + 0.75 * h2.x, t = 1.0 - dot(d, d) / (r * r);
           if (t > 0.0) { float H = r * (0.38 + 0.3 * fract(h.x * 7.13)), tp = pow(max(t, 0.04), 0.6), hh = H * tp;  // (puffy: steep sides, a round top)
             if (hh > best) { best = hh; id = h.x; g = -1.2 * H * tp / max(t, 0.04) * d / (r * r); } } }
-        return vec4(best, g, id); }`)
+        return vec4(best, g, id); }
+      // (A37, review2 w_conzelman1: the chert's fractures: warped cells about a metre across on the face; x a crack line, y the ledge's
+      // shadow just under a crack, z the plate's own id)
+      vec3 jwVor(vec2 q) { vec2 ic = floor(q); float f1 = 9.0, f2 = 9.0, id = 0.0;
+        for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) { vec2 c = ic + vec2(float(i), float(j)), d = q - c - jwH2(c); float e = dot(d, d); if (e < f1) { f2 = f1; f1 = e; id = jwH2(c + 7.0).x; } else if (e < f2) f2 = e; }
+        return vec3(sqrt(f1), sqrt(f2) - sqrt(f1), id); }
+      vec3 jwCrack(vec2 sd, float aa) { vec2 q = vec2(sd.x / 1.1, sd.y / 0.75);  // (plates wider than tall: the strata)
+        vec3 a = jwVor(q), b = jwVor(q + vec2(0.0, 0.2));
+        float cr = (1.0 - smoothstep(0.05, 0.13, a.y)) * aa, sh = (1.0 - smoothstep(0.06, 0.22, b.y)) * (1.0 - cr) * aa;
+        return vec3(cr, sh, a.z); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
       {
         // (the face's own slope from the surface itself, not the mesh's normals: a smoothed or exported-up normal had hidden
@@ -559,6 +574,17 @@ function groundMaker(base) {
         vec2 sr = mat2(0.62, -0.78, 0.78, 0.62) * side;
         float wX = pow(abs(n.x), 4.0), wZ = pow(abs(n.z), 4.0), wb = wX / max(wX + wZ, 1e-4);
         vec3 cFace = mix(jwFace(sXY, dXYx, dXYy, gRep.y), jwFace(sZY, dZYx, dZYy, gRep.y), wb);
+        // (A37, review2 w_conzelman1: orange-red chert broken in plates, crisp dark fractures, a shadow under each ledge, some plates grey or pale)
+        { vec2 wq = (vec2(textureGrad(gNoise, side / 3.1 + 0.13, dSx / 3.1, dSy / 3.1).r, textureGrad(gNoise, side / 3.1 + 0.57, dSx / 3.1, dSy / 3.1).g) - 0.5) * 0.7;
+          float aaC = 1.0 - smoothstep(0.08, 0.25, length(abs(dSx) + abs(dSy)));  /* (the face's own metres per pixel: the ground plane's read grazing on a steep face) */
+          vec3 kA = jwCrack(sXY + wq, aaC), kB = jwCrack(sZY + wq, aaC), k37 = mix(kA, kB, wb);
+          float pid = wb > 0.5 ? kB.z : kA.z, L37 = dot(cFace, vec3(0.3, 0.55, 0.15));
+          vec3 plate = pid < 0.62 ? vec3(1.9, 1.3, 0.88) : pid < 0.85 ? vec3(1.2, 1.15, 1.08) : vec3(1.5, 1.32, 1.12);  /* (A37: lit chert #a47856 by Street View pixel medians, w_conzelman1; ours read #766450) */
+          cFace = mix(cFace, vec3(L37) * plate * 1.15, 0.82 * (1.0 - rb31));
+          cFace *= mix(1.0, 0.22, k37.x) * mix(1.0, 0.55, k37.y);
+          // (grey-green tufts on the ledges: on the plate just over a fracture, in clumps)
+          float tf = k37.y * smoothstep(0.55, 0.72, textureGrad(gNoise, side / 1.7 + 0.31, dSx / 1.7, dSy / 1.7).g) * aaC;
+          cFace = mix(cFace, vec3(0.30, 0.34, 0.22) * mix(0.8, 1.2, textureGrad(gNoise, side / 0.4 + 0.77, dSx / 0.4, dSy / 0.4).r), tf * 0.85 * (1.0 - rb31)); }
         // (cz_1105_a: pale weathered rock showing through the red in patches a metre or two across)
         cFace = mix(cFace, vec3(0.50, 0.44, 0.38) * (0.8 + 0.4 * textureGrad(gNoise, side / 0.6, dSx / 0.6, dSy / 0.6).b), 0.14 * smoothstep(0.66, 0.74, textureGrad(gNoise, side / 1.7 + 0.51, dSx / 1.7, dSy / 1.7).b));
         // (A32, n9_505_a, w61_11010_r: the photos' cuts ribbed and broken: ribs down the fall line a few metres apart, crossed fractures, small dark gaps between stones; no extra geometry)
@@ -590,13 +616,8 @@ function groundMaker(base) {
           float gc = smoothstep(0.56, 0.7, textureGrad(gNoise, side / 2.2 + 0.43, dSx / 2.2, dSy / 2.2).r) * smoothstep(0.35, 0.6, textureGrad(gNoise, p / 8.0 + 0.19, dPx / 8.0, dPy / 8.0).g);
           cCut = mix(cCut, vec3(0.15, 0.21, 0.075) * mix(0.7, 1.25, tB), gc * 0.75 * (1.0 - rb31)); }
           c = mix(c, cCut, clamp(wc * (1.0 - jwBand * (1.0 - steep)), 0.0, 1.0)); }
-        if (p.x > 8935.0 && p.x < 8995.0 && p.y > 11625.0 && p.y < 11695.0) {  // (A31: shade pools under the picnic's cypress crowns, cz_14255_l, 14275_l: bright grass and shade, the plants cast no shadows)
-          float s31 = 0.0; vec3 Q[7]; Q[0] = vec3(8949.0, 11651.0, 7.5); Q[1] = vec3(8953.0, 11660.0, 6.5); Q[2] = vec3(8957.0, 11647.0, 6.5); Q[3] = vec3(8962.0, 11636.0, 6.0); Q[4] = vec3(8964.0, 11652.0, 8.5); Q[5] = vec3(8969.0, 11667.0, 8.0); Q[6] = vec3(8972.0, 11682.0, 8.0);
-          float n31 = texture2D(gNoise, p / 5.5).r * 0.55 + texture2D(gNoise, p / 1.7).g * 0.45;
-          for (int k = 0; k < 7; k++) s31 = max(s31, 0.75 * (1.0 - smoothstep(Q[k].z * 0.12, Q[k].z * 0.5, length(p - Q[k].xy) + (n31 - 0.5) * 3.0)));
-          vec2 T32[4]; T32[0] = vec2(8950.5, 11647.6); T32[1] = vec2(8951.5, 11650.1); T32[2] = vec2(8952.3, 11652.8); T32[3] = vec2(8951.2, 11655.7);  // (A32, cz_14255_l: the trunks' long shadows toward the road, the lawn bright between them)
-          for (int k = 0; k < 4; k++) { vec2 d32 = p - T32[k]; float u32 = clamp(dot(d32, vec2(-0.93, 0.36)), 0.0, 13.0); s31 = max(s31, (1.0 - smoothstep(0.5, 1.2, length(d32 - vec2(-0.93, 0.36) * u32) + (n31 - 0.5) * 0.7)) * (1.0 - u32 / 22.0)); }
-          c *= mix(vec3(1.28, 1.42, 1.0), vec3(0.62, 0.7, 0.58), s31); }
+        // (A37: the picnic cypress's painted shade pools and trunk shadows gone: the hand trees cast real shadows now, 05587f3)
+        if (p.x > 8935.0 && p.x < 8995.0 && p.y > 11625.0 && p.y < 11695.0) c *= vec3(1.28, 1.42, 1.0);  // (the picnic's watered lawn bright lime in the sun, cz_14255_l; its old pools' lit tone kept)
         diffuseColor.rgb *= c;
       }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>

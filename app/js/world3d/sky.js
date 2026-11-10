@@ -46,7 +46,7 @@ export const SKY_K = 0.5, SKY_P = 0.8;
 // The sun to sky light balance: the hemisphere light (sky) and the sun, relative to the old rig (the sky's share of the
 // light on a level face was a third: shade nearly as bright as sun). And the sea's reflectance at grazing angles: a
 // wind-roughened sea shows its dark body in most facets (a smooth fresnel made it a mirror of the pale horizon).
-const HEMI_K = 0.6, SUN_K = 1.2, SEA_FR = 0.38;
+const HEMI_K = 0.85, SUN_K = 1.2, SEA_FR = 0.38;
 /* ---------- three's fog chunks: height fog + aerial haze, warmer toward the sun ---------- */
 // THREE.Fog carries two numbers: near = haze density (per million per metre, scale height 1.4 km), far = low marine
 // layer density (scale height 110 m). Lit materials add the sun's colour looking toward the sun. A material with the
@@ -193,6 +193,9 @@ export function createSky(scene, { far, quality = 0 }) {
         vec2 p = vW.xz;
         vec2 g = wn(p / 61.0 + time * vec2(0.010, 0.006)) * 0.55 + wn(p / 19.0 + time * vec2(-0.021, 0.013)) * 0.35 + wn(p / 233.0 + time * vec2(0.003, -0.002)) * 0.5;
         g *= 0.28 / (1.0 + dist / 1800.0);
+        #ifdef LAGOON
+        g *= 0.35;  // (A37: a sheltered lagoon: calm, Street View w_mitchell0)
+        #endif
         vec3 N = normalize(vec3(g.x, 1.0, g.y));
         float fr = 0.02 + ${(0.98 * SEA_FR).toFixed(3)} * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 5.0);
         vec3 R = reflect(-V, N); R.y = abs(R.y);
@@ -200,12 +203,14 @@ export function createSky(scene, { far, quality = 0 }) {
         float sd = max(dot(R, sunD), 0.0);
         vec3 body = deep * (0.35 + 0.65 * clamp(sunD.y * 2.0, 0.0, 1.0)) * (0.9 + 0.2 * texture2D(waves, p / 41.0).z);
         vec3 c = mix(body, refl, fr) + sunC * (pow(sd, 900.0) * 30.0 + pow(sd, 90.0) * 0.6) * smoothstep(-0.02, 0.06, sunD.y);
+        #ifndef LAGOON
         // the shallows: paler water over sand, then foam: lines of swash running in to the shore, a band at its edge
         float hf = seaFloor(p) - ${SEA.toFixed(2)}, nz = texture2D(tNoise, p / 23.0 + time * 0.01).r, nz2 = texture2D(tNoise, p / 7.0 - time * 0.02).g;
         c = mix(c, mix(c, vec3(0.16, 0.27, 0.25) * (0.4 + 0.6 * clamp(sunD.y * 3.0, 0.0, 1.0)), 0.5), smoothstep(-9.0, -1.0, hf) * (1.0 - fr) * (1.0 - smoothstep(500.0, 1100.0, dist)));
         float swash = smoothstep(0.62, 0.95, sin(hf * 2.6 + time * 1.1 + nz * 4.0) * 0.5 + 0.5) * smoothstep(-4.0, -0.8, hf);
         float foam = max(swash * 0.55, smoothstep(-1.1, -0.15, hf)) * (0.55 + 0.6 * nz2) * smoothstep(1.2, 0.2, hf);
         c = mix(c, (hor * 1.15 + sunC * 0.06) * (0.9 + 0.1 * nz), clamp(foam, 0.0, 0.9) * (1.0 - smoothstep(500.0, 1100.0, dist)));
+        #endif
         gl_FragColor = vec4(c, 1.0);
         #include <fog_fragment>
         #include <tonemapping_fragment>
@@ -213,6 +218,9 @@ export function createSky(scene, { far, quality = 0 }) {
       }`,
   });
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), seaMat);
+  // (A37: Rodeo Lagoon's water, perched behind the beach about 2 m over the sea: the same water, its uniforms shared, no
+  // surf or shallows, calmer (view.js lagoon, Street View w_mitchell0, w_bunker2))
+  const lagoonMat = new THREE.ShaderMaterial({ uniforms: wu, fog: true, defines: { LAGOON: 1 }, vertexShader: seaMat.vertexShader, fragmentShader: seaMat.fragmentShader });
   sea.scale.setScalar(far * 2.2); sea.frustumCulled = false; scene.add(sea);
 
   /* Karl the fog: a map of how high it stands (a smooth top over every bank) and billows of 3D noise in it, for the
@@ -337,7 +345,7 @@ export function createSky(scene, { far, quality = 0 }) {
     exposure = P.exp; sunI = sun.intensity; hemiI = hemi.intensity;
   }
   return {
-    sunDir, sun, hemi, set, go, placeBanks, fog, get time() { return t; }, get moving() { return !!move; },
+    sunDir, sun, hemi, set, go, placeBanks, fog, lagoonMat, get time() { return t; }, get moving() { return !!move; },
     // the fog banks as a volume (post draws them) or as billboards
     setVolume(on) { fog.vol = !!on; showBanks(); }, get exposure() { return exposure; }, get sunI() { return sunI; }, get hemiI() { return hemiI; },
     setBanks(on) { banks.on = !!on; showBanks(); return banks.on; }, get banksOn() { return banks.on; },

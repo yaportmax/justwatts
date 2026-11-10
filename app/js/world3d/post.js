@@ -14,10 +14,10 @@ import { FXAAShader } from '../../vendor/three-0.180.0/addons/shaders/FXAAShader
 
 const GradeShader = {
   name: 'JwGrade',
-  uniforms: { tDiffuse: { value: null }, exposure: { value: 1 }, warm: { value: 0.5 }, vig: { value: 0.28 }, sat: { value: 1.08 }, veil: { value: new THREE.Color(0, 0, 0) }, res: { value: new THREE.Vector2(1, 1) } },
+  uniforms: { tDiffuse: { value: null }, exposure: { value: 1 }, warm: { value: 0.5 }, vig: { value: 0.28 }, sat: { value: 1.08 }, lift: { value: 0 }, veil: { value: new THREE.Color(0, 0, 0) }, res: { value: new THREE.Vector2(1, 1) } },
   vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: /* glsl */`
-    uniform sampler2D tDiffuse; uniform float exposure, warm, vig, sat; uniform vec3 veil; uniform vec2 res; varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform float exposure, warm, vig, sat, lift; uniform vec3 veil; uniform vec2 res; varying vec2 vUv;
     vec3 rrt(vec3 v) { vec3 a = v * (v + 0.0245786) - 0.000090537; vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081; return a / b; }
     vec3 aces(vec3 c) {
       const mat3 i = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
@@ -30,6 +30,10 @@ const GradeShader = {
       // ACES per channel bleaches bright saturated colour (a clear sky turns white-grey long before it is bright); half of
       // it by luminance alone keeps the hue and chroma of the sky (matched to Street View, A20b)
       { vec3 a = aces(c); float lc = dot(c, vec3(0.2126, 0.7152, 0.0722)), la = dot(a, vec3(0.2126, 0.7152, 0.0722)); c = mix(a, clamp(c * (la / max(lc, 1e-5)), 0.0, 1.0), 0.5); }
+      // (A38) shade lifted the way a phone or Street View camera lifts it: ACES' toe takes scene light 0.02 down to 0.003
+      // (shaded banks, verges and walls drew near black: w_bunker1's shade 0.07 against Street View's 0.21); the lift
+      // fades out by mid grey, so sunlit ground and the sky stay where they were
+      c *= 1.0 + lift * exp(-dot(c, vec3(0.2126, 0.7152, 0.0722)) / 0.03);
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
       c = mix(vec3(l), c, sat);                                                     // saturation
       c *= mix(vec3(0.97, 0.99, 1.04), vec3(1.05, 1.0, 0.92), smoothstep(0.05, 0.75, l) * warm + (1.0 - warm) * 0.5);  // split tone
@@ -109,7 +113,7 @@ class FogPass extends Pass {
 // noise and light; near(x, z, r): any fog within r)
 // veiling glare at the sun (in scene light, times the cosine squared of the view to the sun): matched to Street View's
 // into-the-sun Conzelman panos (A20: their shade and sea, a third closer)
-const _v = new THREE.Vector3(), VEIL = 0.12;
+const _v = new THREE.Vector3(), VEIL = 0.12, LIFT = 2.2;
 export function createPost(renderer, scene, camera, fog = null) {
   let composer = null, grade = null, bloom = null, fxaa = null, fogp = null, on = false, cfg = null, size = [1, 1, 1];
   function build(Q) {
@@ -145,6 +149,7 @@ export function createPost(renderer, scene, camera, fog = null) {
         if (fog) { const sd = fog.u.sunD.value, sc = fog.u.sunC.value; camera.getWorldDirection(_v); const a = Math.max(0, _v.dot(sd)), m = Math.max(sc.r, sc.g, sc.b, 1e-6);
           grade.uniforms.veil.value.setRGB(sc.r / m, sc.g / m, sc.b / m).multiplyScalar(VEIL * a * a * Math.min(1, Math.max(0, sd.y * 5)) * api.sunSeen); }
         else grade.uniforms.veil.value.setRGB(0, 0, 0);
+        grade.uniforms.lift.value = LIFT * (fog ? Math.min(1, Math.max(0, fog.u.sunD.value.y * 6 + 0.3)) : 1);  /* by day only: the night stays dark */
         composer.render();
       }
       else { renderer.toneMappingExposure = exposure; renderer.render(scene, camera); }

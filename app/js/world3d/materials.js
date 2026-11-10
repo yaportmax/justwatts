@@ -205,7 +205,8 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   vec3 duff = mix(srgb(vec3(0.38, 0.27, 0.19)), srgb(vec3(0.33, 0.42, 0.18)), smoothstep(0.52, 0.68, small) * 0.85) * (0.85 + 0.3 * fine);
   c = mix(c, duff, rw * 0.9);
   // the shore and the sea floor (heights in the lidar's datum: mean sea level 0.9 m, sky.js SEA)
-  if (lake < 0.5) c = mix(c, srgb(vec3(0.80, 0.74, 0.58)), smoothstep(3.9, 1.7, h) * (1.0 - smoothstep(0.3, 0.5, slope)));
+  // (A37: up to 2.95 m only: Rodeo Lagoon stands at 3.02 m, its banks are grass and reeds, not a beach: w_bunker2)
+  if (lake < 0.5) c = mix(c, srgb(vec3(0.80, 0.74, 0.58)), smoothstep(2.95, 1.5, h) * (1.0 - smoothstep(0.3, 0.5, slope)));
   c = mix(c, srgb(vec3(0.20, 0.34, 0.38)), lake);
   c = mix(c, srgb(vec3(0.24, 0.30, 0.28)), smoothstep(0.5, -2.1, h));
   return c;

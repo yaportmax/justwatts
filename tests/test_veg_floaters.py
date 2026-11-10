@@ -281,7 +281,7 @@ def road_overhangs(app):
         pts = np.concatenate([q[1] for q in model_parts(hand / "veg" / f"{sp}.glb")])
         # (A37: every tree, not only the oak: crowns may span the road high up, as Street View has them, w_east2, w_murray0; place_roads37 /
         # export_veg37 fit each crown to its lod0 leaves at 4.5 m over the road)
-        if sp in ("willow", "willow2", "mcyp", "mcyp2", "loak", "loak2", "oak", "wood", "btree", "cypress", "cyp2", "cyp3", "cypt", "cypt2", "lime", "lime2", "bushtree", "euc", "euc2"):  # a one-sided crown: its own lod0 vertices at each plant's turn and width, not a circle round its trunk
+        if sp in ("mcypt", "willow", "willow2", "mcyp", "mcyp2", "loak", "loak2", "oak", "wood", "btree", "cypress", "cyp2", "cyp3", "cypt", "cypt2", "lime", "lime2", "bushtree", "euc", "euc2"):  # a one-sided crown: its own lod0 vertices at each plant's turn and width, not a circle round its trunk
             pts0 = np.concatenate([q[1] for q in model_parts(hand / "veg" / f"{sp}.glb") if "lod0" in q[0]])[::40]
             n = 0
             for x, _, z, r, sx, sy, sw in np.array(a).reshape(-1, 7):

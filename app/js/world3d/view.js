@@ -14,6 +14,7 @@ import { compileSpec, specPaint, SECTIONS as CZ_SECTIONS, RAILS as CZ_RAILS, LOT
 import { createEdit } from './edit.js';
 import { loadHand, loadVeg as loadHandPlants, loadScrub } from './hand.js';
 import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS, SIGNS, HAND_BLDG } from './handlist.js';
+import { POLES as FURN_POLES, PIECES as FURN_PIECES, LAMPS as FURN_LAMPS } from './furnlist.js';
 import { LIDAR_BLDG } from './bldglidar.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
@@ -172,6 +173,19 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const life = lifeOn ? createLife({ THREE, scene, proj, marks, quality: q }) : { update() {}, show() {}, setLamps() {}, dispose() {}, counts: null }, audio = createAudio({ on: sound });
   const onHide = () => { if (document.hidden) audio.hush(); }; document.addEventListener('visibilitychange', onHide);  // no frames come in a hidden tab
   sky.setBanks(fog);
+  // (A37: Rodeo Lagoon's water: the lidar's hydro-flattened surface (3.02 m, 2 m cells grown 4 m, work/furn/lagoon_enc.py)
+  // a little over it, where the ground rises past it the shore. Only the painted OSM polygon showed before: the water 60 m
+  // off the rail at w_mitchell0, none at w_bunker2; Street View has it right under the rail, NAIP and the lidar agree)
+  fetch('/world/lagoon.json').then(r => r.ok ? r.json() : null).then(j => {
+    if (dead || !j) return; const [, W, N] = j.box, c = j.cell, mlat = 111195, mlon = mlat * Math.cos((j.box[0] + N) / 2 * Math.PI / 180), y = j.level, pos = [];
+    for (const [r, ...runs] of j.rows) for (let k = 0; k < runs.length; k += 2) {
+      const la0 = N - r * c / mlat, la1 = N - (r + 1) * c / mlat, lo0 = W + runs[k] * c / mlon, lo1 = W + runs[k + 1] * c / mlon;
+      const [ax, az] = proj.xz(la0, lo0), [bx, bz] = proj.xz(la0, lo1), [cx, cz] = proj.xz(la1, lo1), [dx, dz] = proj.xz(la1, lo0);
+      pos.push(ax, y, az, dx, y, dz, cx, y, cz, ax, y, az, cx, y, cz, bx, y, bz);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, sky.lagoonMat); m.name = 'lagoon'; scene.add(m);
+  }).catch(() => {});
   // the Headlands' ground cover (veg.js): the ground shader's texture, the scrub, the groves; tiles built before it
   // came are built again
   let veg = null;
@@ -1092,7 +1106,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const LL = c.lines.concat(c.handLines || []);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], warn: [], warnp: [], board: [], reg: [], blade: [], fence: [], picket: [], pole: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], warn: [], warnp: [], board: [], reg: [], blade: [], fence: [], picket: [], pole: [], parm: [], rdelin: [], ubox: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
@@ -1169,8 +1183,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           put(k[0] === 'wposts' ? 'wdelin' : 'delin', P[i][0] + dz * o, P[i][1] - 0.25, P[i][2] - dx * o, 0);
         } }
     }
-    // OpenStreetMap's power lines: a wooden pole with a crossarm at each node in the tile (across the line), two wires
-    // from it to the next node
+    // OpenStreetMap's power lines: a wooden pole with a crossarm at each node in the tile (across the line), its wires
+    // to the next node (A37: three on the crossarm, one lower: props.js pole, Street View w_bunker3)
+    const span = (x, y, z, yaw, x1, y1, z1, yb) => { for (const [o, h] of [[-1, 10.75], [0, 10.75], [1, 10.75], [0.3, 8.2]]) wires.push([x + Math.sin(yaw) * o, y + h, z + Math.cos(yaw) * o, x1 + Math.sin(yb) * o, y1 + h, z1 + Math.cos(yb) * o]); };
     { const bx = tileBox(c);
       for (const line of t.power || []) {
         const Q = line.map(([la, lo]) => proj.xz(la, lo)), at = Q.map(([x, z]) => [x, (hAt(x, z) ?? 0) - 0.1, z]);
@@ -1178,16 +1193,33 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         for (let i = 0; i < Q.length; i++) {
           const [x, z] = Q[i]; if (!(x >= bx[0] && x < bx[2] && z >= bx[1] && z < bx[3])) continue;
           const yaw = yawAt(i); put('pole', x, at[i][1], z, yaw);
-          if (i + 1 < Q.length) { const yb = yawAt(i + 1); for (const o of [-0.8, 0.8]) wires.push([x + Math.sin(yaw) * o, at[i][1] + 9.1, z + Math.cos(yaw) * o, Q[i + 1][0] + Math.sin(yb) * o, at[i + 1][1] + 9.1, Q[i + 1][1] + Math.cos(yb) * o]); }
+          if (i + 1 < Q.length) span(x, at[i][1], z, yaw, Q[i + 1][0], at[i + 1][1], Q[i + 1][1], yawAt(i + 1));
         }
-      } }
+      }
+      // (A37: furnlist.js, off the survey photos and OpenStreetMap's lamps: a point that far past a road's edge at a station,
+      // [x, y (the lidar's ground), z, the road's direction there (tx, tz), toward the road from it (ux, uz)])
+      const atS = (s, side, past) => { const p = CZ.latlon(s), a = CZ.latlon(s + 1), b = CZ.latlon(s - 1); if (!p || !a || !b) return null; const cs = CZ.cross(s) ?? { L: -3.4, R: 3.4 };
+        const [x0, z0] = proj.xz(p[0], p[1]), [ax, az] = proj.xz(a[0], a[1]), [bx2, bz2] = proj.xz(b[0], b[1]), l = Math.hypot(ax - bx2, az - bz2) || 1, tx = (ax - bx2) / l, tz = (az - bz2) / l;
+        const off = side === 'R' ? cs.R + past : cs.L - past, x = x0 - tz * off, z = z0 + tx * off, y = raw(x, z) ?? hAt(x, z); if (y == null) return null;
+        return [x, y, z, tx, tz, -Math.sign(off) * -tz, -Math.sign(off) * tx]; };
+      const inBox = (x, z) => x >= bx[0] && x < bx[2] && z >= bx[1] && z < bx[3];
+      for (const { pts } of FURN_POLES) { const P = pts.map(([s, side, past]) => atS(s, side, past)); if (P.some(q => !q)) continue;
+        // (the crossarm across the chain's run there)
+        const yawOf = i => { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)]; return Math.atan2(b[0] - a[0], b[2] - a[2]) + Math.PI / 2; };
+        P.forEach((q, i) => { const yaw = yawOf(i), n = P[i + 1];
+          if (!inBox(q[0], q[2])) return; if (!pts[i][4]) put('pole', q[0], q[1] - 0.1, q[2], yaw);  // (OpenStreetMap's own pole: drawn already)
+          if (n) span(q[0], q[1] - 0.1, q[2], yaw, n[0], n[1] - 0.1, n[2], yawOf(i + 1));  // (the wires drawn by the tile their first pole is in)
+          if (pts[i][3]) put('parm', q[0], q[1] - 0.1, q[2], Math.atan2(-q[6], q[5])); }); }
+      for (const [s, side, past, kind] of FURN_PIECES) { const q = atS(s, side, past); if (q && inBox(q[0], q[2])) put(kind, q[0], q[1] - (kind === 'rdelin' ? 0.15 : 0.05), q[2], kind === 'rdelin' ? Math.atan2(q[3], q[4]) : Math.atan2(q[5], q[6])); }
+      for (const [la, lo] of FURN_LAMPS) { const [x, z] = proj.xz(la, lo); if (!inBox(x, z)) continue; const hit = nearLine(x, z, 12), y = raw(x, z) ?? hAt(x, z); if (!hit || y == null) continue;
+        const dx = hit[0][0] - x, dz = hit[0][2] - z, l = Math.hypot(dx, dz) || 1; put('lamp', x, y - 0.1, z, Math.atan2(-dz / l, dx / l)); } }
     // the barriers' posts (buildRoads), each from 0.3 m into the ground under it (however far it falls away) to its top:
     // a W-beam's square dark timber posts, a cable fence's and a rail fence's timber posts, a concrete rail's blocks, a
     // chain-link fence's steel posts
     const POST = { wbeam: ['tpost', 0.8], wbeamg: ['gpost', 0.8], cable: ['kpost', 1], cablev: ['kpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
     for (const R of c.rails || []) { const P = POST[R.kind]; if (P) for (const [x, y, z, yaw] of R.posts) { const bot = Math.min(y, hAt(x, z) ?? y) - 0.3; items[P[0]].push([x, bot, z, yaw, y + P[1] - bot]); } }
     // (the feet of what stands on the ground: the seams check)
-    c.feet = ['pole', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'board', 'reg', 'blade', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
+    c.feet = ['pole', 'ubox', 'rdelin', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'board', 'reg', 'blade', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3();
     // every kind in one batched draw
@@ -1648,6 +1680,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (A37: a Headlands box, Alexander Avenue under US-101: the opening the road's width and a little, 14 ft 2 in clear as
       // its sign says, w_alexander0; it was 4 m wider and lower)
       const hlBox = box && !arch && inHeadlands(proj.lat(mid[1]), proj.lon(mid[0]));
+      if (hlBox && handAt(mid[0], mid[1])) continue;  // (A37: a hand-built underpass there, build_conz.py's Alexander box: its portals, lining and road the hand chunk's)
       const w = st.w / 2 + (one || arch ? 1 : hlBox ? 0.9 : 2), H = box ? (arch ? 1.4 : hlBox ? Math.max(2.6, Math.min(4.3, cover - 1.2)) : Math.max(2.6, Math.min(5.2, cover - 0.9))) : one ? 2 : 2.2, rise = box && !arch ? 0 : one || arch ? w : w * 0.75;
       // the bore as straight pieces of up to 40 m, an underpass's of 8 m (it bends with its road: Alexander under US-101, user 2026-11-05) (for the ground to leave out): [x0, z0, x1, z1, floor0, floor1, half width, height]
       const segs = []; let i0 = P.findIndex((_, i) => D[i] >= port - 0.5);  // (the same points as the lining's rings, below)

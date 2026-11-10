@@ -55,6 +55,9 @@ export const ROAD_FIX = {
   // (A37: New Breitung Road at Fort Baker: a broken yellow centre line, no edge lines, curbs about 3.3 m either side (a fifth
   // entry: a centre line alone, its kind as SECTIONS' lines): cz_320000_a to cz_320120_a, sg3_breitung)
   'New Breitung Road': [[0, -3.3, 3.3, null, 'yd']],
+  // (A37: McReynolds Road's south leg where it meets Seitler Road: the paving widens on its left round the corner, the Street
+  // View car 5.1 m left of the line there (cz_220065_a, w_murray0; the other panos along it 0 to 3.6 m off))
+  'McReynolds Road 2': [[0, -3.3, 3.3, null], [45, -3.3, 3.3, null], [58, -7.6, 3.3, null], [74, -7.6, 3.3, null], [88, -3.3, 3.3, null]],
 };
 // (A37) legends painted on the other roads (the hand build's glyphs, build_conz.py GLYPH): [glyph, station, metres right of
 // the line to its centre, flip (true: for traffic against the stations), src]
@@ -68,6 +71,9 @@ export const ROAD_TEXT = [
   ['STOP', 51632, 0.0, false, 'cz_51620_a'],
   ['STOP', 41843, 1.7, false, 'cz_41835_a'],
   ['15', 40341, 1.7, false, 'cz_40330_a'], ['MPH', 40350, 1.7, false, 'cz_40330_a'], ['PED', 40175, 1.7, false, 'cz_40165_a'], ['PED', 41705, -1.7, true, 'cz_41695_a'],
+  // (A37: Conzelman under the red cut: PED XING in the uphill lane for the traffic coming down, XING about 12 m ahead of
+  // cz_10090_a (w_conzelman3), PED 14 m ahead of cz_10110_a; 'U': the lane left of the double yellow, build_conz.py GLYPHS)
+  ['XING', 10103, 'U', true, 'w_conzelman3, cz_10090_a'], ['PED', 10124, 'U', true, 'cz_10110_a'],
 ];
 // (A37; review2: narrower where the dirt read too wide, w_mitchell1, w_east0) the shoulder: Street View's strip of short bright grass ('g') or gravel and dirt ('t' tan gravel, 'd' red-brown dirt;
 // 'b' brush to the edge)

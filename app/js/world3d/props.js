@@ -293,7 +293,19 @@ export function furnitureGeometries() {
     kpost: merge([[C(0.055, 0.05, 1, 6), col(0x7d7264)]]),
     cpost: merge([[B(0.3, 1, 0.3, 0, 0.5, 0), col(0xd9d6cc)]]),
     spost: merge([[C(0.04, 0.04, 1, 6), col(0x7a5340)]]),
-    pole: merge([[C(0.14, 0.11, 9.6, 7), pole], [B(0.1, 0.1, 1.9, 0, 8.9, 0), pole], ...[-0.8, 0.8].map(z => [B(0.07, 0.16, 0.07, 0, 9.03, z), dark])]),
+    // (A37: a wood utility pole as Street View has them at Fort Cronkhite and on Bunker and Alexander (w_bunker3, w_bunker2,
+    // w_alexander1): about 11.5 m, a foot thick at its butt, weathered silver-grey; a 2.4 m crossarm at 10.6 m with three
+    // insulators (wires at -1, 0, +1 m, 10.75 m up), a bracket for the lower line at 8.2 m (view.js POLE_WIRES))
+    pole: merge([[C(0.16, 0.12, 11.4, 8), col(0x8f8a80)], [B(0.11, 0.13, 2.4, 0, 10.6, 0), col(0x7d776c)],
+      ...[-1, 0, 1].map(z => [C(0.05, 0.04, 0.16, 6).translate(0, 10.67, z), col(0xb8b4aa)]), [B(0.3, 0.08, 0.08, 0.15, 8.2, 0), dark]]),
+    // (A37) a cobra-head street light on a utility pole's arm (+x toward the road), its head 8.4 m up, lit underside tag 2:
+    // Fort Cronkhite's poles by the barracks (w_bunker3)
+    parm: merge([[B(2.2, 0.07, 0.07, 1.1, 8.55, 0), col(0x9a9890)], [B(0.62, 0.16, 0.3, 2.35, 8.45, 0), col(0xa9aaa6)], [B(0.5, 0.03, 0.22, 2.38, 8.36, 0), lampC, null, { tag: 2 }]]),
+    // (A37) a roadside delineator: a white flexible post 1.2 m tall (from 0.15 m in the ground), a white reflector near its
+    // top facing the traffic (+z and -z): McCullough's bends (w_mccullough0, cz_70335_a and on)
+    rdelin: merge([[B(0.09, 1.35, 0.04, 0, 0.525, 0), col(0xeeeeea)], [B(0.07, 0.17, 0.05, 0, 1.0, 0), col(0xcfd3d6)]]),
+    // (A37) a utility cabinet on its concrete pad: pale grey-beige steel, about 0.8 by 0.5 by 1.4 m (w_mccullough2's right side)
+    ubox: merge([[B(0.95, 0.12, 0.7, 0, 0.06, 0), col(0xb9b6ad)], [B(0.78, 1.32, 0.5, 0, 0.78, 0), col(0xcfccc2)], [B(0.8, 0.03, 0.52, 0, 1.45, 0), col(0xbcb9b0)], [B(0.02, 1.0, 0.004, 0.0, 0.8, 0.252), col(0x9a978f)]]),
     lamp: merge([[C(0.1, 0.07, 6.6), dark], [B(1.9, 0.08, 0.1, 0.95, 6.5, 0), dark], [B(0.6, 0.14, 0.26, 1.85, 6.42, 0), dark], [B(0.5, 0.03, 0.2, 1.85, 6.34, 0), lampC, null, { tag: 2 }]]),
     // painted on a stop's way in (flat on the road, the driver's right +x, toward the junction -z): the stop bar across a
     // lane, 3.2 m (scaled across to the lane)

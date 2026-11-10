@@ -444,10 +444,11 @@ export function compileSpec(proj, spec = { SECTIONS, RAILS, LOTS, CROSSWALKS }) 
   const rails = spec.RAILS.map(([s0, s1, side, kind]) => { const [la, lo] = latlon(s0 + 1); return [la, lo, Math.round(heading(s0 + 1) * 10) / 10, side, -1, s1 - s0 - 1, kind]; });
   const owns = (la, lo) => { const [x, z] = proj.xz(la, lo), q = at(x, z); return !!q && q.dd < 10 && q.s < 20000 && !!cross(q.s); };  // (the other roads keep the hand list's barriers)
   // (the hand-built corridor, hand.js: a point's nearest station and its distance from LINE, any distance; 40 m cells)
-  const G40 = new Map(); P.forEach(([x, z], i) => { const k = `${Math.floor(x / 40)},${Math.floor(z / 40)}`; (G40.get(k) ?? G40.set(k, []).get(k)).push(i); });
+  // (A37 load profile: 20 m cells, numeric keys, flat coordinates: near() runs for every hand ground vertex, 1.65 s self at the Conzelman start with 40 m string-keyed cells)
+  const GC = 20, G40 = new Map(), PX = new Float64Array(P.length), PZ = new Float64Array(P.length); P.forEach(([x, z], i) => { PX[i] = x; PZ[i] = z; const k = Math.floor(x / GC) * 100003 + Math.floor(z / GC); (G40.get(k) ?? G40.set(k, []).get(k)).push(i); });
   function near(x, z, R = 130) {
-    let best = null, bd = R * R; const r = Math.ceil(R / 40), ci = Math.floor(x / 40), cj = Math.floor(z / 40);
-    for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) for (const i of G40.get(`${ci + a},${cj + b}`) || []) { const d = (P[i][0] - x) ** 2 + (P[i][1] - z) ** 2; if (d < bd) { bd = d; best = i; } }
+    let best = null, bd = R * R; const r = Math.ceil(R / GC), ci = Math.floor(x / GC), cj = Math.floor(z / GC);
+    for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) { const L = G40.get((ci + a) * 100003 + cj + b); if (!L) continue; for (let m = 0; m < L.length; m++) { const i = L[m], dx = PX[i] - x, dz = PZ[i] - z, d = dx * dx + dz * dz; if (d < bd) { bd = d; best = i; } } }
     return best == null ? null : { s: S[best], d: Math.sqrt(bd) };
   }
   return { at, cross, edges, lane, rails, owns, lots: spec.LOTS, walks: spec.CROSSWALKS || [], latlon, near };

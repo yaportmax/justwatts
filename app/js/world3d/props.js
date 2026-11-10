@@ -409,8 +409,8 @@ export function buildingGeometry(list) {
     // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
     // roof half way up its rise)
     const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40;
-    const hw = lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
-    const style = b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
+    const hw = lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    const style = b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];
@@ -509,7 +509,7 @@ export function buildingGeometry(list) {
     // Circle with their two storey verandas, white posts, a floor at each storey, a roof over (Street View
     // murraycircle_0a_0230, s3_murraycircle_1a_0430); elsewhere (Fort Barry, Cronkhite, the cottages) a small entry porch
     // with steps, posts and a lean-to (fieldroad_0b_0830, w_bunker3))
-    if (lid && b.front) {
+    if (lid && b.front && !b.metal) {
       const fx = b.front[0], fz = b.front[1], tside = -uz * fx + ux * fz, sside = ux * fx + uz * fz;
       let len, off, Q, au, av;
       if (Math.abs(tside) * L >= Math.abs(sside) * w * 0.8) { const sd = Math.sign(tside) || 1; len = L; off = w / 2; Q = (a, o) => P(a, sd * (off + o), 0); au = ux; av = uz; }

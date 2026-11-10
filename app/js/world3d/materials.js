@@ -100,7 +100,12 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // the distant tiles, which would leave it golden hills and dark woods; Street View: blue-grey with pale houses)
   // (houses, streets and gardens in the finest noise, no hard edges; its parks and woods dark grey green: Lincoln Park,
   // the Presidio)
-  c = mix(c, mix(mix(srgb(vec3(0.68, 0.68, 0.66)), srgb(vec3(0.42, 0.45, 0.42)), smoothstep(0.3, 0.7, fine)), srgb(vec3(0.24, 0.29, 0.26)), smoothstep(0.3, 0.6, wood)), sf * 0.9);
+  // (A37 far view: from Conzelman and Hawk Hill, 5 to 8 km off, Street View's San Francisco is a dark grey-blue speckle
+  // (its far right, Lands End and Sea Cliff, median sRGB #68849f against the game's pale #a3b6bc, w_conzelman2_fbefore,
+  // hawk_fbefore: a pale beige slab the user once called dunes): roofs and streets a mid grey, its parks and golf courses
+  // (OpenStreetMap's green: Lincoln Park, the Presidio's lawns) and woods the dark cypress green they read as)
+  vec3 sfC = mix(mix(srgb(vec3(0.50, 0.50, 0.49)), srgb(vec3(0.30, 0.33, 0.32)), smoothstep(0.3, 0.7, fine)), srgb(vec3(0.20, 0.26, 0.18)), smoothstep(0.25, 0.6, green));
+  c = mix(c, mix(sfC, srgb(vec3(0.15, 0.21, 0.15)), smoothstep(0.3, 0.6, wood)), sf * 0.92);
   // the Headlands from the aerial imagery (veg.js; its colours from the same imagery, USDA NAIP): grass in the
   // openings, greener in the shade and the hollows; coastal scrub, coyote brush to sage, in clumps of bushes with shade
   // between them; bare red-brown earth; the litter under the groves
@@ -152,10 +157,15 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     jwScrub = sc * known * (1.0 - br) * (1.0 - tr);
   }
   // sand: the beach and dunes
-  c = mix(c, srgb(vec3(0.84, 0.77, 0.61)) * (0.94 + 0.12 * fine), sand);
+  c = mix(c, srgb(vec3(0.84, 0.77, 0.61)) * (0.94 + 0.12 * fine), sand * (1.0 - sf * 0.6));  // (A37: the city's beaches thin strips: its far tiles smeared them into pale flats)
   // rock: cliffs and bluffs; bare earth on road banks and steep grass
   rk = max(rockc, smoothstep(0.5, 0.78, slope + (small - 0.5) * 0.22) * (1.0 - jwScrub * 0.8)) * (1.0 - cut * 0.5) * (1.0 - wood * 0.5);
   vec3 rockC = mix(srgb(vec3(0.47, 0.43, 0.38)), srgb(vec3(0.60, 0.56, 0.50)), smoothstep(0.3, 0.7, fine)) * (0.85 + 0.3 * patch80);
+  // (A37: the sea cliffs, Point Bonita, Bonita Cove, Lands End: dark weathered rock on the steep ground under 90 m, Street View
+  // hawk (2019-04): dark brown-grey faces under the grass tops, the game's were grass to the sea)
+  float seaCl = smoothstep(0.32, 0.55, slope + (small - 0.5) * 0.2) * (1.0 - smoothstep(40.0, 95.0, h)) * step(-1.0, h) * (1.0 - town) * (1.0 - cut);
+  rockC = mix(rockC, mix(srgb(vec3(0.27, 0.24, 0.21)), srgb(vec3(0.38, 0.34, 0.29)), smoothstep(0.3, 0.7, fine)), seaCl);
+  rk = max(rk, seaCl * 0.9);
   c = mix(c, rockC, rk);
   // the road cuts (the banks' steep faces, the grid's carved ground): the ground's own cover on them where they are not
   // steep (Street View: Conzelman's and Bunker's cuts mostly grass and scrub to the road), bare where steep or where the
@@ -591,8 +601,10 @@ export function buildingMaterial() {
           vec2 org = vec2(mod(s, 4.0), floor(s / 4.0) + ground * 2.0);
           vec2 uv = (org + vec2(f.x, 1.0 - f.y)) / 4.0;
           vec4 w = textureGrad(tWin, uv, dFdx(q) / 4.0 * vec2(1.0, -1.0), dFdy(q) / 4.0 * vec2(1.0, -1.0));
+          if (style == 8.0) w = vec4(1.0, 1.0, 1.0, 0.0);  // (A37: a metal shed: no windows, its corrugations below, review2 w_east1)
           vec3 wall = diffuseColor.rgb * (0.92 + 0.12 * nz);
           if (style == 5.0) wall *= 0.9 + 0.1 * step(0.5, fract(vBw.y / 0.22));   // clapboard / shingle siding
+          if (style == 8.0) wall *= 0.86 + 0.14 * smoothstep(0.2, 0.8, abs(fract(vBw.x / 0.2) - 0.5) * 2.0) * (1.0 - smoothstep(0.02, 0.08, fwidth(vBw.x)));
           // (A37: white siding in the shade lit by the sky: Street View's shaded gables at Fort Barry median sRGB #87938f to
           // #7e8d93, the game's #5d5f5c; its sunlit walls already right (#cbc5b5 against #c6c5bd at Murray Circle):
           // fieldroad_0b_0830_tg6; a fill a little blue, about what the sky adds there, small against the sun)
@@ -611,7 +623,7 @@ export function buildingMaterial() {
           diffuseColor.rgb *= 0.95 + 0.1 * nz;
         }`);
   };
-  m.customProgramCacheKey = () => 'jw-bldg-3';
+  m.customProgramCacheKey = () => 'jw-bldg-4';
   return m;
 }
 

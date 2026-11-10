@@ -1284,6 +1284,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       let lb = null;
       if (fort) { let a = 0, o = 0; const n = R0.length - 1; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; } lb = LIDAR_BLDG.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5)) || null; }
       if (lb) {
+        if (lb[4] || lb[5]) ring = ring.map(([x, z]) => [x + lb[4], z - lb[5]]);  // (A37: onto the lidar's roof, bldglidar.js)
         // (on a hillside the walls run down to the lowest ground; the eaves at the lidar's height over the mean ground (the
         // roof's own height above the sea), a storey (2.4 m) at least over the highest, so no slope covers a roof or more than the storey below it: a Sausalito house
         // half in its hill, alexanderavenue_0b_1830; the ground at the corners, the walls' middles and the footprint's middle)
@@ -1297,7 +1298,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const baker = R0[0][0] > 37.832 && R0[0][0] < 37.841 && R0[0][1] > -122.4825 && R0[0][1] < -122.474;
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
-        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: true, front, baker, gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: true, front, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         continue;
       }
       list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });

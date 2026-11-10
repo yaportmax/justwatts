@@ -37,24 +37,29 @@ function shellBrush(geo, lambert) {
   if (!any) return null; geo.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); geo.setAttribute('jwCt', new THREE.BufferAttribute(new Float32Array(P.count * 2), 2)); return groundMaterial({ lambert, shoulder: true });
 }
 function addShoulders(root, lambert) {
-  root.updateMatrixWorld(true); const v = new THREE.Vector3(), cells = new Map(), C = 4, S = [];
+  root.updateMatrixWorld(true); const v = new THREE.Vector3(), cells = new Map(), C = 8, S = [];  // (A37: 8 m cells and a 3 x 3 window still reach the 8 m clamp; each edge tested once per lookup (stamp))
   root.traverse(o => { if (!o.isMesh || !/^road\d/.test(o.name)) return; const P = o.geometry.attributes.position, I = o.geometry.index; if (!I) return;
     const W = new Float32Array(P.count * 2); for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); W[2 * k] = v.x; W[2 * k + 1] = v.z; }
-    for (let t = 0; t + 2 < I.count; t += 3) for (let e = 0; e < 3; e++) { const a = I.getX(t + e), b = I.getX(t + (e + 1) % 3), n = S.length; S.push(W[2 * a], W[2 * a + 1], W[2 * b], W[2 * b + 1]);
+    // (A37 load profile: only the paving's outline: an inner edge (two triangles share it) is never the nearest point from outside)
+    const ec = new Map(), ek = (a, b) => a < b ? a * 1048576 + b : b * 1048576 + a; for (let t = 0; t + 2 < I.count; t += 3) for (let e = 0; e < 3; e++) { const k = ek(I.getX(t + e), I.getX(t + (e + 1) % 3)); ec.set(k, (ec.get(k) || 0) + 1); }
+    for (let t = 0; t + 2 < I.count; t += 3) for (let e = 0; e < 3; e++) { const a = I.getX(t + e), b = I.getX(t + (e + 1) % 3); if (ec.get(ek(a, b)) !== 1) continue; const n = S.length; S.push(W[2 * a], W[2 * a + 1], W[2 * b], W[2 * b + 1]);
       const x0 = Math.floor(Math.min(W[2 * a], W[2 * b]) / C), x1 = Math.floor(Math.max(W[2 * a], W[2 * b]) / C), z0 = Math.floor(Math.min(W[2 * a + 1], W[2 * b + 1]) / C), z1 = Math.floor(Math.max(W[2 * a + 1], W[2 * b + 1]) / C);
       for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) { const k = i * 100003 + j; (cells.get(k) ?? cells.set(k, []).get(k)).push(n); } } });
   if (!S.length) return;
-  const dist = (x, z) => { let best = 64; const ci = Math.floor(x / C), cj = Math.floor(z / C);  /* (squared, numeric cell keys: A37 load profile) */
-    for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) { const L = cells.get((ci + a) * 100003 + cj + b); if (!L) continue; for (let m = 0; m < L.length; m++) { const n = L[m];
+  const seen = new Uint32Array(S.length / 4 + 1); let stamp = 0;
+  const dist = (x, z) => { let best = 64; const ci = Math.floor(x / C), cj = Math.floor(z / C); stamp++;  /* (squared, numeric cell keys: A37 load profile) */
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const L = cells.get((ci + a) * 100003 + cj + b); if (!L) continue; for (let m = 0; m < L.length; m++) { const n = L[m]; if (seen[n >> 2] === stamp) continue; seen[n >> 2] = stamp;
       const ax = S[n], az = S[n + 1], ex = S[n + 2] - ax, ez = S[n + 3] - az, L2 = ex * ex + ez * ez, f = L2 ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / L2)) : 0, dx = x - ax - ex * f, dz = z - az - ez * f, d = dx * dx + dz * dz; if (d < best) best = d; } }
     return Math.sqrt(best); };
   const Z = spec_();
   // (the hand terrain too, its side of the line from the line's own direction there: where no verge is built, and Hawk Hill's
   // brush ('b') up the slope past the verge, sh_hawk: the cover map has it as grass)
+  // (A37 load profile: the terrain's nearest station once per 2 m cell (its vertices are a metre or two apart; the verges stay exact))
+  const NC = new Map(), nearC = (x, z) => { const k = Math.floor(x / 2) * 100003 + Math.floor(z / 2); let q = NC.get(k); if (q === undefined) { q = Z.near(Math.floor(x / 2) * 2 + 1, Math.floor(z / 2) * 2 + 1, 40); NC.set(k, q); } return q; };
   const sideOf = (x, z, s) => { const [a0, o0] = Z.latlon(s - 1), [a1, o1] = Z.latlon(s + 1), [x0, z0] = PROJ_.xz(a0, o0), [x1, z1] = PROJ_.xz(a1, o1); return (x - x0) * -(z1 - z0) + (z - z0) * (x1 - x0) > 0 ? 'R' : 'L'; };
   root.traverse(o => { const ve = /^verge\d+[LR]$/.test(o.name), ext = /^terrain_ext/.test(o.name); if (!o.isMesh || !(ve || ext || /^terrain\d/.test(o.name))) return;  // (A37: the far terrain too, for the brush rows only: hawkR's slope is on it)
     const P = o.geometry.attributes.position, A = new Float32Array(P.count * 3), B = new Float32Array(P.count * 2);
-    for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); const q = ext ? null : Z.near(v.x, v.z, 40); if (!q || q.s < 0) { const bw = brushAt(v.x, v.z); if (bw) { A[3 * k + 1] = -1; A[3 * k + 2] = bw / 8; } continue; } const sd = ve ? o.name.slice(-1) : sideOf(v.x, v.z, q.s), ct = CTK[cutAt(q.s, sd, q.d)]; if (ct) { B[2 * k] = ct[0]; B[2 * k + 1] = ct[1]; } let sh = shoulderAt(q.s, sd); if (sh?.[0] === 'b') sh = null; { const bw = brushAt(v.x, v.z); if (bw) sh = ['b', bw]; } if (!sh || (!ve && q.d > 25 && sh[0] !== 'b')) continue;
+    for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); const q = ext ? null : ve ? Z.near(v.x, v.z, 40) : nearC(v.x, v.z); if (!q || q.s < 0) { const bw = brushAt(v.x, v.z); if (bw) { A[3 * k + 1] = -1; A[3 * k + 2] = bw / 8; } continue; } const sd = ve ? o.name.slice(-1) : sideOf(v.x, v.z, q.s), ct = CTK[cutAt(q.s, sd, q.d)]; if (ct) { B[2 * k] = ct[0]; B[2 * k + 1] = ct[1]; } let sh = shoulderAt(q.s, sd); if (sh?.[0] === 'b') sh = null; { const bw = brushAt(v.x, v.z); if (bw) sh = ['b', bw]; } if (!sh || (!ve && q.d > 25 && sh[0] !== 'b')) continue;
       A[3 * k] = q.d > 18 ? 0 : 1 - dist(v.x, v.z) / 8;  /* (A37: past 18 m of the line the edge is over 8 m away: no search) */ A[3 * k + 1] = SHK[sh[0]] ?? 0; A[3 * k + 2] = sh[1] / 8; }
     o.geometry.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); o.geometry.setAttribute('jwCt', new THREE.BufferAttribute(B, 2)); o.material = groundMaterial({ lambert, shoulder: true }); });
 }
@@ -172,6 +177,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           // aggregate; the verges mottled)
           if (/lot_dirt|lot_gravel/.test(s.name)) grain(m, 0.32, [1.3, 5.3, 19.7]);
           else if (/asphalt|lot/.test(s.name)) grain(m, 0.11, [1.37, 9.7, 37.3]);
+          else if (/wall_stone/.test(s.name)) grain(m, 0.3, [0.35, 0.9, 3.1]);  // (A37: Kirkpatrick Street's rubble stone wall, its stones a hand to a foot across, w_kirkpatrick0)
           if (/^asphalt$|^lot$/.test(s.name)) asphaltWear(m);
           // (galvanised steel: the sky's sheen on its shaded face, Street View: a light W-beam even with the sun behind it)
           if (/wbeam/.test(s.name)) m.emissive = new THREE.Color(0.10, 0.105, 0.11); 

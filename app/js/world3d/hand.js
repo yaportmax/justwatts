@@ -10,7 +10,7 @@ import { MeshoptDecoder } from '../../vendor/three-0.180.0/addons/libs/meshopt_d
 try { if (typeof Worker !== 'undefined' && !globalThis.__w3?.noMeshoptWorkers) MeshoptDecoder.useWorkers(Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1))); } catch {}
 import { textures } from './tex.js';
 import { HZ_LAYER } from './horizon.js';
-import { shoulderAt, cutAt } from './roadlines.js';
+import { shoulderAt, cutAt, SHOULDERS } from './roadlines.js';
 import { compileSpec } from './conzelman.js';
 import { makeProj } from './geo.js';
 
@@ -20,6 +20,22 @@ import { makeProj } from './geo.js';
 // kind (0 grass, 0.5 tan gravel, 1 red dirt), z the width / 8. The hand terrain has none: no shoulder there.
 let SPEC_ = null; const PROJ_ = makeProj(37.93, -122.63), spec_ = () => SPEC_ ??= compileSpec(PROJ_);
 const SHK = { g: 0, t: 0.5, d: 1, b: -1 }, CTK = { r: [1, 0], g: [1, 0.5], p: [1, 1], x: [-1, 0] };  // (jwCt: x 1 a cut face, -1 none; y its tone)  // (b: brush to the edge past a thin rocky lip, the cover forced on)
+// (A37) the scrub shell over a brush shoulder ('b', Hawk Hill): its vertices tagged as the ground's are (jwSh: no band, the brush
+// forced on), so the bushes paint there too; the cover map's shrub mask (G) misses that slope (hawkR). Only vertices near a 'b' row.
+let BR_ = null;
+const brushAt = (x, z) => {  // (a 'b' row's width at (x, z), by that row's own line: at the hairpins another stretch's station is nearer and left patches, hawkR)
+  if (!BR_) { const Z = spec_(); BR_ = SHOULDERS.filter(r => r[3] === 'b').map(([a, b, sd, , w]) => { const P = []; for (let s = a; s <= b; s += 2) P.push(PROJ_.xz(...Z.latlon(s))); let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { P, sd, w, bb: [x0 - 45, z0 - 45, x1 + 45, z1 + 45] }; }); }
+  for (const { P, sd, w, bb } of BR_) { if (x < bb[0] || x > bb[2] || z < bb[1] || z > bb[3]) continue; let bd = 45 * 45, bi = -1; for (let i = 0; i + 1 < P.length; i++) { const d = (P[i][0] - x) ** 2 + (P[i][1] - z) ** 2; if (d < bd) { bd = d; bi = i; } }
+    if (bi < 0) continue; const [x0, z0] = P[bi], [x1, z1] = P[bi + 1]; if (((x - x0) * -(z1 - z0) + (z - z0) * (x1 - x0) > 0 ? 'R' : 'L') === sd) return w; }
+  return 0; };
+function shellBrush(geo, lambert) {
+  const rows = SHOULDERS.filter(r => r[3] === 'b'); if (!rows.length) return null; const Z = spec_(), P = geo.attributes.position, A = new Float32Array(P.count * 3);
+  const boxes = rows.map(([a, b]) => { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (let s = a; s <= b; s += 5) { const [x, z] = PROJ_.xz(...Z.latlon(s)); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return [x0 - 45, z0 - 45, x1 + 45, z1 + 45]; });
+  let any = false;
+  for (let k = 0; k < P.count; k++) { const x = P.getX(k), z = P.getZ(k); if (!boxes.some(b => x > b[0] && x < b[2] && z > b[1] && z < b[3])) continue;
+    const w = brushAt(x, z); if (!w) continue; A[3 * k + 1] = -1; A[3 * k + 2] = w / 8; any = true; }
+  if (!any) return null; geo.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); geo.setAttribute('jwCt', new THREE.BufferAttribute(new Float32Array(P.count * 2), 2)); return groundMaterial({ lambert, shoulder: true });
+}
 function addShoulders(root, lambert) {
   root.updateMatrixWorld(true); const v = new THREE.Vector3(), cells = new Map(), C = 4, S = [];
   root.traverse(o => { if (!o.isMesh || !/^road\d/.test(o.name)) return; const P = o.geometry.attributes.position, I = o.geometry.index; if (!I) return;
@@ -36,8 +52,9 @@ function addShoulders(root, lambert) {
   // (the hand terrain too, its side of the line from the line's own direction there: where no verge is built, and Hawk Hill's
   // brush ('b') up the slope past the verge, sh_hawk: the cover map has it as grass)
   const sideOf = (x, z, s) => { const [a0, o0] = Z.latlon(s - 1), [a1, o1] = Z.latlon(s + 1), [x0, z0] = PROJ_.xz(a0, o0), [x1, z1] = PROJ_.xz(a1, o1); return (x - x0) * -(z1 - z0) + (z - z0) * (x1 - x0) > 0 ? 'R' : 'L'; };
-  root.traverse(o => { const ve = /^verge\d+[LR]$/.test(o.name); if (!o.isMesh || !(ve || /^terrain\d/.test(o.name))) return; const P = o.geometry.attributes.position, A = new Float32Array(P.count * 3), B = new Float32Array(P.count * 2);
-    for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); const q = Z.near(v.x, v.z, 40); if (!q || q.s < 0) continue; const sd = ve ? o.name.slice(-1) : sideOf(v.x, v.z, q.s), ct = CTK[cutAt(q.s, sd, q.d)]; if (ct) { B[2 * k] = ct[0]; B[2 * k + 1] = ct[1]; } const sh = shoulderAt(q.s, sd); if (!sh || (!ve && q.d > 25 && sh[0] !== 'b')) continue;
+  root.traverse(o => { const ve = /^verge\d+[LR]$/.test(o.name), ext = /^terrain_ext/.test(o.name); if (!o.isMesh || !(ve || ext || /^terrain\d/.test(o.name))) return;  // (A37: the far terrain too, for the brush rows only: hawkR's slope is on it)
+    const P = o.geometry.attributes.position, A = new Float32Array(P.count * 3), B = new Float32Array(P.count * 2);
+    for (let k = 0; k < P.count; k++) { v.fromBufferAttribute(P, k).applyMatrix4(o.matrixWorld); const q = ext ? null : Z.near(v.x, v.z, 40); if (!q || q.s < 0) { const bw = brushAt(v.x, v.z); if (bw) { A[3 * k + 1] = -1; A[3 * k + 2] = bw / 8; } continue; } const sd = ve ? o.name.slice(-1) : sideOf(v.x, v.z, q.s), ct = CTK[cutAt(q.s, sd, q.d)]; if (ct) { B[2 * k] = ct[0]; B[2 * k + 1] = ct[1]; } let sh = shoulderAt(q.s, sd); if (sh?.[0] === 'b') sh = null; { const bw = brushAt(v.x, v.z); if (bw) sh = ['b', bw]; } if (!sh || (!ve && q.d > 25 && sh[0] !== 'b')) continue;
       A[3 * k] = q.d > 18 ? 0 : 1 - dist(v.x, v.z) / 8;  /* (A37: past 18 m of the line the edge is over 8 m away: no search) */ A[3 * k + 1] = SHK[sh[0]] ?? 0; A[3 * k + 2] = sh[1] / 8; }
     o.geometry.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); o.geometry.setAttribute('jwCt', new THREE.BufferAttribute(B, 2)); o.material = groundMaterial({ lambert, shoulder: true }); });
 }
@@ -225,7 +242,7 @@ export function loadScrub({ scene, base = '/world/hand/', lambert = m => m }) {
         const pos = new Float32Array(buf, 0, G.n * 3), cOff = G.n * 12, col = new Uint8Array(buf, cOff, G.n * 3), iOff = cOff + G.n * 3 + ((-G.n * 3) % 4 + 4) % 4, idx = new Uint32Array(buf, iOff, G.t * 3);
         const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); { const c = new Float32Array(G.n * 3); for (let i = 0; i < c.length; i++) { const v = col[i] / 255; c[i] = v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; } geo.setAttribute('color', new THREE.BufferAttribute(c, 3)); }  /* (NAIP's sRGB to linear) */ geo.setIndex(new THREE.BufferAttribute(idx, 1));
         geo.computeVertexNormals(); geo.computeBoundingSphere();
-        const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; m.castShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); group.add(m);
+        const m = new THREE.Mesh(geo, shellBrush(geo, lambert) ?? mat); m.receiveShadow = true; m.castShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); group.add(m);
         await new Promise(r => setTimeout(r, 16)); k = -1; }
     } finally { busy = false; }
   }
@@ -293,8 +310,6 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     const out_ = { near, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, near + FADE, { fade: 1, meshNormals: !!J.mesh_normals?.[sp] })) };
     // (A35: the bush-tree's leaves a muted olive: as the tall shrubs along Field, Bunker and McCullough they read cartoon lime against Street View's)
     if (/^lime/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.58, 0.6, 0.44));
-    // (A37: the Monterey cypress near black green in Street View, w_mitchell0, w_simmonds1: the plates read light lime when lit as built)
-    if (/^mcyp/.test(sp)) for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.62, 0.66, 0.6));
     // (A36: the sage read near white beside Conzelman, Street View cz 2025-03 a darker grey green)
     if (sp === 'sage') for (const m of [...out_.mats, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.5, 0.58, 0.45));
     return out_;

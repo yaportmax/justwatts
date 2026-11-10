@@ -369,7 +369,7 @@ export const RAILS = [
 // CROSSWALKS: [station] the zebra across the road there (view.js draws it across the paved width): Battery Spencer's
 // (1316: 1300 ahead about 13 m on, 1325 behind about 5 m back) and the one at 1626 (1620 ahead, 4 to 5 m on)
 export const CROSSWALKS = [1316, 1626, 10061, 10968, 11070, 14272, 11575, 12925,
-  31840, 32010, 100443, 100635, 50243, 280006, 320008, 320058, 320132];  // (A37: New Breitung Road's three, cz_320000_a, cz_320040_a, cz_320120_a)  // (A37: Bunker Road cz_31820_a, cz_32000_a; Mitchell Road cz_100435_a, cz_100620_a; Simmonds Road cz_50235_a; Center Road cz_280000_a)
+  31840, 32010, 100443, 100635, 50243, 280006, 320008, 320058, 320132, 70107];  // (A38: McCullough Road's zebra where the trail crosses, cz_70105_a)  // (A37: New Breitung Road's three, cz_320000_a, cz_320040_a, cz_320120_a)  // (A37: Bunker Road cz_31820_a, cz_32000_a; Mitchell Road cz_100435_a, cz_100620_a; Simmonds Road cz_50235_a; Center Road cz_280000_a)
 export const LOTS = [
   // the junction's mouth on the right at 1745 to 1752 and the road east to Fort Baker's way (Street View 1740 ahead), traced on USDA NAIP
   // (added last below: rings are indexed by the build)
@@ -417,7 +417,7 @@ export function compileSpec(proj, spec = { SECTIONS, RAILS, LOTS, CROSSWALKS }) 
   }
   // the cross-section at station s (null: not in the spec's stretch)
   function cross(s) {
-    let k = -1; for (let i = 0; i < secs.length; i++) if (secs[i].s <= s) k = i; if (k < 0) return null;
+    let k = -1; { let lo = 0, hi = secs.length - 1; while (lo <= hi) { const m = (lo + hi) >> 1; if (secs[m].s <= s) { k = m; lo = m + 1; } else hi = m - 1; } }  /* (A38: the last section at or before s by halving: the Tam roads add 990 rows, and this ran over all of them for every ribbon point) */ if (k < 0) return null;
     const a = secs[k], b = secs[k + 1]; if (a.gap || !b) return null;
     const same = !b.gap && b.lines.length === a.lines.length && b.lines.every((q, i) => q[1] === a.lines[i][1]) && (b.zones || []).length === (a.zones || []).length;
     // (the edges and the rider's lines eased between any two sections, the paint only between like ones)

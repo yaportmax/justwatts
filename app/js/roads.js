@@ -62,7 +62,8 @@ export const turn = (inB, outB) => ((outB - inB) % 360 + 540) % 360 - 180;  // -
 
 // nodes: id -> { lat, lon, adj: [{ to, w, f }] } (f: along the way's node order). A node is complete when its cell
 // is loaded: every way through it is known, so a choice there is safe. Ways seen twice (cell edges) are added once.
-// inside(lat, lon): where routes may go (the open world's edge); a way to a node outside is no option.
+// inside(lat, lon, way): where routes may go (the open world's edge, and beyond the Headlands only the route's own ways,
+// world.js rideable); a way to a node outside is no option.
 export class RoadGraph {
   constructor({ inside = null } = {}) { this.nodes = new Map(); this.cells = new Set(); this.ways = new Set(); this.inside = inside; }
   addCell(key, ways) {
@@ -99,7 +100,7 @@ export class RoadGraph {
   options(prev, cur) {
     const n = this.nodes.get(cur); if (!n) return [];
     const seen = new Set([prev]), all = [];
-    for (const e of n.adj) if (!seen.has(e.to)) { seen.add(e.to); if (!this.inside || this.inside(...this.pos(e.to))) all.push(e); }
+    for (const e of n.adj) if (!seen.has(e.to)) { seen.add(e.to); if (!this.inside || this.inside(...this.pos(e.to), e.w)) all.push(e); }
     const ok = all.filter(e => !e.w.ow || (e.w.ow === 1) === (e.f === 1));
     return ok.length ? ok : all;
   }
@@ -118,7 +119,7 @@ export class RoadGraph {
     const k = Math.cos(lat * Math.PI / 180), X = p => [(p[1] - lon) * k, p[0] - lat];
     let best = null;
     for (const n of this.nodes.values()) for (const e of n.adj) {
-      if (!e.f || (this.inside && !(this.inside(n.lat, n.lon) && this.inside(...this.pos(e.to))))) continue;
+      if (!e.f || (this.inside && !(this.inside(n.lat, n.lon, e.w) && this.inside(...this.pos(e.to), e.w)))) continue;
       const a = X([n.lat, n.lon]), b = X(this.pos(e.to)), dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
       const t = L ? Math.max(0.02, Math.min(0.98, -(a[0] * dx + a[1] * dy) / L)) : 0, x = a[0] + dx * t, y = a[1] + dy * t, d2 = x * x + y * y;
       if (!best || d2 < best.d2) best = { d2, a: n.id, b: e.to, w: e.w, t };

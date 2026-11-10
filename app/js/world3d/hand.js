@@ -34,7 +34,7 @@ function shellBrush(geo, lambert) {
   let any = false;
   for (let k = 0; k < P.count; k++) { const x = P.getX(k), z = P.getZ(k); if (!boxes.some(b => x > b[0] && x < b[2] && z > b[1] && z < b[3])) continue;
     const w = brushAt(x, z); if (!w) continue; A[3 * k + 1] = -1; A[3 * k + 2] = w / 8; any = true; }
-  if (!any) return null; geo.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); geo.setAttribute('jwCt', new THREE.BufferAttribute(new Float32Array(P.count * 2), 2)); return groundMaterial({ lambert, shoulder: true });
+  if (!any) return null; geo.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); geo.setAttribute('jwCt', new THREE.BufferAttribute(new Float32Array(P.count * 2), 2)); return groundMaterial({ lambert, shoulder: true, shell: true });
 }
 function addShoulders(root, lambert) {
   root.updateMatrixWorld(true); const v = new THREE.Vector3(), cells = new Map(), C = 8, S = [];  // (A37: 8 m cells and a 3 x 3 window still reach the 8 m clamp; each edge tested once per lookup (stamp))
@@ -237,7 +237,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 // Lit as a solid mass with the asphalt's world-space grain for its leaves; no model, no texture.
 export function loadScrub({ scene, base = '/world/hand/', lambert = m => m }) {
   const group = new THREE.Group(); group.name = 'handScrub'; scene.add(group);
-  const mat = groundMaterial({ base, lambert });  // (A35: the ground's own material: its scrub cover paints the shell, one surface with relief)
+  const mat = groundMaterial({ base, lambert, shell: true });  // (A35: the ground's own material: its scrub cover paints the shell, one surface with relief)
   let groups = null, at = null, busy = false, D2 = 1800 * 1800;
   fetch(base + 'scrub.json').then(r => r.ok ? r.json() : null).then(j => { if (j) { groups = j.groups; pump(); } }).catch(() => {});
   async function pump() {
@@ -258,7 +258,7 @@ export function loadScrub({ scene, base = '/world/hand/', lambert = m => m }) {
 export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert = m => m }) {
   const group = new THREE.Group(); group.name = 'handVeg'; scene.add(group); group.updateMatrixWorld = () => {};  // (A32: every plant mesh an identity matrix at the origin: not walked each frame)
   const DROP = new Set(['brush', 'brushg', 'mat_o', 'mat_g', 'mat_l', 'mat_d', 'mat_r']);  // (and the scrub carpets: they read as rows of corn up the slopes, user 2026-11-05)
-  const sets = [], CELL = 32, cam = { value: new THREE.Vector3(1e9, 0, 1e9) }; let own = null;
+  const sets = [], CELL = 32, cam = { value: new THREE.Vector3(1e9, 0, 1e9) }; let own = null, ownMore = [];
   // owns(x, z): inside the corridor this list owns (veg.json own: a 2 m bit grid), where the generated scrub and trees
   // give way; onOwn() once that is known
   const ownCbs = [];
@@ -272,7 +272,8 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   const FADE = 5;
   // (A37, review2: the hand roads' trees cast their shadows on the road and the ground, Street View's shade under the canopy, w_east0, w_east2, w_bunker3;
   // trees only, their near model with its leaves' alpha: the shrubs and domes keep none, on the steep faces those fell as black blots, cz_1105_l)
-  const CAST = /^(oak|cyp|cypress|wood|btree|avc|mcyp|loak|willow)/, depths = new Map();
+  /* (A38: and the Tam forest's firs, redwoods and bays, their shade over Panoramic: tam_pan5600; oakt is an oak already) */
+  const CAST = /^(oak|cyp|cypress|wood|btree|avc|mcyp|loak|willow|dfir|rwd|bay)/, depths = new Map();
   const depthFor = src => depths.get(src) ?? depths.set(src, new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: src.map || null, alphaTest: src.map ? 0.5 : 0, side: THREE.DoubleSide })).get(src);
   function material(src, geo, lo, hi, { round = false, fade = 0, meshNormals = false } = {}) {
     const m0 = new THREE.MeshLambertMaterial({ color: src.color, map: src.map, alphaTest: src.map ? 0.5 : 0, side: THREE.DoubleSide, vertexColors: !!geo.attributes.color });
@@ -338,7 +339,9 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     for (const [sp, n] of Object.entries(G.species)) {
       const st = J.stride?.[sp] || 7, a = new Float32Array(buf, off, n * st); off += n * st * 4;
       if (DROP.has(sp)) continue;  // (A33: the round brush domes by the road dropped, user 2026-11-05: 'these bushes so bad just remove them')
-      const M = await model(sp); if (!M) continue; t0 = performance.now();
+      const M = await model(sp); if (!M) continue;
+      if (renderer && !M.tex) { M.tex = true; for (const p of [...M.parts[0], ...M.parts[1]]) if (p.src.map) renderer.initTexture(p.src.map); await new Promise(r => setTimeout(r, 30)); }
+      t0 = performance.now();
       // lod1: every plant of the group, written once
       for (const p of M.parts[1]) {
         const im = new THREE.InstancedMesh(p.geo, p.mat, n);
@@ -362,8 +365,10 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     try {
       // (A28: every species' model and its textures on the GPU when the first group is wanted, under the loading screen for a ride that starts here: a texture is about 15 MB, sent
       // with its mips at the species' first draw it held a frame up by 170 to 220 ms; one species per pause when the rider comes from further off)
-      if (!texDone) { texDone = true; const sps = new Set(); for (const G of groups) if (G) for (const sp of Object.keys(G.species)) sps.add(sp);
-        for (const sp of sps) { const M = await model(sp); if (!M || !renderer) continue; for (const p of [...M.parts[0], ...M.parts[1]]) if (p.src.map) renderer.initTexture(p.src.map); await new Promise(r => setTimeout(r, 30)); } }
+      // (A38: only the species of the groups within 5.4 km: a Headlands ride does not load the mountain's trees nor a Tam ride the Headlands' 15 MB scans; a species met later
+      // is sent when its first group arrives, in addGroup)
+      if (!texDone) { texDone = true; const sps = new Set(); for (const G of groups) if (G && G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < 9 * D2)) for (const sp of Object.keys(G.species)) sps.add(sp);
+        for (const sp of sps) { if (DROP.has(sp)) continue; const M = await model(sp); if (!M || !renderer || M.tex) continue; M.tex = true; for (const p of [...M.parts[0], ...M.parts[1]]) if (p.src.map) renderer.initTexture(p.src.map); await new Promise(r => setTimeout(r, 30)); } }
       for (let k = 0; k < groups.length; k++) { const G = groups[k]; if (!G || !G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < D2)) continue;
         groups[k] = null; await addGroup(G, at[0], at[1]); k = -1; }
     } finally { pumping = false; state.busy = false; state.first = true; }  // (first: the plants at the rider's place are in; busy can read false before a position has come)
@@ -371,7 +376,9 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   const wanted = () => groups.some(G => G && G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < D2));
   fetch(base + 'veg.json').then(r => r.ok ? r.json() : null).then(j => {
     if (!j) return; J = j; groups.push(...(j.groups || []));
-    if (j.own) { const b = atob(j.own.bits), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); own = { ...j.own, u }; for (const f of ownCbs) f(); }
+    // (A38: own_more: further corridors with bit grids of their own, the Tam climb's at 8 m: one 2 m grid over both the Headlands and the mountain would be megabytes)
+    const bitsOf = o => { const b = atob(o.bits), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return { ...o, u }; };
+    if (j.own) { own = bitsOf(j.own); ownMore = (j.own_more || []).map(bitsOf); for (const f of ownCbs) f(); }
     if (at) pump();
   }).catch(() => {}).finally(() => { if (!at || !J || !wanted()) state.busy = false; if (!J) state.first = true; });
   function build(S, c) {
@@ -391,8 +398,9 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   }
   // (view.js as the rider moves; busy: stats().jobs counts it, so a render waits for the plants)
   function want(x, z) { at = [x, z]; if (!J) return; if (wanted()) { state.busy = true; pump(); } }
-  const owns = (x, z) => { if (!own) return false; const i = Math.floor((x - own.x0) / own.g), k = Math.floor((z - own.z0) / own.g);
-    if (i < 0 || k < 0 || i >= own.w || k >= own.h) return false; const b = k * own.w + i; return !!(own.u[b >> 3] & (1 << (b & 7))); };
+  const inOwn = (o, x, z) => { const i = Math.floor((x - o.x0) / o.g), k = Math.floor((z - o.z0) / o.g);
+    if (i < 0 || k < 0 || i >= o.w || k >= o.h) return false; const b = k * o.w + i; return !!(o.u[b >> 3] & (1 << (b & 7))); };
+  const owns = (x, z) => { if (!own) return false; if (inOwn(own, x, z)) return true; for (const o of ownMore) if (inOwn(o, x, z)) return true; return false; };
   return { group, update, want, owns, get busy() { return state.busy; }, get first() { return !!state.first; }, onOwn: f => { if (own) f(); else ownCbs.push(f); } };
 }
 
@@ -401,11 +409,11 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
 // layer, each tiled in world metres, no UVs). The cut shows only where the ground is steep (its side projection then);
 // a shallow cut zone stays grass. One shared material: groundMaterial({ lambert }) for the verges and the hand terrain.
 // (A37: shoulder: the verges' variant, their jwSh attribute's shoulder band; one set of uniforms and textures for both)
-let groundShared = null, groundSh = null, groundMk = null;
-export function groundMaterial({ base = '/world/hand/', lambert = m => m, shoulder = false } = {}) {
+// (A38: shell: the scrub shell's own variant (JW_SHELL): it is brush by construction, so no cut face, no dirt, and its mounds' steep sides keep their paint)
+const groundMats = []; let groundMk = null;
+export function groundMaterial({ base = '/world/hand/', lambert = m => m, shoulder = false, shell = false } = {}) {
   groundMk ??= groundMaker(base);
-  if (shoulder) return groundSh ??= lambert(groundMk(true));
-  return groundShared ??= lambert(groundMk(false));
+  return groundMats[(shoulder ? 1 : 0) + (shell ? 2 : 0)] ??= lambert(groundMk(shoulder, shell));
 }
 function groundMaker(base) {
   const U = {
@@ -427,7 +435,7 @@ function groundMaker(base) {
       U.gRep.value.setComponent(rep[t.layer], t.rep);
     }
   }).catch(() => {});
-  return SH => { const m = new THREE.MeshLambertMaterial({ color: 0xffffff }); if (SH) m.defines = { JW_SH: '' };
+  return (SH, SHELL) => { const m = new THREE.MeshLambertMaterial({ color: 0xffffff }); if (SH || SHELL) m.defines = { ...(SH ? { JW_SH: '' } : {}), ...(SHELL ? { JW_SHELL: '' } : {}) };
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U); sh.uniforms.gNoise = { value: textures().noise };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGdW; varying vec3 vGdN;\n#ifdef JW_SH\nattribute vec3 jwSh; varying vec3 vSh; attribute vec2 jwCt; varying vec2 vCt;\n#endif')
@@ -495,6 +503,14 @@ function groundMaker(base) {
         #ifdef JW_SH
         { float stC = smoothstep(0.12, 0.3, 1.0 - n.y); wc = mix(wc, max(wc, stC), clamp(vCt.x, 0.0, 1.0)) * (1.0 - clamp(-vCt.x, 0.0, 1.0)); wd = w.r * (1.0 - wc); wl = w.b * (1.0 - wc); }
         #endif
+        // (A38, hawkR 37.82645,-122.49934 heading 297: the pale faceted lumps on the upper slope were the scrub shell's own mounds: their steep sides
+        // took the splat's cut face and dirt and lost their brush paint. The shell is brush by construction: no cut face, no dirt, its paint whatever its slope)
+        #ifdef JW_SHELL
+        float shl = 1.0;
+        #else
+        float shl = 0.0;
+        #endif
+        wc *= 1.0 - shl; wd *= 1.0 - shl; float stS = steep * (1.0 - shl), lwn = 0.0; vec3 cLw = vec3(0.0);
         vec3 cGrass = texture2D(gGrass, p / gRep.z).rgb; if (steep > 0.002) cGrass = mix(cGrass, texture2D(gGrass, side / gRep.z).rgb, steep);
         float far = smoothstep(40.0, 160.0, length(vGdW - cameraPosition));
         // (A33: metres of ground under one pixel; each fine pattern fades to its mean once it is a few pixels across: far off it read as grit, user 2026-11-05)
@@ -537,8 +553,8 @@ function groundMaker(base) {
           float clumpS = smoothstep(0.3, 0.72, s1 * 0.65 + s2 * 0.35);
           vec3 cS = mix(vec3(0.085, 0.105, 0.055), vec3(0.125, 0.135, 0.095), smoothstep(0.45, 0.75, s2));
           cS *= mix(0.5, 1.12, clumpS) * mix(1.0, mix(0.82, 1.12, s3), aaS);
-          float cv = smoothstep(0.12, 0.8, cov + (s2 - 0.5) * 0.7 + (s1 - 0.5) * 0.35); cv = max(cv, 0.45 * smoothstep(0.62, 0.8, s1) * sIn);  // (A35: ragged edges and scattered bushes in the grass, cz300: hard-edged grass patches)
-          float sw = cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31) * (1.0 - smoothstep(0.85, 1.0, steep) * 0.7);  // (A37: brush on the steep slopes too, only the cut faces bare: Street View hawk)
+          float cv = smoothstep(0.12, 0.8, cov + (s2 - 0.5) * 0.7 + (s1 - 0.5) * 0.35); cv = max(cv, 0.45 * smoothstep(0.62, 0.8, s1) * sIn); cv = mix(cv, 1.0, shl * 0.9);  // (A35: ragged edges and scattered bushes in the grass, cz300: hard-edged grass patches)
+          float sw = cv * (1.0 - clamp(wd, 0.0, 1.0)) * (1.0 - rb31) * (1.0 - smoothstep(0.85, 1.0, stS) * 0.7);  // (A37: brush on the steep slopes too, only the cut faces bare: Street View hawk)
           if (sw > 0.002) { float bf = (1.0 - smoothstep(0.2, 0.8, pxm)) * smoothstep(0.2, 0.6, max(texture2D(gScrub, sb).g * sIn, jwBrush));  // (the mounds fade to their mean once one is a few pixels across; A37: only where the lidar sees real shrubs, scrubcover G, review1 w_center0 lawns took them as scales)
             vec2 pw = p + (vec2(textureGrad(gNoise, p / 0.8 + 0.41, dPx / 0.8, dPy / 0.8).r, textureGrad(gNoise, p / 0.8 + 0.83, dPx / 0.8, dPy / 0.8).g) - 0.5) * 0.45 * aaS;  // (ragged leafy outlines)
             vec4 bu = jwBush(pw, mix(0.9, 1.0, smoothstep(0.3, 0.9, cov)));
@@ -548,11 +564,20 @@ function groundMaker(base) {
             { float l1 = textureGrad(gNoise, p / 0.27 + 0.29, dPx / 0.27, dPy / 0.27).r, l2 = textureGrad(gNoise, p / 0.7 + 0.53, dPx / 0.7, dPy / 0.7).g;
               cB *= mix(1.0, mix(0.35, 1.45, smoothstep(0.2, 0.8, l1 * 0.6 + l2 * 0.4)), aaS); }  // (the leaves: lit sprays and dark holes in each bush)
             cB *= mix(0.55, 1.0, foot) * mix(0.65, 1.2, top);
+            // (A38: the brush read near black-green beside Street View's: sunlit slope at w_conzelman3 #8e875c against our #485938, overcast hawkR
+            // #575a35 against #4d5b3a; lifted, the red most (Street View's brush has red about equal to green), the grey sage less so it stays grey)
+            cB *= mix(vec3(2.1, 1.55, 1.3), vec3(1.5, 1.45, 1.5), step(0.9, bu.w));
             vec3 cG = mix(vec3(0.16, 0.10, 0.06), vec3(0.17, 0.15, 0.09), smoothstep(0.35, 0.65, s1)) * mix(0.75, 1.1, s3);  // (dirt and dry grass in the gaps)
-            cB = mix(cB, cG, gap);
+            // (A38, w_bunker1: the red-brown gaps drew brown blobs all over the left verge where Street View has grass between the bushes; red dirt
+            // only under the brush rows at a rocky lip (hawkR), dry grass in the gaps everywhere else)
+            cG = mix(mix(vec3(0.105, 0.10, 0.058), vec3(0.15, 0.14, 0.085), smoothstep(0.35, 0.65, s1)) * mix(0.75, 1.1, s3), cG, jwBrush); cB = mix(cB, cG, gap);
             vec3 cFar = mix(vec3(0.055, 0.085, 0.032), vec3(0.08, 0.095, 0.058), smoothstep(0.45, 0.75, s2)) * mix(0.62, 1.12, clumpS);  // (the bushes' and gaps' mean, so near and far brush are one colour)
-            cS = mix(cFar, cB, bf); sw = max(sw, bf * smoothstep(0.4, 0.55, cov) * (1.0 - steep * 0.7) * (1.0 - rb31));
+            cFar *= vec3(2.04, 1.54, 1.32); cS = mix(cFar, cB, bf); sw = max(sw, bf * max(shl, smoothstep(0.4, 0.55, cov)) * (1.0 - stS * 0.7) * (1.0 - rb31));
             jwSW = sw * bf * (1.0 - gap) * mix(0.45, 1.1, jwBrush) * (1.0 - smoothstep(0.3, 0.9, pxm));  /* (A37, hawkR: the brush rows' bushes lit as mounds) */ jwSG = clamp(bu.yz, vec2(-2.5), vec2(2.5)); }  // (A37: the bent light weak, and gone at a grazing angle: on the flat ground it drew the painted mounds as dark shingles, w_field1)
+          // (A38, w_center0: the mown lawns (scrubcover.png's B, from scrub_shell.py's LAWN_SEEDS) a bright even green with no brush and no dry
+          // patches: Street View's Fort Baker parade ground in the sun is #aab754, ours read dull olive #8b9066 with scrub mounds)
+          lwn = texture2D(gScrub, sb).b * sIn;
+          if (lwn > 0.002) { cLw = vec3(0.36, 0.42, 0.095) * mix(0.9, 1.08, s2) * mix(1.0, mix(0.9, 1.1, s3), aaS); c = mix(c, cLw, lwn); sw *= 1.0 - lwn; jwSW *= 1.0 - lwn; }
           c = mix(c, cS, sw * (1.0 - jwBand)); jwSW *= 1.0 - jwBand; }
         #ifdef JW_SH
         // (A37: the shoulder's own surface: short saturated grass, or tan gravel, or red-brown dirt with a few tufts, the dirt
@@ -561,6 +586,7 @@ function groundMaker(base) {
           float m1 = textureGrad(gNoise, p / 3.1 + 0.37, dPx / 3.1, dPy / 3.1).r, m2 = textureGrad(gNoise, p / 0.35 + 0.53, dPx / 0.35, dPy / 0.35).g, k = vSh.y < -0.5 ? 0.45 : vSh.y;
           vec3 gS = textureGrad(gGrass, p / gRep.z, dPx / gRep.z, dPy / gRep.z).rgb; float gl = clamp(dot(gS, vec3(0.3, 0.55, 0.15)) / 0.35, 0.4, 1.6);
           vec3 cSg = vec3(0.21, 0.26, 0.11) * mix(1.0, gl, aaS * 0.7) * mix(0.85, 1.15, m1);
+          cSg = mix(cSg, cLw, lwn);
           vec3 cTan = mix(vec3(0.29, 0.25, 0.21), vec3(0.36, 0.31, 0.26), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
           vec3 cRed = mix(vec3(0.23, 0.18, 0.145), vec3(0.29, 0.225, 0.18), mix(0.5, m2, aaS)) * mix(0.85, 1.12, m1);
           // (A37, review2 w_mccullough2, w_mitchell1: Street View's dirt shoulder grey-brown, #555149 to #877e70 by pixel medians, not salmon; darker at the asphalt)
@@ -623,6 +649,6 @@ function groundMaker(base) {
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
       if (jwSW > 0.001) normal = normalize(normal + (viewMatrix * vec4(-jwSG.x, 0.0, -jwSG.y, 0.0)).xyz * jwSW);`);
   };
-  m.customProgramCacheKey = () => 'jw-hand-ground22' + (SH ? 'sh' : '');
+  m.customProgramCacheKey = () => 'jw-hand-ground23' + (SH ? 'sh' : '') + (SHELL ? 'sl' : '');
   return m; };
 }

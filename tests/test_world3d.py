@@ -195,6 +195,12 @@ def test_routes_never_leave_the_world(out):
     assert e["opts"] == [3, 4] and e["optsIn"] == [4]                           # the way out is no option
     assert 3 in e["plan"] and 3 not in e["planIn"]                             # the default turns away (and turns round)
     assert e["inside"] and not e["outside"] and e["bridge"]
+    # (A38: Mount Tamalpais: a box per road of the climb; the gap between the Headlands and the mountain is not the world)
+    t = out["tam"]
+    assert t["boxes"] == 5 and t["tamJunction"] and t["pantoll"] and t["eastPeak"] and not t["gap"]
+    assert t["route"] and not t["side"] and t["headlandsSide"]                 # out there only the route's own ways
+    assert t["optsAll"] == [3, 4] and t["opts"] == [3]                         # the side road is no option
+    assert t["snapWay"] in (12188378, 88159983)                                # and no start snaps onto it (nearest: the side road)
 
 
 def test_drafting(out, tmp_path):

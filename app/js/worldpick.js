@@ -1,4 +1,4 @@
-// Open world start (the Marin Headlands): a named start (a chip or its pin on the map) or a tap inside the world (the nearest road),
+// Open world start (the Marin Headlands and Mount Tamalpais): a named start (a chip or its pin on the map) or a tap inside the world (the nearest road),
 // a workout to run on top or none, Ride.
 import { esc } from './core.js';
 import { betaOk } from './beta.js';
@@ -6,6 +6,8 @@ import { loadML } from './ridemap.js';
 import { MAP_STYLES } from './map.js';
 import { PRESETS, DEM, BOUNDS, inWorld } from './world.js';
 
+// the whole world: the box round every one of BOUNDS' boxes (A38: the Headlands and the climb up Mount Tamalpais)
+const WB = BOUNDS.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]);
 // go(start, workoutId) -> Promise (throws with a message to show)
 export function createPicker({ $, store, world, wOptions, go }) {
   const box = $('#owModal'), osm = MAP_STYLES.osm;
@@ -29,7 +31,7 @@ export function createPicker({ $, store, world, wOptions, go }) {
   }
   async function initMap() {
     const ml = await loadML(), c = at || PRESETS[0];
-    map = new ml.Map({ container: $('#owMap'), attributionControl: false, center: [c.lon, c.lat], zoom: 13, minZoom: 11.5, maxBounds: [[-122.62, 37.77], [-122.39, 37.88]], maxPitch: 0, dragRotate: false,
+    map = new ml.Map({ container: $('#owMap'), attributionControl: false, center: [c.lon, c.lat], zoom: 13, minZoom: 10.5, maxBounds: [[WB[1] - 0.09, WB[0] - 0.04], [WB[3] + 0.09, WB[2] + 0.04]], maxPitch: 0, dragRotate: false,
       transformRequest: url => ({ url, referrerPolicy: 'strict-origin' }),
       style: { version: 8, sources: { base: { type: 'raster', tiles: [osm.tiles], tileSize: 256, maxzoom: osm.max },
         dem: { type: 'raster-dem', tiles: [DEM], tileSize: 256, maxzoom: 15, encoding: 'terrarium' } },
@@ -42,8 +44,8 @@ export function createPicker({ $, store, world, wOptions, go }) {
     }
     const dot = document.createElement('div'); dot.className = 'rmapdot';
     mk = new ml.Marker({ element: dot }).setLngLat([c.lon, c.lat]).addTo(map);
-    map.fitBounds([[BOUNDS[0][1], BOUNDS[0][0]], [BOUNDS[0][3], BOUNDS[0][2]]], { padding: 16, duration: 0 });  // the whole world, every pin
-    map.on('click', e => inWorld(e.lngLat.lat, e.lngLat.lng) ? pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }) : hint('Outside the Headlands world', true));
+    map.fitBounds([[WB[1], WB[0]], [WB[3], WB[2]]], { padding: 16, duration: 0 });  // the whole world, every pin
+    map.on('click', e => inWorld(e.lngLat.lat, e.lngLat.lng) ? pick({ lat: e.lngLat.lat, lon: e.lngLat.lng, heading: null, name: 'Open world' }) : hint('Outside the open world', true));
   }
   // wid: the workout to ride there ('' free ride); jumpTo(start): mid-ride, go there instead (app.js: world.teleport)
   async function open(wid = '', jumpTo = null) {

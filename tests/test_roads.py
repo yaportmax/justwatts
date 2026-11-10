@@ -198,6 +198,7 @@ def test_preset_roads_are_baked_in(node):
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
     asked = out.pop("asked")
-    assert asked and all(a.startswith("/roads/marin/") for a in asked) and len(asked) == len(set(asked))  # baked blocks, each once, never Overpass
+    assert asked and all(a.startswith(("/roads/marin/", "/roads/tam/")) for a in asked) and len(asked) == len(set(asked))  # baked blocks, each once, never Overpass
+    assert any(a.startswith("/roads/tam/") for a in asked) and {"tamjunction", "pantoll", "eastpeak"} <= set(out)  # (A38: the Mount Tamalpais starts)
     for pid, r in out.items():
         assert r["here"] > 0 and r["around"], pid

@@ -20,7 +20,7 @@ import { skyRadiance, sunTint } from './skymath.js';
 export const TIMES = {
   dawn: { az: 78, el: 4, turb: 3.2, ray: 2.2, mie: 0.006, si: 2.0, haze: 22, low: 120, hzc: [0.69, 0.72, 0.78], banks: 1, cl: 0.3, ci: 0.6, exp: 1.05 },
   morning: { az: 100, el: 15, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.6, haze: 18, low: 110, hzc: [0.69, 0.72, 0.78], banks: 1, cl: 0.22, ci: 0.4, exp: 0.92 },
-  day: { az: 140, el: 40, turb: 1.9, ray: 0.85, mie: 0.0035, si: 3.8, haze: 45, low: 35, hzc: [0.4, 0.48, 0.56], banks: 0, cl: 0.26, ci: 0.3, exp: 0.82 },
+  day: { az: 140, el: 40, turb: 1.9, ray: 0.85, mie: 0.0035, si: 3.8, haze: 45, low: 35, hzc: [0.36, 0.44, 0.57], banks: 0, cl: 0.26, ci: 0.3, exp: 0.82 },
   afternoon: { az: 228, el: 36, turb: 2.2, ray: 1.3, mie: 0.004, si: 3.0, haze: 12, low: 22, hzc: [0.69, 0.72, 0.78], banks: 0.6, cl: 0.4, ci: 0.45, exp: 0.84 },
   golden: { az: 248, el: 13, turb: 2.6, ray: 1.6, mie: 0.005, si: 2.9, haze: 14, low: 30, hzc: [0.69, 0.72, 0.78], banks: 0.75, cl: 0.3, ci: 0.55, exp: 0.88 },
   sunset: { az: 258, el: 3.5, turb: 3.4, ray: 2.4, mie: 0.006, si: 2.3, haze: 20, low: 50, hzc: [0.69, 0.72, 0.78], banks: 0.8, cl: 0.36, ci: 0.7, exp: 1.02 },

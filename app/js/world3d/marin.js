@@ -2,6 +2,7 @@
 // International Orange), the San Francisco skyline across the strait, the Point Bonita and Alcatraz lighthouses and
 // Karl the fog lying off the coast.
 import { hash2 } from './landuse.js';
+import { SF_TALL } from './sfskyline.js';
 import * as roadLib from './ribbon.js';
 
 import { GGB, deckH, centreT, fromST, toST, onDeck } from '../ggb.js';
@@ -262,8 +263,9 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
       const shore = lon > -122.395 ? 37.7985 + (lon + 122.395) * 1.3 : lon > -122.41 ? 37.8075 : lon > -122.425 ? 37.8050 : 37.8035;
       if (lat > shore || (lon > -122.388 && lat > 37.79)) continue;
       const [x, z] = proj.xz(lat, lon), d = Math.hypot(x - fidi[0], z - fidi[1]);
-      const tall = Math.exp(-(d * d) / (650 * 650)), h = 9 + hash2(i, j + 9) * 12 + tall * (25 + hash2(j, i + 4) * 120);
-      const w = 20 + hash2(i + 7, j) * 22 + tall * 8;
+      // (A38 far: the towers are OpenStreetMap's now (SF_TALL below); this grid is only the fabric under them, to 29 m)
+      const tall = Math.exp(-(d * d) / (650 * 650)), h = 9 + hash2(i, j + 9) * 12 + tall * 8;
+      const w = 20 + hash2(i + 7, j) * 22;
       blocks.push([x, z, w, h, w * (0.7 + hash2(j + 2, i) * 0.6), groundSF(x, z)]);
     }
     // the low city seen across the strait from the Headlands (Street View): the Marina, Cow Hollow, Pacific Heights, the
@@ -277,6 +279,11 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
       const [x, z] = proj.xz(lat, lon), w = 14 + hash2(i, j + 2) * 12;
       blocks.push([x, z, w, 7 + hash2(j + 1, i) * 8, w * (0.8 + hash2(i + 2, j) * 0.5), 4 + 40 * hash2(Math.round(la * 300), Math.round(lo * 300)) ** 2]);
     }
+    // (A38 far: the skyline's towers from OpenStreetMap, every building of 30 m and over as its footprint's rectangle at its
+    // tagged height (sfskyline.js, 639 of them): Street View from Hawk Hill and the Conzelman pull-outs shows a wide spread of
+    // many slim towers from Rincon Hill to Russian Hill, where a random grid of wide slabs stood, pairs hawk_city, vista_city)
+    for (let k = 0; k < SF_TALL.length; k += 8) { const [x, z] = proj.xz(37.765 + SF_TALL[k] * 1e-5, -122.44 + SF_TALL[k + 1] * 1e-5);
+      blocks.push([x, z, SF_TALL[k + 2], SF_TALL[k + 6], SF_TALL[k + 3], groundSF(x, z), SF_TALL[k + 4] * Math.PI / 180, SF_TALL[k + 5], SF_TALL[k + 7]]); }
     // a city block: a box with floors of windows in its own shader (bands that fade out far away)
     const cityMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     cityMat.onBeforeCompile = sh => {
@@ -289,9 +296,12 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     cityMat.customProgramCacheKey = () => 'jw-city-2';
     const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), im = new THREE.InstancedMesh(geo, cityMat, blocks.length);
     const m4 = new THREE.Matrix4(), c = new THREE.Color(), tones = [0xe9e6df, 0xd9d4ca, 0xc8c6c2, 0xb9b8b6, 0xe2d6c0, 0xa9b2ba, 0xf0ece4, 0xcfc2ae];
-    blocks.forEach(([x, z, w, h, dep, g], i) => {
-      im.setMatrixAt(i, m4.makeScale(w, h + g, dep).setPosition(x, 0, z));
-      im.setColorAt(i, c.set(tones[Math.floor(hash2(i, 3) * tones.length)]));
+    const towers = [0xe4e0d8, 0xd8d2c6, 0xc9ced4, 0xb7c0c8, 0xa8b0b8, 0xd2ccc0, 0xbfc6cc, 0xe9e6df, 0x8f9aa6, 0x6f7780, 0xcdc6b8, 0x9aa7b3];
+    const v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), q4 = new THREE.Quaternion(), up4 = new THREE.Vector3(0, 1, 0);
+    blocks.forEach(([x, z, w, h, dep, g, yaw, base, col], i) => {
+      if (yaw == null) im.setMatrixAt(i, m4.makeScale(w, h + g, dep).setPosition(x, 0, z));
+      else im.setMatrixAt(i, m4.compose(v3.set(x, base ? g + base : 0, z), q4.setFromAxisAngle(up4, yaw), s3.set(w, base ? h - base : h + g, dep)));
+      im.setColorAt(i, c.set(col || (yaw == null ? tones : towers)[Math.floor(hash2(i, 3) * (yaw == null ? tones : towers).length)]));
     });
     im.computeBoundingSphere(); city.add(im);
     const at = (la, lo) => { const [x, z] = proj.xz(la, lo); return [x, groundSF(x, z), z]; };
@@ -305,11 +315,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     for (const s of [-1, 1]) put(new THREE.BoxGeometry(9, 150, 6).translate(s * 20, 135, 0).applyMatrix4(new THREE.Matrix4().makeRotationZ(-s * 0.1)), 0xe6e2da, 37.7952, -122.4028, 0.15);
     // Coit Tower on Telegraph Hill: a fluted column
     put(new THREE.CylinderGeometry(5.5, 6, 64, 16).translate(0, 32, 0), 0xece6d8, 37.8024, -122.4058);
-    // more of the skyline: 181 Fremont, Millennium, 555 California (dark), 345 California, the Embarcadero Center, One Rincon,
-    // the Ferry Building's clock tower
-    for (const [la, lo, h, w, col] of [[37.7897, -122.3954, 245, 30, 0xb7c0c8], [37.7906, -122.3963, 197, 30, 0xc9ced4], [37.7920, -122.4038, 237, 46, 0x4b3f3a],
-      [37.7926, -122.4006, 212, 36, 0xd8d2c6], [37.7948, -122.3990, 172, 40, 0xe4e0d8], [37.7951, -122.3975, 150, 40, 0xe4e0d8], [37.7955, -122.3962, 125, 40, 0xe4e0d8],
-      [37.7864, -122.3918, 188, 28, 0xbfc6cc], [37.7937, -122.3984, 160, 38, 0xd2ccc0], [37.7889, -122.4014, 180, 34, 0xa8b0b8]]) put(new THREE.BoxGeometry(w, h, w * 0.8).translate(0, h / 2, 0), col, la, lo, 0.3);
+    // the Ferry Building's clock tower (the rest of the skyline is SF_TALL above)
     put(new THREE.BoxGeometry(14, 75, 14).translate(0, 37.5, 0), 0xf0ead8, 37.7955, -122.3937, 0.3);
     put(new THREE.BoxGeometry(200, 14, 30).translate(0, 7, 0), 0xe8e0cc, 37.7953, -122.3930, 0.3);
     // Sutro Tower on its hill (298 m over the hilltop, 254 m up): three legs in red and white bands, drawn in a third of

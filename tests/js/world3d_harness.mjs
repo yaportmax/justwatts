@@ -24,7 +24,7 @@ import { dense, track, railIndex, profileOf, profileAt, laneOf, unpackH, packH, 
 import { BARRIERS, SURVEY, MARKINGS, STOPS, CROSSINGS, WIDTHS } from '../../app/js/world3d/handlist.js';
 import { onDeck, toST, GGB } from '../../app/js/ggb.js';
 import { readdirSync } from 'node:fs';
-import { inWorld, BOUNDS } from '../../app/js/world.js';
+import { inWorld, rideable, BOUNDS, ROUTE } from '../../app/js/world.js';
 import { draftShare } from '../../app/js/world3d/draft.js';
 import { speedStep } from '../../app/js/course.js';
 import { Engine } from '../../app/js/web/engine.js';
@@ -189,10 +189,19 @@ out.pick = {
 // a road along the north edge of the world: a junction with one way leading out of it and one along the edge
 const N = BOUNDS[0][2], edge = N - 0.0005, mk = (id, nodes, pts, hw = 'tertiary') => ({ id, hw, name: '', ref: '', ow: 0, br: 0, rb: 0, nodes, pts });
 const ways = [mk(1, [1, 2], [[edge, -122.50], [edge, -122.499]]), mk(2, [2, 3], [[edge, -122.499], [N + 0.002, -122.499]], 'primary'), mk(3, [2, 4], [[edge, -122.499], [edge - 0.0004, -122.498]], 'residential')];
-const g0 = new RoadGraph(), gIn = new RoadGraph({ inside: inWorld });
+const g0 = new RoadGraph(), gIn = new RoadGraph({ inside: rideable });
 for (const gg of [g0, gIn]) gg.addCell('x', ways), gg.complete = () => true;
 const pl = gr => { const p = Plan.at(gr, gr.snap(edge, -122.4995, 90)); p.extend(300, 6); return p.seq.map(s => s.id); };
-out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).map(e => e.to), plan: pl(g0), planIn: pl(gIn), inside: inWorld(37.83, -122.5), outside: inWorld(37.9, -122.6), bridge: inWorld(37.815, -122.478) };
+out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).map(e => e.to), plan: pl(g0), planIn: pl(gIn), inside: inWorld(37.83, -122.5), outside: inWorld(37.86, -122.5), bridge: inWorld(37.815, -122.478) };
+// (A38: Mount Tamalpais. Beyond the Headlands only the route's own ways are ridden: at Pantoll a junction of the
+// Panoramic Highway (a ROUTE way) with a side road, the side road is no option and a start never snaps onto it)
+{ const rid = [...ROUTE][16], P = [37.9043, -122.6041], tw = [mk(rid, [1, 2], [[P[0], P[1] + 0.001], P], 'secondary'), mk(rid + 1, [2, 3], [P, [P[0], P[1] - 0.001]], 'secondary'), mk(7, [2, 4], [P, [P[0] + 0.0008, P[1]]], 'residential')];
+  tw[1].id = [...ROUTE][17];
+  const gT = new RoadGraph({ inside: rideable }), gA = new RoadGraph(); for (const gg of [gT, gA]) gg.addCell('t', tw), gg.complete = () => true;
+  const sn = gT.snap(P[0] + 0.0006, P[1] + 0.00001, 0);
+  out.tam = { pantoll: inWorld(...P), eastPeak: inWorld(37.9273505, -122.5808411), tamJunction: inWorld(37.8821172, -122.5249231), gap: inWorld(37.86, -122.53), boxes: BOUNDS.length,
+    route: rideable(...P, { id: rid }), side: rideable(...P, { id: 7 }), headlandsSide: rideable(37.83, -122.5, { id: 7 }), opts: gT.options(1, 2).map(e => e.to), optsAll: gA.options(1, 2).map(e => e.to),
+    snapWay: sn?.w?.id ?? null }; }
 
 /* ---------- drafting ---------- */
 const me = { lat: 37.9, lon: -122.6, h: 0 }, ahead = m => ({ lat: 37.9 + m / 111195, lon: -122.6 });
@@ -542,7 +551,7 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
   // (b): the open world's starts (world.js PRESETS and perfride's rides), each way, 3 km on: the course as world.js makes
   // it (10 m points, heights from the baked tiles, straight over bridges and through tunnels, smoothed), its profile
   // matched to the rails, ridden at a third of a metre a step (20 m/s at 60 frames a second)
-  const g = new RoadGraph({ inside: inWorld });
+  const g = new RoadGraph({ inside: rideable });
   for (const f of readdirSync(new URL('roads/marin/', APP))) { const j = JSON.parse(readFileSync(new URL(`roads/marin/${f}`, APP), 'utf8')), byId = new Map(j.ways.map(w => [w.id, w])); for (const [k, ids] of Object.entries(j.cells)) g.addCell(k, ids.map(i => byId.get(i)).filter(Boolean)); }
   const starts = [['ggb', 37.83234, -122.48061, 160], ['conzelman', 37.83300, -122.48341, 190], ['hawk', 37.82625, -122.49900, 250], ['rodeo', 37.83406, -122.53338, 122], ['fortbaker', 37.83658, -122.47779, 330],
     ['hawkDown', 37.826611, -122.499231, 197], ['mccullough', 37.834121, -122.494207, 346], ['bunker', 37.835115, -122.480078, 247]];

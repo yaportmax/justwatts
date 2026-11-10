@@ -245,14 +245,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   // (A28: a group's buffers sent to the GPU a few per frame before it shows: all at its first draw they were 15 MB in one frame, 170 to 220 ms. One attribute or index at a time
   // through a mesh of its own, a real draw of one triangle into a 1 px target so the driver's copy is made too.)
-  let stageRT = null, stageMat = null;
+  let stageRT = null, stageMat = null; const stageSphere = new THREE.Sphere(new THREE.Vector3(), 1);
   async function stageUploads(into) {
     stageRT ??= new THREE.WebGLRenderTarget(1, 1); stageMat ??= new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
     let sent = 0; const S = new THREE.Scene(), seen = new Set(), mesh = new THREE.Mesh(new THREE.BufferGeometry(), stageMat); mesh.frustumCulled = false; S.add(mesh);
     const send = async (attr, index) => {
       if (!attr || seen.has(attr)) return; seen.add(attr);
       const g = new THREE.BufferGeometry(); if (index) { g.setAttribute('position', index[1]); g.setIndex(attr); } else g.setAttribute('position', attr);
-      g.setDrawRange(0, 3); mesh.geometry = g;
+      g.setDrawRange(0, 3); g.boundingSphere = stageSphere; mesh.geometry = g;  // (A38: a sphere given, or the renderer's depth sort measures every attribute as if it were positions: 250 'radius is NaN' errors a load, the live check's log)
       const prev = renderer.getRenderTarget(); renderer.setRenderTarget(stageRT); renderer.render(S, camera); renderer.setRenderTarget(prev);
       g.dispose();
       if (ready && warm.userData.all > 0) await new Promise(r => setTimeout(r, 12)); else if (++sent % 16 === 0) await new Promise(r => setTimeout(r, 0));  // (no need to spread them under the loading screen)

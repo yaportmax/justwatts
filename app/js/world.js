@@ -15,19 +15,47 @@ export const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/
 // ridden: a ride turns round at the deck's end), Vista Point, Conzelman, Field, Bunker (the Baker-Barry tunnel), Mitchell,
 // McCullough and Alexander, Fort Baker. Routes never leave BOUNDS (a way out is no option: the default turns away or
 // turns around); the land beyond stays as scenery.
-export const BOUNDS = [[37.8083, -122.545, 37.848, -122.465]];
-export const inWorld = (lat, lon) => BOUNDS.some(([s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e);
+// (A38: Mount Tamalpais, the climb from Tam Junction to East Peak, 19.7 km: a box per road of the route. Out there only
+// the route's own ways are ridden, ROUTE below: the owner rejected the look of the generated roads, so a road that is
+// not hand-built is scenery.)
+export const BOUNDS = [[37.8083, -122.545, 37.848, -122.465],
+  [37.877, -122.556, 37.89, -122.523],      // Shoreline Highway (CA 1), Tam Junction to the Panoramic Highway
+  [37.8815, -122.606, 37.918, -122.552],    // Panoramic Highway, up past Mountain Home and Bootjack to Pantoll
+  [37.902, -122.617, 37.9125, -122.602],    // Pantoll Road, up to Rock Spring
+  [37.9085, -122.6145, 37.931, -122.5785],  // East Ridgecrest Boulevard, Rock Spring to the East Peak car park
+];
+const inBox = ([s, w, n, e], lat, lon) => lat >= s && lat <= n && lon >= w && lon <= e;
+export const inWorld = (lat, lon) => BOUNDS.some(b => inBox(b, lat, lon));
+// The route's OpenStreetMap ways beyond the Headlands, in riding order from Tam Junction (the extract of 2026-10-31,
+// work/tam-net/route.mjs: the shortest way along the four named roads; cache/roads/lines_tam.json is the same line)
+export const ROUTE = new Set([514410368, 1072216253, 687879578, 1107378169, 1107378168, 1107378167, 1457863968, 1457863966, 1353800490, 993365011,
+  93092271, 1371607291, 1371607290, 1371399605, 1371399606, 12177319,  // Shoreline Highway
+  12188378, 88159983, 125871933, 125871918, 88159938,                  // Panoramic Highway
+  1558904229, 12188784,                                                // Pantoll Road
+  12170878]);                                                          // East Ridgecrest Boulevard
+// where a ride may go (roads.js RoadGraph inside): anywhere in the Headlands (BOUNDS[0]); beyond them only along the
+// route's ways (w: the way, when the caller has one)
+export const rideable = (lat, lon, w = null) => inBox(BOUNDS[0], lat, lon) || ((!w || ROUTE.has(w.id)) && inWorld(lat, lon));
 export const PRESETS = [
   { id: 'ggb', name: 'Golden Gate Bridge', lat: 37.83234, lon: -122.48061, heading: 160 },
   { id: 'conzelman', name: 'Conzelman Road', lat: 37.83300, lon: -122.48341, heading: 190 },
   { id: 'hawk', name: 'Hawk Hill', lat: 37.82625, lon: -122.49900, heading: 250 },
   { id: 'rodeo', name: 'Rodeo Beach', lat: 37.83406, lon: -122.53338, heading: 122 },
   { id: 'fortbaker', name: 'Fort Baker', lat: 37.83658, lon: -122.47779, heading: 330 },
+  // (A38: Mount Tamalpais, each facing up the climb; East Peak facing back down it)
+  { id: 'tamjunction', name: 'Tam Junction', lat: 37.88184, lon: -122.52551, heading: 234 },
+  { id: 'mountainhome', name: 'Mountain Home', lat: 37.91078, lon: -122.57738, heading: 284 },
+  { id: 'pantoll', name: 'Pantoll', lat: 37.90417, lon: -122.60437, heading: 221 },
+  { id: 'rockspring', name: 'Rock Spring', lat: 37.91061, lon: -122.61217, heading: 50 },
+  { id: 'eastpeak', name: 'East Peak', lat: 37.92743, lon: -122.58152, heading: 276 },
 ];
 // roads baked into the app (tools/bake_roads.mjs) in blocks of 5 x 5 cells, app/roads/<id>/<i>_<j>.json: the open
 // world never waits on Overpass
 export const SEEDS = [
   { id: 'marin', box: [37.79, -122.56, 37.86, -122.45], block: 5 },  // the Headlands (BOUNDS) and a cell or two round them
+  // (A38: the climb and a cell round every point of it, so no cell near the route ever asks Overpass; only the route's
+  // own ways, tools/bake_roads.mjs)
+  { id: 'tam', box: [37.86, -122.63, 37.94, -122.51], block: 5, only: ROUTE },
 ];
 export const seedOf = key => {
   const [cs, cw, cn, ce] = cellBox(key);
@@ -153,7 +181,7 @@ async function decodePng(blob) {
 }
 
 // control(action, body) -> Promise (the engine), course() -> Promise<{ course, d }> (GET /api/ride/course)
-export function createWorld({ control, course, loader = createRoadLoader(), terrain = createTerrain({ baked: sharedBaked() }), onChange = () => {}, inside = inWorld }) {
+export function createWorld({ control, course, loader = createRoadLoader(), terrain = createTerrain({ baked: sharedBaked() }), onChange = () => {}, inside = rideable }) {
   const g = new RoadGraph({ inside });
   // ll, ele: the engine's course as sent; raw, br: terrain height and bridge/tunnel flag per point; dirty: first point a
   // junction choice changed; prov: first point of a bridge or tunnel still running at the end of what was sent (sent

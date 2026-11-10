@@ -192,7 +192,7 @@ const ways = [mk(1, [1, 2], [[edge, -122.50], [edge, -122.499]]), mk(2, [2, 3], 
 const g0 = new RoadGraph(), gIn = new RoadGraph({ inside: rideable });
 for (const gg of [g0, gIn]) gg.addCell('x', ways), gg.complete = () => true;
 const pl = gr => { const p = Plan.at(gr, gr.snap(edge, -122.4995, 90)); p.extend(300, 6); return p.seq.map(s => s.id); };
-out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).map(e => e.to), plan: pl(g0), planIn: pl(gIn), inside: inWorld(37.83, -122.5), outside: inWorld(37.86, -122.5), bridge: inWorld(37.815, -122.478) };
+out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).map(e => e.to), plan: pl(g0), planIn: pl(gIn), inside: inWorld(37.83, -122.5), outside: inWorld(37.86, -122.52), bridge: inWorld(37.815, -122.478) };
 // (A38: Mount Tamalpais. Beyond the Headlands only the route's own ways are ridden: at Pantoll a junction of the
 // Panoramic Highway (a ROUTE way) with a side road, the side road is no option and a start never snaps onto it)
 { const rid = [...ROUTE][16], P = [37.9043, -122.6041], tw = [mk(rid, [1, 2], [[P[0], P[1] + 0.001], P], 'secondary'), mk(rid + 1, [2, 3], [P, [P[0], P[1] - 0.001]], 'secondary'), mk(7, [2, 4], [P, [P[0] + 0.0008, P[1]]], 'residential')];
@@ -201,7 +201,13 @@ out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).ma
   const sn = gT.snap(P[0] + 0.0006, P[1] + 0.00001, 0);
   out.tam = { pantoll: inWorld(...P), eastPeak: inWorld(37.9273505, -122.5808411), tamJunction: inWorld(37.8821172, -122.5249231), gap: inWorld(37.86, -122.53), boxes: BOUNDS.length,
     route: rideable(...P, { id: rid }), side: rideable(...P, { id: 7 }), headlandsSide: rideable(37.83, -122.5, { id: 7 }), opts: gT.options(1, 2).map(e => e.to), optsAll: gA.options(1, 2).map(e => e.to),
-    snapWay: sn?.w?.id ?? null }; }
+    snapWay: sn?.w?.id ?? null };
+  // (A38: the link from the Headlands to the climb: Bridgeway and the bike path are the world, a side street off Bridgeway
+  // is not ridden, and the three ways that reach beyond the line (world.js CLIP) are ridden only as far as the line goes)
+  out.link = { bridgeway: rideable(37.86, -122.4863, { id: 239090185 }), side: rideable(37.86, -122.4863, { id: 7 }), path: inWorld(37.88195, -122.51794), almonte: rideable(37.8849, -122.52385, { id: 32742946 }),
+    gate6: [rideable(37.8726825, -122.5055996, { id: 12177501 }), rideable(37.8726974, -122.5055884, { id: 12177501 })],
+    almonteNorth: [rideable(37.8873137, -122.5247287, { id: 1255772604 }), rideable(37.887389, -122.5247661, { id: 1255772604 })],
+    ramp: [rideable(37.8725058, -122.5056536, { id: 986569391 }), rideable(37.8724238, -122.5056449, { id: 986569391 })], route: ROUTE.size }; }
 
 /* ---------- drafting ---------- */
 const me = { lat: 37.9, lon: -122.6, h: 0 }, ahead = m => ({ lat: 37.9 + m / 111195, lon: -122.6 });

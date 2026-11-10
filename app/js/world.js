@@ -23,6 +23,9 @@ export const BOUNDS = [[37.8083, -122.545, 37.848, -122.465],
   [37.8815, -122.606, 37.918, -122.552],    // Panoramic Highway, up past Mountain Home and Bootjack to Pantoll
   [37.902, -122.617, 37.9125, -122.602],    // Pantoll Road, up to Rock Spring
   [37.9085, -122.6145, 37.931, -122.5785],  // East Ridgecrest Boulevard, Rock Spring to the East Peak car park
+  // (A38: the link from the Headlands to the climb, 7.4 km, cache/roads/lines_link.json)
+  [37.8475, -122.507, 37.8735, -122.4775],  // Sausalito: 2nd Street, Richardson Street, Bridgeway to Gate 6 Road
+  [37.872, -122.5255, 37.8882, -122.505],   // the Mill Valley - Sausalito Path over Bothin Marsh, Almonte Boulevard down to Tam Junction
 ];
 const inBox = ([s, w, n, e], lat, lon) => lat >= s && lat <= n && lon >= w && lon <= e;
 export const inWorld = (lat, lon) => BOUNDS.some(b => inBox(b, lat, lon));
@@ -32,10 +35,31 @@ export const ROUTE = new Set([514410368, 1072216253, 687879578, 1107378169, 1107
   93092271, 1371607291, 1371607290, 1371399605, 1371399606, 12177319,  // Shoreline Highway
   12188378, 88159983, 125871933, 125871918, 88159938,                  // Panoramic Highway
   1558904229, 12188784,                                                // Pantoll Road
-  12170878]);                                                          // East Ridgecrest Boulevard
+  12170878,                                                            // East Ridgecrest Boulevard
+  // (A38: the link, work/tam-net/link.mjs: from Alexander Avenue's north end to Tam Junction, both carriageways where the
+  // road is split. South Street, 2nd Street, Richardson Street, Bridgeway, 7 m of Gate 6 Road:)
+  35336043, 12178027, 12178487, 28102889, 521361323, 521361322, 620525365, 239090185, 1414053168, 1394496465,
+  521338800, 1414574634, 521338801, 952953637, 1414008328, 1414007527, 239090187, 1414020782, 1414697613, 1414020781,
+  944617278, 945098999, 239090186, 111833264, 943172885, 945702010, 943167641, 945111921, 943167638, 943167637,
+  926760278, 944233522, 573557315, 945702011, 944612756, 521311175, 521311171, 944612755, 945111919, 387641143,
+  944089719, 944089718, 944617280, 944617279, 111833266, 920719520, 12177501, 986569391, 111833268, 945342794,
+  945704325, 521311176, 944612751, 1066618098, 944612752, 944092606, 944612750, 943397040, 945111920, 521311167,
+  111833267, 573557311, 987856346, 926760276, 926760277, 1067607197, 943167639, 943167640, 945111918, 943453008,
+  943172882, 943172886,
+  // (the Mill Valley - Sausalito Path, its ramp and the crossing of Almonte Boulevard at its end:)
+  30681848, 1457338735, 917986193, 1457338734, 917986192, 30681847, 221143681, 221143679, 157393809, 879479309,
+  103431210,
+  // (Almonte Boulevard:)
+  32742943, 32742946, 1378454826, 1378454827, 1255772603, 32742968, 1378358366, 1255772604]);
+// Three of the link's ways reach beyond the line (Gate 6 Road past the path's start, 40 m; the northbound side of Almonte
+// Boulevard past the path's crossing, 9 m; the path's ramp down to Bridgeway, 9 m): each is ridden only inside its box
+// (s, w, n, e: its ridden nodes), so no junction offers the stub
+const CLIP = new Map([[12177501, [37.87262, -122.50566, 37.87269, -122.50559]], [1255772604, [37.8869, -122.52476, 37.88735, -122.5244]],
+  [986569391, [37.87247, -122.5057, 37.87276, -122.50564]]]);
 // where a ride may go (roads.js RoadGraph inside): anywhere in the Headlands (BOUNDS[0]); beyond them only along the
 // route's ways (w: the way, when the caller has one)
-export const rideable = (lat, lon, w = null) => inBox(BOUNDS[0], lat, lon) || ((!w || ROUTE.has(w.id)) && inWorld(lat, lon));
+export const rideable = (lat, lon, w = null) => inBox(BOUNDS[0], lat, lon)
+  || ((!w || (ROUTE.has(w.id) && (!CLIP.has(w.id) || inBox(CLIP.get(w.id), lat, lon)))) && inWorld(lat, lon));
 export const PRESETS = [
   { id: 'ggb', name: 'Golden Gate Bridge', lat: 37.83234, lon: -122.48061, heading: 160 },
   { id: 'conzelman', name: 'Conzelman Road', lat: 37.83300, lon: -122.48341, heading: 190 },
@@ -48,6 +72,9 @@ export const PRESETS = [
   { id: 'pantoll', name: 'Pantoll', lat: 37.90417, lon: -122.60437, heading: 221 },
   { id: 'rockspring', name: 'Rock Spring', lat: 37.91061, lon: -122.61217, heading: 50 },
   { id: 'eastpeak', name: 'East Peak', lat: 37.92743, lon: -122.58152, heading: 276 },
+  // (A38: the link, each facing north towards the climb)
+  { id: 'sausalito', name: 'Sausalito', lat: 37.85288, lon: -122.47895, heading: 0 },
+  { id: 'bothin', name: 'Bothin Marsh', lat: 37.88195, lon: -122.51794, heading: 313 },
 ];
 // roads baked into the app (tools/bake_roads.mjs) in blocks of 5 x 5 cells, app/roads/<id>/<i>_<j>.json: the open
 // world never waits on Overpass
@@ -56,6 +83,8 @@ export const SEEDS = [
   // (A38: the climb and a cell round every point of it, so no cell near the route ever asks Overpass; only the route's
   // own ways, tools/bake_roads.mjs)
   { id: 'tam', box: [37.86, -122.63, 37.94, -122.51], block: 5, only: ROUTE },
+  // (A38: the link north of the Headlands' own seed: Bridgeway from Sausalito's north half, the path to Bothin Marsh)
+  { id: 'link', box: [37.86, -122.51, 37.9, -122.46], block: 5, only: ROUTE },
 ];
 export const seedOf = key => {
   const [cs, cw, cn, ce] = cellBox(key);
@@ -182,7 +211,7 @@ async function decodePng(blob) {
 
 // control(action, body) -> Promise (the engine), course() -> Promise<{ course, d }> (GET /api/ride/course)
 export function createWorld({ control, course, loader = createRoadLoader(), terrain = createTerrain({ baked: sharedBaked() }), onChange = () => {}, inside = rideable }) {
-  const g = new RoadGraph({ inside });
+  const g = new RoadGraph({ inside, through: w => ROUTE.has(w.id) });
   // ll, ele: the engine's course as sent; raw, br: terrain height and bridge/tunnel flag per point; dirty: first point a
   // junction choice changed; prov: first point of a bridge or tunnel still running at the end of what was sent (sent
   // flat for now, sent again once its far end is known)

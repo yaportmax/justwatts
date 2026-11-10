@@ -88,6 +88,27 @@ def test_the_main_road_wins_over_a_smaller_straight_one(js):
     assert r["names"][:2] == ["Ocean Avenue", "Cliff Drive"]
 
 
+def test_a_through_route_keeps_its_riders(js):
+    # (A38: Alexander Avenue's north end. South Street runs straight on by its name, the route to Mount Tamalpais turns up 2nd Street)
+    cells = osm(way(1, "residential", [(1, 0, -300), (2, 0, 0)], "South Street"), way(2, "residential", [(2, 0, 0), (3, 0, 300)], "South Street"),
+                way(3, "residential", [(2, 0, 0), (4, 300, 100)], "2nd Street"))
+    assert plan(js, cells)["names"] == ["South Street"]                                 # by its name, to the end and back
+    assert plan(js, cells, through=[1, 3])["names"][:2] == ["South Street", "2nd Street"]  # on the route: the route's way on
+    assert plan(js, cells, through=[3])["names"] == ["South Street"]                    # not on the route: not drawn onto it
+    assert plan(js, cells, through=[1, 2, 3])["names"] == ["South Street"]              # two of the route's ways on: the usual rule
+
+
+def test_the_route_does_not_run_into_a_one_way_backwards(js):
+    # (A38: Gate 6 Road. South off the marsh path the path runs on by its name to the end of Bridgeway's northbound carriageway;
+    # the ramp beside it leads to the southbound one)
+    cells = osm(way(1, "cycleway", [(1, 0, -300), (2, 0, 0)], "Marsh Path"), way(2, "cycleway", [(2, 0, 0), (3, 0, 20)], "Marsh Path"),
+                way(3, "secondary", [(5, 0, 400), (3, 0, 20)], "Bridgeway", oneway="yes"),
+                way(4, "cycleway", [(2, 0, 0), (6, 30, 30)]), way(5, "secondary", [(6, 30, 30), (7, 30, 400)], "Bridgeway", oneway="yes"))
+    assert plan(js, cells)["names"][:2] == ["Marsh Path", "Bridgeway"] and plan(js, cells)["seq"][3][0] == 5   # by the name: against the one way
+    r = plan(js, cells, through=[1, 2, 3, 4, 5])
+    assert r["names"][:3] == ["Marsh Path", "Bike path", "Bridgeway"] and [s[0] for s in r["seq"][1:4]] == [2, 6, 7]
+
+
 def test_dead_end_turns_around(js):
     r = plan(js, osm(way(1, "residential", [(1, 0, -300), (2, 0, 0), (3, 0, 300)], "Elm Street"), way(2, "residential", [(2, 0, 0), (4, -300, 0)], "Oak Street")), to=1200)
     ids = [s[0] for s in r["seq"]]
@@ -198,7 +219,7 @@ def test_preset_roads_are_baked_in(node):
     assert p.returncode == 0, p.stderr
     out = json.loads(p.stdout)
     asked = out.pop("asked")
-    assert asked and all(a.startswith(("/roads/marin/", "/roads/tam/")) for a in asked) and len(asked) == len(set(asked))  # baked blocks, each once, never Overpass
-    assert any(a.startswith("/roads/tam/") for a in asked) and {"tamjunction", "pantoll", "eastpeak"} <= set(out)  # (A38: the Mount Tamalpais starts)
+    assert asked and all(a.startswith(("/roads/marin/", "/roads/tam/", "/roads/link/")) for a in asked) and len(asked) == len(set(asked))  # baked blocks, each once, never Overpass
+    assert any(a.startswith("/roads/tam/") for a in asked) and {"tamjunction", "pantoll", "eastpeak", "sausalito", "bothin"} <= set(out)  # (A38: the Mount Tamalpais starts, the link's)
     for pid, r in out.items():
         assert r["here"] > 0 and r["around"], pid

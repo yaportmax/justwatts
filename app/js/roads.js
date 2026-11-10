@@ -65,7 +65,7 @@ export const turn = (inB, outB) => ((outB - inB) % 360 + 540) % 360 - 180;  // -
 // inside(lat, lon, way): where routes may go (the open world's edge, and beyond the Headlands only the route's own ways,
 // world.js rideable); a way to a node outside is no option.
 export class RoadGraph {
-  constructor({ inside = null } = {}) { this.nodes = new Map(); this.cells = new Set(); this.ways = new Set(); this.inside = inside; }
+  constructor({ inside = null, through = null } = {}) { this.nodes = new Map(); this.cells = new Set(); this.ways = new Set(); this.inside = inside; this.through = through; }
   addCell(key, ways) {
     this.cells.add(key);
     for (const w of ways) {
@@ -93,6 +93,18 @@ export class RoadGraph {
     }
     if (r >= 0) (this.dead ??= new Map()).set(k, r);
     return r;
+  }
+  // (A38) riding from cur toward `to`: true when within m metres, with no choice on the way, the road runs against a one way
+  wrongWay(cur, to, m = 60) {
+    let p = cur, c = to, d = 0;
+    for (let i = 0; i < 100; i++) {
+      const e = this.nodes.get(p)?.adj.find(e => e.to === c); if (!e) return false;
+      if (e.w.ow && (e.w.ow === 1) !== (e.f === 1)) return true;
+      d += dist(this.pos(p), this.pos(c)); if (d >= m || !this.complete(c)) return false;
+      const o = this.options(p, c); if (o.length !== 1) return false;
+      p = c; c = o[0].to;
+    }
+    return false;
   }
   complete(id) { const n = this.nodes.get(id); return !!n && this.cells.has(cellKey(n.lat, n.lon)); }
   way(a, b) { return this.nodes.get(a)?.adj.find(e => e.to === b)?.w || null; }
@@ -167,6 +179,19 @@ export class Plan {
       if (sameEx) return sameEx.to;
       if (exits.length && (exits[0].b <= 60 || !round || k - j > 30)) return exits[0].to;
       if (round) return round.to;
+    }
+    // (A38: on a through route (the graph's through(way): world.js ROUTE, the ways from the Headlands to Mount Tamalpais) the
+    // default stays on it where only one way on is the route's. North up Alexander Avenue the default kept South Street by its
+    // name, past 2nd Street into the 65 m left of it west of there, turned round and rode back south: a rider who never
+    // steers never reached Bridgeway, work/tam-net/routewalk.mjs. A rider on any other road is not drawn onto the route)
+    const thru = this.g.through;
+    if (thru && win && thru(win)) {
+      const t = o.filter(x => thru(x.w)); if (t.length === 1) return t[0].to;
+      // (A38: with two or more of the route's ways on, not one that runs against a one way within 60 m when just one other does
+      // not: south off the marsh path the default kept the path by its name for its last 7 m, onto Gate 6 Road and down
+      // Bridgeway's northbound carriageway against it for 2017 m; the ramp beside it leads to the southbound one, routewalk.mjs)
+      const cur = this.seq[k].id, right = t.filter(x => !this.g.wrongWay(cur, x.to));
+      if (t.length > 1 && right.length === 1) return right[0].to;
     }
     const same = o.filter(x => abs(x) <= 100 && win && (x.w === win || (win.name && x.w.name === win.name) || (win.ref && x.w.ref === win.ref)));
     if (same.length) return same.sort(by(abs))[0].to;

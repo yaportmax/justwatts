@@ -31,7 +31,7 @@ export function decodePng(buf) {
   return { w, h, data: out };
 }
 
-const graph = cells => { const g = new R.RoadGraph(); for (const [k, j] of cells) g.addCell(k, R.parseWays(j)); return g; };
+const graph = (cells, through) => { const g = new R.RoadGraph(through ? { through: w => through.includes(w.id) } : undefined); for (const [k, j] of cells) g.addCell(k, R.parseWays(j)); return g; };
 const fixture = k => [k, JSON.parse(readFileSync(new URL(`../fixtures/overpass/${k}.json`, import.meta.url)))];
 const names = (p, k0 = 1) => { const out = []; for (let k = k0; k < p.seq.length; k++) { const l = R.label(p.wayAt(k)); if (out.at(-1) !== l) out.push(l); } return out; };
 const jx = j => j && { k: j.k, d: Math.round(j.d), sel: j.sel, opts: j.opts.map(o => ({ to: o.to, a: Math.round(o.a), name: R.label(o.w) })) };
@@ -43,7 +43,7 @@ function run(r) {
     // plan from a start; picks: [[at node id, to node id]] taken when that junction is reached; later: cells loaded when asked for
     case 'plan': {
       const cells = (r.cells || []).map(c => typeof c === 'string' ? fixture(c) : c), later = new Map((r.later || []).map(c => typeof c === 'string' ? fixture(c) : c));
-      const g = graph(cells), s = g.snap(r.lat, r.lon, r.heading ?? null);
+      const g = graph(cells, r.through), s = g.snap(r.lat, r.lon, r.heading ?? null);
       if (!s) return { snap: null };
       const p = R.Plan.at(g, s), asked = [];
       for (const [at, to] of r.picks || []) {

@@ -119,13 +119,15 @@ const Q = 1e5;
 export function encode(features) {
   return features.map(f => {
     const rs = f.rings.map(r => { let a = 0, b = 0; const o = []; for (const [la, lo] of r) { const x = Math.round(la * Q), y = Math.round(lo * Q); o.push(x - a, y - b); a = x; b = y; } return o; });
+    // (A53: source roof survey and OSM type travel with the footprint; legacy rows retain their form.)
+    if (f.bd) return [K[f.k], rs, f.h || 0, f.lt || null, f.bd];
     return f.lt ? [K[f.k], rs, f.h || 0, f.lt] : f.h ? [K[f.k], rs, f.h] : [K[f.k], rs];
   });
 }
 export function decode(rows, prefix = 'b') {
-  return rows.map(([k, rs, h, lt], i) => {
+  return rows.map(([k, rs, h, lt, bd], i) => {
     const rings = rs.map(o => { const r = []; let a = 0, b = 0; for (let j = 0; j + 1 < o.length; j += 2) { a += o[j]; b += o[j + 1]; r.push([a / Q, b / Q]); } return r; });
-    const f = { id: prefix + i, k: KINDS[k], rings }; if (h) f.h = h; if (lt) f.lt = lt; return f;
+    const f = { id: prefix + i, k: KINDS[k], rings }; if (h) f.h = h; if (lt) f.lt = lt; if (bd && k === K.building) f.bd = bd; return f;
   });
 }
 

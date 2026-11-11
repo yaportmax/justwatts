@@ -415,15 +415,18 @@ export function buildingGeometry(list) {
     // gabled or hipped barracks, halls and houses, the big ones too, Street View)
     // (A33: a pitched roof only over a footprint that nearly fills its box: at 0.7 the roof over an L hung past its walls, red roofs slicing through houses at Fort Baker, user 2026-11-05)
     // (A37: b.rh, the lidar's ridge over the eaves, bldglidar.js: pitched where it rises, flat where it does not, w_bunker3, w_field0)
-    const lid = b.rh != null;
+    // (A53: Miller 591600 has shops, not random barns; measured roof rise and OSM use govern surveyed buildings.)
+    const lid = b.rh != null, bh = b.hc ?? b.h;
     // (A54: pier roofs stay within their footprints; no random cottage porch over the bay.)
-    const house = b.pier ? false : b.fort ? (!lid || b.rh >= 0.4) && b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9, barn = !b.pier && !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
+    const house = b.pier ? false : b.fort ? (!lid || b.rh >= 0.4) && b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : (b.sourceType == null || !lid || b.rh >= 0.4) && bh <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9, barn = !b.pier && !b.fort && !house && (b.sourceType == null || /^(barn|farm_auxiliary)$/.test(b.sourceType)) && bh <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
     // (a footprint too ragged for one roof over its box (an L, a T, the Fort Baker barracks) but pitched by the lidar: a
     // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
     // roof half way up its rise)
     const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40;
     const hw = lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
-    const style = b.style != null ? b.style : b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
+    // (A53: Miller shops and irregular hillside homes need their own wall scale even when their measured roof is flat or hipped.)
+    const shop = /^(retail|commercial|office)$/.test(b.sourceType), domestic = !shop && (house || /^(house|detached|residential|bungalow|semidetached_house)$/.test(b.sourceType) || b.sourceType === 'yes' && bh <= 7 && ob.area < 450);
+    const style = b.style != null ? b.style : b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : shop ? (h(5) < 0.5 ? 2 : 6) : (domestic ? HOUSE : bh > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (domestic ? 8 : 4)];
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];

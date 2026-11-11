@@ -7,6 +7,7 @@ import { makeProj, tileX, tileY, lonOf, latOf, key, unkey, headingOf, angDiff } 
 import { GRID, gridAt } from './baked.js';
 import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSteps, pressUnderSteps, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from './terrain.js';
 import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } from './banks.js';
+import { bufferPaint } from './roadpaint.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impGrow } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths, setLaneHook } from './rail.js';
@@ -602,6 +603,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // where one road's ways of different layouts meet, the width eases from one to the other (no step)
     // (a one-lane bore's way its lane's width: the road narrows to it before each portal)
     t.joints ??= tapers(t.chained, { width: r => oneLane(r) ? ONE_LANE : roadStyle(r.hw, r.ln, r.fl, r.wd).w, parts: r => { if (oneLane(r)) return null; const q = roadStyle(r.hw, r.ln, r.fl, r.wd); return [q.a, q.b, q.pL, q.pR]; }, rigid: r => r.fl & 19, ok: r => !/path|footway|track|bridleway|steps|cycleway|pedestrian/.test(r.hw), xz: proj.xz });
+    const sourcePaint = bufferPaint(t.roads, proj.xz);
     let nr = 0;
     const tunnels = ridden(g) ? tunnelLines(t) : [];
     // the lidar's ground anywhere the baked tiles are loaded (before any carving): a deck's ends in the next tile
@@ -703,7 +705,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const trail = !dk && (st.surf === 2 || /path|footway|track|bridleway|steps/.test(r.hw));
       const inH = !!pts.inH && !dk;  // (A39: a piece in the hand corridor lies on the hand ground edge by edge: no generated ground is cut to it there)
       const lift = rail ? railLift(r) : trail ? 0.15 : inH ? 0.12 : roadLift(r.hw), hint = new Map(), hOn = rail || dk || trail ? hAt : (x, z) => onto(x, z, hAt(x, z), lift, hint);
-      const mk = HM && !trail && (st.lm || !st.surf) ? (x, z, tx, tz) => markCode(HM.across(x, z, tx, tz)) : null;  // (the hand list's markings)
+      const mk = (HM || sourcePaint) && !trail && (st.lm || !st.surf) ? (x, z, tx, tz) => { const code = markCode(HM ? HM.across(x, z, tx, tz) : []); code[1] |= sourcePaint?.(x, z, tx, tz) || 0; return code; } : null;  // (the hand list's markings)
       // (a railed service way drawn eased onto the wider road it leaves, as an unrailed one: flush at its edge, Street View
       // Bunker Road 1a_1030; the rider's line is its rail all the same, a few centimetres off it within the paved width)
       const rl = rail && r.hw === 'service' ? (x, z) => onto(x, z, rail(x, z), lift, hint, st.w / 2) : rail;
@@ -1509,6 +1511,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         continue;
       }
       list.push({ ring, base, pier, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
+      // (A53: cx-mvlook pairs 570400, 591200, 620400: cached lidar roof survey and OSM type, carried with each footprint.)
+      if (f.bd) {
+        const b = list.at(-1), d = f.bd; b.sourceType = d.kind;
+        if (Number.isFinite(d.eave) && Number.isFinite(d.rise)) { b.h = Math.max(2.4, d.eave - b.base); b.hc = d.h; b.rh = d.rise; b.roof = d.roof; }
+      }
       // (A38: off the Headlands (no lidar table there) a building on a hillside as the Headlands' own: the eaves a storey (2.4 m)
       // over the highest ground at its corners, the walls still down to the lowest, so no slope covers a roof: 34 of the 148
       // houses within 350 m of 37.8895,-122.5465 above Shoreline Highway stood with their roof under the uphill ground, 80 with

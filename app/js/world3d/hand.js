@@ -617,7 +617,9 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
       // lod0: the plants by cell, every cell built now, nearest first
       if (!M.parts[0].length) continue;
       const cellsOf = size => { const cells = new Map(); for (let i = 0; i < n; i++) { const cx = Math.floor(a[st * i] / size), cz = Math.floor(a[st * i + 2] / size), k = cx + ',' + cz; (cells.get(k) ?? cells.set(k, { ids: [], meshes: null, cx: (cx + 0.5) * size, cz: (cz + 0.5) * size }).get(k)).ids.push(i); } return [...cells.values()]; };
-      const S = { sp, a, st, parts: M.parts[0], tiers: [{ size: CELL, mats: M.mats, lo: 0, hi: M.split, cast: true, cells: cellsOf(CELL) }, { size: CELL2, mats: M.mats2, lo: M.split, hi: M.R1 + M.band, cast: false, cells: cellsOf(CELL2) }] }; sets.push(S);
+      // (A53: lidar canopy on Miller added 231 draw calls for 120k triangles. Larger batches use exact plant distances below; model, scale and thinning stay unchanged.)
+      const batch = Array.isArray(G.batch), c0 = batch ? G.batch[0] : CELL, c1 = batch ? G.batch[1] : CELL2;
+      const S = { sp, a, st, batch, parts: M.parts[0], tiers: [{ size: c0, mats: M.mats, lo: 0, hi: M.split, cast: true, cells: cellsOf(c0) }, { size: c1, mats: M.mats2, lo: M.split, hi: M.R1 + M.band, cast: false, cells: cellsOf(c1) }] }; sets.push(S);
       await breath();
       const [px, pz] = at ?? [x, z], d2 = c => (c.cx - px) ** 2 + (c.cz - pz) ** 2;
       for (const T of S.tiers) for (const c of [...T.cells].sort((p, q) => d2(p) - d2(q))) { build(S, T, c); await breath(); }
@@ -657,9 +659,16 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   }
   // (a cell: shown while one of its plants can be inside its ring, and of each part only the clusters its nearest plant keeps)
   function show(S, T, c, x, z) {
-    const full = forced === 0, h = T.size * 0.7072 + 3, dc = Math.hypot(c.cx - x, c.cz - z), on = full && T.lo > 0 ? true : dc - h < T.hi && dc + h >= T.lo;
+    const full = forced === 0, h = T.size * 0.7072 + 3, dc = Math.hypot(c.cx - x, c.cz - z);
+    let near = dc - h, far = dc + h;
+    if (S.batch && near < T.hi && far >= T.lo) {
+      let n2 = Infinity, f2 = 0;
+      for (const i of c.ids) { const dx = S.a[S.st * i] - x, dz = S.a[S.st * i + 2] - z, d2 = dx * dx + dz * dz; n2 = Math.min(n2, d2); f2 = Math.max(f2, d2); }
+      near = Math.sqrt(n2) - 3; far = Math.sqrt(f2) + 3;
+    }
+    const on = full && T.lo > 0 ? true : near < T.hi && far >= T.lo;
     for (let k = 0; k < c.meshes.length; k++) { const m = c.meshes[k]; m.visible = on; if (!on) continue;
-      const p = S.parts[k], d = Math.max(1, dc - h, T.lo - 3), fr = full ? 1 : Math.max((p.prune.d1 / d) ** 2, p.prune.u.value.y), nk = Math.min(p.nc, Math.ceil(Math.min(1, fr) * p.nc) + 1);
+      const p = S.parts[k], d = Math.max(1, near, T.lo - 3), fr = full ? 1 : Math.max((p.prune.d1 / d) ** 2, p.prune.u.value.y), nk = Math.min(p.nc, Math.ceil(Math.min(1, fr) * p.nc) + 1);
       m.geometry.setDrawRange(0, p.ends[nk - 1]); }
   }
   // every frame: the camera uniform; near cells shown (only after 3 m of travel: the extra 3 m in R covers it)

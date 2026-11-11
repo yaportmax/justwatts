@@ -425,9 +425,14 @@ export function roadMaterial() {
         float r = x + W * 0.5, ta = vRd2.x, tb = W - vRd2.y, ln1 = 0.0;
         // the hand list's markings (ribbon.js markCode): mc the centre line, mb bits
         int mc = int(vRd3.x + 0.5), mb = int(vRd3.y + 0.5); bool noEdge = (mb & 1) != 0;
+        // (A54: source-tagged bike buffers, 0.6 m within existing paving, conservative width from Miller pairs. No road-edge geometry.)
+        float br = (mb & 128) != 0 && ta - vRd2.w > 1.2 ? 0.6 : 0.0;
+        float bl = (mb & 256) != 0 && vRd2.y - vRd2.z > 1.2 && lm != 4.0 ? 0.6 : 0.0;
+        float bikeR = ta, bikeL = tb;
+        ta += br; tb -= bl;
         #define LN(at, hw) (1.0 - smoothstep(hw, hw + aa, abs(r - (at))))
         if (lm >= 1.0) {
-          float rr = ta > 0.5 ? ta : 0.3, ll = W - (vRd2.y > 0.5 ? vRd2.y : 0.3);
+          float rr = ta > 0.5 ? ta : 0.3, ll = vRd2.y > 0.5 ? tb : W - 0.3;
           if (!noEdge || ta > 0.5) line = max(line, LN(rr, 0.06));
           if (vRd2.w > 0.5 && ta - vRd2.w > 0.5) line = max(line, LN(vRd2.w, 0.06));                 // parking, then a bike lane
           if (vRd2.z > 0.5 && vRd2.y - vRd2.z > 0.5) line = max(line, LN(W - vRd2.z, 0.06));
@@ -442,6 +447,14 @@ export function roadMaterial() {
           }
           else if (lm == 3.0) { if (mc != 1) yel = max(yel, LN(ll, 0.06)); }                       // a oneway's left edge
           else if (!noEdge || vRd2.y > 0.5) line = max(line, LN(ll, 0.06));
+        }
+        if (lm >= 1.0 && br > 0.0) {
+          float dg = mod(along + r - bikeR, 6.0);
+          line = max(line, max(LN(bikeR, 0.06), step(bikeR, r) * step(r, ta) * (1.0 - smoothstep(0.07, 0.07 + aa, min(dg, 6.0 - dg)))));
+        }
+        if (lm >= 1.0 && bl > 0.0) {
+          float dg = mod(along - r + bikeL, 6.0);
+          line = max(line, max(LN(bikeL, 0.06), step(tb, r) * step(r, bikeL) * (1.0 - smoothstep(0.07, 0.07 + aa, min(dg, 6.0 - dg)))));
         }
         if (lm == 0.0 && mc == 7) yel = max(yel, max(LN(W * 0.5 - 0.11, 0.05), LN(W * 0.5 + 0.11, 0.05)));  // (the hand list's double yellow, A13)
         if (lm == 2.0) {
@@ -474,8 +487,8 @@ export function roadMaterial() {
         // (none where the hand list says; BIKE LANE in words where it says so)
         if (lm >= 1.0 && (mb & 2) == 0) {
           float pr = vRd2.w, pl = vRd2.z, rl = W - pl; bool wd = (mb & 4) != 0;
-          if (ta - pr > 1.2 && r > pr && r < ta) line = max(line, wd ? jwWords(vec2((pr + ta) * 0.5 - r, mod(along, 150.0) - 75.0), aa) : jwBike(vec2(r - (pr + ta) * 0.5, mod(along, 150.0) - 75.0), aa));
-          if (rl - tb > 1.2 && r > tb && r < rl) line = max(line, wd ? jwWords(vec2(r - (tb + rl) * 0.5, 75.0 - mod(along + 40.0, 150.0)), aa) : jwBike(vec2((tb + rl) * 0.5 - r, 75.0 - mod(along + 40.0, 150.0)), aa));
+          if (bikeR - pr > 1.2 && r > pr && r < bikeR) line = max(line, wd ? jwWords(vec2((pr + bikeR) * 0.5 - r, mod(along, 150.0) - 75.0), aa) : jwBike(vec2(r - (pr + bikeR) * 0.5, mod(along, 150.0) - 75.0), aa));
+          if (rl - bikeL > 1.2 && r > bikeL && r < rl) line = max(line, wd ? jwWords(vec2(r - (bikeL + rl) * 0.5, 75.0 - mod(along + 40.0, 150.0)), aa) : jwBike(vec2((bikeL + rl) * 0.5 - r, 75.0 - mod(along + 40.0, 150.0)), aa));
         }
         // stall ticks across a parking lane every 6.7 m (22 ft, a parallel stall), the hand list's
         if ((mb & 32) != 0 && vRd2.w > 1.5 && r < vRd2.w) { float sl = fract(along / 6.7) * 6.7; line = max(line, 1.0 - smoothstep(0.06, 0.06 + aa * 2.0, min(sl, 6.7 - sl))); }
@@ -485,7 +498,7 @@ export function roadMaterial() {
         c = mix(c, srgb(vec3(0.88, 0.88, 0.85)), line * 0.92 * fade);
         diffuseColor.rgb *= c;`);
   };
-  m.customProgramCacheKey = () => 'jw-road-7';
+  m.customProgramCacheKey = () => 'jw-road-8';
   return m;
 }
 

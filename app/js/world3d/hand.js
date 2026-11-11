@@ -276,7 +276,7 @@ function rasterY(R, x, z) {
   return sw > 0.249 ? R.y0 + s / sw / 100 : null;
 }
 
-export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoad = () => {}, prepare = null }) {
+export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoad = () => {}, prepare = null, ahead = () => 1 }) {
   const group = new THREE.Group(); group.name = 'hand'; scene.add(group);
   // (A23: streamed by stretch: a group of chunks loads when the rider comes within 1800 m of one of them; a ride elsewhere loads none. state.on(s): that station's
   // chunk is in the scene; state.want(x, z): called by view.js as the rider moves; onLoad after each group.)
@@ -318,8 +318,12 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
     const grp = c => c.s0 >= 20000 ? 100 + Math.floor(c.s0 / 1000) : c.s0 < 5000 ? 0 : c.s0 < 11322 ? 1 : c.s0 < 12822 ? 2 : 3,  /* (A33: the other roads a group per kilometre: all of them one group loaded 85 MB at once and the ride stalled) */ groups = new Map(); for (const c of live) { const k = grp(c); (groups.get(k) ?? groups.set(k, []).get(k)).push(c); }
     // (a group stays hidden until all its chunks are in, and counts as present only then: a late load shows the generated ground it replaces, never a part of the
     // corridor standing in it)
+    // (A51: ahead(): how many of a group's chunk files are on their way at once, the one being worked on counted. 1 in a ride, as before. Under the
+    // start screen view.js asks for 6: on the live site each file waited for the one before it to be fetched and worked through, 102 files at the
+    // Conzelman start arriving from 7 s to 24 s, v610_conzelman_net.txt. They are still worked through one at a time in the same order.)
+    const coming = new Map(), fetchChunk = c => coming.get(c.i) ?? coming.set(c.i, loader.loadAsync(base + `conz_${c.i}.glb`).catch(() => null)).get(c.i);
     async function addChunk(c, into, box) {
-      const g = await loader.loadAsync(base + `conz_${c.i}.glb`).catch(() => null); if (!g) return;
+      const g = await fetchChunk(c); coming.delete(c.i); if (!g) return;
       g.scene.position.set(c.cx, 0, c.cz);
       { const od = OWN?.drop?.[c.i]; if (od) g.scene.traverse(o => { const B = o.isMesh && od[o.name], I = o.geometry?.index; if (!B || !I) return; const nt = I.count / 3; if (nt !== B[0]) { state.own.skipped++; return; }  // (A46; a list made from another build of the chunk: not used)
           const T = new Int16Array(nt).fill(-1), sets = []; for (let q = 1; q + 1 < B.length; q += 2) { const id = sets.push(B[q]) - 1, R = B[q + 1]; for (let k = 0; k + 1 < R.length; k += 2) { T.fill(id, R[k], R[k] + R[k + 1]); state.own.tris += R[k + 1]; } }
@@ -400,7 +404,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           cs.sort((a, b) => ((a.cx - x) ** 2 + (a.cz - z) ** 2) - ((b.cx - x) ** 2 + (b.cz - z) ** 2));
           const into = new THREE.Group(); into.visible = false; group.add(into);
           // (lastBox: what this group covers, view.js builds again only the tiles it touches; prepare: slow work done in slices before the group shows)
-          const box = new THREE.Box3(); for (const c of cs) await addChunk(c, into, box);
+          const box = new THREE.Box3(); for (let i = 0; i < cs.length; i++) { for (let j = i + 1, n = Math.min(cs.length, i + ahead()); j < n; j++) fetchChunk(cs[j]); await addChunk(cs[i], into, box); }
           { const will = new Set(cs.map(c => c.i)); ownApply(ownReg(into), i => (shown.has(i) || will.has(i)) && !ownCut.has(i)); }  // (A46: before the buffers go to the GPU)
           await prepare?.(into); state.lastBox = box;
           into.updateMatrixWorld(true); into.updateMatrixWorld = () => {};  // (A32: never moves. three.js walks every child each frame whatever matrixWorldAutoUpdate says: 1.5 ms a frame over 8000 objects)

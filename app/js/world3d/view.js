@@ -220,7 +220,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   let CZ = compileSpec(proj, czSpec); const notCz = e => !CZ.owns(e[0], e[1]); setLaneHook((x, z, dx, dz) => { const l = Math.hypot(dx, dz) || 1; return CZ.lane(x, z, dx / l, dz / l); });
   let railsJson = null;
   // the hand-built scenery (hand.js); once in, the near tiles' roads are built again without that stretch
-  const HAND = loadHand({ scene, lambert: m => withSun(m), prepare: into => handBasePrepare().then(() => stageUploads(into)), onLoad: () => { hz.touch(); handMask = null; const B = HAND.lastBox, M = 130; for (const c of near.values()) if (c.sig) { const b = tileBox(c); if (B && b && (b[2] < B.min.x - M || b[0] > B.max.x + M || b[3] < B.min.z - M || b[1] > B.max.z + M)) continue;  /* (a tile this group does not reach keeps its ground and roads: building them again held a frame up and uploaded 15 MB in mid ride) */ if (c.sig.roads) { c.sig.roads = null; c.sig.furn = null; } if (c.sig.terrain && HAND.settled) c.sig.terrain = null; } poke(); } });
+  const HAND = loadHand({ scene, lambert: m => withSun(m), ahead: () => veilAt ? 6 : 1, prepare: into => handBasePrepare().then(() => stageUploads(into)), onLoad: () => { hz.touch(); handMask = null; const B = HAND.lastBox, M = 130; for (const c of near.values()) if (c.sig) { const b = tileBox(c); if (B && b && (b[2] < B.min.x - M || b[0] > B.max.x + M || b[3] < B.min.z - M || b[1] > B.max.z + M)) continue;  /* (a tile this group does not reach keeps its ground and roads: building them again held a frame up and uploaded 15 MB in mid ride) */ if (c.sig.roads) { c.sig.roads = null; c.sig.furn = null; } if (c.sig.terrain && HAND.settled) c.sig.terrain = null; } poke(); } });
   const HVEG = loadHandPlants({ scene, renderer, lambert: m => withSun(m) });
   const HSCRUB = loadScrub({ scene, lambert: m => withSun(m) });  // (A35: the coastal scrub, one canopy surface)
   // (A19: inside the hand list's corridor its own plants stand; the generated trees and scrub give way, built again once known)
@@ -298,7 +298,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   async function handBasePrepare() {
     if (handBase || !headNear()) return; const g = handBaseSteps(); let t = performance.now();
-    for (;;) { if (g.next().done) return; if (performance.now() - t > 3) { await new Promise(r => setTimeout(r, 4)); t = performance.now(); } }
+    for (;;) { if (g.next().done) return; if (performance.now() - t > (veilAt ? 30 : 3)) { await new Promise(r => setTimeout(r, veilAt ? 0 : 4)); t = performance.now(); } }  /* (A51: under the start screen in long slices, nothing is seen) */
   }
   function handCover() {
     if (handMask) return handMask;
@@ -2283,6 +2283,31 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     { const bm = new THREE.BatchedMesh(1, 64, 64, mats.furn); bm.setMatrixAt(bm.addInstance(bm.addGeometry(geo)), under); bm.frustumCulled = false; bm.castShadow = bm.receiveShadow = true; warm.add(bm);
       for (const side of [THREE.FrontSide, THREE.DoubleSide]) { const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ side }), 1); im.setMatrixAt(0, under); im.setColorAt(0, new THREE.Color(1, 1, 1)); im.frustumCulled = false; im.castShadow = im.receiveShadow = true; im.userData.ownMat = true; warm.add(im); } }
     warm.userData.geo = geo; }
+  // (A51: under the start screen the programs are built in parallel, off the main thread, and the scene is not drawn while one is still
+  // being built. Before, each was linked at its first draw with the main thread waiting on it: 12.0 s of a 53.8 s start at Conzelman, 5.1 s
+  // of that in the very first frame, cpu_conz.txt. askPrograms: every material new to the scene, shown or not yet (a hand group stands in
+  // the scene hidden while its chunks load), as it will be drawn: into post's targets when post is on. Without the extension nothing is
+  // held; during a ride nothing changes.)
+  const PAR = !!renderer.extensions.get('KHR_parallel_shader_compile'), asked = new WeakMap(), askBox = new THREE.Object3D();
+  let askRT = null, askAt = 0, holdAt = 0, drawAt = 0;
+  const unbuilt = () => renderer.info.programs.some(pr => !pr.isReady());
+  const asDrawn = fn => { const on = post.on && !globalThis.__w3?.noPost, prev = renderer.getRenderTarget(); if (on) renderer.setRenderTarget(askRT ??= new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType })); try { fn(); } finally { if (on) renderer.setRenderTarget(prev); } };
+  function askPrograms() {
+    const list = [];
+    scene.traverse(o => {
+      const M = o.material; if (!M || !(o.isMesh || o.isPoints || o.isLine || o.isSprite)) return;
+      // what of the object and its geometry chooses the program
+      const G = o.geometry, A = G?.attributes ?? {}, kind = (o.isInstancedMesh ? (o.instanceColor ? 'I' : 'i') : '') + (o.isBatchedMesh ? 'b' : '') + (o.isSkinnedMesh ? 's' : '') + (o.isPoints ? 'p' : '') + (A.color ? 'c' + A.color.itemSize : '') + (A.uv1 ? 'u' : '') + (A.uv2 ? 'v' : '') + (A.tangent ? 't' : '') + (G?.morphAttributes?.position ? 'm' : '');
+      // (a see-through two-sided material's version counts up at every draw, three.js draws it as two: its version is not looked at)
+      const one = m => { const v = m.transparent && m.side === THREE.DoubleSide && !m.forceSinglePass ? -1 : m.version; let r = asked.get(m); if (!r || r.v !== v) asked.set(m, r = { v, k: new Set() }); if (r.k.has(kind)) return false; r.k.add(kind); return true; };
+      let fresh = false; if (Array.isArray(M)) { for (const m of M) if (one(m)) fresh = true; } else fresh = one(M);
+      if (fresh) list.push(o);
+    });
+    if (!list.length) return 0;
+    // (a stand-in parent for compile() to walk: the objects stay where they are in the scene)
+    askBox.children = list; try { asDrawn(() => renderer.compile(askBox, camera, scene)); } finally { askBox.children = []; }
+    return list.length;
+  }
   function governor(dt, now) {
     if (document.hidden || dt > 0.25 || globalThis.__w3?.noGov) return;  /* (noGov: a scan or a test keeps the level it asked for) */
     // (A49: nor under the start screen: there the build runs flat out, 40 ms a frame by design, and while the hand chunks load the queue is
@@ -2341,7 +2366,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const lat = proj.lat(p[1]), lon = proj.lon(p[0]);
       stream(lat, lon, now);
       const PF = globalThis.__w3?.prof, pm = PF ? [c0] : null, mark = PF ? () => pm.push(performance.now()) : () => {}, gq0 = PF && globalThis.__w3.gpu ? gpuTime.begin() : null;
-      jobs.run(globalThis.__w3?.budget ?? (veilAt ? 40 : q >= 2 ? 2.5 : 4));  // (A33: under the start screen nothing is seen: build flat out, a slow device's start took over 30 s at 4 ms a frame) mark();  // (__w3.budget: tools that only want it built)
+      jobs.run(globalThis.__w3?.budget ?? (veilAt ? 90 : q >= 2 ? 2.5 : 4));  // (A33: under the start screen nothing is seen: build flat out, a slow device's start took over 30 s at 4 ms a frame; A51: 90 ms, was 40: a frame's other work and the wait for the display's next frame are a smaller share of it) mark();  // (__w3.budget: tools that only want it built)
       if (easing.size) easeStep(performance.now());
       marks.update(camera, dt);
       // the full trees follow the rider: split a tile again after 60 m, unless it is all far away and already all simple
@@ -2420,21 +2445,36 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // once the world round the start is built: every program it needs built now, not when a part of it first comes
       // into view or into the shadow box on the ride (each one held a frame up by a quarter of a second): the scene's
       // materials compiled, and one shadow map drawn over 20 km
+      // (A51: under the start screen: the new materials' programs asked for, and no draw while one is still being built (5 s at most, then
+      // drawn as before, waiting); and while the world is still building, a draw every 100 ms only: nothing of it is seen, and each draw
+      // costs the build 8 ms of a frame)
+      let hold = false;
+      if (veilAt && !dbg.noAsk) {
+        if (PAR) { if (now - askAt > 100) { askAt = now; askPrograms(); }
+          hold = unbuilt(); if (hold) { holdAt ||= now; if (now - holdAt > 5000) hold = false; } else holdAt = 0; }
+        if (!hold && !(ready && jobs.size < 2) && now - drawAt < 100) hold = true;
+      }
       if (ready && warm.userData.frames > 3 && !warm.userData.all) {
-        warm.userData.all = warm.userData.frames; renderer.compile(scene, camera);
-        { const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType }), prev = renderer.getRenderTarget(); renderer.setRenderTarget(rt); renderer.compile(scene, camera); renderer.setRenderTarget(prev); rt.dispose(); }  // as drawn into post's targets
-        for (const p of renderer.info.programs) p.getUniforms();  // linked and checked now (a program's first use waits for that)
-        const c = sky.sun.shadow.camera, far = c.far; c.far = 40000; sky.update(camera, me.group.position, 0, 20000, true); c.updateProjectionMatrix(); renderer.shadowMap.needsUpdate = true;
-        warm.userData.restore = () => { c.far = far; c.updateProjectionMatrix(); };
-      } else if (warm.userData.restore) { warm.userData.restore(); warm.userData.restore = null; }
+        // (the whole scene asked for once, as it is drawn: into post's targets or onto the screen, not both, the other was never used)
+        if (!warm.userData.askAll) { warm.userData.askAll = now; asDrawn(() => renderer.compile(scene, camera)); if (veilAt && PAR && !dbg.noAsk) hold = unbuilt(); }
+        // (in a ride, when the start screen lifted before the world was whole: the draws go on, this step waits for the programs, 5 s at most)
+        if (!hold && (veilAt || !PAR || now - warm.userData.askAll > 5000 || !unbuilt())) {
+          warm.userData.all = warm.userData.frames;
+          for (const p of renderer.info.programs) p.getUniforms();  // linked and checked now (a program's first use waits for that)
+          const c = sky.sun.shadow.camera, far = c.far; c.far = 40000; sky.update(camera, me.group.position, 0, 20000, true); c.updateProjectionMatrix(); renderer.shadowMap.needsUpdate = true;
+          warm.userData.restore = () => { c.far = far; c.updateProjectionMatrix(); };
+        }
+      } else if (warm.userData.restore && !hold) { warm.userData.restore(); warm.userData.restore = null; }
       renderer.info.reset(); mark();
       const c1 = performance.now();
-      const gq = dbg.gpu && !gq0 ? gpuTime.begin() : null;
-      if (dbg.noPost) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = sky.exposure; renderer.render(scene, camera); } else post.render(sky.exposure * (1 + dark * 0.6));
-      if (gq || gq0) gpuTime.end(gq || gq0);
+      if (!hold) {
+        const gq = dbg.gpu && !gq0 ? gpuTime.begin() : null;
+        if (dbg.noPost) { renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = sky.exposure; renderer.render(scene, camera); } else post.render(sky.exposure * (1 + dark * 0.6));
+        if (gq || gq0) gpuTime.end(gq || gq0);
+        drawAt = now; warm.userData.frames++;  /* (frames: drawn ones, the warm-up counts them) */
+      } else if (gq0) gpuTime.end(gq0);
       const c2 = performance.now(); if (PF && c2 - c0 > 12) { pm.push(c2); PF.push([Math.round(now), ...pm.slice(1).map((t, i) => +(t - pm[i]).toFixed(1))]); if (PF.length > 400) PF.shift(); }
       cpu.js += (c1 - c0 - cpu.js) * 0.05; cpu.draw += (c2 - c1 - cpu.draw) * 0.05; cpu.max = Math.max(cpu.max * 0.995, c1 - c0);
-      warm.userData.frames++;
       frames++; if (now - fpsT > 1000) { fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now; }
       governor(dt, now);
     } catch (e) { fail(e); return; }
@@ -2448,7 +2488,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (dead) return; dead = true; cancelAnimationFrame(raf);
     for (const m of [near, far]) for (const k of [...m.keys()]) dropChunk(m, k);
     me.dispose(); for (const e of others.values()) e.r.dispose();
-    grass.dispose(); scrub.dispose(); post.dispose(); life.dispose(); audio.dispose(); document.removeEventListener('visibilitychange', onHide); hz.dispose(); if (tun.group) disposeObj(tun.group);
+    grass.dispose(); scrub.dispose(); post.dispose(); askRT?.dispose(); life.dispose(); audio.dispose(); document.removeEventListener('visibilitychange', onHide); hz.dispose(); if (tun.group) disposeObj(tun.group);
     renderer.dispose(); renderer.forceContextLoss?.(); canvas.remove(); tags.remove(); veil.remove();
   }
   raf = requestAnimationFrame(frame);

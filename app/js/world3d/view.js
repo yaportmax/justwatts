@@ -1415,9 +1415,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // at about 3.2 m to the eaves, w_bunker3; Cronkhite's barracks two storeys under red roofs, w_mitchell1; the Field Road
       // house two storeys and a steep roof, w_field0. Walls to the eaves over the footprint's mean ground; a hand height,
       // BUILDINGS, agrees with it where both are)
-      const fort = inHeadlands(...R0[0]);
+      // (A52: the army posts only. The Headlands' box reaches 37.865 for its grass and scrub, so every lidar-matched building in Sausalito was
+      // drawn as a white clapboard barracks under a military roof, cx-junction sa_0800, sa_1200, cxj_541600; town buildings keep the lidar's shape, in the town's walls)
+      const hl = inHeadlands(...R0[0]), fort = hl && R0[0][0] < 37.8425;
       let lb = null;
-      if (fort) { let a = 0, o = 0; const n = R0.length - 1; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; } const ka = Math.round(a / n * 1e5), ko = Math.round(o / n * 1e5); lb = LIDAR_BLDG.get(ka + ',' + ko) || null;
+      if (hl) { let a = 0, o = 0; const n = R0.length - 1; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; } const ka = Math.round(a / n * 1e5), ko = Math.round(o / n * 1e5); lb = LIDAR_BLDG.get(ka + ',' + ko) || null;
         // (A38: a building the keep-out pass moved off a road's ribbon by up to 3 steps of 1e-5 degrees, keepout_bake.mjs (160 of
         // the Headlands' with a lidar roof): its roof by the nearest key, ring by ring; the pass proves no other building finds one so)
         for (let d = 1; d <= 3 && !lb; d++) for (let i = -d; i <= d && !lb; i++) for (let j = -d; j <= d && !lb; j++) if (Math.max(Math.abs(i), Math.abs(j)) === d) lb = LIDAR_BLDG.get((ka + i) + ',' + (ko + j)) || null; }
@@ -1436,7 +1438,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const baker = R0[0][0] > 37.832 && R0[0][0] < 37.841 && R0[0][1] > -122.4825 && R0[0][1] < -122.474;
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
-        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort: true, front, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         continue;
       }
       list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
@@ -2308,6 +2310,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     askBox.children = list; try { asDrawn(() => renderer.compile(askBox, camera, scene)); } finally { askBox.children = []; }
     return list.length;
   }
+  let lowAsked = false;
+  function warmLow() {
+    if (lowAsked || !PAR) return; lowAsked = true;
+    const tm = renderer.toneMapping, se = renderer.shadowMap.enabled, cs = sky.sun.castShadow;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = false; sky.sun.castShadow = false;
+    try { renderer.compile(scene, camera); } finally { renderer.toneMapping = tm; renderer.shadowMap.enabled = se; sky.sun.castShadow = cs; }
+  }
   function governor(dt, now) {
     if (document.hidden || dt > 0.25 || globalThis.__w3?.noGov) return;  /* (noGov: a scan or a test keeps the level it asked for) */
     // (A49: nor under the start screen: there the build runs flat out, 40 ms a frame by design, and while the hand chunks load the queue is
@@ -2318,6 +2327,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     ft.sort((a, b) => a - b); const med = ft[ft.length >> 1] || 0; ft = [];
     if (med > 1 / 50) { slow++; fast = 0; } else { slow = 0; if (med < 1 / 75) fast++; }
     // (A33: the level kept for the next ride, onQuality: a slower machine starts where it ended, not on high again; one step back up a ride when it runs fast for 20 s)
+    // (A52: the step down to a level without post or shadows needs every program built again: 10.2 s in one frame, fr_ship_3c00860 at 199 m. Asked for at the first slow reading, in parallel, 2.5 s or more before any step)
+    if (slow >= 1 && q <= 1) warmLow();
     if (slow >= 2 && q < QUALITY.length - 1) { q++; slow = 0; fast = 0; applyQuality(); onQuality(q); }
     else if (fast >= 8 && q > 0 && !raised) { q--; fast = 0; raised = true; applyQuality(); onQuality(q); }
     // (at the lowest it stays: a slow device keeps the world, not the flat map)
@@ -2511,7 +2522,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setQuality(n) { q = Math.max(0, Math.min(QUALITY.length - 1, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
-    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, sky, post, gpuMs: gpuTime.ms, me: me.group.position.toArray(), hand: (x, z) => ({ y: HAND.yAt?.(x, z) ?? null, hy: handY(x, z), inAll: inHandAll(x, z), inH: inHand(x, z), drawn: drawnY(x, z) }), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), raw: (c => c?.grid ? gridHeight(c.grid, x, z, c.grid.raw) : null)(near.get(key(NEAR_Z, ...tileOf(x, z)))), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown) == null ? null : profY(dShown) + TYRE, lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z), press: () => [...near.values()].map(c => ({ k: c.k, segs: c.grid?.segs, ...c.grid?.press })), quad: (x, z) => { const c = near.get(key(NEAR_Z, ...tileOf(x, z))), G = c?.grid; if (!G) return null; const [fi, fj] = gridIJ(G, x, z), s = G.segs, i = Math.min(s - 1, Math.floor(fi)), j = Math.min(s - 1, Math.floor(fj)), n = s + 1, k = j * n + i; return { k: c.k, segs: s, i, j, full: G.full ? G.full[j * s + i] : null, skip: !!handSkip(G)?.(i, j), hs: [G.hs[k], G.hs[k + 1], G.hs[k + n], G.hs[k + n + 1]].map(v => +v.toFixed(2)), raw: [G.raw[k], G.raw[k + 1], G.raw[k + n], G.raw[k + n + 1]].map(v => +v.toFixed(2)), x: [G.xs[i], G.xs[i + 1]].map(v => +v.toFixed(1)), z: [G.zs[j], G.zs[j + 1]].map(v => +v.toFixed(1)) }; },
+    debug: () => ({ warmLow, scene, camera, THREE, renderer, horizon: hz, sky, post, gpuMs: gpuTime.ms, me: me.group.position.toArray(), hand: (x, z) => ({ y: HAND.yAt?.(x, z) ?? null, hy: handY(x, z), inAll: inHandAll(x, z), inH: inHand(x, z), drawn: drawnY(x, z) }), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), raw: (c => c?.grid ? gridHeight(c.grid, x, z, c.grid.raw) : null)(near.get(key(NEAR_Z, ...tileOf(x, z)))), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown) == null ? null : profY(dShown) + TYRE, lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z), press: () => [...near.values()].map(c => ({ k: c.k, segs: c.grid?.segs, ...c.grid?.press })), quad: (x, z) => { const c = near.get(key(NEAR_Z, ...tileOf(x, z))), G = c?.grid; if (!G) return null; const [fi, fj] = gridIJ(G, x, z), s = G.segs, i = Math.min(s - 1, Math.floor(fi)), j = Math.min(s - 1, Math.floor(fj)), n = s + 1, k = j * n + i; return { k: c.k, segs: s, i, j, full: G.full ? G.full[j * s + i] : null, skip: !!handSkip(G)?.(i, j), hs: [G.hs[k], G.hs[k + 1], G.hs[k + n], G.hs[k + n + 1]].map(v => +v.toFixed(2)), raw: [G.raw[k], G.raw[k + 1], G.raw[k + n], G.raw[k + n + 1]].map(v => +v.toFixed(2)), x: [G.xs[i], G.xs[i + 1]].map(v => +v.toFixed(1)), z: [G.zs[j], G.zs[j + 1]].map(v => +v.toFixed(1)) }; },
       // the drawn road's top under a point (a ray down onto the roads' and the bores' road surfaces), the nearest under y + 1
       // what is seen from above at a point: the top of the ground, the banks, the roads and lots, the bores' floors
       // ({ y, kind: 'ground' | 'bank' | 'road' }), null where nothing is drawn

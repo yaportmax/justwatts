@@ -123,6 +123,15 @@ def test_a_short_dead_end_is_no_option(js):
     assert [s[0] for s in r["seq"]][:3] == [1, 2, 4] and all(j["opts"] is None or len(j["opts"]) <= 1 for j in r["junctions"] if j["k"] == 1)
 
 
+def test_a_curated_short_destination_remains_an_option(js):
+    # (A49: Miller ends 98 m past Sunnyside at Lytton Square, an intentional destination in ROUTE.)
+    cells = osm(way(1, "residential", [(1, 0, -300), (2, 0, 0), (3, 0, 100)], "Elm Street"),
+                way(2, "residential", [(2, 0, 0), (4, -300, 0), (5, -300, 400)], "Oak Street"))
+    r = plan(js, cells, through=[1], to=600)
+    assert [s[0] for s in r["seq"]][:4] == [1, 2, 3, 2]
+    assert any(j["k"] == 1 and {o["to"] for o in j["opts"]} == {3, 4} for j in r["junctions"])
+
+
 def test_oneway_the_wrong_way_is_not_the_default(js):
     r = plan(js, osm(ELM, way(2, "primary", [(3, 300, 0), (2, 0, 0)], "Main Street", oneway="yes"), way(3, "residential", [(2, 0, 0), (4, -300, 0)], "Oak Street")))
     assert r["names"][:2] == ["Elm Street", "Oak Street"] and all(j["k"] != 1 for j in r["junctions"])  # one way on: no question

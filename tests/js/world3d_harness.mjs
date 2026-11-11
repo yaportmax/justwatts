@@ -209,6 +209,15 @@ out.edge = { opts: g0.options(1, 2).map(e => e.to), optsIn: gIn.options(1, 2).ma
     almonteNorth: [rideable(37.8873137, -122.5247287, { id: 1255772604 }), rideable(37.887389, -122.5247661, { id: 1255772604 })],
     ramp: [rideable(37.8725058, -122.5056536, { id: 986569391 }), rideable(37.8724238, -122.5056449, { id: 986569391 })], route: ROUTE.size }; }
 
+// (A49: the cached OSM route connects the northern path and both Miller carriageways to the climb.)
+out.millvalley = {
+  route: [[37.8874135, -122.524467, 958712917], [37.8967152, -122.5262427, 371636205],
+    [37.8975315, -122.5369892, 12187862], [37.8974586, -122.5370888, 573467260],
+    [37.8969979, -122.5402379, 12183318], [37.900178, -122.545051, 125871927],
+    [37.8935125, -122.5572405, 12178775]].map(([la, lo, id]) => rideable(la, lo, { id })),
+  side: rideable(37.9, -122.54, { id: 7 }),
+};
+
 /* ---------- drafting ---------- */
 const me = { lat: 37.9, lon: -122.6, h: 0 }, ahead = m => ({ lat: 37.9 + m / 111195, lon: -122.6 });
 out.draft = { close: draftShare(me, [ahead(3)]), far: draftShare(me, [ahead(9)]), gone: draftShare(me, [ahead(20)]), behind: draftShare(me, [ahead(-3)]),
@@ -517,6 +526,11 @@ out.draftSpeed = { solo: r3(v0 * 3.6), drafting: r3(v1 * 3.6), capped: r3(speedS
     for (let i = 1; i + 1 < P.length; i++) { let t = Math.atan2(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]) - Math.atan2(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); while (t > Math.PI) t -= 2 * Math.PI; while (t < -Math.PI) t += 2 * Math.PI; turn.push([i, t * 180 / Math.PI]); }
     for (let k = 0; k < turn.length; k++) { const [i, t] = turn[k]; if (Math.abs(t) < 3) continue; for (let m = k + 1; m < turn.length && D[turn[m][0]] - D[i] < 10; m++) if (Math.abs(turn[m][1]) >= 3 && Math.sign(turn[m][1]) !== Math.sign(t)) { jogs++; jogWorst = Math.max(jogWorst, Math.min(Math.abs(t), Math.abs(turn[m][1]))); break; } } }
   out.rails = { jogs, jogWorst: r3(jogWorst), n, km: r3(km), grade: r3(worstGrade), bend: r3(worstBend), cut: r3(worstCut), cutAt, tileGap: r3(tileGap), tilePts, file: readFileSync(new URL('world/rails.bin', APP)).length };
+  // (A49: partial bakes keep the old rails. The Mill Valley connections must use those preserved junction heights.)
+  out.mvJoins = [[37.893513, -122.557240], [37.887275, -122.524815], [37.887414, -122.524467], [37.887389, -122.524766]].map(p => {
+    const hs = RI.rails.filter(q => q.r.pts.some(v => Math.abs(v[0] - p[0]) < 1e-8 && Math.abs(v[1] - p[1]) < 1e-8)).map(q => q.T.at(...xz(...p)).h);
+    return { at: p, roads: hs.length, gap: Math.max(...hs) - Math.min(...hs) };
+  });
 
   // every bridge in the Headlands' tiles: its deck (straight between its ends) never through the ground, and over the
   // lidar's gap (a creek, a road, water), not a slab in the air over a culvert or a ridge

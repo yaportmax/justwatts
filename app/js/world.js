@@ -16,8 +16,7 @@ export const DEM = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/
 // McCullough and Alexander, Fort Baker. Routes never leave BOUNDS (a way out is no option: the default turns away or
 // turns around); the land beyond stays as scenery.
 // (A38: Mount Tamalpais, the climb from Tam Junction to East Peak, 19.7 km: a box per road of the route. Out there only
-// the route's own ways are ridden, ROUTE below: the owner rejected the look of the generated roads, so a road that is
-// not hand-built is scenery.)
+// the route's own ways are ridden, ROUTE below. A49 adds the generated Mill Valley approach from the cached OSM extract.)
 export const BOUNDS = [[37.8083, -122.545, 37.848, -122.465],
   [37.877, -122.556, 37.89, -122.523],      // Shoreline Highway (CA 1), Tam Junction to the Panoramic Highway
   [37.8815, -122.606, 37.918, -122.552],    // Panoramic Highway, up past Mountain Home and Bootjack to Pantoll
@@ -25,6 +24,8 @@ export const BOUNDS = [[37.8083, -122.545, 37.848, -122.465],
   [37.9085, -122.6145, 37.931, -122.5785],  // East Ridgecrest Boulevard, Rock Spring to the East Peak car park
   // (A38: the link from the Headlands to the climb, 7.4 km, cache/roads/lines_link.json)
   [37.8475, -122.507, 37.8735, -122.4775],  // Sausalito: 2nd Street, Richardson Street, Bridgeway to Gate 6 Road
+  // (A49: cached OSM, 68 Mill Valley ways joining Almonte to Panoramic at node 110407952.)
+  [37.887, -122.559, 37.9065, -122.524], // path, Miller and the Montford/Molino/Edgewood/Sequoia climb
   [37.872, -122.5255, 37.8882, -122.505],   // the Mill Valley - Sausalito Path over Bothin Marsh, Almonte Boulevard down to Tam Junction
 ];
 const inBox = ([s, w, n, e], lat, lon) => lat >= s && lat <= n && lon >= w && lon <= e;
@@ -50,11 +51,20 @@ export const ROUTE = new Set([514410368, 1072216253, 687879578, 1107378169, 1107
   30681848, 1457338735, 917986193, 1457338734, 917986192, 30681847, 221143681, 221143679, 157393809, 879479309,
   103431210,
   // (Almonte Boulevard:)
-  32742943, 32742946, 1378454826, 1378454827, 1255772603, 32742968, 1378358366, 1255772604]);
-// Three of the link's ways reach beyond the line (Gate 6 Road past the path's start, 40 m; the northbound side of Almonte
-// Boulevard past the path's crossing, 9 m; the path's ramp down to Bridgeway, 9 m): each is ridden only inside its box
+  32742943, 32742946, 1378454826, 1378454827, 1255772603, 32742968, 1378358366, 1255772604,
+  // (A49: work/codex/cx-mv/mv_route.json, both Miller carriageways and the climb.)
+  958712917, 221143682, 221143680, 371636202, 371636201, 371636205, 276107607, 88159904, 88159975, 1083745635,
+  276107608, 813765174, 813765175, 88159861, 1083745637, 88160057, 88159912, 958712916, 30681987, 1450213661,
+  1107375723, 1255772605, 239090191, 1067544345, 604630286, 604630287, 620535183, 1255772601, 12175289, 573467265,
+  573467257, 1255772600, 305656804, 1255772599, 276107611, 813765176, 12175841, 12175278, 686937240, 30681970,
+  1520825467, 1083993190, 573467263, 573467260, 573467261, 221143683, 1255772602, 620535182, 1057567906, 1057567905,
+  1057567908, 1057567907, 1047824355, 1107371323, 1047824356, 1047824357, 1047824358, 88159875, 1520860140, 1047824359,
+  958712914, 12187862, 1450162090, 573467259, 12183318, 125871927, 88160064, 12178775]);
+// Two of the link's ways reach beyond the line (Gate 6 Road past the path's start, 40 m;
+// the path's ramp down to Bridgeway, 9 m): each is ridden only inside its box
 // (s, w, n, e: its ridden nodes), so no junction offers the stub
-const CLIP = new Map([[12177501, [37.87262, -122.50566, 37.87269, -122.50559]], [1255772604, [37.8869, -122.52476, 37.88735, -122.5244]],
+// (A49: Almonte's last 9 m now connects to Miller, so it is no longer a clipped stub.)
+const CLIP = new Map([[12177501, [37.87262, -122.50566, 37.87269, -122.50559]],
   [986569391, [37.87247, -122.5057, 37.87276, -122.50564]]]);
 // where a ride may go (roads.js RoadGraph inside): anywhere in the Headlands (BOUNDS[0]); beyond them only along the
 // route's ways (w: the way, when the caller has one)
@@ -75,6 +85,7 @@ export const PRESETS = [
   // (A38: the link, each facing north towards the climb)
   { id: 'sausalito', name: 'Sausalito', lat: 37.85288, lon: -122.47895, heading: 0 },
   { id: 'bothin', name: 'Bothin Marsh', lat: 37.88195, lon: -122.51794, heading: 313 },
+  { id: 'millvalley', name: 'Mill Valley', lat: 37.89735, lon: -122.53675, heading: 315 },
 ];
 // roads baked into the app (tools/bake_roads.mjs) in blocks of 5 x 5 cells, app/roads/<id>/<i>_<j>.json: the open
 // world never waits on Overpass

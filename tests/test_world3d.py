@@ -197,15 +197,17 @@ def test_routes_never_leave_the_world(out):
     assert e["inside"] and not e["outside"] and e["bridge"]
     # (A38: Mount Tamalpais: a box per road of the climb; the gap between the Headlands and the mountain is not the world)
     t = out["tam"]
-    assert t["boxes"] == 7 and t["tamJunction"] and t["pantoll"] and t["eastPeak"] and not t["gap"]
+    assert t["boxes"] == 8 and t["tamJunction"] and t["pantoll"] and t["eastPeak"] and not t["gap"]
     assert t["route"] and not t["side"] and t["headlandsSide"]                 # out there only the route's own ways
     assert t["optsAll"] == [3, 4] and t["opts"] == [3]                         # the side road is no option
     assert t["snapWay"] in (12188378, 88159983)                                # and no start snaps onto it (nearest: the side road)
     # (A38: the link: Sausalito's Bridgeway, the Mill Valley - Sausalito Path, Almonte Boulevard; a way that reaches beyond
     # the line is ridden only along the line)
     k = out["link"]
-    assert k["bridgeway"] and not k["side"] and k["path"] and k["almonte"] and k["route"] == 115
-    assert k["gate6"] == [True, False] and k["almonteNorth"] == [True, False] and k["ramp"] == [True, False]
+    assert k["bridgeway"] and not k["side"] and k["path"] and k["almonte"] and k["route"] == 183
+    # (A49: Almonte's last 9 m joins Miller; Gate 6 and the Bridgeway ramp remain clipped.)
+    assert k["gate6"] == [True, False] and k["almonteNorth"] == [True, True] and k["ramp"] == [True, False]
+    assert all(out["millvalley"]["route"]) and not out["millvalley"]["side"]
 
 
 def test_drafting(out, tmp_path):
@@ -353,7 +355,7 @@ def test_rail_pieces(out):
 
 def test_rails_walked_at_light_speed(out):
     r = out["rails"]
-    assert r["n"] > 300 and r["km"] > 50 and r["file"] < 70000                         # every road the rides reach, one small file
+    assert r["n"] >= 673 and r["km"] > 110 and r["file"] < 70000                      # (A49: 68 Mill Valley rails appended, both Miller carriageways, still under 70 kB.)
                                                                                          # (A38: 609 rails, 102 km with the Tam climb
                                                                                          # and the link from the Headlands: 62 kB)
     assert r["grade"] < 0.45                                                             # no stretch steeper than 45 % over 10 m (South
@@ -362,6 +364,7 @@ def test_rails_walked_at_light_speed(out):
     assert r["cut"] < 3.2, r["cutAt"]                                                    # never far under the lidar's ground (but in a
                                                                                          # tunnel, over a deck, down to a portal)
     assert r["tilePts"] > 500 and r["tileGap"] < 0.02                                    # the tiles' pieces are the area's rails
+    assert all(j["roads"] >= 2 and j["gap"] < 0.015 for j in out["mvJoins"])           # (A49: new rails meet the preserved network within rounding.)
     assert r["jogs"] < 60 and r["jogWorst"] < 10                                         # the roads smooth curves: OpenStreetMap's nodes
                                                                                          # zigzagged them (400 S-jogs, the worst 38 degrees)
     u = out["railUnder"]

@@ -416,13 +416,14 @@ export function buildingGeometry(list) {
     // (A33: a pitched roof only over a footprint that nearly fills its box: at 0.7 the roof over an L hung past its walls, red roofs slicing through houses at Fort Baker, user 2026-11-05)
     // (A37: b.rh, the lidar's ridge over the eaves, bldglidar.js: pitched where it rises, flat where it does not, w_bunker3, w_field0)
     const lid = b.rh != null;
-    const house = b.fort ? (!lid || b.rh >= 0.4) && b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9, barn = !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
+    // (A54: pier roofs stay within their footprints; no random cottage porch over the bay.)
+    const house = b.pier ? false : b.fort ? (!lid || b.rh >= 0.4) && b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : b.h <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9, barn = !b.pier && !b.fort && !house && b.h <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
     // (a footprint too ragged for one roof over its box (an L, a T, the Fort Baker barracks) but pitched by the lidar: a
     // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
     // roof half way up its rise)
     const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40;
-    const hw = lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
-    const style = b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
+    const hw = lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    const style = b.style != null ? b.style : b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : (house ? HOUSE : b.h > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (house ? 8 : 4)];
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];
@@ -474,7 +475,7 @@ export function buildingGeometry(list) {
           if (h(13) < 0.45) { const sd = h(14) < 0.5 ? -1 : 1, p = P(sd * (L / 2 - 0.8), (h(15) - 0.5) * w * 0.3, 0); box(p[0], top - 0.5, p[2], 0.38, rh + 1.4, 0.38, ux, uz, col(h(16) < 0.6 ? 0x8a4a3a : 0x9a9690)); }
         }
         // a porch along one long side: a lean-to roof on two posts, a deck
-        if (h(17) < 0.35 && L > 6) {
+        if (!b.pier && h(17) < 0.35 && L > 6) {
           const sd = h(18) < 0.5 ? -1 : 1, s0 = -L * 0.34, s1 = L * 0.34, t0 = sd * w / 2, t1 = sd * (w / 2 + 2.2), y0 = b.base + 2.95, y1 = b.base + 2.55, pc = col(0xe8e4dc);
           const q1 = P(s0, t0, y0), q2 = P(s1, t0, y0), q3 = P(s1, t1, y1), q4 = P(s0, t1, y1), sl = Math.hypot(2.2, 0.4);
           sd < 0 ? quad(q1, q2, q3, q4, rc, [R(0, sl), R(s1 - s0, sl), R(s1 - s0, 0), R(0, 0)]) : quad(q2, q1, q4, q3, rc, [R(0, sl), R(s1 - s0, sl), R(s1 - s0, 0), R(0, 0)]);
@@ -565,4 +566,163 @@ export function signFaceGeometry(list) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.computeBoundingSphere(); return g;
+}
+
+// (A54: bay promenade from local OSM Bridgeway and the sa_0800/cxj_541000 pairs.
+// Pavement clears every drawn road/path, ride line and vehicle ribbon, on the existing ground, with closed sides.
+// No terrain edits, invented lanes, cars, or per-frame work.)
+export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false }) {
+  const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
+  const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d);
+  const tri = (a, b, c, color) => { pos.push(...a, ...b, ...c); for (let i = 0; i < 3; i++) col.push(color.r, color.g, color.b); };
+  const quad = (a, b, c, d, color) => { tri(a, b, c, color); tri(a, c, d, color); };
+  const wall = (a,b,c,d,color) => { const key=[a,b,c,d].map(p=>p.map(v=>v.toFixed(3)).join(',')).sort().join('|');if(walls.has(key))walls.delete(key);else walls.set(key,[a,b,c,d,color]); };
+  const closest = (x, z) => {
+    let best = null, bd = 2.5 ** 2;
+    for (const s of streets) for (let j = 1; j < s.P.length; j++) {
+      const a = s.P[j - 1], b = s.P[j], dx = b[0] - a[0], dz = b[1] - a[1], l2 = dx * dx + dz * dz;
+      const t = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / l2)) : 0;
+      const d = (x - a[0] - dx * t) ** 2 + (z - a[1] - dz * t) ** 2;
+      if (d < bd) { bd = d; best = { s, dx, dz }; }
+    }
+    return best;
+  };
+  let work = 0;
+  for (const L of lines) {
+    if (L.hand || L.br) continue;
+    const P = L.P;
+    for (let i = 1; i < P.length; i++) {
+      const a = P[i - 1], b = P[i], dx = b[0] - a[0], dz = b[2] - a[2], len = Math.hypot(dx, dz);
+      if (len < 0.1) continue;
+      const match = closest((a[0] + b[0]) / 2, (a[2] + b[2]) / 2); if (!match) continue;
+      for (const right of [true, false]) {
+        const off = right ? 4 : 7, count = Math.ceil(len / 1.5);
+        const bay = match.s.name === 'Bridgeway' && shore((a[off]+b[off])/2,(a[off+2]+b[off+2])/2,(a[off]+b[off]-a[0]-b[0])/2);
+        const width = bay; if (!width) continue;
+        const at = (f, w) => {
+          const x = a[off] + (b[off] - a[off]) * f, z = a[off + 2] + (b[off + 2] - a[off + 2]) * f;
+          const y=a[off+1]+(b[off+1]-a[off+1])*f;
+          const cx = a[0] + dx * f, cz = a[2] + dz * f, d = Math.hypot(x - cx, z - cz) || 1;
+          return [x + (x - cx) / d * w, y, z + (z - cz) / d * w];
+        };
+        for (let k = 0; k < count; k++) {
+          if (++work % 8 === 0) yield;
+          const f0 = k / count, f1 = (k + 1) / count;
+          let ok = true;
+          for (let u = 0; u <= 3 && ok; u++) for (let v = 0; v <= Math.ceil(width / 0.4); v++) {
+            const p = at(f0 + (f1 - f0) * u / 3, START + width * v / Math.ceil(width / 0.4));
+            const g = ground(p[0], p[2]), d = gap(p[0], p[2]); evidence.samples++;
+            const curbEdge=v===0;
+            if (g == null || (!bay && g < 0.9) || g > p[1] + (curbEdge?0.1:0.42) || p[1] - g > (bay ? 6 : 1.5) || d < 0.015 || blocked(p[0], p[2])) { ok = false; break; }
+            evidence.minGap = Math.min(evidence.minGap, d);
+          }
+          if (!ok) { evidence.rejected++; continue; }
+          const A = at(f0, START), B = at(f1, START), C = at(f1, width + START), D = at(f0, width + START);
+          const points = right ? [A, D, C, B] : [A, B, C, D];
+          const bottom = points.map(p => [p[0], Math.min(p[1] - 0.25, ground(p[0], p[2]) - 0.15), p[2]]);
+          const top = points.map(p => [p[0], Math.max(p[1] + 0.15, ground(p[0], p[2]) + 0.05), p[2]]);
+          quad(...top, concrete);
+          for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red ? red : curb); }
+          evidence.sections++;
+        }
+      }
+    }
+  }
+  for(const args of walls.values())quad(...args);
+  if (!pos.length) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute('tag', new THREE.Float32BufferAttribute(new Float32Array(pos.length / 3), 1));
+  g.computeVertexNormals(); g.computeBoundingSphere(); g.userData.edgeEvidence = evidence;
+  return g;
+}
+
+// (A54: sa_0800/cxj_541000: the bay restaurants stand on decks with piles, not walls in open water.
+// Exact retained OSM footprints; the deck follows the street-side level and piles reach the existing seabed.)
+export function townPierGeometry(piers, ground) {
+  const pos = [], colors = [], supports = [], deck = new THREE.Color(0x9b9487), wood = new THREE.Color(0x51483c);
+  const tri = (a, b, c, color) => { pos.push(...a, ...b, ...c); for (let i = 0; i < 3; i++) colors.push(color.r, color.g, color.b); };
+  const quad = (a, b, c, d, color) => { tri(a, b, c, color); tri(a, c, d, color); };
+  const pile = (x, z, top) => {
+    const bottom = Math.min(ground(x, z) ?? -2, 0) - 1;
+    const R = 0.22, N = 8;
+    supports.push({x,z,foot:bottom,top,radius:R});
+    for (let i = 0; i < N; i++) {
+      const a = i / N * 2 * Math.PI, b = (i + 1) / N * 2 * Math.PI;
+      const p = [x + Math.cos(a) * R, bottom, z + Math.sin(a) * R], q = [x + Math.cos(b) * R, bottom, z + Math.sin(b) * R];
+      quad(p, [p[0], top, p[2]], [q[0], top, q[2]], q, wood);
+    }
+  };
+  for (const {ring, y} of piers) {
+    let R = ring.slice(0, -1); if (THREE.ShapeUtils.isClockWise(R.map(p => new THREE.Vector2(...p)))) R = R.reverse();
+    for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(R.map(p => new THREE.Vector2(...p)), [])) {
+      const at = (i, h) => [R[i][0], h, R[i][1]];
+      tri(at(a,y),at(c,y),at(b,y),deck);tri(at(a,y-0.3),at(b,y-0.3),at(c,y-0.3),wood);
+    }
+    for (let i = 0; i < R.length; i++) {
+      const a = R[i], b = R[(i + 1) % R.length], L = Math.hypot(b[0]-a[0],b[1]-a[1]);
+      quad([a[0],y,a[1]],[b[0],y,b[1]],[b[0],y-0.3,b[1]],[a[0],y-0.3,a[1]],deck);
+      const n = Math.max(1, Math.ceil(L / 3));
+      for (let j = 0; j < n; j++) { const f = (j + 0.5) / n; pile(a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,y-0.25); }
+    }
+  }
+  if (!pos.length) return null;
+  const g = new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));g.setAttribute('tag',new THREE.Float32BufferAttribute(new Float32Array(pos.length/3),1));
+  g.computeVertexNormals();g.computeBoundingSphere();g.userData.supports=supports;return g;
+}
+
+// (A54: cxj_560630, local OSM fuel canopy way179743762 and CHM/NAIP: 96% roof coverage,
+// eave 4.4 m, top 4.9 m. The service lane passes under the open roof, never through a solid wall.)
+export function townCanopyGeometry(ring, ground) {
+  const pos = [], colors = [], white = new THREE.Color(0xd1cdc5), red = new THREE.Color(0x913735), roof = new THREE.Color(0x9e9a9e);
+  const tri = (a,b,c,col) => { pos.push(...a,...b,...c);for(let i=0;i<3;i++)colors.push(col.r,col.g,col.b); };
+  const quad = (a,b,c,d,col) => {tri(a,b,c,col);tri(a,c,d,col);};
+  let R=ring.slice(0,-1);if(THREE.ShapeUtils.isClockWise(R.map(p=>new THREE.Vector2(...p))))R.reverse();
+  const feet=R.map(p=>ground(...p)),base=feet.reduce((a,b)=>a+b,0)/feet.length,low=base+4.4,top=base+4.9;
+  for(const [a,b,c] of THREE.ShapeUtils.triangulateShape(R.map(p=>new THREE.Vector2(...p)),[])){
+    const at=(i,y)=>[R[i][0],y,R[i][1]];tri(at(a,top),at(c,top),at(b,top),roof);tri(at(a,low),at(b,low),at(c,low),white);
+  }
+  for(let i=0;i<R.length;i++){
+    const a=R[i],b=R[(i+1)%R.length];
+    for(const [lo,hi,col] of [[low,low+0.18,white],[low+0.18,top,red]])quad([a[0],hi,a[1]],[b[0],hi,b[1]],[b[0],lo,b[1]],[a[0],lo,a[1]],col);
+    for(let j=0;j<8;j++){
+      const u=j*Math.PI/4,v=(j+1)*Math.PI/4,p=[a[0]+Math.cos(u)*0.18,a[1]+Math.sin(u)*0.18],q=[a[0]+Math.cos(v)*0.18,a[1]+Math.sin(v)*0.18];
+      quad([p[0],feet[i]-0.1,p[1]],[p[0],low,p[1]],[q[0],low,q[1]],[q[0],feet[i]-0.1,q[1]],white);
+    }
+  }
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));g.setAttribute('tag',new THREE.Float32BufferAttribute(new Float32Array(pos.length/3),1));g.computeVertexNormals();g.computeBoundingSphere();
+  g.userData.supports=R.map((p,i)=>({x:p[0],z:p[1],foot:feet[i]-0.1,top:low}));g.userData.roofClearance=4.4;return g;
+}
+
+// (A54: cxj_560630 shows mast-arm signals. Reuse the existing head mesh, with a generated steel support.)
+export function townMastGeometry(list, head) {
+  const pos=[],colors=[],tags=[],supports=[],overhead=[],grey=new THREE.Color(0x777c7a);
+  const add=(source,matrix,color=null)=>{
+    const g=source.index?source.toNonIndexed():source.clone(); if(matrix)g.applyMatrix4(matrix);
+    const p=g.attributes.position,c=g.attributes.color,t=g.attributes.tag;
+    for(let i=0;i<p.count;i++){
+      pos.push(p.getX(i),p.getY(i),p.getZ(i));
+      colors.push(color?color.r:c.getX(i),color?color.g:c.getY(i),color?color.b:c.getZ(i));
+      tags.push(color?0:t?.getX(i)||0);
+    }
+    g.dispose();
+  };
+  const tube=(a,b,r0,r1)=>{
+    const A=new THREE.Vector3(...a),B=new THREE.Vector3(...b),v=B.clone().sub(A),g=new THREE.CylinderGeometry(r1,r0,v.length(),8);
+    add(g,new THREE.Matrix4().compose(A.add(B).multiplyScalar(0.5),new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),v.normalize()),new THREE.Vector3(1,1,1)),grey);g.dispose();
+  };
+  for(const s of list){
+    tube([s.x,s.foot,s.z],[s.x,s.top-0.4,s.z],0.15,0.1);
+    supports.push({x:s.x,z:s.z,foot:s.foot,top:s.top-0.4,radius:0.15});
+    let prev=[s.x,s.top-0.4,s.z];
+    for(let i=1;i<=8;i++){
+      const f=i/8,p=[s.x+(s.hx-s.x)*f,s.top-0.4+0.55*f+0.32*Math.sin(Math.PI*f),s.z+(s.hz-s.z)*f];
+      tube(prev,p,0.1,0.09);overhead.push({x:p[0],z:p[2],bottom:p[1]-0.11,min:5});prev=p;
+    }
+    add(head,new THREE.Matrix4().compose(new THREE.Vector3(s.hx,s.top-0.5,s.hz),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),s.yaw),new THREE.Vector3(1,1,1)));
+    overhead.push({x:s.hx,z:s.hz,bottom:s.top-1.16,min:5});
+  }
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));g.setAttribute('tag',new THREE.Float32BufferAttribute(tags,1));g.computeVertexNormals();g.computeBoundingSphere();g.userData.supports=supports;g.userData.overhead=overhead;return g;
 }

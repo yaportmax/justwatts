@@ -16,12 +16,16 @@ import { loadHand, loadVeg as loadHandPlants, loadScrub, lawnAt } from './hand.j
 import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS, SIGNS, HAND_BLDG } from './handlist.js';
 import { POLES as FURN_POLES, PIECES as FURN_PIECES, LAMPS as FURN_LAMPS } from './furnlist.js';
 import { LIDAR_BLDG } from './bldglidar.js';
+import { TOWN_SIGNALS } from '../../world/town-signals.js';
+import { TOWN_CANOPY } from '../../world/town-canopy.js';
+import { TOWN_PIERS } from '../../world/town-piers.js';
 import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
-import { hash2 } from './landuse.js';
+import { hash2, inRings } from './landuse.js';
+import { TOWN_STREETS, TOWN_WATERFRONT } from '../../world/town-streets.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
+import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, townMastGeometry, townCanopyGeometry, townPierGeometry, townEdgeGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { loadVeg, loadTrees, loadHandVeg, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
 import { createScrub, REACH, TOP } from './scrub.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
@@ -1323,6 +1327,66 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     c.feet = ['pole', 'ubox', 'rdelin', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'board', 'reg', 'blade', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3();
+    // (A54: sa_0800/cxj_541000: a continuous bay promenade replaces grass to the white line.
+    // Generate with the furniture, outside all road/path ribbons; never touch terrain or road construction.)
+    const tb = tileBox(c), la0 = proj.lat(tb[3]), la1 = proj.lat(tb[1]);
+    if (la1 > TOWN_WATERFRONT.south && la0 < TOWN_WATERFRONT.north && proj.lon(tb[2]) > -122.482 && proj.lon(tb[0]) < -122.474) {
+      const streets = TOWN_STREETS.filter(s => s.pts.some(([a, o]) => a >= la0 - 0.001 && a <= la1 + 0.001 && o >= proj.lon(tb[0]) - 0.001 && o <= proj.lon(tb[2]) + 0.001))
+        .map(s => ({ ...s, P: s.pts.map(p => proj.xz(...p)) }));
+      const buildings = t.features.filter(f => f.k === 'building').map(f => {
+        const rings = f.rings.map(r => r.map(p => proj.xz(...p))), P = rings.flat();
+        return { rings, x0: Math.min(...P.map(p => p[0])), x1: Math.max(...P.map(p => p[0])), z0: Math.min(...P.map(p => p[1])), z1: Math.max(...P.map(p => p[1])) };
+      });
+      // (A54: sa_0800/sa_1200: suppressed OSM sidewalk footways must receive paving, not block it as a solid object.
+      // Retain all ride-line and vehicle-way exclusions, plus every actually drawn road and pedestrian path.)
+      const pavementKeep = lineRibbons(t.roads.filter(r => r.hw !== 'footway'));
+      const geom = yield* townEdgeGeometry(c.lines, streets, {
+        ground: (x, z) => drawnY(x, z), gap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z)), roadGap(x, z) ?? Infinity),
+        // (A54: sa_0800/cxj_541000: the eastern bay promenade has a seawall down to the seabed.)
+        shore: (x, z, east) => east > 0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.width : 0,
+        blocked: (x, z) => inHandAll(x, z) || buildings.some(b => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && inRings(b.rings, x, z)),
+      });
+      if (geom) { const mesh = new THREE.Mesh(geom, mats.furn); mesh.name = 'town-sidewalks'; mesh.receiveShadow = true; grp.add(mesh); }
+    }
+    // (A54: a mapped fuel canopy is an open roof, not the nearby service building. Corner posts clear all ribbons.)
+    const cb = tileBox(c), cp = TOWN_CANOPY.map(p => proj.xz(...p)), cc = cp.slice(0,-1).reduce((s,p)=>[s[0]+p[0]/4,s[1]+p[1]/4],[0,0]);
+    // (A54: all four mapped corners are on Tam hand ground, which is a valid support, not a missing-building veto.)
+    if(cc[0]>=cb[0]&&cc[0]<cb[2]&&cc[1]>=cb[1]&&cc[1]<cb[3]&&cp.every(p=>KO.clear(...p,1.68)&&drawnY(...p)!=null)) {
+      const geometry=townCanopyGeometry(cp,drawnY),mesh=new THREE.Mesh(geometry,mats.furn);mesh.name='town-fuel-canopy';mesh.receiveShadow=true;grp.add(mesh);
+    }
+    // (A54: Tam's mapped directional approaches have mast arms in cxj_560630.
+    // One head per approach, beyond a clear roadside pole. No added per-frame traffic simulation.)
+    const signals=TOWN_SIGNALS.filter(inTile),masts=[],signalBuildings=signals.length?t.features.filter(f=>f.k==='building').map(f=>f.rings.map(r=>r.map(p=>proj.xz(...p)))):[];
+    const mastBlocked=(x,z)=>signalBuildings.some(r=>{for(let j=0;j<9;j++)if(inRings(r,x+(j?Math.cos(j*Math.PI/4)*0.5:0),z+(j?Math.sin(j*Math.PI/4)*0.5:0)))return true;return false;});
+    // (A54: mapped stop approaches fall between or beyond clipped centre points at the hand-road join.
+    // Match the nearest aligned carriageway segment within one junction, never a service driveway.)
+    const mastLine=(x,z,fx,fz)=>{
+      let best=null,bd=25*25;
+      for(const L of LL){if(L.br||/service|path|footway|cycleway|track|pedestrian/.test(L.hw))continue;
+        for(let i=1;i<L.P.length;i++){
+          const a=L.P[i-1],b=L.P[i],dx=b[0]-a[0],dz=b[2]-a[2],l2=dx*dx+dz*dz;
+          if(l2<0.01||Math.abs((dx*fx+dz*fz)/Math.sqrt(l2))<0.8)continue;
+          const u=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[2])*dz)/l2)),px=a[0]+dx*u,pz=a[2]+dz*u,dd=(px-x)**2+(pz-z)**2;
+          if(dd<bd){bd=dd;best=[[px,a[1]+(b[1]-a[1])*u,pz,(a[3]??L.w/2)*(1-u)+(b[3]??L.w/2)*u],L,[dx,dz]];}
+        }
+      }
+      return best;
+    };
+    // (A54: the lowered tile below hand ground is not a water test for a pole on that visible ground.
+    // Keep the same ribbon gap and building tests; verify each foot against rendered triangles at both qualities.)
+    const mastKO=rule({gap:koGap,wet:(x,z)=>{const y=drawnY(x,z);return y==null||y<SEA;},ground:drawnY});
+    for(const [la,lo,hd,id] of signals){
+      const [x,z]=proj.xz(la,lo),rad=hd*Math.PI/180,fx=Math.sin(rad),fz=-Math.cos(rad),hit=mastLine(x,z,fx,fz);if(!hit)continue;
+      const [q,L,d]=hit,nx=-fz,nz=fx,half=q[3]??L.w/2;
+      if(L.br||Math.abs((d[0]*fx+d[1]*fz)/(Math.hypot(...d)||1))<0.8)continue;
+      const sp=mastKO.spot(q[0]+nx*(half+1.7),q[2]+nz*(half+1.7),1.7,(a,b)=>!mastBlocked(a,b));
+      if(!sp||Math.hypot(sp[0]-q[0],sp[1]-q[2])>half+5||(sp[0]-q[0])*nx+(sp[1]-q[2])*nz<half)continue;
+      const y=drawnY(...sp);if(y==null||y>q[1]+2)continue;
+      const hx=q[0]+nx*half*0.45,hz=q[2]+nz*half*0.45;
+      let clear=true;for(let j=0;j<=12;j++)if(mastBlocked(sp[0]+(hx-sp[0])*j/12,sp[1]+(hz-sp[1])*j/12))clear=false;
+      if(clear)masts.push({x:sp[0],z:sp[1],foot:y-0.1,top:Math.max(y,q[1])+7.4,hx,hz,yaw:Math.atan2(-fx,-fz),id});
+    }
+    if(masts.length){const geometry=townMastGeometry(masts,FURN.signalHead),mesh=new THREE.Mesh(geometry,mats.furn);mesh.name='town-mast-signals';mesh.receiveShadow=true;grp.add(mesh);}
     // every kind in one batched draw
     const kinds = Object.keys(items).filter(k => items[k].length), count = kinds.reduce((n, k) => n + items[k].length, 0);
     if (count) {
@@ -1407,7 +1471,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (a height Street View shows, handlist.js BUILDINGS, where OpenStreetMap has none)
       { const R1 = f.rings[0], n1 = R1.length - 1; let a1 = 0, o1 = 0; for (let i = 0; i < n1; i++) { a1 += R1[i][0] / n1; o1 += R1[i][1] / n1; }
         if (HAND_BLDG.some(([R]) => { let ca = 0, co = 0; for (const [la, lo] of R) { ca += la / R.length; co += lo / R.length; } return Math.hypot((ca - a1) * 111195, (co - o1) * 88000) < 12; })) continue; }  // (A37: a hand-placed building there instead: OpenStreetMap's within 12 m of its middle left out)
-      const R0 = f.rings[0], hb = BUILDINGS.find(([la, lo]) => { let c = false; for (let i = 0, j = R0.length - 1; i < R0.length; j = i++) if ((R0[i][0] > la) !== (R0[j][0] > la) && lo < (R0[j][1] - R0[i][1]) * (la - R0[i][0]) / (R0[j][0] - R0[i][0]) + R0[i][1]) c = !c; return c; });
+      const R0 = f.rings[0], pier = (() => {
+        const n = R0.length - 1; let a = 0, o = 0; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; }
+        return TOWN_PIERS.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5));
+      })(), hb = BUILDINGS.find(([la, lo]) => { let c = false; for (let i = 0, j = R0.length - 1; i < R0.length; j = i++) if ((R0[i][0] > la) !== (R0[j][0] > la) && lo < (R0[j][1] - R0[i][1]) * (la - R0[i][0]) / (R0[j][0] - R0[i][0]) + R0[i][1]) c = !c; return c; });
       if ([[37.82213, -122.52782], [37.82202, -122.52766]].some(([a_, o_]) => Math.abs(R0[0][0] - a_) < 3e-5 && Math.abs(R0[0][1] - o_) < 3e-5)) continue;  // (A27: the garage at the road's end is hand-built, build_conz.py; OpenStreetMap's second block is not in cz_14600_a)
       // (A25: Conzelman's far west, 13800 on: low barns, red roofs as at 13900; grey from about 14400: the garage, 14500, 14600)
       const low = R0[0][0] > 37.82126 && R0[0][0] < 37.82932 && R0[0][1] > -122.5395 && R0[0][1] < -122.52422;  // (west to Cronkhite's low white blocks as seen from 14500 right)
@@ -1438,10 +1505,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const baker = R0[0][0] > 37.832 && R0[0][0] < 37.841 && R0[0][1] > -122.4825 && R0[0][1] < -122.474;
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
-        list.push({ ring, base, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        list.push({ ring, base, pier, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         continue;
       }
-      list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
+      list.push({ ring, base, pier, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
       // (A38: off the Headlands (no lidar table there) a building on a hillside as the Headlands' own: the eaves a storey (2.4 m)
       // over the highest ground at its corners, the walls still down to the lowest, so no slope covers a roof: 34 of the 148
       // houses within 350 m of 37.8895,-122.5465 above Shoreline Highway stood with their roof under the uphill ground, 80 with
@@ -1454,7 +1521,24 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (!(cx >= tb[0] && cx < tb[2] && cz >= tb[1] && cz < tb[3])) continue; let lo = Infinity, m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw) ?? hAt(p[0], p[1]); if (h != null) { lo = Math.min(lo, h); m += h; k++; } } if (!k) continue;
       list.push({ ring, base: lo, h: m / k - lo + e, rh: r - e, roof: 2, seed: Math.round(cx * 13 + cz * 7), fort: true, metal: !!(fl & 1) }); } }
     if (!list.length) return setPart(c, 'bldg', null);
-    const grp = new THREE.Group();
+    const grp = new THREE.Group(), piers = [];
+    for (const b of list) if (b.pier) {
+      const near = b.ring.map(([x, z]) => roadTopNear(x, z)).filter(y => y != null);
+      if (!near.length) continue;
+      // (A54: the pier's walk connects at the street, not at the lidar seabed. Preserve the roof elevation.)
+      const y = Math.max(SEA + 0.6, Math.min(...near) + 0.15), top = b.base + b.h;
+      const center = b.ring.slice(0,-1).reduce((s,p) => [s[0]+p[0]/(b.ring.length-1),s[1]+p[1]/(b.ring.length-1)],[0,0]);
+      const wide = b.ring.map(p => { const dx=p[0]-center[0],dz=p[1]-center[1],d=Math.hypot(dx,dz)||1;return [p[0]+dx/d*0.6,p[1]+dz/d*0.6]; });
+      const clear = R => R.every((p,i) => { const q=R[(i+1)%R.length],n=Math.max(1,Math.ceil(Math.hypot(q[0]-p[0],q[1]-p[1])/0.4));for(let j=0;j<=n;j++)if(koGap(p[0]+(q[0]-p[0])*j/n,p[1]+(q[1]-p[1])*j/n)<0.4)return false;return true; });
+      const ring = clear(wide) ? wide : clear(b.ring) ? b.ring : null;
+      if (ring) {
+        b.base = y; b.h = Math.max(2.4, top - y);
+        if (b.pier.flat) { b.rh = 0; b.paint = b.pier.paint; b.style = 0; }
+        piers.push({ring,y});
+      }
+    }
+    if (piers.length) { const geometry = townPierGeometry(piers, hAt), mesh = new THREE.Mesh(geometry, mats.furn);mesh.name='town-piers';mesh.receiveShadow=true;grp.add(mesh); }
+
     for (let i = 0; i < list.length; i += 60) {
       yield;
       const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60)), mats.bldg); mesh.castShadow = true; mesh.receiveShadow = true; grp.add(mesh);

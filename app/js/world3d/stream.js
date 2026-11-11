@@ -77,14 +77,15 @@ export function jobQueue(now = () => performance.now()) {
 // from the outer ring and the same tile close up sit at the same heights, so nothing shifts when it changes. The
 // detail only thins what is too small to tell apart out there: the trees (the share the impostors' shader keeps past
 // FAR_D, as the shader would draw them) and the street furniture (detail 0 only). A detail change rebuilds neither the
-// ground nor the roads. sigs: the build signatures of a tile's parts (a part is rebuilt when its signature changes).
+// ground nor the roads, and nor does a quality change (A49). sigs: the build signatures of a tile's parts (a part is rebuilt when its signature changes).
 export const FAR_D = 1640, FAR_KEEP = 0.3;
 // the impostors' thinning by distance (impostor.js): the share kept and how much the kept ones grow
 export const impKeep = d => 1 + (FAR_KEEP - 1) * Math.min(1, Math.max(0, (d - 140) / (FAR_D - 140)));
 export const impGrow = keep => 0.92 / Math.sqrt(keep) + 0.08;
 export function sigs(lod, q, ver, rails, pads = false) {
-  const ts = `${q}`, ds = `${ts}|${ver}`, rs = ds + (rails ? '|r' : '') + (pads ? '|p' : '');
-  return { terrain: ts, roads: rs, trees: `${ds}|${lod > 0 ? 'far' : 'all'}`, bldg: ds, tun: ds, furn: `${rs}|${lod}` };
+  // (A49: the quality is in the trees' signature only: the ground, the roads, the buildings, the tunnels and the street furniture are the same at every level)
+  const ts = 'g', ds = `${ver}`, rs = ds + (rails ? '|r' : '') + (pads ? '|p' : '');
+  return { terrain: ts, roads: rs, trees: `${q}|${ds}|${lod > 0 ? 'far' : 'all'}`, bldg: ds, tun: ds, furn: `${rs}|${lod}` };
 }
 // a near tile eases in from the far tile's ground under it (where one was drawn) over EASE ms: the weight of its own
 // heights at t ms after it is shown (smooth at both ends)

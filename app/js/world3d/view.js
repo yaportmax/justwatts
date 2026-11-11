@@ -45,12 +45,16 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // the ground's own scrub colour stays, the lidar's trees and the hand list's plants stay)
 const SCRUB_ON = false, SHRUBS_ON = false;  // (the generated scrub too: it grew in within a hundred metres, jarring, user 2026-11-05)
 export const QUALITY = [
-  { name: 'high', shadow: 1536, span: 70, pr: 1.25, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38], veg: 1 },
-  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30], veg: 0.8 },
-  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18], veg: 0.6 },
+  { name: 'high', shadow: 1536, span: 70, pr: 1.25, trees: 1, rings: [1, 2], far: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38], veg: 1 },
+  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30], veg: 0.8 },
+  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18], veg: 0.6 },
   // (A33: lowest, for weak computers and phones: fewer pixels, no grass, little scrub, a shorter view; the governor settles here and never gives up)
-  { name: 'lowest', shadow: 0, span: 0, pr: 0.6, trees: 0.2, rings: [1, 1], far: 1, segs: 64, up: 1, view: 14000, post: false, bloom: false, msaa: 0, grass: [12, 0.5], detail: false, treeNear: 70, scrub: [30, 10], veg: 0.45 },
+  { name: 'lowest', shadow: 0, span: 0, pr: 0.6, trees: 0.2, rings: [1, 1], far: 1, view: 14000, post: false, bloom: false, msaa: 0, grass: [12, 0.5], detail: false, treeNear: 70, scrub: [30, 10], veg: 0.45 },
 ];
+// (A49: the near ground's grid, the same at every quality (it was 256 on high and medium, 64 on low and lowest: 30 m cells). The ground, the roads' pushes and
+// banks and the press under the hand ground are computed on it, and the plants are seated on it: on the coarse grid the Tam Junction ground stood at 0 m
+// under trees seated at 7 m, and the governor takes a 20 ms machine to low in a minute. Quality changes shading, density and distance, never the ground)
+export const NEAR_SEGS = 256;
 const CAP = 22000;  // trees per tile at full share (a denser tile is thinned evenly)
 // trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
 // wood (mixed, broadleaf, needleleaf), and ground no tree grows on (rock, sand, water). [class, metres between trees,
@@ -417,10 +421,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   function* buildTerrain(c) {
     const t = c.tile, Q = QUALITY[q];
     if (!t) { c.grid = null; setPart(c, 'terrain', null); c.built = true; c.ver = (c.ver || 0) + 1; farDirty = true; return; }
-    // the grid's side: the quality's on every near tile, whatever its detail (upsampled from a coarse tile; the ground
+    // the grid's side: NEAR_SEGS on every near tile, whatever its detail and the quality (upsampled from a coarse tile; the ground
     // and the roads the same seen from the outer ring as close up: nothing shifts when the rider comes nearer), a far
     // tile's own; from it the step through the tile's samples or the upsampling
-    const fine = c.z === NEAR_Z, src = t.n - 1, want = c.z === FAR_Z ? src : Q.segs * Q.up;
+    const fine = c.z === NEAR_Z, src = t.n - 1, want = c.z === FAR_Z ? src : NEAR_SEGS;
     const up = want > src ? Math.round(want / src) : 1, step = want < src ? Math.round(src / want) : 1, gk = up > 1 ? 'u' + up : 's' + step;
     const lidar = c.z === NEAR_Z && src > GRID[NEAR_Z];  // a tile from the lidar (about 7.5 m): its roads' benches and cuts are in the heights
     // built aside (G) and swapped in at the end: the ground in use stays as it is while this runs over several frames
@@ -534,7 +538,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
     g.setIndex(new THREE.BufferAttribute(m.idx, 1)); g.computeBoundingSphere();
     const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : bored ? mats.terrainFarBore : mats.terrainFar);
-    mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch(); mesh.userData.floor0 = m.floor0;  // (the bores left out at every quality)
+    mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch(); mesh.userData.floor0 = m.floor0; mesh.userData.bored = bored;  // (the bores left out at every quality; bored: applyQuality picks the material again)
     c.grid = G; c.tmesh = { src: m.src, nv: (G.segs + 1) ** 2, skirt: c.z === FAR_Z ? 40 : 12 };
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); } else { c.nor = c.mask = c.cv = null; }
     if (fine) { c.ease = ease; c.group.visible = !ease; }
@@ -1314,7 +1318,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (count) {
       const bm = new THREE.BatchedMesh(count, kinds.reduce((n, k) => n + FURN[k].attributes.position.count, 0), 0, mats.furn);
       for (const k of kinds) { const gi = bm.addGeometry(FURN[k]); for (const [x, y, z, yaw, sy = 1, sx = 1] of items[k]) bm.setMatrixAt(bm.addInstance(gi), m4.compose(v.set(x, y, z), qq.setFromAxisAngle(up, yaw), sc.set(sx, sy, 1))); }
-      bm.castShadow = QUALITY[q].shadow > 0; bm.receiveShadow = true; bm.computeBoundingSphere(); grp.add(bm);
+      bm.castShadow = true; bm.receiveShadow = true; bm.computeBoundingSphere(); grp.add(bm);
     }
     if (faces.length) { const fm = new THREE.Mesh(signFaceGeometry(faces), mats.signFace); fm.receiveShadow = true; grp.add(fm); }
     // the wires: hanging a little between the poles (three straight pieces each)
@@ -1372,7 +1376,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // smoothed the face's normals down toward its foot: Street View Center Road 0a_0030's raised curb read flush))
         if (key === 'curb' || key === 'red' || key === 'low') g = g.toNonIndexed();
         g.computeVertexNormals(); g.computeBoundingSphere();
-        const m = new THREE.Mesh(g, SEC[key][0]); m.castShadow = key !== 'mesh' && QUALITY[q].shadow > 0; m.receiveShadow = true; grp.add(m);
+        const m = new THREE.Mesh(g, SEC[key][0]); m.castShadow = key !== 'mesh'; m.receiveShadow = true; grp.add(m);
       }
     }
     setPart(c, 'furn', grp.children.length ? grp : null);
@@ -1441,7 +1445,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const grp = new THREE.Group();
     for (let i = 0; i < list.length; i += 60) {
       yield;
-      const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60)), mats.bldg); mesh.castShadow = QUALITY[q].shadow > 0; mesh.receiveShadow = true; grp.add(mesh);
+      const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60)), mats.bldg); mesh.castShadow = true; mesh.receiveShadow = true; grp.add(mesh);
     }
     setPart(c, 'bldg', grp);
   }
@@ -1539,7 +1543,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (const c of far.values()) {
       if (c.tile === undefined) continue;
       const mask = childrenOf(c.k).map(k => near.get(k)?.built ? 1 : 0).join('');
-      const fs = `${mask}|${q}`;
+      const fs = mask;  /* (A49: the far ground does not depend on the quality either: a governor step built all 22 far tiles again) */
       // (first, when a near tile waits to be shown or a dropped one to be covered: the far ground is built again at once)
       const urgent = childrenOf(c.k).some(k => near.get(k)?.ease?.t0 === null || leaving.has(k));
       if (c.sig.terrain !== fs) { c.sig.terrain = fs; jobs.add(c.k + '|t', urgent ? -1 : 20 + (farDirty ? 0 : 5), () => buildTerrain(c)); }
@@ -2230,6 +2234,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (Q.shadow) { sky.sun.shadow.mapSize.set(Q.shadow, Q.shadow); sky.sun.shadow.map?.dispose(); sky.sun.shadow.map = null; }
     camera.far = Q.view; camera.updateProjectionMatrix();
     sky.set(sky.time); post.build({ ...Q, ...(globalThis.__w3?.post || {}) }); sky.setVolume(post.fog); grass.set(...Q.grass); scrub.set(...Q.scrub); VEG.near.value = SCRUB_ON ? Q.scrub[0] : 0;
+    // (A49: the near ground keeps its grid and is not rebuilt on a quality change: only its material follows the level)
+    for (const c of near.values()) { const m = c.parts.terrain; if (m) m.material = Q.detail ? (m.userData.bored ? mats.terrainBore : mats.terrain) : m.userData.bored ? mats.terrainFarBore : mats.terrainFar; }
     size = ''; poke();
     scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
   }
@@ -2268,8 +2274,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const side of [THREE.FrontSide, THREE.DoubleSide]) { const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ side }), 1); im.setMatrixAt(0, under); im.setColorAt(0, new THREE.Color(1, 1, 1)); im.frustumCulled = false; im.castShadow = im.receiveShadow = true; im.userData.ownMat = true; warm.add(im); } }
     warm.userData.geo = geo; }
   function governor(dt, now) {
-    if (document.hidden || dt > 0.25) return;
-    if (jobs.size > 3) { ft = []; lastGov = now; return; }  // still building tiles: judge the steady ride, not the loading
+    if (document.hidden || dt > 0.25 || globalThis.__w3?.noGov) return;  /* (noGov: a scan or a test keeps the level it asked for) */
+    // (A49: nor under the start screen: there the build runs flat out, 40 ms a frame by design, and while the hand chunks load the queue is
+    // short, so the governor read its own loading as a slow machine: weak.mjs cpu4 at Tam Junction went high, medium, low in 20 s behind the
+    // veil, and the level is kept for the next ride)
+    if (jobs.size > 3 || veilAt) { ft = []; lastGov = now; if (veilAt) slow = 0; return; }  // still building tiles: judge the steady ride, not the loading
     ft.push(dt); if (now - lastGov < 2500) return; lastGov = now;
     ft.sort((a, b) => a - b); const med = ft[ft.length >> 1] || 0; ft = [];
     if (med > 1 / 50) { slow++; fast = 0; } else { slow = 0; if (med < 1 / 75) fast++; }
@@ -2306,11 +2315,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (busy) { idleSince = 0; busySince ||= now; if (!busyOn && now - busySince > 500) { busyOn = true; busyTag.style.opacity = '1'; } }
         else { busySince = 0; idleSince ||= now; if (busyOn && now - idleSince > 1000) { busyOn = false; busyTag.style.opacity = '0'; } } }
       // (lifted when the rider's profile and the spawn tile's data are here: the rider is on the rail from the first frame)
-      const onRail = profY(d) != null, spawn = onRail && near.get(key(NEAR_Z, ...tileOf(p[0], p[1])))?.tile !== undefined;
+      // (A49: the 60 s limit waits for the rider's own tile, ground and road surfaces, up to 3 minutes: weak.mjs cpu4 at Tam Junction lifted the
+      // start screen at 60 s onto bare grass, the tile's road job still 10 s from done, weak_cpu4_dev_tj.jpg)
+      const homeC = near.get(key(NEAR_Z, ...tileOf(p[0], p[1]))), onRail = profY(d) != null, spawn = onRail && homeC?.tile !== undefined;
       if (veilAt) { const nl = [...near.values()].filter(c => c.lod === 0), part = k => nl.length ? nl.filter(c => c.parts[k] !== undefined).length / nl.length : 0;
         showSteps([['Map and roads', nl.length ? nl.filter(c => c.tile !== undefined).length / nl.length : 0], ['Ground', nl.length ? nl.filter(c => c.built).length / nl.length : 0], ['Road surfaces', part('roads')],
           ['Hand-built roads', HAND.notHere() ? 0.5 : 1], ['Trees', part('trees')], ['Buildings', part('bldg')], ['Plants', HVEG.first ? 1 : 0.3], ['Finishing', jobs.size < 2 ? 1 : Math.max(0, 1 - jobs.size / 40)]]); }
-      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) && jobs.size < 2 : ready && HVEG.first && underMe(p) && jobs.size < 2) && (!ready || (warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 4)) && now - veilAt > 600) || now - veilAt > 60000))  /* (A34: and the programs and the long shadow warm-up done under it: a 1.1 s frame just after it lifted, prof_start) */  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
+      if (veilAt && (((onRail ? spawn && HVEG.first && !HAND.notHere() && underMe(p) && jobs.size < 2 : ready && HVEG.first && underMe(p) && jobs.size < 2) && (!ready || (warm.userData.all > 0 && warm.userData.frames - warm.userData.all > 4)) && now - veilAt > 600) || (now - veilAt > 60000 && ((homeC?.built && homeC.parts.roads !== undefined) || now - veilAt > 180000))))  /* (A34: and the programs and the long shadow warm-up done under it: a 1.1 s frame just after it lifted, prof_start) */  /* (A32: the hand chunks and the first plants too: the road's bushes came in 5 s after the veil lifted; 30 s stays the limit) */ { veilAt = 0; veil.style.transition = 'opacity .5s'; veil.style.opacity = '0'; }
       const y = yAt(p[0], p[1], d), want = Math.atan2(pb[0] - pa[0], -(pb[1] - pa[1]));
       yaw += ((want - yaw + Math.PI * 3) % (Math.PI * 2) - Math.PI) * Math.min(1, dt * 8);
       const yb = yAt(pb[0], pb[1], d + 3), ya = yAt(pa[0], pa[1], d - 2);

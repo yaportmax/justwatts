@@ -185,7 +185,7 @@ export function createRideMap({ $, store, fit, css, toast, relayout, live = () =
     try {
       const m = await import('./world3d/view.js');
       if (!cur || kind() !== 'world') return;
-      wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, onQuality: q => store.set('hw.worldQ', q), quality: store.get('hw.worldQ', null),
+      wv = m.createWorldView({ container: wbox, baked: sharedBaked(), getOthers: shown, onFail: worldFail, onQuality: q => store.set('hw.worldQ2', q), quality: store.get('hw.worldQ2', null),  /* (A49, worldQ2: the levels kept under the old key were set by a governor that timed the loading screen: every device starts from its guess again) */
         time: store.get('hw.worldTime', 'day'), sound: soundOn(), fog: store.get('hw.worldFog', true) !== false, kit: KITS[store.get('hw.worldKit', 0) % KITS.length], look: look() });
       wv.update(worldState());
     } catch (e) { worldFail(e?.message || String(e)); }

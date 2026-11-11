@@ -28,8 +28,11 @@ export const PIECES = [
 
 // OpenStreetMap's street lamps (highway=street_lamp) beside the Headlands' roads (within 10 m of a line): [lat, lon]; the
 // lamp's arm toward the nearest road (Alexander Avenue's, w_alexander1)
+// (A38: three of them stood in Alexander Avenue's drawn ribbon or within 1.5 m of it, the keep-out rule, keepout.js: moved out
+// on their own side to the ribbon's edge plus 1.5 m by keepout_bake.mjs; OpenStreetMap's own: 37.844316, -122.4780669;
+// 37.8437457, -122.4782694; 37.8473599, -122.4808409)
 export const LAMPS = [
-  [37.844316, -122.4780669], [37.8437457, -122.4782694], [37.8453242, -122.4779757],
+  [37.8443183, -122.478078], [37.8437479, -122.4782792], [37.8453242, -122.4779757],
   [37.8354721, -122.4849709], [37.8341323, -122.4842596], [37.8338454, -122.4838655], [37.8393894, -122.4870957],
-  [37.8469216, -122.479793], [37.8469359, -122.4808308], [37.8473599, -122.4808409],
+  [37.8469216, -122.479793], [37.8469359, -122.4808308], [37.8473601, -122.4808655],
 ];

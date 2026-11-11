@@ -5,17 +5,19 @@
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { makeProj, tileX, tileY, lonOf, latOf, key, unkey, headingOf, angDiff } from './geo.js';
 import { GRID, gridAt } from './baked.js';
-import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSteps, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from './terrain.js';
+import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSteps, pressUnderSteps, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from './terrain.js';
 import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } from './banks.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impGrow } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths, setLaneHook } from './rail.js';
 import { compileSpec, specPaint, SECTIONS as CZ_SECTIONS, RAILS as CZ_RAILS, LOTS as CZ_LOTS, CROSSWALKS as CZ_WALKS } from './conzelman.js';
 import { createEdit } from './edit.js';
-import { loadHand, loadVeg as loadHandPlants, loadScrub } from './hand.js';
+import { loadHand, loadVeg as loadHandPlants, loadScrub, lawnAt } from './hand.js';
 import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS, SIGNS, HAND_BLDG } from './handlist.js';
 import { POLES as FURN_POLES, PIECES as FURN_PIECES, LAMPS as FURN_LAMPS } from './furnlist.js';
 import { LIDAR_BLDG } from './bldglidar.js';
+import { KEEP, ribbons, rule } from './keepout.js';
+import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2 } from './landuse.js';
 import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -43,11 +45,11 @@ const ORIGIN = [37.93, -122.63];  // the middle of the Marin world: every coordi
 // the ground's own scrub colour stays, the lidar's trees and the hand list's plants stay)
 const SCRUB_ON = false, SHRUBS_ON = false;  // (the generated scrub too: it grew in within a hundred metres, jarring, user 2026-11-05)
 export const QUALITY = [
-  { name: 'high', shadow: 1536, span: 70, pr: 1.25, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38] },
-  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30] },
-  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18] },
+  { name: 'high', shadow: 1536, span: 70, pr: 1.25, trees: 1, rings: [1, 2], far: 2, segs: 128, up: 2, view: 42000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 22, grass: [56, 4], detail: true, treeNear: 300, scrub: [130, 38], veg: 1 },
+  { name: 'medium', shadow: 1024, span: 55, pr: 1, trees: 0.6, rings: [1, 2], far: 2, segs: 128, up: 2, view: 32000, post: true, bloom: true, msaa: 0, fxaa: true, vol: 18, grass: [44, 2.6], detail: true, treeNear: 200, scrub: [95, 30], veg: 0.8 },
+  { name: 'low', shadow: 0, span: 0, pr: 0.8, trees: 0.3, rings: [1, 1], far: 1, segs: 64, up: 1, view: 22000, post: false, bloom: false, msaa: 0, grass: [24, 1.4], detail: false, treeNear: 120, scrub: [55, 18], veg: 0.6 },
   // (A33: lowest, for weak computers and phones: fewer pixels, no grass, little scrub, a shorter view; the governor settles here and never gives up)
-  { name: 'lowest', shadow: 0, span: 0, pr: 0.6, trees: 0.2, rings: [1, 1], far: 1, segs: 64, up: 1, view: 14000, post: false, bloom: false, msaa: 0, grass: [12, 0.5], detail: false, treeNear: 70, scrub: [30, 10] },
+  { name: 'lowest', shadow: 0, span: 0, pr: 0.6, trees: 0.2, rings: [1, 1], far: 1, segs: 64, up: 1, view: 14000, post: false, bloom: false, msaa: 0, grass: [12, 0.5], detail: false, treeNear: 70, scrub: [30, 10], veg: 0.45 },
 ];
 const CAP = 22000;  // trees per tile at full share (a denser tile is thinned evenly)
 // trees by the tile's ground classes (a raster at about 15 m): codes, higher wins: open grass, farm, town, park, scrub,
@@ -208,7 +210,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
 
   // the rails of every road the rides reach (rail.js): the rider's heights, read before any tile; a course's profile is
   // matched to them when both are here
-  let RI = null, HB = null, HM = null, HV = null;  // (HB, HM: the hand list's barriers and lane markings on the rails, rail.js handBarriers)
+  let RI = null, HB = null, HM = null, HV = null, KOR = null;  // (HB, HM: the hand list's barriers and lane markings on the rails, rail.js handBarriers)
   // (Conzelman Road from its hand-authored spec, conzelman.js: the hand list's entries on its stretch give way to the spec's)
   const czSpec = { SECTIONS: CZ_SECTIONS, RAILS: CZ_RAILS, LOTS: CZ_LOTS, CROSSWALKS: CZ_WALKS };
   let CZ = compileSpec(proj, czSpec); const notCz = e => !CZ.owns(e[0], e[1]); setLaneHook((x, z, dx, dz) => { const l = Math.hypot(dx, dz) || 1; return CZ.lane(x, z, dx / l, dz / l); });
@@ -230,7 +232,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   let handMask = null, handBase = null;
   function* handBaseSteps() {
     const P = [], R = 117, C = 2, RS = s => s >= 10000 ? 67 : 117;  // (A23: west of McCullough the hand terrain's corridor is 70 m each side, 120 m on the east stretch)
-    for (const [s0, s1] of HAND.allRanges) for (let s = s0 + 3; s <= s1 - 3; s += 4) { const [la, lo] = CZ.latlon(s); P.push([...proj.xz(la, lo), RS(s), s]); }
+    // (A38: each cell keeps its nearest row's chunk (its index in conz.json plus one), not the row's station: 16 bit stations wrapped from McCullough Road's 70000 up,
+    // so those roads' corridors were masked by whichever Conzelman, Alexander or Bunker chunk the wrapped number fell in)
+    HAND.allRanges.forEach(([s0, s1], ri) => { if (s0 < TAM0) for (let s = s0 + 3; s <= s1 - 3; s += 4) { const [la, lo] = CZ.latlon(s); P.push([...proj.xz(la, lo), RS(s), ri + 1]); } });
     yield;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of P) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
     x0 -= R; z0 -= R; const nx = Math.ceil((x1 + R - x0) / C) + 1, nz = Math.ceil((z1 + R - z0) / C) + 1, sta = new Uint16Array(nx * nz);
@@ -242,6 +246,32 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (++n % 16 === 0) yield; }
     for (let k = 0; k < sta.length; k++) if (best[k] < rad[k] * rad[k]) sta[k] = near_[k];
     handBase = { x0, z0, nx, nz, C, sta };
+  }
+  // (A38: Mount Tam's corridor mask. The raster above is one grid over every chunk's box with 16 bit stations: with the Tam chunks (stations from 500000, 9 km north)
+  // it grew from 6.7 to 47 million cells and their stations wrapped. Tam's is made per kilometre of road (hand.js grp) the first time a tile there is built with that
+  // group in: a 2 m raster of each cell's nearest row's chunk (its index in conz.json plus one), the same nearest row rule and the build's 70 m corridor. A ride on the
+  // Headlands makes none of it; a ride on Mount Tam makes no Headlands raster, handBasePrepare.)
+  const TAM0 = 500000; let tamB = null, headPts = null;
+  function tamBlocks() {
+    if (tamB) return tamB; tamB = []; const R = 67, by = new Map(), all = [];
+    HAND.allRanges.forEach(([s0, s1], ri) => { if (s0 < TAM0) return; const k = Math.floor(s0 / 1000); let B = by.get(k);
+      if (!B) { B = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity, ris: [], grid: null }; by.set(k, B); tamB.push(B); } B.ris.push(ri + 1);
+      for (let s = s0 + 3; s <= s1 - 3; s += 4) { const [la, lo] = CZ.latlon(s), [x, z] = proj.xz(la, lo); all.push(x, z, ri + 1); B.x0 = Math.min(B.x0, x - R); B.x1 = Math.max(B.x1, x + R); B.z0 = Math.min(B.z0, z - R); B.z1 = Math.max(B.z1, z + R); } });
+    tamB.pts = all; return tamB;
+  }
+  function tamGrid(B) {
+    const R = 67, C = 2, P = tamB.pts, nx = Math.ceil((B.x1 - B.x0) / C) + 1, nz = Math.ceil((B.z1 - B.z0) / C) + 1, idx = new Uint16Array(nx * nz), best = new Float32Array(nx * nz).fill(R * R), r = Math.ceil(R / C);
+    for (let k = 0; k < P.length; k += 3) { const x = P[k], z = P[k + 1]; if (x < B.x0 - R || x > B.x1 + R || z < B.z0 - R || z > B.z1 + R) continue;
+      const ci = Math.round((x - B.x0) / C), cj = Math.round((z - B.z0) / C);
+      for (let j = Math.max(0, cj - r); j <= Math.min(nz - 1, cj + r); j++) { const dz = B.z0 + j * C - z, row = j * nx; for (let i = Math.max(0, ci - r); i <= Math.min(nx - 1, ci + r); i++) { const dx = B.x0 + i * C - x, d = dx * dx + dz * dz; if (d < best[row + i]) { best[row + i] = d; idx[row + i] = P[k + 2]; } } } }
+    return (B.grid = { nx, nz, C, idx });
+  }
+  // (a Headlands chunk within reach of the rider: hand.js loads a group within 1800 m of one of its chunks' centres)
+  function headNear() {
+    const a = HAND.at; if (!a || !HAND.allRanges) return true;
+    if (!headPts) { headPts = []; for (const [s0, s1] of HAND.allRanges) if (s0 < TAM0) for (const s of [s0, (s0 + s1) / 2, s1]) { const [la, lo] = CZ.latlon(s); headPts.push(...proj.xz(la, lo)); } }
+    for (let k = 0; k < headPts.length; k += 2) if ((headPts[k] - a[0]) ** 2 + (headPts[k + 1] - a[1]) ** 2 < 2400 * 2400) return true;
+    return false;
   }
   // (A28: a group's buffers sent to the GPU a few per frame before it shows: all at its first draw they were 15 MB in one frame, 170 to 220 ms. One attribute or index at a time
   // through a mesh of its own, a real draw of one triangle into a 1 px target so the driver's copy is made too.)
@@ -263,22 +293,31 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (G.index && G.attributes.position) await send(G.index, [true, G.attributes.position]); }
   }
   async function handBasePrepare() {
-    if (handBase) return; const g = handBaseSteps(); let t = performance.now();
+    if (handBase || !headNear()) return; const g = handBaseSteps(); let t = performance.now();
     for (;;) { if (g.next().done) return; if (performance.now() - t > 3) { await new Promise(r => setTimeout(r, 4)); t = performance.now(); } }
   }
   function handCover() {
     if (handMask) return handMask;
+    const A = HAND.allRanges, onR = new Uint8Array(A.length + 1); let head = false;
+    for (const [s0, s1] of HAND.ranges) { if (s0 < TAM0) head = true; const i = A.findIndex(q => q[0] === s0 && q[1] === s1); if (i >= 0) onR[i + 1] = 1; }
+    if (!head) return (handMask = { x0: 0, z0: 0, nx: 0, nz: 0, C: 2, m: new Uint8Array(0), onR });
     if (!handBase) for (const _ of handBaseSteps());
-    const { x0, z0, nx, nz, C, sta } = handBase, on = new Uint8Array(65536), m = new Uint8Array(nx * nz);
-    for (const [s0, s1] of HAND.ranges) on.fill(1, s0, s1 + 1);
-    for (let k = 0; k < m.length; k++) if (on[sta[k]] && sta[k]) m[k] = 1;
-    return (handMask = { x0, z0, nx, nz, C, m });
+    const { x0, z0, nx, nz, C, sta } = handBase, m = new Uint8Array(nx * nz);
+    for (let k = 0; k < m.length; k++) if (sta[k] && onR[sta[k]]) m[k] = 1;
+    return (handMask = { x0, z0, nx, nz, C, m, onR });
   }
   function handSkip(G) {
     if (!HAND.ready || !HAND.covers) return null; const H = handCover(), n = G.segs + 1, inC = new Uint8Array(n * n); let any = false;
     for (let j = 0; j < n; j++) { const cj = Math.round((G.zs[j] - H.z0) / H.C), row = cj >= 0 && cj < H.nz ? cj * H.nx : -1;
       for (let i = 0; i < n; i++) { const ci = Math.round((G.xs[i] - H.x0) / H.C); if ((row >= 0 && ci >= 0 && ci < H.nx && H.m[row + ci]) || HAND.extAt?.(G.xs[i], G.zs[j])) { inC[j * n + i] = 1; any = true; } } }
-    return any ? (i, j) => inC[j * n + i] && inC[j * n + i + 1] && inC[(j + 1) * n + i] && inC[(j + 1) * n + i + 1] : null;
+    const gx0 = Math.min(G.xs[0], G.xs[n - 1]), gx1 = Math.max(G.xs[0], G.xs[n - 1]), gz0 = Math.min(G.zs[0], G.zs[n - 1]), gz1 = Math.max(G.zs[0], G.zs[n - 1]);
+    for (const B of tamBlocks()) { if (B.x1 < gx0 || B.x0 > gx1 || B.z1 < gz0 || B.z0 > gz1 || !B.ris.some(q => H.onR[q])) continue; const T = B.grid ?? tamGrid(B);
+      for (let j = 0; j < n; j++) { const cj = Math.round((G.zs[j] - B.z0) / T.C); if (cj < 0 || cj >= T.nz) continue;
+        for (let i = 0; i < n; i++) { const ci = Math.round((G.xs[i] - B.x0) / T.C); if (ci < 0 || ci >= T.nx) continue; const v = T.idx[cj * T.nx + ci]; if (v && H.onR[v]) { inC[j * n + i] = 1; any = true; } } } }
+    // (A43: and only where the hand ground really covers the quad, terrain.js pressUnderSteps full: a corridor quad the hand meshes do not cover whole is
+    // drawn, pressed under them: the tile's ground in a crack, not a pit. __w3.noCover: by the mask alone, as before)
+    const F = globalThis.__w3?.noCover ? null : G.full, s = G.segs; if (F && G.press) { let gap = 0; for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) if (!F[j * s + i] && inC[j * n + i] && inC[j * n + i + 1] && inC[(j + 1) * n + i] && inC[(j + 1) * n + i + 1]) gap++; G.press.gap = gap; }
+    return any ? (i, j) => inC[j * n + i] && inC[j * n + i + 1] && inC[(j + 1) * n + i] && inC[(j + 1) * n + i + 1] && (!F || F[j * s + i]) : null;
   }
   function handSplit(pts) {
     if (!HAND.ready || !pts.some(p => handAt(p[0], p[1]))) return [pts];
@@ -288,7 +327,19 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (const q of out) for (const k of ['line', 'ns', 'ne', 'fs', 'fe']) if (pts[k] != null) q[k] = pts[k];
     return out.filter(q => q.length > 1);
   }
-  const handLists = () => { RI = setWidths(railIndex(railsJson, proj.xz), WIDTHS.filter(notCz), proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS).filter(notCz).concat(CZ.rails), SURVEY, proj.xz); HM = handBarriers(RI, MARKINGS.filter(notCz), [], proj.xz, true); HV = handBarriers(RI, VERGES.filter(notCz), [], proj.xz); };
+  // (A39: a way's pieces inside the hand corridor apart from those outside (inH): they take the hand ground's heights, view.js handY)
+  function handInSplit(pts) {
+    if (!HAND.ready || !HAND.yAt || globalThis.__w3?.noHandY) return [pts];
+    const P = resample(pts, 2), I = P.map(p => inHandAll(p[0], p[1])); if (!I.some(Boolean)) return [pts];
+    if (I.every(Boolean)) { pts.inH = true; return [pts]; }
+    const out = []; let cur = [P[0]];
+    for (let i = 1; i < P.length; i++) { cur.push(P[i]); if (I[i] !== I[i - 1]) { cur.inH = I[i - 1]; out.push(cur); cur = [P[i]]; } }
+    cur.inH = I.at(-1); out.push(cur);
+    const R = out.filter(q => q.length > 1); if (!R.length) return [pts];
+    for (const k of ['fs', 'ns']) if (pts[k] != null) R[0][k] = pts[k]; for (const k of ['fe', 'ne']) if (pts[k] != null) R.at(-1)[k] = pts[k];
+    return R;
+  }
+  const handLists = () => { RI = setWidths(railIndex(railsJson, proj.xz), WIDTHS.filter(notCz), proj.xz); HB = handBarriers(RI, BARRIERS.concat(CURBS).filter(notCz).concat(CZ.rails), SURVEY, proj.xz); HM = handBarriers(RI, MARKINGS.filter(notCz), [], proj.xz, true); HV = handBarriers(RI, VERGES.filter(notCz), [], proj.xz); KOR = lineRibbons(RI.rails.map(m => m.r)); };
   baked.rails?.().then(j => { if (dead || !j) return; railsJson = j; handLists(); if (st) st.ri = null; tun.dirty = true; poke(); });  // (the tunnels' floors from it)
   // a tunnel's rail at a point (its floor, baked), null off every tunnel's
   // the drawn top of the road at a point nearest the height e, of the rails it is on, not past one's end (rail.js top
@@ -380,7 +431,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       G.key = gk; G.m = (up > 1 ? 1 / up : step) * GRID[c.z] / src;  // the grid's step over the coarse grid's (about 15 m)
       yield 't:grid';
     } else G = { ...G };
-    G.cut = null; G.hs = G.raw;
+    G.cut = null; G.hold = null; G.hs = G.raw;
     const ms = G.m;
     if (fine) {
       // a road over a tunnel (US-101 over Alexander Avenue and Bunker Road): the lidar's bare earth has a gap where the
@@ -419,6 +470,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const box = [Math.min(G.xs[0], G.xs[G.segs]), Math.min(G.zs[0], G.zs[G.segs]), Math.max(G.xs[0], G.xs[G.segs]), Math.max(G.zs[0], G.zs[G.segs])];
         for (const [a, dir] of [[0, 1], [P.length - 1, -1]]) {
           if (!(P[a][0] > box[0] + 1 && P[a][0] < box[2] - 1 && P[a][1] > box[1] + 1 && P[a][1] < box[3] - 1)) continue;  // past the tile's edge: the neighbour's piece, not a portal
+          if (!globalThis.__w3?.noHill && portalAt(P[a][0], P[a][1], proj)) continue;  // (A44: a measured portal's headwall stands at the way's end: no open cut behind it)
           // (the portal's height: the tunnel's rail, baked; else the lower of the ground there and a step out)
           const out = [P[a][0] * 2 - P[a + dir][0], P[a][1] * 2 - P[a + dir][1]], h = r.h ? (a ? r.h.at(-1) : r.h[0]) : Math.min(gridHeight(G, ...P[a], G.raw) ?? 1e9, gridHeight(G, ...out, G.raw) ?? 1e9);
           if (h > 1e8) continue;
@@ -435,8 +487,20 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         }
       }
       yield 't:ports'; if (!globalThis.__w3?.noCarve) yield* carveSteps(G, [], 0, 1, under); yield 't:carved';  // (__w3.noCarve, noPush: checks)
+      // (A44) Behind a measured portal's plane (portals.js) the hill as the lidar has it: the road's carve outside ends in a round cap that reached 10 m in behind
+      // the headwall (its bare bank 21 m), and the pushes under the road's and the verge's triangles took the grid's points 5 m round them down to the road:
+      // the hill behind the headwall stood in facets a few metres over the road. Those points keep their heights (G.hold: terrain.js pushUnderSteps leaves
+      // them). __w3.noHill: as before
+      if (!globalThis.__w3?.noHill) { const s = G.segs, n = s + 1, bx0 = Math.min(G.xs[0], G.xs[s]), bx1 = Math.max(G.xs[0], G.xs[s]), bz0 = Math.min(G.zs[0], G.zs[s]), bz1 = Math.max(G.zs[0], G.zs[s]);
+        for (const F of portalFrames(proj)) { if (F.ox < bx0 - 40 || F.ox > bx1 + 40 || F.oz < bz0 - 40 || F.oz > bz1 + 40) continue;
+          for (let j = 0; j <= s; j++) { const z = G.zs[j]; if (Math.abs(z - F.oz) > 40) continue;
+            for (let i = 0; i <= s; i++) { const x = G.xs[i]; if (Math.abs(x - F.ox) > 40) continue; const [sp, dp] = F.sd(x, z); if (sp > PLANE || sp < -26 || Math.abs(dp) > 26) continue;
+              const w = Math.min(1, (26 - Math.abs(dp)) / 6, (26 + sp) / 6), v = j * n + i; if (G.hs !== G.raw) G.hs[v] += (G.raw[v] - G.hs[v]) * w; (G.hold ??= new Uint8Array(n * n))[v] = 1; if (G.cut && w > 0.5) G.cut[v] = 0; } } } }
       // the ground as carved to the roads, before it is pushed under their tops (the grid is coarser than a road: a
       // triangle under one road and beside another comes down whole): the road sides are drawn on this one (banks.js)
+      // (A41: and under the hand-built ground, at every point of it: the quads kept at the hand corridor's rim stood over it wherever the grid's
+      // surface was the higher, by 3 m on a 30 m grid; before the banks' copy, they come down to this ground. __w3.noPress: without)
+      if (HAND.ready && HAND.rastersIn && !globalThis.__w3?.noPress) { G.press = yield* pressUnderSteps(G, HAND.rastersIn(Math.min(G.xs[0], G.xs[G.segs]), Math.min(G.zs[0], G.zs[G.segs]), Math.max(G.xs[0], G.xs[G.segs]), Math.max(G.zs[0], G.zs[G.segs])), { skip: globalThis.__w3?.noHill ? null : courtSkip(proj, Math.min(G.xs[0], G.xs[G.segs]), Math.min(G.zs[0], G.zs[G.segs]), Math.max(G.xs[0], G.xs[G.segs]), Math.max(G.zs[0], G.zs[G.segs])) });  /* (A44: a portal's court asks nothing of the hill behind it) */ yield 't:press'; }
       G.carved = G.hs.slice();
     }
     // a near tile built for the first time where its far tile's ground is drawn: kept hidden until the far tile is drawn
@@ -453,7 +517,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const skipped = c.z === FAR_Z ? new Set(childrenOf(c.k).filter(k => near.get(k)?.built)) : null;
     // (the hand-built corridor, hand.js: the generated ground not drawn where the hand terrain is, one ground there)
     const hs = fine && HAND.ready ? handSkip(G) : null, fs = skipped ? farSkip(c, G, skipped) : null;
-    const m = gridMesh(G, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: hs && fs ? (i, j) => hs(i, j) || fs(i, j) : hs || fs }); yield 't:mesh';
+    // (A40: the quads left out for the hand ground keep a floor 12 m down, terrain.js gridMesh; __w3.noFloor: without, to compare)
+    const m = gridMesh(G, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: hs && fs ? (i, j) => hs(i, j) || fs(i, j) : hs || fs, floor: globalThis.__w3?.noFloor ? null : hs }); yield 't:mesh';
     const nor = gridNormals(G); yield 't:normals';
     const mask = classMasks(lu, G.cut); yield 't:masks';
     const cv = gridCurvature(G, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6); yield 't:curv';
@@ -469,7 +534,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     g.setAttribute('mk', new THREE.BufferAttribute(A, 4, true)); g.setAttribute('mk2', new THREE.BufferAttribute(B, 4, true)); g.setAttribute('cv', new THREE.BufferAttribute(CV, 1));
     g.setIndex(new THREE.BufferAttribute(m.idx, 1)); g.computeBoundingSphere();
     const bored = c.z === NEAR_Z && t.roads.some(r => r.fl & 2), mesh = new THREE.Mesh(g, c.z === NEAR_Z && Q.detail ? (bored ? mats.terrainBore : mats.terrain) : bored ? mats.terrainFarBore : mats.terrainFar);
-    mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch();  // (the bores left out at every quality)
+    mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch(); mesh.userData.floor0 = m.floor0;  // (the bores left out at every quality)
     c.grid = G; c.tmesh = { src: m.src, nv: (G.segs + 1) ** 2, skirt: c.z === FAR_Z ? 40 : 12 };
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); } else { c.nor = c.mask = c.cv = null; }
     if (fine) { c.ease = ease; c.group.visible = !ease; }
@@ -509,7 +574,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const due = slicer();
     const t = c.tile, decks = [];
     if (!t || !c.grid) return setPart(c, 'roads', null);
-    const B = builder(), pillars = [], hAt = hOf(c), g = c.grid, occ = new Uint8Array(OCC * OCC), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
+    const B = builder(), pillars = [], hG = hOf(c), hAt = (x, z) => handY(x, z) ?? hG(x, z)  /* (A39: in the hand corridor the hand ground) */, g = c.grid, occ = new Uint8Array(OCC * OCC), ox = Math.min(g.xs[0], g.xs[g.segs]), oz = Math.min(g.zs[0], g.zs[g.segs]);
     const ow = Math.abs(g.xs[g.segs] - g.xs[0]) / OCC, oh = Math.abs(g.zs[g.segs] - g.zs[0]) / OCC;
     // (v: 1 a road's cells (its half width and 1.2 m, the cells coarser than a verge), 2 a car park's or a building's)
     const mark = (x, z, r, v = 1) => { for (let a = Math.floor((x - r - ox) / ow); a <= Math.floor((x + r - ox) / ow); a++) for (let b = Math.floor((z - r - oz) / oh); b <= Math.floor((z + r - oz) / oh); b++) if (a >= 0 && b >= 0 && a < OCC && b < OCC) occ[b * OCC + a] = Math.max(occ[b * OCC + a], v); };
@@ -611,14 +676,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const cutP0 = tr || !RI || r.fl & 19 ? pieces : pieces.flatMap(p => p.line ? [p] : offRails(p, r, st.w / 2)); if (cutP0 !== pieces) yield;
       // (the hand-built stretch, hand.js: its pieces of the way not drawn, only indexed (the paving's index, the ground's
       // and the grass's masks), a metre's overlap at its ends)
-      const cutP = cutP0.flatMap(p => handSplit(p));
+      const cutP = cutP0.flatMap(p => handSplit(p)).flatMap(p => p.hand || p.line || rail ? [p] : handInSplit(p));
       for (const pts of cutP) {  // exactly this tile: the next one draws on from its edge
       if (due()) yield;
       if (pts.length < 2) continue;
       const dk = pts.line ?? (r.fl & 16 && r.dk ? [marks.deckLine(...pts[0]), marks.deckLine(...pts.at(-1))] : r.dk);  // the approaches meet the deck
       // a trail lies on the hillside (each edge on the ground); the ground goes under it only where it would cover it
       const trail = !dk && (st.surf === 2 || /path|footway|track|bridleway|steps/.test(r.hw));
-      const lift = rail ? railLift(r) : trail ? 0.15 : roadLift(r.hw), hint = new Map(), hOn = rail || dk || trail ? hAt : (x, z) => onto(x, z, hAt(x, z), lift, hint);
+      const inH = !!pts.inH && !dk;  // (A39: a piece in the hand corridor lies on the hand ground edge by edge: no generated ground is cut to it there)
+      const lift = rail ? railLift(r) : trail ? 0.15 : inH ? 0.12 : roadLift(r.hw), hint = new Map(), hOn = rail || dk || trail ? hAt : (x, z) => onto(x, z, hAt(x, z), lift, hint);
       const mk = HM && !trail && (st.lm || !st.surf) ? (x, z, tx, tz) => markCode(HM.across(x, z, tx, tz)) : null;  // (the hand list's markings)
       // (a railed service way drawn eased onto the wider road it leaves, as an unrailed one: flush at its edge, Street View
       // Bunker Road 1a_1030; the rider's line is its rail all the same, a few centimetres off it within the paved width)
@@ -626,7 +692,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (a side road cut at the other road's edge: its corners rounded there (curb returns), 5 m: NAIP, Field Road 0a_0130's
       // T junction, both corners about 4 to 6 m; Street View: a flared mouth. Not a service way's)
       const fl = r.hw === 'service' ? null : [...(pts.fs ? [[...pts[0], 5]] : []), ...(pts.fe ? [[...pts.at(-1), 5]] : [])];
-      const BB = pts.hand ? builder() : B, i0 = BB.idx.length, centre = ribbon(BB, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : 5, joints: t.joints.get(ri), drape: trail, mk, flares: fl, wAt: RI?.widthOf && !trail ? RI.widthOf : null, xs: !trail && !dk ? CZ.edges : null });
+      const BB = pts.hand ? builder() : B, i0 = BB.idx.length, centre = ribbon(BB, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : inH ? 2.5 : 5, joints: t.joints.get(ri), drape: trail || inH, mk, flares: fl, wAt: RI?.widthOf && !trail ? RI.widthOf : null, xs: !trail && !dk ? CZ.edges : null });
       const spec = centre.some(q => q.sp); if (spec && !pts.hand) czPaint.push(centre);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
       if (pts.hand && !trail && centre.length > 1) handLines.push({ P: centre, w: st.w, hw: r.hw, lm: st.lm, hand: true });  // (A37: the hand-built stretch's centre for the stop signs on it: OpenStreetMap's highway=stop there had no road to stand by)
@@ -719,6 +785,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const r = ring.map(([la, lo]) => proj.xz(la, lo)); if (r.length > 3 && r[0][0] === r.at(-1)[0] && r[0][1] === r.at(-1)[1]) r.pop();
       if (r.length < 3) continue;
       lotRings.push(r);
+      // (A39: none where the hand-built chunk has its own car park: two pavings in one place, Rock Spring's generated one lay 2.2 m under the hand ground)
+      if (!pad && HAND.ready && HAND.lotAt && !globalThis.__w3?.noHandY) { const T3 = THREE.ShapeUtils.triangulateShape(r.map(p => new THREE.Vector2(p[0], p[1])), []); if (T3.some(([a, b, c]) => HAND.lotAt((r[a][0] + r[b][0] + r[c][0]) / 3, (r[a][1] + r[b][1] + r[c][1]) / 3)) || r.some((p, i) => { const q = r[(i + 1) % r.length]; return HAND.lotAt((p[0] + q[0]) / 2, (p[1] + q[1]) / 2); })) continue; }
       // (a lot's paving under any road's top it reaches: never a step up onto it from the road)
       const code = [0, surf, 0, 60, 0, 0, 0, 0], i0 = B.idx.length, vx = (x, z) => { const h = (hAt(x, z) ?? hAt(Math.max(tbox[0], Math.min(tbox[2], x)), Math.max(tbox[1], Math.min(tbox[3], z))) ?? 0) + 0.2, t = RI?.top(x, z, h); return B.v(x, t != null ? Math.min(h, t - 0.04) : h, z, 0.5, 0, code); };
       const tri = (a, b, c, d = 0) => {  // split until no side is over 4 m (the paving follows the ground)
@@ -746,7 +814,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // (Hawk Hill's gravel junction lay 0.6 m under the road's edge))
     const lotEase = (x, z, h) => { if (!RI) return 0; let up = 0; for (const id of RI.near(x, z)) { const m = RI.rails[id]; if (m.r.fl & 3 || isTrail(m.r)) continue; const p = m.T.at(x, z); if (!p) continue; const d = Math.max(0, Math.abs(p.d) - m.half); if (d > 3 || Math.abs(p.h + m.lift - h) > 2) continue; up = Math.max(up, (p.h + m.lift - 0.04 - (h + 0.04)) * (1 - d / 3)); } return up; };
     // the ground never over a road (lowered, the terrain mesh moved to match): its grid is coarser than a path is wide
-    { const T = []; for (const [a, b, trail] of tops) if (trail !== true && trail !== 'pad') for (let k = a; k < b; k++) { const v = B.idx[k]; T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]); }
+    // (A38: not under a car park either: it lies on the ground as a pad does (draped below), so the push was fed its own
+    // result: on Sausalito's slopes the ground under OpenStreetMap's lot at 37.85669,-122.48090 went 4.4 m down (to each
+    // 4 m triangle's lowest corner, a grid step and the margin round it), the lot was draped into that pit and the service
+    // way's bank strip stood over it: 3080 quarter metre cells there, work/tam-net/kosmoke2.mjs; __w3.lotPush: as before)
+    { const T = []; for (const [a, b, trail] of tops) if (!trail || (trail === 'lot' && globalThis.__w3?.lotPush)) for (let k = a; k < b; k++) { const v = B.idx[k]; T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]); }
       // (the hand-built stretch's paving too: the ground pushed under it as under a drawn road)
       for (const v of handT) T.push(v);
       { const H = HAND.push; for (let k = 0; k + 8 < H.length; k += 9) { const mx = (H[k] + H[k + 3] + H[k + 6]) / 3, mz = (H[k + 2] + H[k + 5] + H[k + 8]) / 3; if (mx >= tbox[0] - 5 && mx <= tbox[2] + 5 && mz >= tbox[1] - 5 && mz <= tbox[3] + 5) for (let q = 0; q < 9; q++) T.push(H[k + q]); } }
@@ -756,7 +828,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // the trails draped on the ground as it now is (after the roads' carve and push): every vertex 4 cm over it, the
       // ground never pushed under them (that left their edges over a trench)
       // (the car parks too: on the ground, under any road's top they reach)
-      if (g) for (const [a, b, trail] of tops) if (trail) { if (b - a > 600) yield; for (let k = a; k < b; k++) { const v = B.idx[k], x = B.pos[3 * v], z = B.pos[3 * v + 2], h = gridHeight(g, x, z) ?? (trail !== true ? gridHeight(g, Math.max(tbox[0], Math.min(tbox[2], x)), Math.max(tbox[1], Math.min(tbox[3], z))) : null); if (due()) yield; if (h == null) continue; const lot = trail === 'lot' || trail === 'pad', rt = lot ? RI?.top(x, z, h) : null; B.pos[3 * v + 1] = rt != null ? rt - 0.04 : lot ? h + 0.04 + lotEase(x, z, h) : h + 0.04; } } }
+      if (g) for (const [a, b, trail] of tops) if (trail) { if (b - a > 600) yield; for (let k = a; k < b; k++) { const v = B.idx[k], x = B.pos[3 * v], z = B.pos[3 * v + 2], hy = handY(x, z), h = hy ?? gridHeight(g, x, z) ?? (trail !== true ? gridHeight(g, Math.max(tbox[0], Math.min(tbox[2], x)), Math.max(tbox[1], Math.min(tbox[3], z))) : null); if (due()) yield; if (h == null) continue; const lot = trail === 'lot' || trail === 'pad', rt = lot ? RI?.top(x, z, h) : null, up = hy != null ? 0.12 : 0.04  /* (A39: in the hand corridor on the hand ground, not the grid pushed under it; 12 cm: its mesh is finer than the paving's) */; B.pos[3 * v + 1] = rt != null ? rt - 0.04 : lot ? h + up + lotEase(x, z, h) : h + up; } } }
     yield;
     // the road sides (banks.js) on the ground as it now is: embankments down to it, cut faces up the lidar's banks, the
     // barriers at the paved edge: on a surveyed road the hand list's (handlist.js, Street View), each its kind; elsewhere
@@ -771,7 +843,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const cl = (x, z) => [Math.max(gx0, Math.min(gx1, x)), Math.max(gz0, Math.min(gz1, z))];
       // (past it the next near tile's own fine grid when that is in: clamped heights there stood the strips' outer sides sheer, slabs along the tile edges, user 2026-11-05)
       const nb = (x, z, w) => { const [tx, ty] = tileOf(x, z), n = near.get(key(NEAR_Z, tx, ty)); return n && n !== c && n.lod === 0 && n.grid ? gridHeight(n.grid, x, z, w ? n.grid.raw : n.grid.hs) : null; };
-      const ground = (x, z) => gridHeight(g, x, z) ?? nb(x, z, false) ?? gridHeight(g, ...cl(x, z)), raw = (x, z) => gridHeight(g, x, z, g.raw) ?? nb(x, z, true) ?? gridHeight(g, ...cl(x, z), g.raw), n1 = g.segs + 1;
+      // (A39: in the hand corridor the ground a strip runs down or up to is the hand ground, handY: on the tile's grid there the strips lay in and over it)
+      const ground = (x, z) => handY(x, z) ?? gridHeight(g, x, z) ?? nb(x, z, false) ?? gridHeight(g, ...cl(x, z)), raw = (x, z) => handY(x, z) ?? gridHeight(g, x, z, g.raw) ?? nb(x, z, true) ?? gridHeight(g, ...cl(x, z), g.raw), n1 = g.segs + 1;
       const osm = new Map(), ok = (x, z) => `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
       for (const line of t.rails || []) for (const [x, z] of resample(line.map(([la, lo]) => proj.xz(la, lo)), 2)) (osm.get(ok(x, z)) ?? osm.set(ok(x, z), []).get(ok(x, z))).push([x, z]);
       // (a mapped rail beside this edge: from a metre and a half inside it to 6 m out, within 4 m along)
@@ -789,7 +862,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (nor over a car park or a pad: it lies on the ground eased up to the road's edge within 3 m (A12: a strip up the
       // lidar's ground over the carve hid Mitchell Road's lot and Conzelman 0a_2030's turnout under grass))
       const inLot = (x, z) => lotRings.some(r => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) if ((r[i][1] > z) !== (r[j][1] > z) && x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c; return c; });
-      const block = (x, z, ey) => { if (lotRings.length && inLot(x, z) && Math.abs((ground(x, z) ?? ey) - ey) < 3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
+      const NHB = !!globalThis.__w3?.noHandBanks || (!HY && !globalThis.__w3?.handBanks);  // (A39: __w3.noHandBanks: no strip at all in the hand corridor; without handY none either, the strips lay in and over the hand ground, 21 644 cells at the Sausalito join)
+      const block = (x, z, ey) => { if (NHB && inHandAll(x, z)) return true; if (lotRings.length && inLot(x, z) && Math.abs((ground(x, z) ?? ey) - ey) < 3) return true; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of SI.cells.get(`${Math.floor(x / 10) + a},${Math.floor(z / 10) + b}`) || []) {
         const S = SI.S, ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, tu = L2 ? ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2 : 0, t = Math.max(0, Math.min(1, tu));
         if (tu > -0.05 && tu < 1.05 && Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) < S[k + 6] && Math.abs(S[k + 1] + (S[k + 4] - S[k + 1]) * t - ey) < 8) return true; } return false; };
       // one edge's strips (banks.js): into the banks' geometry; nothing grows where a strip stands off the ground (grass,
@@ -911,7 +985,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // [x, y, z, scale, random, near only: a full model, no impostor] (on a road side's strip where one is, none on a steep face)
     // (hf: the height over the width scale, else a little either way at random; foot: the ground's lowest round the trunk;
     // a lidar tree (hf) by a road's coarse cells too: its own gap to the paving decided, fitTree)
-    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || HVEG.owns(x, z)) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - 0.3, z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
+    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || HVEG.owns(x, z)) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z) || !KO.clear(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - 0.3, z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
@@ -1140,13 +1214,18 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (on the road's centre line that far back, the right half's middle, along it: the approach may curve)
       if (o.legend && !L.hand) { const d = o.legend + 1.4, h2 = nearLine(x - fx * d, z - fz * d, 6); if (h2) { const [p2, L2, e2] = h2, el = Math.hypot(e2[0], e2[1]) || 1, ex = e2[0] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), ez = e2[1] / el * Math.sign(e2[0] * fx + e2[1] * fz || 1), hf2 = (p2[3] ?? L2.w / 2) / 2;
         put('stopword', p2[0] - ez * hf2, p2[1] + 0.03, p2[2] + ex * hf2, Math.atan2(-ex, -ez)); } }
-      { const sx = x + nx * (half + 0.8), sz = z + nz * (half + 0.8); put('stop', sx, Math.min(q[1] - 0.25, (hAt(sx, sz) ?? q[1]) - 0.1), sz, yaw); }  // (its foot in the ground: never over a fill's slope)
+      // (A38: by the keep-out rule: KEEP off its road's edge, clear of every other ribbon (moved out, else none), its foot on the drawn ground; it stood 0.8 m off its own road with no other test)
+      { const sp = KO.spot(x + nx * (half + KEEP), z + nz * (half + KEEP)); if (sp) put('stop', sp[0], Math.min(q[1] - 0.25, (KO.groundY(sp[0], sp[1]) ?? q[1]) - 0.1), sp[1], yaw); }  // (its foot in the ground: never over a fill's slope)
       if (!L.hand) put('stopbar', x + nx * (two ? half / 2 : 0), q[1] + 0.03, z + nz * (two ? half / 2 : 0), yaw, (two ? half : 2 * half) / 3.2);  // (a hand-built road paints its own)
     }
     // (A37: the hand list's roadside signs, Street View: facing the traffic that reads them, on the lidar's ground under them
     // (the grid's carved ground lay 2.7 m under the hand-built bank at Bunker Road's crossing: the sign was buried))
+    // (A38: the hand list's pieces stand where Street View has them (their place is not the rule's to move); their foot by
+    // the rule's ground: the lidar's inside the hand-built corridor as before, the tile's cut ground outside it, where the
+    // lidar's is not what is drawn)
+    const handY = (x, z) => KO.groundY(x, z) ?? raw(x, z) ?? hAt(x, z);
     const faces = [];
-    for (const [la, lo, hd, kind, plate, sym, psym] of SIGNS.filter(inTile)) { const r = hd * Math.PI / 180, [x, z] = proj.xz(la, lo), y = raw(x, z) ?? hAt(x, z); if (y == null) continue; const yaw = Math.atan2(-Math.sin(r), Math.cos(r)); put(kind === 'warn' && plate ? 'warnp' : kind, x, y - 0.05, z, yaw);
+    for (const [la, lo, hd, kind, plate, sym, psym] of SIGNS.filter(inTile)) { const r = hd * Math.PI / 180, [x, z] = proj.xz(la, lo), y = handY(x, z); if (y == null) continue; const yaw = Math.atan2(-Math.sin(r), Math.cos(r)); put(kind === 'warn' && plate ? 'warnp' : kind, x, y - 0.05, z, yaw);
       // (A37 round 2: its face from the sign atlas, tex.js: the diamond's symbol, the plate's, a regulatory sign's words, a blade's name both sides)
       const F = []; if (kind === 'warn') { F.push([SIGN_CELL[sym] ?? SIGN_CELL.blank, 0, 2.25, 1.1, 1.1, 0.04]); if (plate && psym) F.push([SIGN_CELL[psym], 0, 2.25 - 0.82, 0.651, 0.669, 0.036]); }
       else if (kind === 'reg') F.push([SIGN_CELL[sym], 0, 2.1, 0.669, 0.651, 0.034]);
@@ -1162,14 +1241,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const [dx, dz] = dir(i), nx = -dz, nz = dx, [x, y, z] = P[i], k = cls(x, z), road = y - 0.25, r = hash2(Math.round(x), Math.round(z)), half = hw(i);
         run += i ? Math.hypot(x - P[i - 1][0], z - P[i - 1][2]) : 0;
         // lamps along town streets every 32 m, sides in turn; a speed limit along the bigger roads now and then
-        if (k === 3 && !L.br && run >= 32) { run = 0; const s = (i >> 2) % 2 ? 1 : -1; const lx = x + nx * s * (half + 0.9), lz = z + nz * s * (half + 0.9); put('lamp', lx, Math.min(road, (hAt(lx, lz) ?? road) - 0.1), lz, Math.atan2(nz * s, -nx * s)); }
-        if (t.limits && big && !L.br && i % 90 === 45 && r < 0.6) { const lx = x + nx * (half + 1.3), lz = z + nz * (half + 1.3); put('limit', lx, Math.min(road, (hAt(lx, lz) ?? road) - 0.1), lz, Math.atan2(-dx, -dz)); }
+        // (A38: each by the keep-out rule: KEEP off its road's edge and clear of every other ribbon (moved out, else none), its foot on the drawn ground)
+        if (k === 3 && !L.br && run >= 32) { run = 0; const s = (i >> 2) % 2 ? 1 : -1, sp = KO.spot(x + nx * s * (half + KEEP), z + nz * s * (half + KEEP)); if (sp) put('lamp', sp[0], Math.min(road, (KO.groundY(sp[0], sp[1]) ?? road) - 0.1), sp[1], Math.atan2(nz * s, -nx * s)); }
+        if (t.limits && big && !L.br && i % 90 === 45 && r < 0.6) { const sp = KO.spot(x + nx * (half + KEEP), z + nz * (half + KEEP)); if (sp) put('limit', sp[0], Math.min(road, (KO.groundY(sp[0], sp[1]) ?? road) - 0.1), sp[1], Math.atan2(-dx, -dz)); }
 
         // fences: post and rail along farm roads, picket in front of the houses on town streets, in stretches
         if (i % 3 === 0 && !L.br && i + 1 < n && !hlTile) for (const s of [1, -1]) {  // (none in the Headlands, Street View)
           const blk = hash2(Math.floor(x / 40) + s * 7, Math.floor(z / 40));
-          if (k === 2 && blk < 0.75) put('fence', x + nx * s * (half + 3), hAt(x + nx * s * (half + 3), z + nz * s * (half + 3)) ?? road, z + nz * s * (half + 3), Math.atan2(-dz, dx));
-          else if (k === 3 && small && blk < 0.3) put('picket', x + nx * s * (half + 2.4), hAt(x + nx * s * (half + 2.4), z + nz * s * (half + 2.4)) ?? road, z + nz * s * (half + 2.4), Math.atan2(-dz, dx));
+          // (A38: a panel, 3 m along the road from its post, only where its two ends and its middle are clear by the keep-out rule (it crossed a side road or a path that met its road); its foot on the drawn ground)
+          const kind = k === 2 && blk < 0.75 ? 'fence' : k === 3 && small && blk < 0.3 ? 'picket' : null; if (!kind) continue;
+          const o = half + (kind === 'fence' ? 3 : 2.4), fx = x + nx * s * o, fz = z + nz * s * o;
+          if (KO.clear(fx, fz) && KO.clear(fx + dx * 1.5, fz + dz * 1.5) && KO.clear(fx + dx * 3, fz + dz * 3)) put(kind, fx, KO.groundY(fx, fz) ?? hAt(fx, fz) ?? road, fz, Math.atan2(-dz, dx));
         }
       }
       // flexible posts in the middle of the buffer beside a bike lane against a oneway (upper Conzelman Road), every 9 m:
@@ -1188,10 +1270,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const span = (x, y, z, yaw, x1, y1, z1, yb) => { for (const [o, h] of [[-1, 10.75], [0, 10.75], [1, 10.75], [0.3, 8.2]]) wires.push([x + Math.sin(yaw) * o, y + h, z + Math.cos(yaw) * o, x1 + Math.sin(yb) * o, y1 + h, z1 + Math.cos(yb) * o]); };
     { const bx = tileBox(c);
       for (const line of t.power || []) {
-        const Q = line.map(([la, lo]) => proj.xz(la, lo)), at = Q.map(([x, z]) => [x, (hAt(x, z) ?? 0) - 0.1, z]);
+        // (A38: each by the keep-out rule: clear of every ribbon by KEEP, else moved out to it, else none (the wires go on to
+        // the next one standing); its foot on the drawn ground. They stood on their OpenStreetMap nodes with no test: "poles
+        // in the middle of the road". The data pass has moved the nodes already (keepout_bake.mjs): this is the same rule
+        // where they are drawn)
+        const O = line.map(([la, lo]) => proj.xz(la, lo)), Q0 = O.map(([x, z]) => KO.spot(x, z)), keep = Q0.map((q, i) => (q ? i : -1)).filter(i => i >= 0), Q = keep.map(i => Q0[i]);
+        const at = Q.map(([x, z]) => [x, (KO.groundY(x, z) ?? hAt(x, z) ?? 0) - 0.1, z]);
         const yawAt = i => { const a = Q[Math.max(0, i - 1)], b = Q[Math.min(Q.length - 1, i + 1)]; return Math.atan2(b[0] - a[0], b[1] - a[1]) + Math.PI / 2; };
         for (let i = 0; i < Q.length; i++) {
-          const [x, z] = Q[i]; if (!(x >= bx[0] && x < bx[2] && z >= bx[1] && z < bx[3])) continue;
+          const [x, z] = Q[i], [ox, oz] = O[keep[i]]; if (!(ox >= bx[0] && ox < bx[2] && oz >= bx[1] && oz < bx[3])) continue;  // (the tile its node is in draws it, wherever it was moved to)
           const yaw = yawAt(i); put('pole', x, at[i][1], z, yaw);
           if (i + 1 < Q.length) span(x, at[i][1], z, yaw, Q[i + 1][0], at[i + 1][1], Q[i + 1][1], yawAt(i + 1));
         }
@@ -1200,7 +1287,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // [x, y (the lidar's ground), z, the road's direction there (tx, tz), toward the road from it (ux, uz)])
       const atS = (s, side, past) => { const p = CZ.latlon(s), a = CZ.latlon(s + 1), b = CZ.latlon(s - 1); if (!p || !a || !b) return null; const cs = CZ.cross(s) ?? { L: -3.4, R: 3.4 };
         const [x0, z0] = proj.xz(p[0], p[1]), [ax, az] = proj.xz(a[0], a[1]), [bx2, bz2] = proj.xz(b[0], b[1]), l = Math.hypot(ax - bx2, az - bz2) || 1, tx = (ax - bx2) / l, tz = (az - bz2) / l;
-        const off = side === 'R' ? cs.R + past : cs.L - past, x = x0 - tz * off, z = z0 + tx * off, y = raw(x, z) ?? hAt(x, z); if (y == null) return null;
+        const off = side === 'R' ? cs.R + past : cs.L - past, x = x0 - tz * off, z = z0 + tx * off, y = handY(x, z); if (y == null) return null;
         return [x, y, z, tx, tz, -Math.sign(off) * -tz, -Math.sign(off) * tx]; };
       const inBox = (x, z) => x >= bx[0] && x < bx[2] && z >= bx[1] && z < bx[3];
       for (const { pts } of FURN_POLES) { const P = pts.map(([s, side, past]) => atS(s, side, past)); if (P.some(q => !q)) continue;
@@ -1211,7 +1298,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           if (n) span(q[0], q[1] - 0.1, q[2], yaw, n[0], n[1] - 0.1, n[2], yawOf(i + 1));  // (the wires drawn by the tile their first pole is in)
           if (pts[i][3]) put('parm', q[0], q[1] - 0.1, q[2], Math.atan2(-q[6], q[5])); }); }
       for (const [s, side, past, kind] of FURN_PIECES) { const q = atS(s, side, past); if (q && inBox(q[0], q[2])) put(kind, q[0], q[1] - (kind === 'rdelin' ? 0.15 : 0.05), q[2], kind === 'rdelin' ? Math.atan2(q[3], q[4]) : Math.atan2(q[5], q[6])); }
-      for (const [la, lo] of FURN_LAMPS) { const [x, z] = proj.xz(la, lo); if (!inBox(x, z)) continue; const hit = nearLine(x, z, 12), y = raw(x, z) ?? hAt(x, z); if (!hit || y == null) continue;
+      for (const [la, lo] of FURN_LAMPS) { const [x, z] = proj.xz(la, lo); if (!inBox(x, z)) continue; const hit = nearLine(x, z, 12), y = handY(x, z); if (!hit || y == null) continue;
         const dx = hit[0][0] - x, dz = hit[0][2] - z, l = Math.hypot(dx, dz) || 1; put('lamp', x, y - 0.1, z, Math.atan2(-dz / l, dx / l)); } }
     // the barriers' posts (buildRoads), each from 0.3 m into the ground under it (however far it falls away) to its top:
     // a W-beam's square dark timber posts, a cable fence's and a rail fence's timber posts, a concrete rail's blocks, a
@@ -1316,7 +1403,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // BUILDINGS, agrees with it where both are)
       const fort = inHeadlands(...R0[0]);
       let lb = null;
-      if (fort) { let a = 0, o = 0; const n = R0.length - 1; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; } lb = LIDAR_BLDG.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5)) || null; }
+      if (fort) { let a = 0, o = 0; const n = R0.length - 1; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; } const ka = Math.round(a / n * 1e5), ko = Math.round(o / n * 1e5); lb = LIDAR_BLDG.get(ka + ',' + ko) || null;
+        // (A38: a building the keep-out pass moved off a road's ribbon by up to 3 steps of 1e-5 degrees, keepout_bake.mjs (160 of
+        // the Headlands' with a lidar roof): its roof by the nearest key, ring by ring; the pass proves no other building finds one so)
+        for (let d = 1; d <= 3 && !lb; d++) for (let i = -d; i <= d && !lb; i++) for (let j = -d; j <= d && !lb; j++) if (Math.max(Math.abs(i), Math.abs(j)) === d) lb = LIDAR_BLDG.get((ka + i) + ',' + (ko + j)) || null; }
       if (lb) {
         if (lb[4] || lb[5]) ring = ring.map(([x, z]) => [x + lb[4], z - lb[5]]);  // (A37: onto the lidar's roof, bldglidar.js)
         // (on a hillside the walls run down to the lowest ground; the eaves at the lidar's height over the mean ground (the
@@ -1336,6 +1426,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         continue;
       }
       list.push({ ring, base, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
+      // (A38: off the Headlands (no lidar table there) a building on a hillside as the Headlands' own: the eaves a storey (2.4 m)
+      // over the highest ground at its corners, the walls still down to the lowest, so no slope covers a roof: 34 of the 148
+      // houses within 350 m of 37.8895,-122.5465 above Shoreline Highway stood with their roof under the uphill ground, 80 with
+      // under a storey showing, work/tam-net/bldgslope.mjs, ride shot up_07519. A house (OpenStreetMap's height 10 m or less)
+      // to 10 m of wall at most, so it keeps its pitched roof, props.js house)
+      if (!fort) { const b = list.at(-1); let gx = -Infinity; for (const p of ring) { const g = hAt(p[0], p[1]); if (g != null) gx = Math.max(gx, g); } const up = gx - b.base + 2.4; if (up > b.h) b.h = b.h <= 10 ? Math.min(10, up) : up; }
     }
     // (A37: the hand list's buildings, HAND_BLDG: on the lidar's ground round them, the tile's own)
     { const tb = tileBox(c); for (const [R, e, r, fl] of HAND_BLDG) { const ring = R.concat([R[0]]).map(([la, lo]) => proj.xz(la, lo)); let cx = 0, cz = 0; for (const p of R) { const [x, z] = proj.xz(...p); cx += x / R.length; cz += z / R.length; }
@@ -1558,6 +1654,58 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   // what grows stands on: a road side's strip where one is (banks.js; null on a steep face), else the ground
   const standOn = (c, x, z, h) => { const b = c.bankH?.size ? c.bankH.get(bkey(x, z)) : null; return b == null ? h : b < -1e8 ? null : Math.max(h, b); };
+  /* ---------- the keep-out rule (keepout.js): the one rule every placer here asks, as the data pass does on the baked
+     tiles (justwatts-private/work/tam-net/keepout_bake.mjs) and the ship gate counts (keepout_check.mjs). KO.clear(x, z,
+     margin): may something stand there (clear of every road's, path's and ride line's ribbon by the margin, 1.5 m unless
+     given, and not in the sea); KO.spot(x, z): a pole's place (out to the ribbon's edge plus the margin on its own side,
+     null: none); KO.groundY(x, z): the height its foot takes.
+     (A38: the owner's ride of the link to Mount Tam, "poles in the middle of the road", "so much glitchy stuff and stuff
+     floating". Before it each placer had its own test and its own height: a lamp stood 0.9 m off its own road whatever
+     other way ran there (the lamp post in Bridgeway's bike lane, ride frame linkN_02006), a power pole on its
+     OpenStreetMap node with no test at all, a grid tree by a coarse raster of road cells, the hand list's furniture on
+     the lidar's ground while the rest stood on the tile's cut ground.) ---------- */
+  // the ribbons of a list of ways (a tile's, the ride lines' of rails.bin), each at its width: not a bore's nor the Golden
+  // Gate Bridge's (its own model); a bridge by its deck's height (more than 5 m over the ground it does not count). The
+  // same lines and widths as the data pass and the gate, so the three agree
+  function lineRibbons(roads) {
+    const R = ribbons();
+    for (const r of roads) { if (r.fl & 18 || r.pts.length < 2) continue;
+      const half = (oneLane(r) ? ONE_LANE : roadStyle(r.hw, r.ln, r.fl, r.wd).w) / 2, dk = r.fl & 1 && r.dk ? Math.min(r.dk[0], r.dk[1]) : null;
+      let a = proj.xz(r.pts[0][0], r.pts[0][1]); for (let i = 1; i < r.pts.length; i++) { const b = proj.xz(r.pts[i][0], r.pts[i][1]); R.add(a[0], a[1], b[0], b[1], half, dk); a = b; } }
+    return R;
+  }
+  const ribOf = c => (c?.tile ? (c.rib ??= lineRibbons(c.tile.roads || [])) : null);
+  // how far a point is outside the nearest ribbon's edge: the ride lines', its tile's ways' and, within 10 m of the tile's
+  // edge, the next tile's (a way drawn by it reaches over the edge)
+  function koGap(x, z) {
+    const fx = tileX(proj.lon(x), NEAR_Z), fy = tileY(proj.lat(z), NEAR_Z), tx = Math.floor(fx), ty = Math.floor(fy), u = fx - tx, v = fy - ty, E = 0.0055, c = near.get(key(NEAR_Z, tx, ty));
+    const y = c?.grid ? gridHeight(c.grid, x, z) : null; let best = KOR ? KOR.gap(x, z, y) : Infinity;
+    const T = [c]; if (u < E) T.push(near.get(key(NEAR_Z, tx - 1, ty))); else if (u > 1 - E) T.push(near.get(key(NEAR_Z, tx + 1, ty)));
+    if (v < E) T.push(near.get(key(NEAR_Z, tx, ty - 1))); else if (v > 1 - E) T.push(near.get(key(NEAR_Z, tx, ty + 1)));
+    for (const q of T) { const R = ribOf(q); if (R) best = Math.min(best, R.gap(x, z, y)); }
+    return best;
+  }
+  // is a point inside the hand-built corridor as it is drawn now (the stations loaded: there the generated ground gives way, handSkip)
+  const inHand = (x, z) => { if (!HAND.ready || !HAND.covers) return false; const H = handCover(), i = Math.round((x - H.x0) / H.C), j = Math.round((z - H.z0) / H.C); return !!((i >= 0 && j >= 0 && i < H.nx && j < H.nz && H.m[j * H.nx + i]) || HAND.extAt?.(x, z)); };
+  // (A39: the same on Mount Tam too, whose corridor is masked per kilometre, tamBlocks)
+  const inHandAll = (x, z) => { if (!HAND.ready || !HAND.covers) return false; if (inHand(x, z)) return true; const H = handCover();
+    for (const B of tamBlocks()) { if (x < B.x0 || x > B.x1 || z < B.z0 || z > B.z1 || !B.ris.some(q => H.onR[q])) continue; const T = B.grid ?? tamGrid(B), ci = Math.round((x - B.x0) / T.C), cj = Math.round((z - B.z0) / T.C);
+      if (ci >= 0 && cj >= 0 && ci < T.nx && cj < T.nz) { const v = T.idx[cj * T.nx + ci]; if (v && H.onR[v]) return true; } }
+    return false; };
+  // (A39: the hand-built ground's own height where it is the ground drawn (inside the corridor), hand.js yAt; null elsewhere. One height there for every
+  // generated thing in the corridor: before it they stood on the tile's 7.5 m grid, over or under the hand ground by up to a metre. __w3.noHandY: as before)
+  const HY = !globalThis.__w3?.noHandY, handY = (x, z) => { if (!HY || !HAND.ready || !HAND.yAt) return null; const y = HAND.yAt(x, z); return y == null || !inHandAll(x, z) ? null : y; };
+  // the height of the surface drawn at a point: inside the hand-built corridor the lidar's ground (the hand terrain is
+  // built from it; there is no height lookup of that mesh itself, hand/ground.json holds its texture only), else the
+  // tile's ground as cut to its roads, on a road side's strip where one is (null on a strip's steep face: nothing stands there)
+  function drawnY(x, z) {
+    const hy = handY(x, z); if (hy != null) return hy;
+    const c = near.get(key(NEAR_Z, ...tileOf(x, z))); if (!c?.grid) return groundAt(x, z);
+    const h = gridHeight(c.grid, x, z); if (h == null) return null;
+    return inHand(x, z) ? gridHeight(c.grid, x, z, c.grid.raw) ?? h : standOn(c, x, z, h);
+  }
+  // (in the sea: the ground under the sea's level; a lake's or a lagoon's polygon is the data pass's to test, it has the rings)
+  const KO = rule({ gap: koGap, wet: (x, z) => { const h = groundAt(x, z); return h != null && h < SEA; }, ground: drawnY });
   // grass: clumps in cells round the camera (grass.js); the ground under a point: height, normal, class weights
   function groundSample(x, z) {
     const [tx, ty] = tileOf(x, z), c = near.get(key(NEAR_Z, tx, ty)); if (!c?.grid || !c.mask) return null;
@@ -1575,7 +1723,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const vk = vcls(x, z); if (vk === CYPRESS || vk === EUC || vk === PAVED || (vk === SCRUB && hash2(Math.round(x * 7), Math.round(z * 7)) < 0.5 && (roadGap(x, z) ?? 9) > 3.5)) return { skip: true };  // under the groves and on the paving none; between the scrub's bushes some; the verges in full
     return { h, nx: N[3 * v], ny: N[3 * v + 1], nz: N[3 * v + 2], cv: c.cv[v], m: [mk[8 * v] / 255, mk[8 * v + 1] / 255, mk[8 * v + 2] / 255, mk[8 * v + 3] / 255] };
   }
-  const grass = createGrass({ THREE, scene, mat: mats.grass, sample: (x, z) => ((x > 11412 && x < 11453 && z > 11450 && z < 11470) || (x > 11380 && z > 11368 && z < 11482 && x < 11493 - (z - 11380) * 0.414) ? null : groundSample(x, z)) });  // (A31: no grass clumps inside the tunnel at 11076, on the height grid they stood under its roof, w5_11070_r; none on the bare red bank north of it, dark tufts at w9_11070_r, or on the crest above: the height grid stands over the hand terrain there, flecks against the sky at w11_11030_a)
+  const grass = createGrass({ THREE, scene, mat: mats.grass, sample: (x, z) => ((x > 11412 && x < 11453 && z > 11450 && z < 11470) || (x > 11380 && z > 11368 && z < 11482 && x < 11493 - (z - 11380) * 0.414) || lawnAt(x, z) ? null : groundSample(x, z)) });  // (A31: no grass clumps inside the tunnel at 11076, on the height grid they stood under its roof, w5_11070_r; none on the bare red bank north of it, dark tufts at w9_11070_r, or on the crest above: the height grid stands over the hand terrain there, flecks against the sky at w11_11030_a)
   // the scrub's bushes stand on the ground: not on a road, in a building, a bore or on a steep bank cut for a road; clear of
   // a road's paved edge by their whole reach (nothing over the paving; A11's bushes from 1.6 m at full size hung over the
   // road). A bush of scale sc whose leaves would reach within 0.25 m of the paving is moved out from the road till they
@@ -1689,7 +1837,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
       let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity; for (const [x, z] of P) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); bz0 = Math.min(bz0, z); bz1 = Math.max(bz1, z); }
       list.push({ P, D, Y, h0, h1, w, L, segs, cuts: [], port, box, cover, lift: railLift(r), bb: [bx0 - w - 5, bz0 - w - 5, bx1 + w + 5, bz1 + w + 5] });
-      const k0 = B.idx.length; ribbon(B, P, { ...st, hAt: () => 0, deck: [h0, h1], rail: (x, z) => tunRail(x, z), lift: railLift(r), step: 6 }); cuts.push([k0, B.idx.length, port, L]);  // (its top as its rail's: rail.js)
+      const k0 = B.idx.length; ribbon(B, P, { ...st, hAt: () => 0, deck: [h0, h1], rail: (x, z) => tunRail(x, z), lift: railLift(r), step: 6 }); cuts.push([k0, B.idx.length, one && portalAt(P[0][0], P[0][1], proj) ? -9 : port, L, one && portalAt(P.at(-1)[0], P.at(-1)[1], proj) ? -9 : port]);  /* (A44: no open cut at a measured portal) */  // (its top as its rail's: rail.js)
       // a ring: walls up to the arch (or the flat roof), and the floor under the road (closed, so nothing outside shows through)
       const SEG = 12, R = w, ring = [];
       if (!rise) ring.push([R, H], [-R, H]);
@@ -1718,8 +1866,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     yield;
     // the open cuts before the portals: the ground there kept under the road (each near tile its own part)
     { const T = [];
-      for (const [a, b, port, L] of cuts) for (let k = a; k + 2 < b; k += 3) {
-        const vs = [B.idx[k], B.idx[k + 1], B.idx[k + 2]]; if (!vs.every(v => B.uv[2 * v + 1] <= port + 1) && !vs.every(v => B.uv[2 * v + 1] >= L - port - 1)) continue;
+      for (const [a, b, port, L, port1 = port] of cuts) for (let k = a; k + 2 < b; k += 3) {
+        const vs = [B.idx[k], B.idx[k + 1], B.idx[k + 2]]; if (!vs.every(v => B.uv[2 * v + 1] <= port + 1) && !vs.every(v => B.uv[2 * v + 1] >= L - port1 - 1)) continue;
         for (const v of vs) T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]);
       }
       if (T.length) for (const c of near.values()) if (c.grid) { const bx = tileBox(c), Tc = [];
@@ -1762,6 +1910,25 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // a flat headwall with a round-arched opening, a coping, wing walls splayed out from it and sloping down (Street
         // View: the Baker-Barry tunnel's portals, Bunker Road under US-101); at a one-lane tunnel a signal each side of
         // the opening, on the wall
+        // (A44) a measured portal (portals.js): its court's ground the hand-built ground's alone (the tile's not drawn there); and its own headwall, wing
+        // and walls in place of the standing ones (local: x to the right of the way out, z back into the hill; the headwall's body 0.8 m about its plane)
+        const mp = one && !globalThis.__w3?.noHill && portalAt(end[0], end[1], proj);
+        if (mp) { const [c0, c1, co] = mp.p.court, ca = mp.xz(PLANE, (c0 + c1) / 2), cb = mp.xz(co, (c0 + c1) / 2), cut = [ca[0], ca[1], cb[0], cb[1], y - 1, y - 1, (c1 - c0) / 2, 60]; cut.court = true; T.cuts.push(cut); }
+        if (mp && !mp.p.generic) {
+          const S = mp.p, top = H + rise + 2.2, ry = -S.hd * Math.PI / 180, [n0, n1] = S.head, sh = new THREE.Shape();
+          sh.moveTo(n1, -2); sh.lineTo(n1, top); sh.lineTo(n0, top); let dl = n0; for (const [d, h] of S.wing || []) { sh.lineTo(d, h); dl = d; } sh.lineTo(dl, -2); sh.lineTo(n1, -2);
+          const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H);
+          for (let k = 1; k <= 16; k++) { const th = Math.PI * k / 16; hole.lineTo(Math.cos(th) * R, H + Math.sin(th) * rise); }
+          hole.lineTo(-R, -0.5); sh.holes.push(hole);
+          add(new THREE.ExtrudeGeometry(sh, { depth: 0.8, bevelEnabled: false }).translate(0, 0, -PLANE - 0.4), mp.ox, y, mp.oz, ry, S.white);
+          add(new THREE.BoxGeometry(n1 - n0 + 0.5, 0.35, 1.1).translate((n0 + n1) / 2, top + 0.15, -PLANE), mp.ox, y, mp.oz, ry, S.white);
+          // (the floor between the jambs out to the hand road's start: the hand ground is left out there, hand.js)
+          add(new THREE.BoxGeometry(2 * MOUTH[1], 0.3, MOUTH[0] - PLANE + 0.4).translate(0, -0.3, -(MOUTH[0] + PLANE - 0.4) / 2), mp.ox, y, mp.oz, ry);
+          for (const W of S.walls || []) { const A = mp.xz(...W.a), Bq = mp.xz(...W.b), wl = Math.hypot(Bq[0] - A[0], Bq[1] - A[1]), ws = new THREE.Shape(); ws.moveTo(0, -2); ws.lineTo(wl, -2); ws.lineTo(wl, W.top[1]); ws.lineTo(0, W.top[0]); ws.lineTo(0, -2);
+            add(new THREE.ExtrudeGeometry(ws, { depth: W.th, bevelEnabled: false }).translate(0, 0, W.to > 0 ? 0 : -W.th), A[0], y, A[1], Math.atan2(-(Bq[1] - A[1]), Bq[0] - A[0]), W.white); }
+          for (const s of [-1, 1]) { const v = new THREE.Vector3(s * (R + 0.8), H + rise * 0.55, -PLANE - 0.45).applyAxisAngle(new THREE.Vector3(0, 1, 0), ry); heads.push([mp.ox + v.x, y + v.y, mp.oz + v.z, ry + Math.PI]); }
+          continue;
+        }
         const top = H + rise + 2.2, half = R + 2.6, ry = yaw + (dir > 0 ? Math.PI : 0), sh = new THREE.Shape(); sh.moveTo(-half, -1); sh.lineTo(half, -1); sh.lineTo(half, top); sh.lineTo(-half, top); sh.lineTo(-half, -1);
         const hole = new THREE.Path(); hole.moveTo(-R, -0.5); hole.lineTo(R, -0.5); hole.lineTo(R, H);
         for (let k = 1; k <= 16; k++) { const th = Math.PI * k / 16; hole.lineTo(Math.cos(th) * R, H + Math.sin(th) * rise); }
@@ -1852,7 +2019,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       hm.userData.shared = true; hm.computeBoundingSphere(); grp.add(hm);
     }
     if (tun.group) disposeObj(tun.group);
-    tun.group = grp; tun.list = list; scene.add(grp);
+    grp.name = 'tunnels'; tun.group = grp; tun.list = list; scene.add(grp);
     grass.invalidate(); scrub.invalidate();  // (none in the bores and their cuts: onTunnel)
   }
   // is ground at height h on a tunnel's way at its floor's level (its open cuts, its portals): nothing grows there
@@ -2058,6 +2225,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   function applyQuality() {
     const Q = QUALITY[q];
+    HVEG.detail(Q.veg);  /* (A39: the hand plants' full-detail distance by tier) */
     renderer.shadowMap.enabled = Q.shadow > 0; sky.sun.castShadow = Q.shadow > 0;
     if (Q.shadow) { sky.sun.shadow.mapSize.set(Q.shadow, Q.shadow); sky.sun.shadow.map?.dispose(); sky.sun.shadow.map = null; }
     camera.far = Q.view; camera.updateProjectionMatrix();
@@ -2199,7 +2367,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       mark(); if (ready) hz.update(p[0], p[1], now); mark();
       // the bores nearest the camera, for the ground to leave out
       { const segs = [];
-        for (const T of tun.list) for (const g of [...T.segs, ...T.cuts]) segs.push([Math.hypot((g[0] + g[2]) / 2 - camPos.x, (g[1] + g[3]) / 2 - camPos.z), g]);
+        for (const T of tun.list) for (const g of [...T.segs, ...T.cuts]) segs.push([Math.hypot((g[0] + g[2]) / 2 - camPos.x, (g[1] + g[3]) / 2 - camPos.z) - (g.court ? 400 : 0), g]);  /* (A44: a portal's court before the bore's far pieces) */
         segs.sort((a, b) => a[0] - b[0]); const n = Math.min(12, segs.length);
         for (let i = 0; i < n; i++) { const g = segs[i][1]; BORES.a.value[i].set(g[0], g[1], g[2], g[3]); BORES.b.value[i].set(g[4], g[5], g[6], g[7]); }
         BORES.n.value = n; }
@@ -2282,7 +2450,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setQuality(n) { q = Math.max(0, Math.min(QUALITY.length - 1, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
-    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, sky, post, gpuMs: gpuTime.ms, me: me.group.position.toArray(), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), raw: (c => c?.grid ? gridHeight(c.grid, x, z, c.grid.raw) : null)(near.get(key(NEAR_Z, ...tileOf(x, z)))), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown) == null ? null : profY(dShown) + TYRE, lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z),
+    debug: () => ({ scene, camera, THREE, renderer, horizon: hz, sky, post, gpuMs: gpuTime.ms, me: me.group.position.toArray(), hand: (x, z) => ({ y: HAND.yAt?.(x, z) ?? null, hy: handY(x, z), inAll: inHandAll(x, z), inH: inHand(x, z), drawn: drawnY(x, z) }), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), raw: (c => c?.grid ? gridHeight(c.grid, x, z, c.grid.raw) : null)(near.get(key(NEAR_Z, ...tileOf(x, z)))), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown) == null ? null : profY(dShown) + TYRE, lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z), press: () => [...near.values()].map(c => ({ k: c.k, segs: c.grid?.segs, ...c.grid?.press })), quad: (x, z) => { const c = near.get(key(NEAR_Z, ...tileOf(x, z))), G = c?.grid; if (!G) return null; const [fi, fj] = gridIJ(G, x, z), s = G.segs, i = Math.min(s - 1, Math.floor(fi)), j = Math.min(s - 1, Math.floor(fj)), n = s + 1, k = j * n + i; return { k: c.k, segs: s, i, j, full: G.full ? G.full[j * s + i] : null, skip: !!handSkip(G)?.(i, j), hs: [G.hs[k], G.hs[k + 1], G.hs[k + n], G.hs[k + n + 1]].map(v => +v.toFixed(2)), raw: [G.raw[k], G.raw[k + 1], G.raw[k + n], G.raw[k + n + 1]].map(v => +v.toFixed(2)), x: [G.xs[i], G.xs[i + 1]].map(v => +v.toFixed(1)), z: [G.zs[j], G.zs[j + 1]].map(v => +v.toFixed(1)) }; },
       // the drawn road's top under a point (a ray down onto the roads' and the bores' road surfaces), the nearest under y + 1
       // what is seen from above at a point: the top of the ground, the banks, the roads and lots, the bores' floors
       // ({ y, kind: 'ground' | 'bank' | 'road' }), null where nothing is drawn

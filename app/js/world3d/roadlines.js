@@ -86,19 +86,20 @@ export const ROAD_TEXT = [
   // cz_10090_a (w_conzelman3), PED 14 m ahead of cz_10110_a; 'U': the lane left of the double yellow, build_conz.py GLYPHS)
   ['XING', 10103, 'U', true, 'w_conzelman3, cz_10090_a'], ['PED', 10124, 'U', true, 'cz_10110_a'],
 ];
-// (A37; review2: narrower where the dirt read too wide, w_mitchell1, w_east0) the shoulder: Street View's strip of short bright grass ('g') or gravel and dirt ('t' tan gravel, 'd' red-brown dirt;
+// (A37; review2: narrower where the dirt read too wide, w_mitchell1, w_east0) the shoulder: Street View's strip of short bright grass ('g') or gravel and dirt ('t' tan gravel, 'd' red-brown dirt, 'o' orange dirt under an orange soil cut;
 // 'b' brush to the edge)
 // between the paved edge (or its curb) and the scrub, width in metres; hand.js paints it on the verges and holds the brush
 // back behind it. Every road from Bunker Road on has a grass strip about a metre wide on both sides unless a row says
 // otherwise (review1 w_bunker1, w_field2, w_simmonds0, w_center0; the survey's ahead photos cz_30000_a to cz_280245_a); rows
 // [s0, s1, side 'L' | 'R' | 'B', kind, width] (the last row that covers a point wins; kind null: no shoulder).
-export const SHOULDER_DEFAULT = (s) => s >= 30000 ? ['g', 1.0] : null;
+// (A38, w_bunker1, h_bunker1, w_simmonds1: the strip is about 2 m of grass before the brush starts, not 1 m)
+export const SHOULDER_DEFAULT = (s) => s >= 30000 ? ['g', 1.8] : null;
 export const SHOULDERS = [
   // Conzelman down from Hawk Hill: dense brush right to a thin rocky lip at the edge on the right (cz_11110_a to cz_11245_a;
   // the hand verge stands over the lidar there and buried the brush shell: a lawn in the game)
   [11085, 11250, 'R', 'b', 40.0],
-  // Conzelman under the red cut west of McCullough: a red-brown dirt shoulder 1.5 to 2 m (w_conzelman3, cz_10090_a)
-  [10075, 10200, 'R', 'd', 1.8],
+  // Conzelman under the orange cut west of McCullough: an orange dirt shoulder about 3 m (A38: kind 'o', w_conzelman3, cz_10090_a)
+  [10075, 10200, 'R', 'o', 3.0],
   // Bunker Road: the wide dirt pull-off on the right by the McCullough junction (w_mccullough2), the dry grass strip left of it
   [33240, 33330, 'L', 'd', 3.0], [33240, 33330, 'R', 'g', 0.8],  // (w_mccullough2 looks back west: its right is the road's left)
   // Bunker Road through Fort Cronkhite's lawns: grass to the edge, wide (cz_33430_a to cz_33630_a)
@@ -111,10 +112,24 @@ export const SHOULDERS = [
   [80420, 80780, 'L', 'd', 1.2],
   // Center Road: the parade's lawn up to the curbs (w_center0)
   [280000, 280250, 'B', 'g', 2.0],
+  // (A38) Mount Tam. Panoramic Highway and Pantoll Road under the trees: brown duff and red-brown dirt to the paved edge, no bright
+  // grass strip (Street View frames work/tam-roads/sv/tam_512500, tam_514500, tam_517000, tam_520300, tam_521200); East
+  // Ridgecrest Boulevard on the open ridge: pale gravel shoulders (tam_530500, tam_532000, tam_533500)
+  [510000, 518600, 'B', 'd', 0.9], [520000, 522300, 'B', 'd', 1.2], [530000, 534700, 'B', 't', 1.0],
+  // (A38) East Ridgecrest from the first open bend to the East Peak car park: pale gravel and serpentine rubble 3 to 5 m wide on both sides where the game had
+  // lawn to the asphalt edge (pair tam_532000; frames work/tam-roads/sv/tam_531625, tam_532125 to tam_533875, tam_534375). The grass stretches
+  // (tam_531875, tam_534125) keep the 1 m band; the wood at the Rock Spring end has duff and dirt (tam_530125)
+  [530000, 530300, 'B', 'd', 2.5], [531550, 531800, 'B', 't', 4.0], [531940, 533950, 'B', 't', 4.0], [534250, 534671, 'B', 't', 3.5],
+  // (A38: Mount Tam's pull-outs: level ground past the paved edge in the 0.5 m lidar that NAIP shows bare and pale, gravel to that width, only the rows a pair
+  // has shown. Mountain Home's gravel edge, pair tam_514060; East Ridgecrest at 532000, pair tam_532000. The other 28 measured rows wait for pairs:
+  // work/tam-roads/pullouts_block_unverified.patch)
+  [514054, 514238, 'L', 't', 8.0], [531942, 532054, 'L', 't', 4.5], [531954, 532026, 'R', 't', 4.0],
 ];
 // (A37) rock cuts the hand ground's splat lacks or has wrong, off the survey photos: [s0, s1, side, tone, o0, o1] metres from the
 // line; tone 'r' red chert, 'g' grey chert, 'p' weathered pale grey-pink, 'x' no cut (grass): hand.js's jwCt. The face shows
 // only where the ground is steep.
+// (A38) tone 'o': the splat's own face painted as crumbling orange chert and soil; it forces no face where the splat has none.
+// (A38) tone 't': Mount Tam's banks, a face forced where the ground is steep as 'r', painted tan-brown broken soil and sandstone with grass tufts.
 export const CUTS = [
   [956, 990, 'L', 'x', 0, 9],  // (w_conzelman2: the bank's foot left of the bend green and yellow grass to the kerb; the red face above it and before 955 stays, the Conzelman control)
   [432, 482, 'L', 'r', 3, 32],  // (w_conzelman5: the tall face on the left, red and grey fractured rock; review2: as 'p' it read a flat pink wall)
@@ -123,6 +138,18 @@ export const CUTS = [
   [70480, 70540, 'R', 'r', 6, 20],  // (cz_70505_a, cz_70530_a: a red scar high on the bank)
   [70735, 70805, 'L', 'r', 3, 22],  // (cz_70745_a to cz_70795_a: the tall red-grey cut left at the bend)
   [33690, 33835, 'R', 'r', 3, 14],  // (cz_33700_a to cz_33830_a: Bunker Road's low red cut)
+  [10075, 10200, 'R', 'o', 3, 40],  // (A38, w_conzelman3: the tall cut right of the road bright orange crumbling chert and soil, #c0986f in the sun, a few green tufts; ours read grey plated rock #857d64)
+  // (A38) Mount Tam's tall cut banks: the uphill faces the 0.5 m lidar has 6.4 m or more over the paved edge within 8 m and steep for 10 m or more out
+  // (work/tam-roads/cuts.py), each looked at in a Street View frame turned to the bank (work/tam-roads/sv): bare brown rock and soil 'r', grey
+  // outcrops 'g'. The tall banks the frames show green (502544, 515188, 516576, 518254) and the two without a frame have no row.
+  [502372, 502456, 'R', 'g', 3, 24],  // (tam_502414_t35: Shoreline's grey face over a green foot)
+  [514286, 514582, 'R', 'r', 3, 26], [514658, 515058, 'R', 'r', 3, 36],  // (tam_514434_t35, tam_514500, tam_514858_t35: bare tan-brown soil and rock, slide debris at the foot)
+  [515550, 515630, 'R', 'r', 3, 28], [515662, 515758, 'R', 'r', 3, 24], [515958, 516026, 'R', 'r', 3, 20],  // (tam_515590_t35, tam_515710_t35, tam_515992_t35: brown fractured rock, moss on the last)
+  [516666, 516810, 'R', 'r', 3, 24], [516834, 517126, 'R', 'r', 3, 36],  // (tam_516738_t35, tam_517000: bare brown rock with green patches)
+  [517218, 517490, 'R', 'g', 3, 28],  // (tam_517300_t35: grey-brown outcrops over a grass foot)
+  [520620, 520872, 'R', 'g', 3, 36], [520900, 521152, 'R', 'r', 3, 26],  // (tam_520746_t35: Pantoll Road's pale grey outcrop; tam_521026_t35: the brown rock wall)
+  [521760, 521852, 'L', 'r', 3, 24], [521980, 522096, 'L', 'r', 3, 18],  // (tam_521806_t-35: dark brown rock; tam_522100: red-brown rock under dry grass)
+  [531002, 531066, 'L', 'r', 3, 26], [531586, 531726, 'L', 'p', 3, 24], [532202, 532270, 'L', 'r', 3, 22],  // (tam_531034_t-35 red-brown, tam_531656_t-35 pale tan under shrubs, tam_532236_t-35 brown with roots)
 ];
 export function cutAt(s, side, d) { let r = null; for (const [a, b, sd, t, o0, o1] of CUTS) if (s >= a && s <= b && sd === side && d >= o0 && d <= o1) r = t; return r; }
 export function shoulderAt(s, side) {

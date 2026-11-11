@@ -19,6 +19,20 @@ export const SFB = { value: new THREE.Vector4(0, 0, -1, -1) };
 // the Headlands' ground cover (veg.js): per cell scrub, trees, bare earth, known (RGBA, blended between cells) over
 // box [x0, z0, x1, z1] in local metres (none until it loads); near: the radius the scrub's bushes are drawn in
 export const VEG = { tex: { value: null }, box: { value: new THREE.Vector4(0, 0, -1, -1) }, near: { value: 150 } };
+// (A38 Tam, tam-veg) Mount Tamalpais' ground cover from the lidar canopy and NAIP (private work/tam-veg/cover_tam.py; /world/hand/tamcover.png,
+// 5 m cells: r tree canopy, g brush 0.6 to 4 m, b bare earth; the rest open grass) over box [x0, z0, 1 / width, 1 / depth] in local metres. on is 0
+// until a Tam plant group (veg g500 and up) loads (hand.js loadVeg calls tamCover): on a Headlands ride the file is never fetched and both ground
+// shaders' Tam blocks are skipped. Shared by this file's jwGround and hand.js groundMaterial.
+export const TAM = { tex: { value: null }, box: { value: new THREE.Vector4(0, 0, 1, 1) }, on: { value: 0 } };
+let tamAsked = false;
+export function tamCover(base = '/world/hand/') {
+  if (tamAsked) return; tamAsked = true;
+  fetch(base + 'scrub.json').then(r => r.ok ? r.json() : null).then(j => { if (!j?.tam) return;
+    const t = new THREE.TextureLoader().load(base + j.tam.file, () => { const b = j.tam.box; TAM.box.value.set(b[0], b[1], 1 / (b[2] - b[0]), 1 / (b[3] - b[1])); TAM.tex.value = t; TAM.on.value = 1; });
+    /* (no mipmaps: the lookups sit behind the on uniform, and a 5 m cell is under a pixel only kilometres off) */
+    t.flipY = false; t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter;
+  }).catch(() => {});
+}
 export const BORES = { a: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, b: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, n: { value: 0 } };
 
 const GLSL_COMMON = /* glsl */`
@@ -34,6 +48,7 @@ export const GROUND_SUN = { value: new THREE.Vector3(0, 1, 0) };
 const GLSL_GROUND = /* glsl */`
 uniform vec3 jwSunG; uniform sampler2D tNoise;
 const float EARTH_SUN = 2.4; uniform vec4 rwBox[4]; uniform vec4 hlBox; uniform vec4 sfBox; uniform sampler2D tVeg; uniform vec4 vegBox;
+uniform sampler2D tTam; uniform vec4 tamBox; uniform float tamOn;
 vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
 vec4 jwVeg(vec2 p) {
   vec2 uv = (p - vegBox.xy) / (vegBox.zw - vegBox.xy);
@@ -204,6 +219,27 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   rw *= smoothstep(0.3, 0.65, wood);
   vec3 duff = mix(srgb(vec3(0.38, 0.27, 0.19)), srgb(vec3(0.33, 0.42, 0.18)), smoothstep(0.52, 0.68, small) * 0.85) * (0.85 + 0.3 * fine);
   c = mix(c, duff, rw * 0.9);
+  // >>> A38 Tam cover (tam-veg) begin. tamOn is 0 until a Tam plant group loads (TAM above): nothing in this block runs on a Headlands ride.
+  // (Street View tam_pan5600: dark brown duff and ferns under the firs; tam_ridge3500: olive chaparral to the road's edge; tam_shore3000 and
+  // tam_pan5600's verges: spring grass, lit median #90995e; tam_pan5600's cut bank lit #8d8566. The first pairs had lawn green under all of it and on
+  // the far slopes. Far off the tree cover is the canopy itself, dark green crowns with shade between: the hills past the planted corridor read as forest.)
+  if (tamOn > 0.5) {
+    vec4 tq = jwN(mat2(0.6, -0.8, 0.8, 0.6) * p / 70.0 + 0.23);
+    vec2 tu = (p + (tq.gr - 0.5) * 5.0 - tamBox.xy) * tamBox.zw; float tIn = step(0.0, tu.x) * step(tu.x, 1.0) * step(0.0, tu.y) * step(tu.y, 1.0);
+    vec3 tv = texture2D(tTam, clamp(tu, 0.0, 1.0)).rgb;
+    float kT = smoothstep(0.25, 0.6, tv.r + (tq.b - 0.5) * 0.25), kB = smoothstep(0.25, 0.6, tv.g + (tq.b - 0.5) * 0.3) * (1.0 - kT), kE = smoothstep(0.3, 0.65, tv.b + (tq.g - 0.5) * 0.2) * (1.0 - kT) * (1.0 - kB);
+    vec3 tGrass = mix(srgb(vec3(0.47, 0.52, 0.32)), srgb(vec3(0.55, 0.55, 0.38)), smoothstep(0.3, 0.75, mid * 0.6 + small * 0.4)) * (0.92 + 0.16 * fine);
+    tGrass = mix(tGrass, srgb(vec3(0.42, 0.49, 0.29)), clamp(north * 0.5 + max(cv, 0.0) * 0.6, 0.0, 0.6));
+    vec3 tBrush = mix(srgb(vec3(0.27, 0.31, 0.19)), srgb(vec3(0.39, 0.42, 0.27)), smoothstep(0.3, 0.7, tq.g)) * (0.82 + 0.3 * tq.r) * (1.0 - 0.3 * smoothstep(0.5, 0.75, tq.b));
+    vec3 tBare = mix(srgb(vec3(0.55, 0.48, 0.36)), srgb(vec3(0.47, 0.37, 0.28)), smoothstep(0.35, 0.7, patch80)) * (0.9 + 0.2 * fine);
+    vec3 tDuff = mix(srgb(vec3(0.37, 0.30, 0.22)), srgb(vec3(0.30, 0.24, 0.18)), smoothstep(0.3, 0.7, tq.r));
+    tDuff = mix(tDuff, srgb(vec3(0.27, 0.35, 0.17)), smoothstep(0.58, 0.78, tq.g) * 0.65);
+    vec3 tCan = mix(srgb(vec3(0.15, 0.21, 0.12)), srgb(vec3(0.25, 0.32, 0.17)), smoothstep(0.3, 0.7, tq.g)) * (0.85 + 0.3 * tq.r) * (1.0 - 0.35 * smoothstep(0.55, 0.8, tq.b));
+    vec3 tc = mix(mix(mix(tGrass, tBrush, kB), tBare, kE), mix(tCan, tDuff, jwNear), kT);
+    /* (in a town the gardens and paving stay as they were; the trees' ground still dark) */
+    c = mix(c, tc, tIn * (1.0 - town * 0.8 * (1.0 - kT)));
+  }
+  // <<< A38 Tam cover (tam-veg) end
   // the shore and the sea floor (heights in the lidar's datum: mean sea level 0.9 m, sky.js SEA)
   // (A37: up to 2.95 m only: Rodeo Lagoon stands at 3.02 m, its banks are grass and reeds, not a beach: w_bunker2)
   if (lake < 0.5) c = mix(c, srgb(vec3(0.80, 0.74, 0.58)), smoothstep(2.95, 1.5, h) * (1.0 - smoothstep(0.3, 0.5, slope)));
@@ -219,7 +255,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tamBox: TAM.box, tamOn: TAM.on, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv; attribute float gv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vGv = gv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
@@ -279,7 +315,7 @@ export function grassMaterial() {
   const T = textures(), U = { radius: { value: 60 }, centre: { value: new THREE.Vector2() } };
   m.userData.u = U;
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
+    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tamBox: TAM.box, tamOn: TAM.on, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 gA; attribute vec4 gB; uniform float wTime, wGust, radius; uniform vec2 centre; varying vec3 vGc;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <begin_vertex>', /* glsl */`

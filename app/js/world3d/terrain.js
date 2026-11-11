@@ -253,16 +253,18 @@ export function rasterBy(g, features, value) {
 // The mesh: positions, ground class per vertex, triangles; skip(i, j): leave quad i, j out (a finer tile covers it).
 // Skirts hang `skirt` metres down from every edge that borders nothing.
 // Skirts face out (front faces seen from outside the tile). Returns src: for every vertex the grid vertex it copies.
-export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
+// (A40) floor(i, j): a quad left out by skip is still drawn, `skirt` under its own heights, on vertices of its own: with the skirt
+// walls the tile's ground is then one closed surface, so a gap between it and the hand-built ground shows ground, not the sky
+export function gridMesh(g, { lu = null, skip = null, skirt = 0, floor = null } = {}) {
   const s = g.segs, n = s + 1, nv = n * n;
   const keep = (i, j) => i >= 0 && j >= 0 && i < s && j < s && !(skip && skip(i, j));
   // count first (quads kept, skirt walls), then fill typed arrays: no growing arrays for the 66 000 vertices of a fine tile
-  let quads = 0, walls = 0;
+  let quads = 0, walls = 0, fq = 0, fn = 0; const fl = floor && skirt > 0 ? floor : null, fv = fl ? new Int32Array(nv).fill(-1) : null;
   for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
-    if (!keep(i, j)) continue;
+    if (!keep(i, j)) { if (fl && fl(i, j)) { fq++; const a = j * n + i; for (const v of [a, a + 1, a + n, a + n + 1]) if (fv[v] < 0) fv[v] = fn++; } continue; }
     quads++; if (skirt > 0) walls += !keep(i, j - 1) + !keep(i, j + 1) + !keep(i - 1, j) + !keep(i + 1, j);
   }
-  const NV = nv + 2 * walls, pos = new Float32Array(NV * 3), cls = new Uint8Array(NV), src = new Uint32Array(NV), idx = NV > 65535 ? new Uint32Array(6 * (quads + walls)) : new Uint16Array(6 * (quads + walls));
+  const NV = nv + 2 * walls + fn, NI = 6 * (quads + walls + fq), pos = new Float32Array(NV * 3), cls = new Uint8Array(NV), src = new Uint32Array(NV), idx = NV > 65535 ? new Uint32Array(NI) : new Uint16Array(NI);
   for (let j = 0, v = 0; j < n; j++) for (let i = 0; i < n; i++, v++) { pos[3 * v] = g.xs[i]; pos[3 * v + 1] = g.hs[v]; pos[3 * v + 2] = g.zs[j]; cls[v] = lu ? lu[v] : 0; src[v] = v; }
   let nx = nv, k = 0;
   const wall = (va, vb) => {
@@ -280,7 +282,17 @@ export function gridMesh(g, { lu = null, skip = null, skirt = 0 } = {}) {
       if (!keep(i + 1, j)) wall(b, d);
     }
   }
-  return { pos, cls, src, idx };
+  const floor0 = k;
+  if (fn) {
+    const f0 = nx;
+    for (let v = 0; v < nv; v++) { const f = fv[v]; if (f < 0) continue; const o = f0 + f; pos[3 * o] = pos[3 * v]; pos[3 * o + 1] = pos[3 * v + 1] - skirt; pos[3 * o + 2] = pos[3 * v + 2]; cls[o] = cls[v]; src[o] = v; }
+    for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) {
+      if (keep(i, j) || !fl(i, j)) continue;
+      const q = j * n + i, a = f0 + fv[q], b = f0 + fv[q + 1], c = f0 + fv[q + n], d = f0 + fv[q + n + 1];
+      idx[k++] = a; idx[k++] = c; idx[k++] = b; idx[k++] = b; idx[k++] = c; idx[k++] = d;
+    }
+  }
+  return { pos, cls, src, idx, floor0 };
 }
 
 // do two triangles [[x, z] x 3] overlap (separating axes)
@@ -301,6 +313,63 @@ function trisOverlap(A, B) {
 // no higher than that road triangle's lowest corner less `below` (else a corner further up a cut slope lifts the
 // triangle over the road's edge between them; cover: false leaves that out, for a trail draped on the ground). Lowers
 // only. Returns how many points came down.
+// (A41) The grid's heights lowered under the hand-built ground. rasters: hand.js groundRaster ({ x0, z0, C, nx, nz, y0, h: centimetres
+// over y0, -32768: none }). At each raster point with a height the grid's surface there (its quad's two triangles, as gridMesh draws
+// them) may stand over the hand ground less the margin: by how much is what that quad asks; each grid point then drops by the most
+// its four quads ask, so the lowered surface is under the hand ground at every raster point whatever the grid's step. A point asking
+// more than cap (6 m) is left out (the hand ground far under the tile's is not the same ground: a road under a bridge or through a cutting the tile's grid does not have). A slice every 48 raster rows.
+export function* pressUnderSteps(g, rasters, { margin = 0.35, cap = 6, skip = null } = {}) {
+  const s = g.segs, n = s + 1, xs = g.xs, zs = g.zs, hs = g.hs, kx = s / (xs[s] - xs[0]), st = { nodes: 0, asked: 0, max: 0, over: 0, moved: 0, nb: 0, big: [] };
+  const bx0 = Math.min(xs[0], xs[s]), bx1 = Math.max(xs[0], xs[s]), bz0 = Math.min(zs[0], zs[s]), bz1 = Math.max(zs[0], zs[s]);
+  // (A43) cov: the hand ground's own cover of the tile, a byte a 1 m point (1: a raster has a height there); overQ: the quads with an ask over the cap
+  const cx0 = Math.floor(bx0) - 1, cz0 = Math.floor(bz0) - 1, cw = Math.ceil(bx1) - cx0 + 2, ch = Math.ceil(bz1) - cz0 + 2; let cov = null, overQ = null; g.full = null;
+  let need = null;
+  for (const R of rasters) {
+    if (R.x1 < bx0 || R.x0 > bx1 || R.z1 < bz0 || R.z0 > bz1) continue;
+    need ??= new Float32Array(s * s); cov ??= new Uint8Array(cw * ch); overQ ??= new Uint8Array(s * s); const hf = (R.C - 1) / 2;
+    // (the raster's columns and rows in the grid's units, as gridIJ)
+    const FI = new Float64Array(R.nx), FJ = new Float64Array(R.nz);
+    for (let i = 0; i < R.nx; i++) FI[i] = (R.x0 + i * R.C - xs[0]) * kx;
+    for (let j = 0; j < R.nz; j++) FJ[j] = (tileY(g.proj.lat(R.z0 + j * R.C), g.z) - g.y) * s;
+    for (let j = 0; j < R.nz; j++) {
+      if (j % 48 === 47) yield;
+      const fj = FJ[j]; if (!(fj >= 0 && fj <= s)) continue;
+      const gj = Math.min(s - 1, Math.floor(fj)), v = fj - gj, row = j * R.nx;
+      for (let i = 0; i < R.nx; i++) {
+        const hv = R.h[row + i]; if (hv === -32768) continue;
+        const fi = FI[i]; if (!(fi >= 0 && fi <= s)) continue;
+        const gi = Math.min(s - 1, Math.floor(fi)), u = fi - gi, k = gj * n + gi, a = hs[k], b = hs[k + 1], c = hs[k + n], e = hs[k + n + 1];
+        const y = u + v <= 1 ? a + (b - a) * u + (c - a) * v : e + (c - e) * (1 - u) + (b - e) * (1 - v), q = y - (R.y0 + hv / 100) + margin;
+        { const X = R.x0 + i * R.C - cx0, Zc = R.z0 + j * R.C - cz0; if (hf < 0.01) cov[Math.round(Zc) * cw + Math.round(X)] = 1;
+          else for (let zz = Math.max(0, Math.round(Zc - hf)), z1 = Math.min(ch - 1, Math.round(Zc + hf)); zz <= z1; zz++) for (let xx = Math.max(0, Math.round(X - hf)), x1 = Math.min(cw - 1, Math.round(X + hf)); xx <= x1; xx++) cov[zz * cw + xx] = 1; }
+        if (skip && skip(R.x0 + i * R.C, R.z0 + j * R.C)) continue;  // (A44: a portal's court, portals.js: its ground far under the hill's asks nothing)
+        st.nodes++; if (!(q > 0)) continue;
+        if (q > 4 && st.nb++ % 300 === 0 && st.big.length < 80) st.big.push([Math.round(R.x0 + i * R.C), Math.round(R.z0 + j * R.C), +q.toFixed(1), +(R.y0 + hv / 100).toFixed(1)]);  // (samples of the large asks, debug press())
+        if (q > cap) { st.over++; overQ[gj * s + gi] = 1; continue; }
+        st.asked++; if (q > st.max) st.max = q; const o = gj * s + gi; if (q > need[o]) need[o] = q;
+      }
+    }
+  }
+  // (A43) full: the quads the hand ground covers at every 1 m point in them, and those with an ask over the cap (a structure's): only these are left
+  // out of the tile's mesh for the hand ground (view.js handSkip); st.gap: the corridor's other quads are counted there
+  if (cov) { const full = g.full = new Uint8Array(s * s);
+    for (let j = 0; j < s; j++) { const z0 = Math.ceil(Math.min(zs[j], zs[j + 1])) - cz0, z1 = Math.floor(Math.max(zs[j], zs[j + 1])) - cz0;
+      for (let i = 0; i < s; i++) { const o = j * s + i; if (overQ[o]) { full[o] = 1; continue; } const x0 = Math.ceil(Math.min(xs[i], xs[i + 1])) - cx0, x1 = Math.floor(Math.max(xs[i], xs[i + 1])) - cx0; let ok = true;
+        for (let z = z0; z <= z1 && ok; z++) for (let x = x0; x <= x1; x++) if (!cov[z * cw + x]) { ok = false; break; }
+        full[o] = ok ? 1 : 0; } } }
+  if (!need || !st.asked) return st;
+  if (g.hs === g.raw) g.hs = g.raw.slice();
+  const H = g.hs;
+  for (let j = 0; j <= s; j++) for (let i = 0; i <= s; i++) {
+    let q = 0;
+    if (i > 0 && j > 0) q = need[(j - 1) * s + i - 1];
+    if (i < s && j > 0 && need[(j - 1) * s + i] > q) q = need[(j - 1) * s + i];
+    if (i > 0 && j < s && need[j * s + i - 1] > q) q = need[j * s + i - 1];
+    if (i < s && j < s && need[j * s + i] > q) q = need[j * s + i];
+    if (q > 0) { H[j * n + i] -= q; st.moved++; }
+  }
+  return st;
+}
 export function pushUnder(g, tris, opt) { return drain(pushUnderSteps(g, tris, opt)); }
 // the same a slice at a time (a generator yielding every 500 triangles)
 export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.08, cover = true } = {}) {
@@ -338,6 +407,7 @@ export function* pushUnderSteps(g, tris, { margin = 5.5, slope = 0.2, below = 0.
     }
   }
   let moved = 0;
-  for (let v = 0; v < n * n; v++) if (hs[v] > lim[v]) { hs[v] = lim[v]; moved++; }
+  const hold = g.hold;  // (A44: the hill behind a measured portal's plane, view.js)
+  for (let v = 0; v < n * n; v++) if (hs[v] > lim[v] && !(hold && hold[v])) { hs[v] = lim[v]; moved++; }
   return moved;
 }

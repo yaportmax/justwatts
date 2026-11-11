@@ -311,7 +311,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     return (handMask = { x0, z0, nx, nz, C, m, onR });
   }
   function handSkip(G) {
-    if (!HAND.ready || !HAND.covers) return null; const H = handCover(), n = G.segs + 1, inC = new Uint8Array(n * n); let any = false;
+    if (!HAND.ready || !HAND.covers) return null; const covered = HAND.coverFor?.(G); if (!covered) return null; const H = handCover(), n = G.segs + 1, inC = new Uint8Array(n * n); let any = false;
     for (let j = 0; j < n; j++) { const cj = Math.round((G.zs[j] - H.z0) / H.C), row = cj >= 0 && cj < H.nz ? cj * H.nx : -1;
       for (let i = 0; i < n; i++) { const ci = Math.round((G.xs[i] - H.x0) / H.C); if ((row >= 0 && ci >= 0 && ci < H.nx && H.m[row + ci]) || HAND.extAt?.(G.xs[i], G.zs[j])) { inC[j * n + i] = 1; any = true; } } }
     const gx0 = Math.min(G.xs[0], G.xs[n - 1]), gx1 = Math.max(G.xs[0], G.xs[n - 1]), gz0 = Math.min(G.zs[0], G.zs[n - 1]), gz1 = Math.max(G.zs[0], G.zs[n - 1]);
@@ -319,9 +319,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (let j = 0; j < n; j++) { const cj = Math.round((G.zs[j] - B.z0) / T.C); if (cj < 0 || cj >= T.nz) continue;
         for (let i = 0; i < n; i++) { const ci = Math.round((G.xs[i] - B.x0) / T.C); if (ci < 0 || ci >= T.nx) continue; const v = T.idx[cj * T.nx + ci]; if (v && H.onR[v]) { inC[j * n + i] = 1; any = true; } } } }
     // (A43: and only where the hand ground really covers the quad, terrain.js pressUnderSteps full: a corridor quad the hand meshes do not cover whole is
-    // drawn, pressed under them: the tile's ground in a crack, not a pit. __w3.noCover: by the mask alone, as before)
+    // drawn, pressed under them: the tile's ground in a crack, not a pit. __w3.noCover bypasses the raster gate; the exact triangle-cover gate remains.)
     const F = globalThis.__w3?.noCover ? null : G.full, s = G.segs; if (F && G.press) { let gap = 0; for (let j = 0; j < s; j++) for (let i = 0; i < s; i++) if (!F[j * s + i] && inC[j * n + i] && inC[j * n + i + 1] && inC[(j + 1) * n + i] && inC[(j + 1) * n + i + 1]) gap++; G.press.gap = gap; }
-    return any ? (i, j) => inC[j * n + i] && inC[j * n + i + 1] && inC[(j + 1) * n + i] && inC[(j + 1) * n + i + 1] && (!F || F[j * s + i]) : null;
+    return any ? (i, j) => inC[j * n + i] && inC[j * n + i + 1] && inC[(j + 1) * n + i] && inC[(j + 1) * n + i + 1] && (!F || F[j * s + i]) && covered(i, j) : null;
   }
   function handSplit(pts) {
     if (!HAND.ready || !pts.some(p => handAt(p[0], p[1]))) return [pts];

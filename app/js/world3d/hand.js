@@ -11,6 +11,7 @@ try { if (typeof Worker !== 'undefined' && !globalThis.__w3?.noMeshoptWorkers) M
 import { textures } from './tex.js';
 import { TAM, tamCover } from './materials.js';
 import { HZ_LAYER } from './horizon.js';
+import { createCoverage } from './hand-cover.js';
 import { shoulderAt, cutAt, SHOULDERS } from './roadlines.js';
 import { compileSpec } from './conzelman.js';
 import { makeProj } from './geo.js';
@@ -304,6 +305,10 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
     // of all the ground. A chunk with triangles cut at the tunnel (cutBored) owns nothing: its ground has an opening the list does not know.
     // __w3.noOwn: all drawn, as before
     const OWN = globalThis.__w3?.noOwn ? null : await fetch(base + 'own.json').then(r => r.ok ? r.json() : null).catch(() => null), ownBy = new Map(), ownCut = new Set();
+    // (A53 ground: a height raster misses thin gaps. Suppress a tile quad only when retained hand triangles cover it whole
+    // and their chunks are visible. cx-ground/pits_before_q0: McCullough 14 pit cells, source triangle edge gaps.)
+    const cover = await fetch(base + 'cover.json').then(r => r.ok ? r.json() : null).then(j => j ? createCoverage(j) : null).catch(() => null);
+    state.coverFor = g => cover?.forGrid(g) ?? null;
     state.own = { meshes: 0, skipped: 0, tris: 0, hidden: 0, ms: 0, max: 0 }; if (globalThis.__w3) globalThis.__w3.own = state.own;
     const ownReg = into => { const list = []; into.traverse(o => { const T = o.userData.ownT, sets = o.userData.ownSets; if (!T) return; delete o.userData.ownT; delete o.userData.ownSets;
         const I = o.geometry?.index; if (!I || I.count !== 3 * T.length) { state.own.skipped++; return; }
@@ -323,7 +328,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
     // Conzelman start arriving from 7 s to 24 s, v610_conzelman_net.txt. They are still worked through one at a time in the same order.)
     const coming = new Map(), fetchChunk = c => coming.get(c.i) ?? coming.set(c.i, loader.loadAsync(base + `conz_${c.i}.glb`).catch(() => null)).get(c.i);
     async function addChunk(c, into, box) {
-      const g = await fetchChunk(c); coming.delete(c.i); if (!g) return;
+      const g = await fetchChunk(c); coming.delete(c.i); if (!g) return false;
       g.scene.position.set(c.cx, 0, c.cz);
       { const od = OWN?.drop?.[c.i]; if (od) g.scene.traverse(o => { const B = o.isMesh && od[o.name], I = o.geometry?.index; if (!B || !I) return; const nt = I.count / 3; if (nt !== B[0]) { state.own.skipped++; return; }  // (A46; a list made from another build of the chunk: not used)
           const T = new Int16Array(nt).fill(-1), sets = []; for (let q = 1; q + 1 < B.length; q += 2) { const id = sets.push(B[q]) - 1, R = B[q + 1]; for (let k = 0; k + 1 < R.length; k += 2) { T.fill(id, R[k], R[k] + R[k + 1]); state.own.tris += R[k + 1]; } }
@@ -379,6 +384,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
       into.updateMatrixWorld(true); g.scene.updateMatrixWorld(true);
       g.scene.traverse(o => { if (!o.isMesh || !/^(verge|lot)/.test(o.name)) return; const out = state.push, P = o.geometry.attributes.position, I = o.geometry.index, v = new THREE.Vector3();
         for (let k = 0, n = I ? I.count : P.count; k < n; k++) { v.fromBufferAttribute(P, I ? I.getX(k) : k).applyMatrix4(o.matrixWorld); out.push(v.x, v.y, v.z); } });
+      return true;
     }
     // (A39: the hand-built ground's height at a point, the highest of its surfaces there (terrain, verge, road, lot), null where there is none: the chunks' rasters in 64 m cells)
     const rasters = new Map(), RC = 64, rasterList = [];
@@ -404,7 +410,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           cs.sort((a, b) => ((a.cx - x) ** 2 + (a.cz - z) ** 2) - ((b.cx - x) ** 2 + (b.cz - z) ** 2));
           const into = new THREE.Group(); into.visible = false; group.add(into);
           // (lastBox: what this group covers, view.js builds again only the tiles it touches; prepare: slow work done in slices before the group shows)
-          const box = new THREE.Box3(); for (let i = 0; i < cs.length; i++) { for (let j = i + 1, n = Math.min(cs.length, i + ahead()); j < n; j++) fetchChunk(cs[j]); await addChunk(cs[i], into, box); }
+          const box = new THREE.Box3(), covered = []; for (let i = 0; i < cs.length; i++) { for (let j = i + 1, n = Math.min(cs.length, i + ahead()); j < n; j++) fetchChunk(cs[j]); if (await addChunk(cs[i], into, box)) covered.push(cs[i].i); }
           { const will = new Set(cs.map(c => c.i)); ownApply(ownReg(into), i => (shown.has(i) || will.has(i)) && !ownCut.has(i)); }  // (A46: before the buffers go to the GPU)
           await prepare?.(into); state.lastBox = box;
           into.updateMatrixWorld(true); into.updateMatrixWorld = () => {};  // (A32: never moves. three.js walks every child each frame whatever matrixWorldAutoUpdate says: 1.5 ms a frame over 8000 objects)
@@ -412,7 +418,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           for (const R of into.userData.lotRasters ?? []) lotRasters.push(R);
           into.visible = true; for (const c of cs) { shown.add(c.i); state.ranges.push([c.s0, c.s1]); }
           { const L = new Set(); for (const c of cs) for (const e of ownBy.get(c.i) ?? []) L.add(e); if (L.size) ownApply(L, i => shown.has(i) && !ownCut.has(i)); }  // (A46: the shown chunks' ground this group owns)
-          state.ready = true; onLoad(state); }
+          cover?.mark(covered); state.ready = true; onLoad(state); }
       } finally { busy = false; state.busy = false; state.settled = true; }
     };
     state.pump();

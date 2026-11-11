@@ -509,9 +509,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     // a near tile built for the first time where its far tile's ground is drawn: kept hidden until the far tile is drawn
     // without it, then eased in from the far ground (easeStep), from Dn: per grid point the far ground's height over its own
-    // (built again, a new quality: swapped in as it is)
+    // (built again while it waits or eases in, as when a hand chunk loads beside it: the ease goes on with the new
+    // ground, see below; built again in place: swapped in as it is)
     let ease = null;
-    if (fine) { const f = far.get(parentOf(c.k)); if (c.ver == null && f?.parts.terrain && f.grid) {
+    if (fine) { const f = far.get(parentOf(c.k)); if ((c.ver == null || c.ease) && f?.parts.terrain && f.grid) {
       const s = G.segs, n = s + 1, Dn = new Float32Array(n * n);
       for (let j = 0; j <= s; j++) { for (let i = 0; i <= s; i++) { const fh = gridHeight(f.grid, G.xs[i], G.zs[j]); Dn[j * n + i] = fh == null ? 0 : fh - G.hs[j * n + i]; } if (j % 48 === 47) yield 't:ease'; }
       ease = { Dn, s, x0: G.xs[0], x1: G.xs[s], z0: G.zs[0], z1: G.zs[s], t0: null, parts: [] }; } }
@@ -541,7 +542,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     mesh.receiveShadow = fine; mesh.matrixAutoUpdate = false; mesh.layers.enable(HZ_LAYER); hz.touch(); mesh.userData.floor0 = m.floor0; mesh.userData.bored = bored;  // (the bores left out at every quality; bored: applyQuality picks the material again)
     c.grid = G; c.tmesh = { src: m.src, nv: (G.segs + 1) ** 2, skirt: c.z === FAR_Z ? 40 : 12 };
     if (fine) { c.nor = nor; c.mask = mask; c.cv = cv; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c)); } else { c.nor = c.mask = c.cv = null; }
-    if (fine) { c.ease = ease; c.group.visible = !ease; }
+    // (A50: built again during its ease, the tile used to drop the ease while it stayed in the easing set, and the next
+    // frame's easeStep threw on it: the whole world view shut down, "Cannot read properties of null (reading 't0')", met on
+    // the ship ride of 244630a at the start. Now the new ground takes over the old ease's clock and parts; an ease that
+    // ended while this build ran leaves the tile in place; one that cannot go on (no far ground) is finished first)
+    if (fine) {
+      const old = c.ver != null ? c.ease : null;
+      if (ease && c.ver != null) { if (old) { ease.t0 = old.t0; ease.parts = old.parts; } else ease = null; }
+      else if (old) { easeApply(c, 1); easing.delete(c); }
+      c.ease = ease; c.group.visible = !ease || ease.t0 != null;
+    }
     setPart(c, 'terrain', mesh); upload(mesh); c.built = true; c.ver = (c.ver || 0) + 1; if (c.z === NEAR_Z) { farDirty = true; poke(); }
     if (c.z === FAR_Z) {
       // the near tiles it leaves out now: shown (and eased in); the ones gone that it draws again: dropped
@@ -2486,6 +2496,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // the LOD check (r5check.mjs lod): a near tile's detail at a point, the far tile's ground there, and points every
       // `step` m along the roads within R of (x, z) ([x, z, half width, railed, normal x, z]; no bores, trails or bridges)
       tileLod: (x, z) => near.get(key(NEAR_Z, ...tileOf(x, z)))?.lod ?? null,
+      retile: k => { const c = near.get(k); if (c?.sig) { c.sig.terrain = null; poke(); } return !!c; },  // (a test's way to build a near tile's ground again: A50)
       lodState: () => ({ hidden: [...near.values()].filter(c => !c.group.visible).map(c => c.k), easing: [...easing].map(c => c.k), leaving: [...leaving.keys()] }),
       farGround: (x, z) => { const lat = proj.lat(z), lon = proj.lon(x), f = far.get(key(FAR_Z, Math.floor(tileX(lon, FAR_Z)), Math.floor(tileY(lat, FAR_Z)))); return f?.grid ? gridHeight(f.grid, x, z) : null; },
       roadPts: (x, z, R, step = 10) => { const out = [], seen = new Set();

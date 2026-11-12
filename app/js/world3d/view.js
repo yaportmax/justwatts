@@ -1508,26 +1508,30 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const baker = R0[0][0] > 37.832 && R0[0][0] < 37.841 && R0[0][1] > -122.4825 && R0[0][1] < -122.474;
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
-        list.push({ ring, base, pier, h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        list.push({ ring, base, pier, maxTop: m + lb[1], h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         continue;
       }
-      list.push({ ring, base, pier, h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
+      list.push({ ring, base, pier, maxTop: base + (hb ? hb[2] : f.h || 6), h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
       // (A53: cx-mvlook pairs 570400, 591200, 620400: cached lidar roof survey and OSM type, carried with each footprint.)
       if (f.bd) {
         const b = list.at(-1), d = f.bd; b.sourceType = d.kind;
-        if (Number.isFinite(d.eave) && Number.isFinite(d.rise)) { b.h = Math.max(2.4, d.eave - b.base); b.hc = d.h; b.rh = d.rise; b.roof = d.roof; }
+        if (Number.isFinite(d.eave) && Number.isFinite(d.rise)) { b.h = Math.max(2.4, d.eave - b.base); b.hc = d.h; b.rh = d.rise; b.roof = d.roof; b.maxTop = d.eave + d.rise; }
       }
       // (A38: off the Headlands (no lidar table there) a building on a hillside as the Headlands' own: the eaves a storey (2.4 m)
       // over the highest ground at its corners, the walls still down to the lowest, so no slope covers a roof: 34 of the 148
       // houses within 350 m of 37.8895,-122.5465 above Shoreline Highway stood with their roof under the uphill ground, 80 with
       // under a storey showing, work/tam-net/bldgslope.mjs, ride shot up_07519. A house (OpenStreetMap's height 10 m or less)
       // to 10 m of wall at most, so it keeps its pitched roof, props.js house)
-      if (!fort) { const b = list.at(-1); let gx = -Infinity; for (const p of ring) { const g = hAt(p[0], p[1]); if (g != null) gx = Math.max(gx, g); } const up = gx - b.base + 2.4; if (up > b.h) b.h = b.h <= 10 ? Math.min(10, up) : up; }
+      if (!fort) { const b = list.at(-1); let gx = -Infinity; for (const p of ring) { const g = hAt(p[0], p[1]); if (g != null) gx = Math.max(gx, g); } const up = gx - b.base + 2.4; if (up > b.h) b.h = b.h <= 10 ? Math.min(10, up) : up;
+        // (A55: a relative height tag is above the uphill ground, not the downhill
+        // foundation. Preserve A38's exposed storey; absolute survey tops stay fixed.)
+        if (b.rh == null && Number.isFinite(gx)) { const ht = hb ? hb[2] : f.h || 6; b.maxTop = Math.max(b.maxTop, gx + ht); b.minEave = Math.min(b.base + b.h, gx + Math.min(2.4, ht)); }
+      }
     }
     // (A37: the hand list's buildings, HAND_BLDG: on the lidar's ground round them, the tile's own)
     { const tb = tileBox(c); for (const [R, e, r, fl] of HAND_BLDG) { const ring = R.concat([R[0]]).map(([la, lo]) => proj.xz(la, lo)); let cx = 0, cz = 0; for (const p of R) { const [x, z] = proj.xz(...p); cx += x / R.length; cz += z / R.length; }
       if (!(cx >= tb[0] && cx < tb[2] && cz >= tb[1] && cz < tb[3])) continue; let lo = Infinity, m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw) ?? hAt(p[0], p[1]); if (h != null) { lo = Math.min(lo, h); m += h; k++; } } if (!k) continue;
-      list.push({ ring, base: lo, h: m / k - lo + e, rh: r - e, roof: 2, seed: Math.round(cx * 13 + cz * 7), fort: true, metal: !!(fl & 1) }); } }
+      list.push({ ring, base: lo, maxTop: m / k + r, h: m / k - lo + e, rh: r - e, roof: 2, seed: Math.round(cx * 13 + cz * 7), fort: true, metal: !!(fl & 1) }); } }
     if (!list.length) return setPart(c, 'bldg', null);
     const grp = new THREE.Group(), piers = [];
     for (const b of list) if (b.pier) {

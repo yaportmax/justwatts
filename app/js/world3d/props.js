@@ -5,6 +5,7 @@
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { hash2 } from './landuse.js';
 import { LEAF, leafCell } from './tex.js';
+import { footprintGap, footprintContains, simpleOutline } from './footprint.js';
 
 const col = (hex, f = 1) => { const c = new THREE.Color(hex); return [c.r * f, c.g * f, c.b * f]; };
 // merge parts [geometry, colour, matrix, opts] into one non-indexed geometry with colour and uv attributes. opts.soft:
@@ -394,20 +395,48 @@ const ROOFS = [0x55534f, 0x6b665e, 0xa4583c, 0x46484b, 0x786f62, 0x93503a, 0x5e4
 const HOUSE = [0, 1, 3, 5, 5, 7, 0, 3], FLATS = [0, 3, 4, 4, 1], BIG = [2, 6, 2, 4];
 // list: [{ ring: [[x, z], ...] closed, base, h, seed }] -> geometry with position, colour, bw [along, up, style, kind]
 export function buildingGeometry(list) {
-  const pos = [], cl = [], bw = [];
-  const tri = (a, b, c, k, w) => { pos.push(...a, ...b, ...c); cl.push(...k, ...k, ...k); bw.push(...w[0], ...w[1], ...w[2]); };
+  const pos = [], cl = [], bw = [], overhangs = [];
+  let outline = null, ceiling = Infinity;
+  // (A55: collapsed hip ridges and repeated footprint corners emitted zero-area
+  // faces. Do the test at output precision, which is the geometry the GPU draws.)
+  const tri = (a, b, c, k, w) => {
+    const sx = b[0] - a[0], sy = Math.min(b[1], ceiling) - Math.min(a[1], ceiling), sz = b[2] - a[2], tx = c[0] - a[0], ty = Math.min(c[1], ceiling) - Math.min(a[1], ceiling), tz = c[2] - a[2];
+    // (A55: packing a collinear zero-rise gable can manufacture a tiny triangle.
+    // It must have area both before and after packing, including height clipping.)
+    if (Math.hypot(sy * tz - sz * ty, sz * tx - sx * tz, sx * ty - sy * tx) < 1e-7) return;
+    const p = [a, b, c].map(v => [Math.fround(v[0]), Math.fround(Math.min(v[1], ceiling)), Math.fround(v[2])]), u = p[1].map((v, i) => v - p[0][i]), v = p[2].map((v, i) => v - p[0][i]);
+    const nx = u[1] * v[2] - u[2] * v[1], ny = u[2] * v[0] - u[0] * v[2], nz = u[0] * v[1] - u[1] * v[0];
+    if (!p.flat().every(Number.isFinite) || Math.hypot(nx, ny, nz) < 1e-7) return;
+    // (A55: choose roof winding before Float32 rounding. Large world coordinates
+    // tilt vertical gables by tiny amounts; their rounded ny must not flip them.
+    // Backtracking footprint walls face away from their locally filled interior.)
+    const upArea = sz * tx - sx * tz;
+    let inward = false;
+    if (w[0][3] === 0 && outline) {
+      const n = Math.hypot(nx, nz);
+      if (n > 1e-6) {
+        const x = (p[0][0] + p[1][0] + p[2][0]) / 3, z = (p[0][2] + p[1][2] + p[2][2]) / 3;
+        inward = footprintGap(outline, x + nx / n * 0.1, z + nz / n * 0.1) < footprintGap(outline, x - nx / n * 0.1, z - nz / n * 0.1) - 0.05;
+      }
+    }
+    const roofFace = w[0][3] === 1 || Math.abs(upArea) > 1e-7;
+    if ((roofFace && ny < 0) || inward) { [p[1], p[2]] = [p[2], p[1]]; w = [w[0], w[2], w[1]]; }
+    pos.push(...p[0], ...p[1], ...p[2]); cl.push(...k, ...k, ...k); bw.push(...w[0], ...w[1], ...w[2]);
+  };
   const quad = (a, b, c, d, k, w) => { tri(a, b, c, k, [w[0], w[1], w[2]]); tri(a, c, d, k, [w[0], w[2], w[3]]); };
   const G = [0, 0, 0, 2], T = [G, G, G, G];
   // a box standing on y0 (no floor), sides along (ux, uz) and across, in one colour as trim
   const box = (cx, y0, cz, sl, sh, sw, ux, uz, k) => {
-    const P = (s, t, y) => [cx + ux * s - uz * t, y, cz + uz * s + ux * t], y1 = y0 + sh;
+    const P = (s, t, y) => [cx + ux * s - uz * t, y, cz + uz * s + ux * t], y1 = Math.min(y0 + sh, ceiling);
     const c = [[-sl, -sw], [sl, -sw], [sl, sw], [-sl, sw]];
+    if (y1 <= y0 || outline && !footprintContains(outline, c.map(([s, t]) => [cx + ux * s - uz * t, cz + uz * s + ux * t]), 0.35)) return;
     for (let i = 0; i < 4; i++) { const [s0, t0] = c[i], [s1, t1] = c[(i + 1) % 4]; quad(P(s1, t1, y0), P(s0, t0, y0), P(s0, t0, y1), P(s1, t1, y1), k, T); }
     quad(P(-sl, sw, y1), P(sl, sw, y1), P(sl, -sw, y1), P(-sl, -sw, y1), k, T);
   };
   for (const b of list) {
-    let r = b.ring.slice(0, -1); if (r.length < 3) continue;
+    let r = b.ring.slice(0, -1).filter((p, i, a) => !i || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 1e-5); if (r.length < 3) continue;
     if (THREE.ShapeUtils.isClockWise(r.map(p => new THREE.Vector2(p[0], p[1])))) r = r.reverse();
+    outline = r; ceiling = b.maxTop ?? (b.rh == null ? Infinity : b.base + b.h + Math.max(0, b.rh));
     const h = (k) => hash2(b.seed, k), ob = orientedBox(r), area = Math.abs(THREE.ShapeUtils.area(r.map(p => new THREE.Vector2(p[0], p[1])))), fill = area / Math.max(1, ob.area);
     // houses: small and near enough a box for one roof over it (an L or a T takes a flat roof); a few barns with a
     // gambrel roof, in barn red
@@ -418,12 +447,20 @@ export function buildingGeometry(list) {
     // (A53: Miller 591600 has shops, not random barns; measured roof rise and OSM use govern surveyed buildings.)
     const lid = b.rh != null, bh = b.hc ?? b.h;
     // (A54: pier roofs stay within their footprints; no random cottage porch over the bay.)
-    const house = b.pier ? false : b.fort ? (!lid || b.rh >= 0.4) && b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : (b.sourceType == null || !lid || b.rh >= 0.4) && bh <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9, barn = !b.pier && !b.fort && !house && (b.sourceType == null || /^(barn|farm_auxiliary)$/.test(b.sourceType)) && bh <= 10 && ob.area > 120 && ob.area < 900 && fill > 0.85 && h(11) < 0.22;
+    // (A55: a high fill ratio still permits a long missing notch. Test the whole
+    // box boundary before drawing a rectangular roof over the actual walls.)
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) => [ob.c[0] + ob.u[0] * s * ob.L / 2 - ob.u[1] * t * ob.W / 2, ob.c[1] + ob.u[1] * s * ob.L / 2 + ob.u[0] * t * ob.W / 2]);
+    const fits = fill > 0.85 && footprintContains(r, corners, 0.35), pitched = !lid || b.rh >= 0.4;
+    const house = !b.pier && pitched && fits && (b.fort ? b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : bh <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9), barn = !b.pier && !b.fort && !house && pitched && fits && (b.sourceType == null || /^(barn|farm_auxiliary)$/.test(b.sourceType)) && bh <= 10 && ob.area > 120 && ob.area < 900 && h(11) < 0.22;
     // (a footprint too ragged for one roof over its box (an L, a T, the Fort Baker barracks) but pitched by the lidar: a
     // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
     // roof half way up its rise)
     const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40;
-    const hw = lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    // (A55: OSM height is the whole building, not the eaves plus another random roof.
+    // Surveyed roofs retain their rise within the surveyed top, including on slopes.)
+    const roofRoom = b.minEave == null ? Infinity : Math.max(0, ceiling - b.minEave);
+    const rise = house ? Math.min(roofRoom, lid ? Math.min(5.5, b.rh) : Math.min(3.8, ob.W * (0.26 + 0.24 * h(7)))) : barn ? Math.min(roofRoom, lid ? Math.min(5, b.rh) : Math.min(5, ob.W * 0.42)) : hipped ? Math.min(b.rh, Math.min(2.5, b.rh * 1.3, Math.sqrt(area) * 0.18) * 0.9) : 0;
+    const hw = Math.min(lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, ceiling - b.base - rise), top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     // (A53: Miller shops and irregular hillside homes need their own wall scale even when their measured roof is flat or hipped.)
     const shop = /^(retail|commercial|office)$/.test(b.sourceType), domestic = !shop && (house || /^(house|detached|residential|bungalow|semidetached_house)$/.test(b.sourceType) || b.sourceType === 'yes' && bh <= 7 && ob.area < 450);
     const style = b.style != null ? b.style : b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : shop ? (h(5) < 0.5 ? 2 : 6) : (domestic ? HOUSE : bh > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (domestic ? 8 : 4)];
@@ -444,7 +481,7 @@ export function buildingGeometry(list) {
       const o = 0.45, e = top - 0.15;
       if (barn) {
         // a gambrel: steep lower slopes to a knee, shallow ones to the ridge; the ends closed in wall colour
-        const rh = Math.min(5, w * 0.42), kt = w / 2 * 0.62, ky = top + rh * 0.62;
+        const rh = rise, kt = w / 2 * 0.62, ky = top + rh * 0.62;
         const lo = (t, y) => [P(-L / 2 - o, t, y), P(L / 2 + o, t, y)];
         for (const sd of [-1, 1]) {
           const [a1, a2] = lo(sd * (w / 2 + o), e), [k1, k2] = lo(sd * kt, ky), [r1, r2] = lo(0, top + rh), s1 = Math.hypot(w / 2 + o - kt, ky - e), s2 = s1 + Math.hypot(kt, top + rh - ky);
@@ -458,7 +495,7 @@ export function buildingGeometry(list) {
       } else {
         // a gable roof along the long side, a hip roof on a squarish house, now and then a shed roof; pitches vary
         // (A37: a steep roof the lidar measured a gable: the Field Road house's gable end to the road, w_field0)
-        const rh = lid ? Math.min(5.5, b.rh) : Math.min(3.8, w * (0.26 + 0.24 * h(7))), shed = !lid && h(8) > 0.9, hip = !shed && (lid ? b.rh < 2.5 && L < w * 1.35 : L < w * 1.35 || h(8) < 0.3), inset = hip ? Math.min(L / 2, w / 2) : 0;
+        const rh = rise, shed = !lid && h(8) > 0.9, hip = !shed && (lid ? b.rh < 2.5 && L < w * 1.35 : L < w * 1.35 || h(8) < 0.3), inset = hip ? Math.min(L / 2, w / 2) : 0;
         if (shed) {
           const a1 = P(-L / 2 - o, -w / 2 - o, e), a2 = P(L / 2 + o, -w / 2 - o, e), b1 = P(-L / 2 - o, w / 2 + o, e + rh * 0.7), b2 = P(L / 2 + o, w / 2 + o, e + rh * 0.7), sl = Math.hypot(w + 2 * o, rh * 0.7);
           quad(a2, a1, b1, b2, rc, [R(0, 0), R(L, 0), R(L, sl), R(0, sl)]);
@@ -478,7 +515,9 @@ export function buildingGeometry(list) {
           if (h(13) < 0.45) { const sd = h(14) < 0.5 ? -1 : 1, p = P(sd * (L / 2 - 0.8), (h(15) - 0.5) * w * 0.3, 0); box(p[0], top - 0.5, p[2], 0.38, rh + 1.4, 0.38, ux, uz, col(h(16) < 0.6 ? 0x8a4a3a : 0x9a9690)); }
         }
         // a porch along one long side: a lean-to roof on two posts, a deck
-        if (!b.pier && h(17) < 0.35 && L > 6) {
+        // (A55: random porches had no footprint or survey evidence and projected
+        // through neighbouring buildings. Only the surveyed front below is drawn.)
+        if (b.porch === true && !b.pier && h(17) < 0.35 && L > 6) {
           const sd = h(18) < 0.5 ? -1 : 1, s0 = -L * 0.34, s1 = L * 0.34, t0 = sd * w / 2, t1 = sd * (w / 2 + 2.2), y0 = b.base + 2.95, y1 = b.base + 2.55, pc = col(0xe8e4dc);
           const q1 = P(s0, t0, y0), q2 = P(s1, t0, y0), q3 = P(s1, t1, y1), q4 = P(s0, t1, y1), sl = Math.hypot(2.2, 0.4);
           sd < 0 ? quad(q1, q2, q3, q4, rc, [R(0, sl), R(s1 - s0, sl), R(s1 - s0, 0), R(0, 0)]) : quad(q2, q1, q4, q3, rc, [R(0, sl), R(s1 - s0, sl), R(s1 - s0, 0), R(0, 0)]);
@@ -499,7 +538,7 @@ export function buildingGeometry(list) {
         inn.push([p[0] + mx * d * k, p[1] + mz * d * k]);
       }
       // (the crown must still be the walls' shape the same way round: else the offset folded over, and a flat roof it is)
-      const ok = !THREE.ShapeUtils.isClockWise(inn.map(p => new THREE.Vector2(p[0], p[1]))) && Math.abs(THREE.ShapeUtils.area(inn.map(p => new THREE.Vector2(p[0], p[1])))) < area;
+      const ok = simpleOutline(inn) && footprintContains(r, inn) && !THREE.ShapeUtils.isClockWise(inn.map(p => new THREE.Vector2(p[0], p[1]))) && Math.abs(THREE.ShapeUtils.area(inn.map(p => new THREE.Vector2(p[0], p[1])))) < area;
       const ins = ok ? inn : r, ry = ok ? rr : 0.05, sl = Math.hypot(d, ry);
       if (ok) for (let i = 0; i < n; i++) {
         const j = (i + 1) % n, L = Math.hypot(r[j][0] - r[i][0], r[j][1] - r[i][1]);
@@ -511,7 +550,7 @@ export function buildingGeometry(list) {
     } else {
       // a flat roof inside a parapet; boxes on the roof (plant, a stair head) on the bigger ones
       flat(top + 0.05, col(0x8c8a86, 0.9 + 0.2 * h(9)), 2);
-      const pc = col(0xd8d4cc), ph = 0.5 + 0.5 * h(10);
+      const pc = col(0xd8d4cc), ph = Math.max(0, Math.min(0.5 + 0.5 * h(10), ceiling - top));
       for (let i = 0; i < r.length; i++) {
         const p = r[i], q = r[(i + 1) % r.length];
         tri([p[0], top, p[1]], [q[0], top + ph, q[1]], [q[0], top, q[1]], pc, [G, G, G]); tri([p[0], top, p[1]], [p[0], top + ph, p[1]], [q[0], top + ph, q[1]], pc, [G, G, G]);
@@ -526,10 +565,18 @@ export function buildingGeometry(list) {
     // murraycircle_0a_0230, s3_murraycircle_1a_0430); elsewhere (Fort Barry, Cronkhite, the cottages) a small entry porch
     // with steps, posts and a lean-to (fieldroad_0b_0830, w_bunker3))
     if (lid && b.front && !b.metal) {
-      const fx = b.front[0], fz = b.front[1], tside = -uz * fx + ux * fz, sside = ux * fx + uz * fz;
-      let len, off, Q, au, av;
-      if (Math.abs(tside) * L >= Math.abs(sside) * w * 0.8) { const sd = Math.sign(tside) || 1; len = L; off = w / 2; Q = (a, o) => P(a, sd * (off + o), 0); au = ux; av = uz; }
-      else { const sd = Math.sign(sside) || 1; len = w; off = L / 2; Q = (a, o) => P(sd * (off + o), a, 0); au = -uz; av = ux; }
+      // (A55: the measured veranda has its own intentional 2.85 m roof
+      // overhang. Roof plant above still has to fit the main footprint.)
+      outline = null;
+      // (A55: anchor a measured veranda on a real wall, not the oriented box.
+      // Fort Baker's notched barracks otherwise left decks up to 7.19 m away.)
+      const fx = b.front[0], fz = b.front[1]; let edge = null, score = -Infinity;
+      for (let i = 0; i < r.length; i++) {
+        const a = r[i], q = r[(i + 1) % r.length], dx = q[0] - a[0], dz = q[1] - a[1], l = Math.hypot(dx, dz), s = dz * fx - dx * fz;
+        if (l > 0 && s > score) { score = s; edge = { a, q, l, ux: dx / l, uz: dz / l }; }
+      }
+      const len = edge.l, au = edge.ux, av = edge.uz, Q = (a, o) => [(edge.a[0] + edge.q[0]) / 2 + au * a + av * o, 0, (edge.a[1] + edge.q[1]) / 2 + av * a - au * o];
+      const porchStart = pos.length / 3;
       const wh = col(0xf2f0ea), deck = col(0xb8b2a6), y0 = Math.max(b.base, Math.min(b.gy ?? b.base, b.base + hw - 3.2)), slab = (a0, a1, o0, o1, ya, th, k) => { const c = Q((a0 + a1) / 2, (o0 + o1) / 2); box(c[0], ya, c[2], Math.abs(a1 - a0) / 2, th, Math.abs(o1 - o0) / 2, au, av, k); };
       if (b.baker && b.h >= 5.5 && len > 15) {
         const D = 2.6, a0 = -len / 2 + 0.6, a1 = len / 2 - 0.6, yr = Math.min(y0 + 6.6, b.base + hw - 0.2);
@@ -543,12 +590,14 @@ export function buildingGeometry(list) {
         for (const a of [ac - W2 + 0.1, ac + W2 - 0.1]) { const c = Q(a, D - 0.1); box(c[0], y0, c[2], 0.07, 2.75, 0.07, au, av, wh); }
         slab(ac - 0.7, ac + 0.7, D, D + 0.9, y0 + 0.0, 0.25, deck);  // a step
       }
+      if (pos.length / 3 > porchStart) overhangs.push({ start: porchStart, end: pos.length / 3, metres: 2.85, source: 'surveyed veranda and entry step' });
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(cl, 3));
   g.setAttribute('bw', new THREE.Float32BufferAttribute(bw, 4));
+  g.userData.overhangs = overhangs;
   g.computeVertexNormals(); g.computeBoundingSphere();
   return g;
 }

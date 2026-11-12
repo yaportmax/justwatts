@@ -23,14 +23,14 @@ def test_prompt_shows_before_the_junction_with_the_default_on(out):
     p = out["prompt"]
     assert p and p["on"] and 150 <= p["m"] <= 200                      # about 200 m before it
     assert [o["name"] for o in p["opts"]] == ["Road", "McCullough Road"]  # left to right
-    assert [b["on"] for b in p["buttons"]] == [o["on"] for o in p["opts"]] == [False, True]
+    assert [b["on"] for b in p["buttons"]] == [o["on"] for o in p["opts"]] == [True, False]
     assert 'rotate(-33deg)' in p["html"] and "McCullough Road" in p["html"]
     assert out["defaultNext"]["sel"] == out["defaultNext"]["inEngine"]   # doing nothing: the engine already has the default way
 
 
 def test_arrow_keys_and_taps_change_the_way(out):
-    assert out["key"] is True and out["afterKey"]["sel"] == out["afterKey"]["want"] == out["afterKey"]["inEngine"]  # left: one way over
-    assert [b["on"] for b in out["afterKey"]["buttons"]] == [True, False]
+    assert out["key"] is True and out["afterKey"]["sel"] == out["afterKey"]["want"] == out["afterKey"]["inEngine"]  # one option away from the default
+    assert [b["on"] for b in out["afterKey"]["buttons"]] == [False, True]
     assert out["up"] is True and out["afterUp"]["sel"] == out["afterUp"]["want"] == out["afterUp"]["inEngine"]      # up: the straightest
     t = out["afterTap"]
     assert t["sel"] == t["want"] == t["inEngine"] and [b["on"] for b in t["buttons"]] == [True, False]

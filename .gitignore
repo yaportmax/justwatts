@@ -41,3 +41,4 @@ tools/
 !/tools/
 /tools/*
 !/tools/hand-ground/
+!/tools/rider-ground/

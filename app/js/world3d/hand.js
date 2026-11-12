@@ -30,14 +30,6 @@ const brushAt = (x, z) => {  // (a 'b' row's width at (x, z), by that row's own 
   for (const { P, sd, w, bb } of BR_) { if (x < bb[0] || x > bb[2] || z < bb[1] || z > bb[3]) continue; let bd = 45 * 45, bi = -1; for (let i = 0; i + 1 < P.length; i++) { const d = (P[i][0] - x) ** 2 + (P[i][1] - z) ** 2; if (d < bd) { bd = d; bi = i; } }
     if (bi < 0) continue; const [x0, z0] = P[bi], [x1, z1] = P[bi + 1]; if (((x - x0) * -(z1 - z0) + (z - z0) * (x1 - x0) > 0 ? 'R' : 'L') === sd) return w; }
   return 0; };
-function shellBrush(geo, lambert) {
-  const rows = SHOULDERS.filter(r => r[3] === 'b'); if (!rows.length) return null; const Z = spec_(), P = geo.attributes.position, A = new Float32Array(P.count * 3);
-  const boxes = rows.map(([a, b]) => { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (let s = a; s <= b; s += 5) { const [x, z] = PROJ_.xz(...Z.latlon(s)); x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return [x0 - 45, z0 - 45, x1 + 45, z1 + 45]; });
-  let any = false;
-  for (let k = 0; k < P.count; k++) { const x = P.getX(k), z = P.getZ(k); if (!boxes.some(b => x > b[0] && x < b[2] && z > b[1] && z < b[3])) continue;
-    const w = brushAt(x, z); if (!w) continue; A[3 * k + 1] = -1; A[3 * k + 2] = w / 8; any = true; }
-  if (!any) return null; geo.setAttribute('jwSh', new THREE.BufferAttribute(A, 3)); geo.setAttribute('jwCt', new THREE.BufferAttribute(new Float32Array(P.count * 2), 2)); return groundMaterial({ lambert, shoulder: true, shell: true });
-}
 function addShoulders(root, lambert) {
   root.updateMatrixWorld(true); const v = new THREE.Vector3(), cells = new Map(), C = 8, S = [];  // (A37: 8 m cells and a 3 x 3 window still reach the 8 m clamp; each edge tested once per lookup (stamp))
   root.traverse(o => { if (!o.isMesh || !/^road\d/.test(o.name)) return; const P = o.geometry.attributes.position, I = o.geometry.index; if (!I) return;
@@ -434,29 +426,6 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 // near. Which lod a plant draws in is decided on the GPU by its
 // distance to the camera (veg.json lod: { sp: [lod0 metres, last metres] }); update(x, z) only moves that uniform and
 // toggles near cells: no matrices are rewritten after load.
-// A35: the coastal scrub as one canopy surface (private tools/blender/scrub_shell.py: the lidar's canopy over its ground where NAIP sees
-// plants, coloured from NAIP): scrub.json the head, scrub/s<k>.bin per road group (positions, rgb, triangles), streamed as loadHand's groups.
-// Lit as a solid mass with the asphalt's world-space grain for its leaves; no model, no texture.
-export function loadScrub({ scene, base = '/world/hand/', lambert = m => m }) {
-  const group = new THREE.Group(); group.name = 'handScrub'; scene.add(group);
-  const mat = groundMaterial({ base, lambert, shell: true });  // (A35: the ground's own material: its scrub cover paints the shell, one surface with relief)
-  let groups = null, at = null, busy = false, D2 = 1800 * 1800;
-  fetch(base + 'scrub.json').then(r => r.ok ? r.json() : null).then(j => { if (j) { groups = j.groups; pump(); } }).catch(() => {});
-  async function pump() {
-    if (busy || !groups || !at) return; busy = true;
-    try {
-      for (let k = 0; k < groups.length; k++) { const G = groups[k]; if (!G || !G.at.some(c => (c[0] - at[0]) ** 2 + (c[1] - at[1]) ** 2 < D2)) continue; groups[k] = null;
-        const buf = await fetch(base + G.file).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null); if (!buf) continue;
-        const pos = new Float32Array(buf, 0, G.n * 3), cOff = G.n * 12, col = new Uint8Array(buf, cOff, G.n * 3), iOff = cOff + G.n * 3 + ((-G.n * 3) % 4 + 4) % 4, idx = new Uint32Array(buf, iOff, G.t * 3);
-        const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); { const c = new Float32Array(G.n * 3); for (let i = 0; i < c.length; i++) { const v = col[i] / 255; c[i] = v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; } geo.setAttribute('color', new THREE.BufferAttribute(c, 3)); }  /* (NAIP's sRGB to linear) */ geo.setIndex(new THREE.BufferAttribute(idx, 1));
-        geo.computeVertexNormals(); geo.computeBoundingSphere();
-        const m = new THREE.Mesh(geo, shellBrush(geo, lambert) ?? mat); m.receiveShadow = true; m.castShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); group.add(m);
-        await new Promise(r => setTimeout(r, 16)); k = -1; }
-    } finally { busy = false; }
-  }
-  return { group, want(x, z, r = 1800) { at = [x, z]; D2 = r * r; pump(); } };  // (A36: r: only the groups by the rider while the world loads, 124 MB in all)
-}
-
 // (A39, the owner twice: the plants must not change as the rider nears them. The near model was swapped for crossed cards at 25 to 80 m, a tree 130 to 600 px tall
 // turning into another tree. Now the near model itself thins with distance and no swap happens while the plant is large: thin() cuts a part into clusters (a leaf
 // card, or a single triangle of a trunk) and ranks them so that any head of the list is spread over the whole plant; at a distance d a plant keeps the share

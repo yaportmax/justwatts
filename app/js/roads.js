@@ -165,6 +165,19 @@ export class Plan {
     const o = g.options(this.seq[k - 1].id, cur), live = o.filter(e => g.through?.(e.w) || g.deadEnd(cur, e.to) !== 1);
     return (live.length ? live : o).map(e => ({ to: e.to, w: e.w, a: turn(inB, g.outBearing(cur, e.to)) })).sort((x, y) => x.a - y.a);
   }
+  // (A60) round a roundabout from cur toward `to`: true when an exit with the name of inW (the way we came in on) comes
+  // before the ring closes, not one that meets inW again (the way back). False when a node on the way is not loaded yet.
+  exitAhead(cur, to, inW) {
+    const g = this.g; let p = cur, c = to;
+    for (let i = 0; i < 100 && c !== cur; i++) {
+      if (!g.complete(c)) return false;
+      const o = g.options(p, c);
+      if (o.some(e => !e.w.rb && e.w.name === inW.name && !e.w.nodes?.some(n => n !== c && inW.nodes?.includes(n)))) return true;
+      const r = o.find(e => e.w.rb); if (!r) return false;
+      p = c; c = r.to;
+    }
+    return false;
+  }
   // the default way on at seq[k]: the same road, else straight on, else the main road; a dead end turns around
   next(k) {
     const o = this.options(k), prev = this.seq[k - 1].id, win = this.wayAt(k);
@@ -178,6 +191,9 @@ export class Plan {
       // (A33: the road we came in on, by name, before the straightest: at Conzelman's roundabout with McCullough a ride up Conzelman turned down McCullough, user 2026-11-05)
       const inW = this.wayAt(j - 1), sameEx = inW?.name && exits.find(x => x.w.name === inW.name);
       if (sameEx) return sameEx.to;
+      // (A60: ... and further round: up Conzelman from the bridge the ring's first exit is McCullough Road, 4 deg from straight,
+      // while Hawk Hill's Conzelman Road leaves 60 m round; the same name's way back to where we came in does not count)
+      if (round && inW?.name && this.exitAhead(this.seq[k].id, round.to, inW)) return round.to;
       if (exits.length && (exits[0].b <= 60 || !round || k - j > 30)) return exits[0].to;
       if (round) return round.to;
     }

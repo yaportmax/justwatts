@@ -167,7 +167,8 @@ def test_points_every_10_m_with_bridges_flagged(js):
 def test_plan_on_real_roads_climbs_conzelman(js):
     r = js([{"op": "plan", "cells": ["3782_-12249", "3783_-12249", "3783_-12250"], **HAWK, "to": 1500}])[0]
     assert r["snap"]["name"] == "Conzelman Road" and r["snap"]["m"] < 2
-    assert r["names"][0] == "Conzelman Road" and "McCullough Road" in r["names"]
+    # The roundabout's unnamed ring continues to Conzelman toward Hawk Hill.
+    assert r["names"] == ["Conzelman Road", "Road", "Conzelman Road"]
     assert r["end"] >= 1500 and r["blocked"] is None
 
 

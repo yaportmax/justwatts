@@ -13,7 +13,7 @@ import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, ease
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths, setLaneHook } from './rail.js';
 import { compileSpec, specPaint, SECTIONS as CZ_SECTIONS, RAILS as CZ_RAILS, LOTS as CZ_LOTS, CROSSWALKS as CZ_WALKS } from './conzelman.js';
 import { createEdit } from './edit.js';
-import { loadHand, loadVeg as loadHandPlants, loadScrub, lawnAt } from './hand.js';
+import { loadHand, loadVeg as loadHandPlants, lawnAt } from './hand.js';
 import { BARRIERS, CURBS, SURVEY, MARKINGS, BUILDINGS, CUTS, STOPS, CROSSINGS, VERGES, WIDTHS, SIGNS, HAND_BLDG } from './handlist.js';
 import { POLES as FURN_POLES, PIECES as FURN_PIECES, LAMPS as FURN_LAMPS } from './furnlist.js';
 import { LIDAR_BLDG } from './bldglidar.js';
@@ -227,7 +227,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // the hand-built scenery (hand.js); once in, the near tiles' roads are built again without that stretch
   const HAND = loadHand({ scene, lambert: m => withSun(m), ahead: () => veilAt ? 6 : 1, prepare: into => handBasePrepare().then(() => stageUploads(into)), onLoad: () => { hz.touch(); handMask = null; const B = HAND.lastBox, M = 130; for (const c of near.values()) if (c.sig) { const b = tileBox(c); if (B && b && (b[2] < B.min.x - M || b[0] > B.max.x + M || b[3] < B.min.z - M || b[1] > B.max.z + M)) continue;  /* (a tile this group does not reach keeps its ground and roads: building them again held a frame up and uploaded 15 MB in mid ride) */ if (c.sig.roads) { c.sig.roads = null; c.sig.furn = null; } if (c.sig.terrain && HAND.settled) c.sig.terrain = null; } poke(); } });
   const HVEG = loadHandPlants({ scene, renderer, lambert: m => withSun(m) });
-  const HSCRUB = loadScrub({ scene, lambert: m => withSun(m) });  // (A35: the coastal scrub, one canopy surface)
+  // (cx-scrub: cx-ground2 probe1100b/270 isolates the hanging raw-lidar shell.
+  // Cover is already painted on the final drawn terrain; do not load a second canopy surface.)
   // (A19: inside the hand list's corridor its own plants stand; the generated trees and scrub give way, built again once known)
   HVEG.onOwn(() => { for (const c of [...near.values(), ...far.values()]) c.sig.trees = null; scrub.invalidate(); poke(); });
   const handAt = (x, z) => { if (!HAND.ready || !HAND.covers) return false; if (HAND.on(14000) && x > 9076 && x < 9122 && z > 11495 && z < 11530 && Math.abs((x - 9118.5) * 0.59 - (z - 11526) * 0.81) < 7) return true;  /* (A32, w29_14000_a: the generated arm under the hand fork: its paint and edge showed) */ if (HAND.on(10030) && ((x - 11927) ** 2 + (z - 10713) ** 2 < 28 * 28 || (x - 11962) ** 2 + (z - 10718) ** 2 < 16 * 16)) return true; if (HAND.on(14490) && (x - 8934) ** 2 + (z - 11860) ** 2 < 46 * 46) return true; if (HAND.on(1750) && (x - 12870) ** 2 + (z - 10763) ** 2 < 16.5 * 16.5) return true;  // (A25: and at the fork at 14490: one hand-built surface, cz_14500_l)  // (A23: the generated stubs at the McCullough roundabout give way to the hand-built one)
@@ -1620,7 +1621,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // along the route, not in rings: a tile the course runs through first, sooner the sooner the rider gets there (a
     // tile 1.5 km on counts as one tile away), the rest by distance after them; in each the ground and the road before
     // anything else, the trees, buildings and furniture after every tile's ground and roads
-    HAND.want(...proj.xz(lat, lon)); HVEG.want(...proj.xz(lat, lon)); HSCRUB.want(...proj.xz(lat, lon), veilAt ? 350 : 1800);
+    HAND.want(...proj.xz(lat, lon)); HVEG.want(...proj.xz(lat, lon));
     const rx = tileX(lon, NEAR_Z), ry = tileY(lat, NEAR_Z), route = routeTiles(), d0 = dShown;
     for (const c of near.values()) {
       if (c.tile === undefined) continue;

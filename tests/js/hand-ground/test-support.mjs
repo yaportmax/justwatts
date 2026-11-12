@@ -1,0 +1,26 @@
+import assert from 'node:assert/strict';
+import * as T from '../../../app/vendor/three-0.180.0/three.module.min.js';
+import {captureSupport,checkSupport} from '../../../tools/hand-ground/support.js';
+globalThis.window={__seatAt:[0,0]};
+const scene=new T.Scene(),hand=new T.Group(),veg=new T.Group();hand.name='hand';veg.name='handVeg';scene.add(hand,veg);
+function plane(y,attr,parent=scene){const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute([-5,y,-5,5,y,-5,-5,y,5,5,y,-5,5,y,5,-5,y,5],3));if(attr)g.setAttribute(attr,new T.Float32BufferAttribute(new Float32Array(6),1));const m=new T.Mesh(g,new T.MeshBasicMaterial({side:T.DoubleSide}));parent.add(m);return m;}
+const ground=plane(2,'mk'),bank=plane(3,'gv'),floor=plane(20,'mk');floor.userData.floor0=0;
+const hidden=plane(30,'mk');hidden.visible=false;
+const plant=new T.InstancedMesh(new T.BoxGeometry(),new T.MeshBasicMaterial(),1);plant.name='veg1_bayf';plant.setMatrixAt(0,new T.Matrix4().makeTranslation(1,5,1));veg.add(plant);scene.updateMatrixWorld(true);
+const D={THREE:T,scene,xz:()=>[0,0]},a=captureSupport(D);
+assert.equal(a.points.length,1);assert.equal(a.points[0][3],2);assert.equal(a.points[0][4],3);
+assert.equal(checkSupport(D,a.points).mismatch.length,0);
+assert.equal(captureSupport(D).points.length,1);
+assert.equal(captureSupport({...D,xz:()=>[100,0]}).points.length,0);
+window.__seatSeen=new Set();bank.geometry.setDrawRange(0,0);const b=captureSupport(D);assert.equal(b.points[0][4],null);
+window.__seatSeen=new Set();const h=plane(4,null,hand);h.name='terrain0';scene.updateMatrixWorld(true);assert.equal(captureSupport(D).points[0][3],4);
+const back=plane(40,'mk');back.material.side=T.FrontSide;scene.updateMatrixWorld(true);assert.equal(captureSupport(D).points[0][3],4);
+back.material.side=T.BackSide;assert.equal(captureSupport(D).points[0][3],40);
+assert.equal(checkSupport(D,captureSupport(D).points).mismatch.length,0);
+console.log('PASS: exact ground, bank, hand surface, draw range, visibility, face side, floor exclusion, near repeats and distant sampling cache');
+const road=plane(5,'ruv');road.geometry.setAttribute('rd',new T.Float32BufferAttribute(Array.from({length:6},()=>[0,0,0,16.5]).flat(),4));
+plant.setMatrixAt(0,new T.Matrix4().makeTranslation(5.4,5,1));scene.updateMatrixWorld(true);
+let paving=captureSupport(D).paving[0][3];assert.equal(paving.length,1);assert.ok(Math.abs(paving[0][1]-0.4)<1e-5);assert.equal(paving[0][3],16.5);
+plant.setMatrixAt(0,new T.Matrix4().makeTranslation(5.7,5,1));scene.updateMatrixWorld(true);assert.equal(captureSupport(D).paving[0][3].length,0);
+const tunnels=new T.Group();tunnels.name='tunnels';scene.add(tunnels);tunnels.add(road);plant.setMatrixAt(0,new T.Matrix4().makeTranslation(1,5,1));scene.updateMatrixWorld(true);assert.equal(captureSupport(D).paving[0][3].length,0);
+console.log('PASS: actual paving edges with 0.6m clearance, width metadata and tunnel exclusion');

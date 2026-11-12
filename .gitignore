@@ -37,3 +37,7 @@ docs/RELIABILITY.md
 docs/API.md
 docs/INTEGRATIONS.md
 tools/
+# Keep the reproducible placement rules and proof gate with the world they verify.
+!/tools/
+/tools/*
+!/tools/hand-ground/

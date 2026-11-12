@@ -35,8 +35,17 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   const S0 = GGB.span[0], S1 = GGB.span[1], st = [];
   for (let s = S0; s < S1; s += s < -1150 || s > 1210 ? 10 : 40) st.push(s);
   st.push(S1);
-  const segBox = (sx, sy, m, s0, s1, d, y0, y1) => {
-    const a = D(s0, d, y0), b = D(s1, d, y1), len = Math.hypot(b.x - a.x, b.z - a.z), o = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, len + 0.4), m);
+  const segBox = (sx, sy, m, s0, s1, d, y0, y1, at = D) => {
+    let bent = false;
+    if (at === railD && s1 - s0 > 5.01) {
+      const a = at(s0, d, 0), b = at(s1, d, 0);
+      for (let s = s0 + 5; s < s1; s += 5) { const p = at(s, d, 0), f = (s - s0) / (s1 - s0); if (Math.hypot(p.x - a.x - (b.x - a.x) * f, p.z - a.z - (b.z - a.z) * f) > 0.005) { bent = true; break; } }
+    }
+    if (bent) {
+      for (let s = s0; s < s1; s += 5) { const end = Math.min(s1, s + 5), y = k => y0 + (y1 - y0) * (k - s0) / (s1 - s0); segBox(sx, sy, m, s, end, d, y(s), y(end), at); }
+      return;
+    }
+    const a = at(s0, d, y0), b = at(s1, d, y1), len = Math.hypot(b.x - a.x, b.z - a.z), o = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, len + 0.4), m);
     o.position.set((a.x + b.x) / 2, (y0 + y1) / 2, (a.z + b.z) / 2); o.quaternion.setFromEuler(new THREE.Euler(-Math.atan2(y1 - y0, len), Math.atan2(b.x - a.x, b.z - a.z), 0, 'YXZ'));
     o.castShadow = true; o.receiveShadow = true; bridge.add(o); return o;
   };
@@ -47,18 +56,51 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   // across the deck (ggb.js): the curb wall's middle, the outer railing (at the sidewalk's outer side)
   const WALL = GGB.curb + GGB.wall / 2, RAIL = GGB.curb + GGB.wall + GGB.walk + 0.05;
   const rail = [], legT = 14.6, dpOf = (s0, s1) => s0 >= -1000 && s1 <= 1100 ? 7.6 : 4.6, inner = [];
+  const sidewalkEdges = new Map(), slabs = [];
+  if (mats?.road) {
+    const { builder, ribbon } = roadLib, Bd = builder(), axis = [], H = (x, z) => deckH(toST(proj.lat(z), proj.lon(x))[0]);
+    for (let s = S0; s <= S1; s += 5) axis.push(s);
+    const line = d => axis.map(s => { const p = D(s, d, 0); return [p.x, p.z]; });
+    ribbon(Bd, line(0), { w: 2 * GGB.curb, lm: 2, lanes: 6, hAt: H, lift: 0.02, step: 10 });
+    for (const t of [-1, 1]) sidewalkEdges.set(t, ribbon(Bd, line(t * (GGB.curb + GGB.wall + GGB.walk / 2)), { w: GGB.walk, surf: 1, hAt: H, lift: 0.06, step: 10 }));
+    const d = Bd.done(), g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); g.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); g.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); g.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4));
+    g.setIndex(new THREE.BufferAttribute(d.idx, 1)); g.computeVertexNormals(); g.computeBoundingSphere();
+    const top = new THREE.Mesh(g, mats.road); top.receiveShadow = true; bridge.add(top);
+  }
+  // (A53: actual ribbon edges and slab/wall supports seat every bridge fixture; 3,592 bases checked, paving unchanged.)
+  function railD(s, d, y) {
+    const t = Math.sign(d), rows = sidewalkEdges.get(t); if (!rows) return D(s, d, y);
+    const f = (s - S0) / 5, i = Math.max(0, Math.min(rows.length - 2, Math.floor(f))), u = f - i, edge = t > 0 ? 4 : 7;
+    const point = row => { const dx = row[edge] - row[0], dz = row[edge + 2] - row[2], len = Math.hypot(dx, dz), clearance = Math.abs(d) - (GGB.curb + GGB.wall + GGB.walk);
+      return { x: row[edge] + dx / len * clearance, z: row[edge + 2] + dz / len * clearance }; };
+    const a = point(rows[i]), b = point(rows[i + 1]); return { x: a.x + (b.x - a.x) * u, y, z: a.z + (b.z - a.z) * u, yaw: Math.atan2(b.x - a.x, b.z - a.z) };
+  }
+  function segmentAt(s, d, rise, centreNormal = false) {
+    let i = 1; while (i < st.length - 1 && st[i] < s) i++;
+    const s0 = st[i - 1], s1 = st[i], a = D(s0, centreNormal ? 0 : d, deckH(s0) + rise), b = D(s1, centreNormal ? 0 : d, deckH(s1) + rise), f = (s - s0) / (s1 - s0);
+    const tx = b.x - a.x, tz = b.z - a.z, len = Math.hypot(tx, tz), offset = centreNormal ? d : 0;
+    return { x: a.x + tx * f - tz / len * offset, y: a.y + (b.y - a.y) * f, z: a.z + tz * f + tx / len * offset, yaw: Math.atan2(tx, tz) };
+  }
+  const supportRay = new THREE.Raycaster(), supportOrigin = new THREE.Vector3(), supportDown = new THREE.Vector3(0, -1, 0);
+  function slabFoot(p) {
+    for (const slab of slabs) slab.updateMatrixWorld();
+    supportRay.set(supportOrigin.set(p.x, p.y + 3, p.z), supportDown); const hit = supportRay.intersectObjects(slabs, false)[0];
+    if (!hit) throw new Error('Bridge fixture has no supporting slab');
+    return hit.point.y - 0.01;
+  }
   for (let i = 1; i < st.length; i++) {
     const s0 = st[i - 1], s1 = st[i], h0 = deckH(s0), h1 = deckH(s1);
-    segBox(GGB.deckW - 1, 1.1, orange, s0, s1, 0, h0 - 0.7, h1 - 0.7);
+    slabs.push(segBox(GGB.deckW, 1.1, orange, s0, s1, 0, h0 - 0.7, h1 - 0.7));
     // the outer railing's rails: a heavy flat top (Street View) and a lower rail
-    for (const t of [-1, 1]) for (const [y, th, wd] of [[1.17, 0.1, 0.24], [0.55, 0.05, 0.07]]) segBox(wd, th, orange, s0, s1, t * RAIL, h0 + y, h1 + y);
+    for (const t of [-1, 1]) for (const [y, th, wd] of [[1.17, 0.1, 0.24], [0.55, 0.05, 0.07]]) segBox(wd, th, orange, s0, s1, t * RAIL, h0 + y, h1 + y, railD);
     // between the roadway and each sidewalk a riveted steel wall (a rail on posts over it, below); down the middle the
     // movable median barrier, dark blocks with a yellow band (Street View)
     for (const t of [-1, 1]) { segBox(GGB.wall, 0.86, orange, s0, s1, t * WALL, h0 + 0.43, h1 + 0.43); for (const y of [1.08, 1.38]) segBox(0.07, 0.07, orange, s0, s1, t * WALL, h0 + y, h1 + y); }
     segBox(0.6, 0.82, median, s0, s1, 0, h0 + 0.41, h1 + 0.41);
     segBox(0.68, 0.18, yellow, s0, s1, 0, h0 + 0.52, h1 + 0.52);
-    for (let k = s0; k < s1; k += 4) if (Math.abs(Math.abs(k) - GGB.towers) > 12) for (const t of [-1, 1]) { const p = D(k, t * RAIL, deckH(k) + 0.6); rail.push(new THREE.Vector3(p.x, p.y, p.z)); }
-    for (let k = s0; k < s1; k += 3) for (const t of [-1, 1]) { const p = D(k, t * WALL, deckH(k) + 1.15); inner.push(new THREE.Vector3(p.x, p.y, p.z)); }
+    for (let k = s0; k < s1; k += 4) if (Math.abs(Math.abs(k) - GGB.towers) > 12) for (const t of [-1, 1]) { const p = railD(k, t * RAIL, deckH(k) + 0.6); rail.push(new THREE.Vector3(p.x, p.y, p.z)); }
+    for (let k = s0; k < s1; k += 3) for (const t of [-1, 1]) { const p = segmentAt(k, t * WALL, 1.15); inner.push(new THREE.Vector3(p.x, p.y, p.z)); }
   }
   // the trusses: a Warren truss with verticals under each edge, the lateral bracing across their bottom chords, one mesh
   // with its members cut out in the shader (solid and darker where they are finer than a pixel)
@@ -92,23 +134,13 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
     box(4.2, 1.2, 30, concrete, s, t * (legT + 6.9), deckH(s) - 0.62);
     box(0.08, 1.15, 30, orange, s, t * (legT + 8.95), deckH(s) + 0.6);
   }
-  if (mats?.road) {
-    const { builder, ribbon } = roadLib, Bd = builder(), axis = [], H = (x, z) => deckH(toST(proj.lat(z), proj.lon(x))[0]);
-    for (let s = S0; s <= S1; s += 5) axis.push(s);
-    const line = d => axis.map(s => { const p = D(s, d, 0); return [p.x, p.z]; });
-    ribbon(Bd, line(0), { w: 2 * GGB.curb, lm: 2, lanes: 6, hAt: H, lift: 0.02, step: 10 });
-    for (const t of [-1, 1]) ribbon(Bd, line(t * (GGB.curb + GGB.wall + GGB.walk / 2)), { w: GGB.walk, surf: 1, hAt: H, lift: 0.06, step: 10 });
-    const d = Bd.done(), g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); g.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2)); g.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); g.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4));
-    g.setIndex(new THREE.BufferAttribute(d.idx, 1)); g.computeVertexNormals(); g.computeBoundingSphere();
-    const top = new THREE.Mesh(g, mats.road); top.receiveShadow = true; bridge.add(top);
-  }
-  { const post = new THREE.InstancedMesh(new THREE.BoxGeometry(0.06, 1.2, 0.06), orange, rail.length), m4 = new THREE.Matrix4();
-    rail.forEach((p, i) => post.setMatrixAt(i, m4.makeTranslation(p.x, p.y, p.z))); post.computeBoundingSphere(); bridge.add(post); }
+
+  { const post = new THREE.InstancedMesh(new THREE.BoxGeometry(0.06, 1.36, 0.06), orange, rail.length), m4 = new THREE.Matrix4();
+    rail.forEach((p, i) => post.setMatrixAt(i, m4.makeTranslation(p.x, slabFoot(p) + 0.68, p.z))); post.computeBoundingSphere(); bridge.add(post); }
   // the railings' bars: a strip along each edge, its balusters (19 cm apart) cut in the shader
   { const pos = [], uv = [], idx = [];
     for (const [t, top] of [[-RAIL, 1.12], [RAIL, 1.12]]) { const b = pos.length / 3; let n = 0;  // the outer railings (their balusters, under the flat top)
-      for (let s = S0; s <= S1; s += 2, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 0.05, p.z, p.x, h + top, p.z); uv.push(s - S0, 0, s - S0, 1); }
+      for (let s = S0; s <= S1; s += 2, n++) { const p = railD(s, t, 0), h = deckH(s); pos.push(p.x, h + 0.05, p.z, p.x, h + top, p.z); uv.push(s - S0, 0, s - S0, 1); }
       for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
     const m = new THREE.MeshLambertMaterial({ color: 0xa85a48, side: THREE.DoubleSide });
@@ -122,7 +154,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   // railings, 1.9 m over them, on posts every 3 m (Street View)
   { const pos = [], uv = [], idx = [], posts = [], m4 = new THREE.Matrix4();
     for (const t of [-RAIL - 0.03, RAIL + 0.03]) { const b = pos.length / 3; let n = 0;
-      for (let s = S0; s <= -987; s += 3, n++) { const p = D(s, t, 0), h = deckH(s); pos.push(p.x, h + 1.2, p.z, p.x, h + 3.1, p.z); uv.push((s - S0) / 0.06, 0, (s - S0) / 0.06, 1.9 / 0.06); posts.push([p.x, h + 2.15, p.z]); }
+      for (let s = S0; s <= -987; s += 3, n++) { const p = railD(s, t, 0), h = deckH(s); pos.push(p.x, h + 1.2, p.z, p.x, h + 3.1, p.z); uv.push((s - S0) / 0.06, 0, (s - S0) / 0.06, 1.9 / 0.06); posts.push([p.x, h + 2.15, p.z]); }
       for (let k = 1; k < n; k++) { const a = b + 2 * (k - 1); idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
     // the chain link: a diamond of wire every 6 cm (mipmapped, a grey haze from afar)
@@ -204,7 +236,7 @@ export function createLandmarks({ THREE, scene, proj, sky, mats, baked }) {
   }
   // lamp standards along both rails every 50 m (the Art Deco lamps), the lantern leaning over the roadway
   { const lp = [], lg = new THREE.BoxGeometry(0.22, 7.4, 0.22).translate(0, 3.7, 0), am = new THREE.BoxGeometry(0.14, 0.14, 1.4).translate(0, 7.3, 0.6), ln = new THREE.BoxGeometry(0.42, 0.5, 0.42).translate(0, 7.1, 1.25);
-    for (let s = S0 + 25; s < S1 - 10; s += 50) if (Math.abs(Math.abs(s) - GGB.towers) > 30) for (const t of [-1, 1]) { const p = D(s, t * (GGB.deckW / 2 - 0.4), deckH(s)); lp.push([p.x, p.y, p.z, p.yaw + (t > 0 ? Math.PI / 2 : -Math.PI / 2)]); }
+    for (let s = S0 + 25; s < S1 - 10; s += 50) if (Math.abs(Math.abs(s) - GGB.towers) > 30) for (const t of [-1, 1]) { const p = segmentAt(s, t * (GGB.deckW / 2 - 0.4), 0, true); lp.push([p.x, slabFoot(p), p.z, p.yaw + (t > 0 ? Math.PI / 2 : -Math.PI / 2)]); }
     const geo = mergeBoxes([lg, am, ln]), im = new THREE.InstancedMesh(geo, orange, lp.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1);
     lp.forEach(([x, y, z, ry], i) => im.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), q.setFromEuler(e.set(0, ry, 0)), one))); im.castShadow = true; im.computeBoundingSphere(); bridge.add(im); }
   // the approaches: concrete piers (to well below the ground) every 45 m where the deck curves off the axis at the San

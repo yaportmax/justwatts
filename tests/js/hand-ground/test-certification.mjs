@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {mkdirSync,readFileSync as read,writeFileSync as write} from 'node:fs';
+import {resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const folder=resolve(process.argv[2]),app=folder+'/app',samples=folder+'/samples';
+for(const dir of ['js/world3d','world','vendor/three-0.180.0'])mkdirSync(app+'/'+dir,{recursive:true});
+mkdirSync(samples,{recursive:true});write(app+'/world/example.json','{}\n');
+const hash=s=>createHash('sha256').update(s).digest('hex'),put=(f,o)=>write(samples+'/'+f,JSON.stringify(o));
+const command=fileURLToPath(new URL('../../../tools/hand-ground/certify-proof.mjs',import.meta.url));
+const run=(...args)=>spawnSync(process.execPath,[command,'--app='+app,'--samples='+samples,...args],{windowsHide:true,encoding:'utf8'});
+let result=run('--start');assert.equal(result.status,0,result.stderr);
+const network=Object.fromEntries(['network_q0','network_q3','mv_q0','mv_q3'].map(k=>[k,{expected:1,stops:1,failed:0,hole:0,pit:0,float:0,onroad:0}]));
+put('comparison_proof.json',{pass:true,network,worseStops:{hover:0,sunk:0,seam:0,buried:0,zfight:0},comparisons:[]});
+put('coverage.json',{inputs:hash('[]'),missing:[0,0],pavingMissing:[0,0],closeMissing:[0,0]});
+write(samples+'/after.done','complete');for(const name of ['keepout','handkeep']){write(samples+'/'+name+'_after.exit','0');write(samples+'/'+name+'_after.log','PASS');}
+const original='original comparison',control='measured control',source='original row',matched='matched row';
+for(const [f,s]of Object.entries({'comparison_original_proof.json':original,'control.jsonl':control,'original_sample.jsonl':source,'matched_sample.jsonl':matched}))write(samples+'/'+f,s);
+put('comparison_recaptures.json',{originalComparison:{file:'comparison_original_proof.json',sha256:hash(original)},recaptures:[{controls:{'control.jsonl':hash(control)}}],files:{sample:{source:'original_sample.jsonl',sourceHash:hash(source),matched:'matched_sample.jsonl',matchedHash:hash(matched)}}});
+result=run();assert.equal(result.status,0,result.stderr);const proof=JSON.parse(read(samples+'/hand-ground-proof.json'));assert.equal(proof.evidence['control.jsonl'].sha256,hash(control));assert(proof.recaptures);
+write(samples+'/control.jsonl','altered');result=run();assert.notEqual(result.status,0);assert.match(result.stderr,/Recapture control changed/);
+write(samples+'/control.jsonl',control);write(samples+'/matched_sample.jsonl','altered');result=run();assert.notEqual(result.status,0);assert.match(result.stderr,/Matched baseline provenance changed/);
+console.log('PASS: certification preserves recapture provenance and rejects changed controls or matched baseline rows');

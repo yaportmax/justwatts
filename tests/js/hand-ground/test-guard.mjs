@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {mkdirSync,writeFileSync as write} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {geometryFiles,digest,verifyProof} from '../../../tools/hand-ground/hand_ground_guard.mjs';
+const app=(process.argv[2]+'/app/');
+for(const d of ['js/world3d','world','vendor/three-0.180.0'])mkdirSync(app+d,{recursive:true});
+write(app+'js/world3d/terrain.js',"import {height} from '../height.js';\ndrawGround(height);\n");write(app+'js/height.js','export const height=1;\n');write(app+'world/plants.bin',new Uint8Array([1,2,3]));
+const proof={files:Object.fromEntries(geometryFiles(app).map(p=>[p,digest(app+p)])),network:Object.fromEntries(['network_q0','network_q3','mv_q0','mv_q3'].map(k=>[k,{expected:1,stops:1,failed:0,hole:0,pit:0,float:0,onroad:0}])),worseStops:{hover:0,sunk:0,seam:0,buried:0,zfight:0},coverage:{missing:[0,0],pavingMissing:[0,0]},gates:{generatedKeepout:0,handKeepout:0}};
+proof.coverage.closeMissing=[0,0];assert.deepEqual(verifyProof(app,proof),[]);
+write(app+'js/world3d/terrain.js',"import {height} from '../height.js';\r\ndrawGround(height);\r\n");assert.deepEqual(verifyProof(app,proof),[]);
+write(app+'js/height.js','export const height=2;\n');assert.ok(verifyProof(app,proof).some(s=>s.includes('height.js')));write(app+'js/height.js','export const height=1;\n');
+write(app+'world/plants.bin',new Uint8Array([1,2,4]));assert.ok(verifyProof(app,proof).some(s=>s.includes('plants.bin')));
+write(app+'world/plants.bin',new Uint8Array([1,2,3]));proof.network.mv_q3.failed=1;assert.ok(verifyProof(app,proof).some(s=>s.includes('Incomplete network')));
+proof.network.mv_q3.failed=0;proof.worseStops.sunk=1;assert.ok(verifyProof(app,proof).some(s=>s.includes('sunk')));
+proof.worseStops.sunk=0;proof.coverage.missing=[0,1];assert.ok(verifyProof(app,proof).some(s=>s.includes('coverage')));
+console.log('PASS: stale plant data, incomplete stops, regression and support gaps rejected; checkout line endings normalized');

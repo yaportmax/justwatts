@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import * as T from '../../../app/vendor/three-0.180.0/three.module.min.js';
+import {isSurfaceEffect} from '../../../tools/hand-ground/surface-effect.js';
+const matrix=new T.Matrix4(),mat=new T.MeshLambertMaterial({map:new T.Texture(),alphaTest:0.5});
+const plane=new T.Mesh(new T.PlaneGeometry(6,6).rotateX(-Math.PI/2),mat);
+assert.equal(isSurfaceEffect(plane,matrix),true);
+assert.equal(isSurfaceEffect(plane,new T.Matrix4().makeRotationZ(Math.PI/2)),false);
+const shear=new T.Matrix4();shear.elements[1]=1;assert.equal(isSurfaceEffect(plane,shear),false);
+assert.equal(isSurfaceEffect(new T.Mesh(new T.BoxGeometry(6,0.01,6),mat),matrix),false);
+assert.equal(isSurfaceEffect(new T.Mesh(plane.geometry,new T.MeshLambertMaterial()),matrix),false);
+console.log('PASS: only horizontal zero-height textured cutouts classify as surface effects');

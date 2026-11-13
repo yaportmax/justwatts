@@ -1006,7 +1006,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // [x, y, z, scale, random, near only: a full model, no impostor] (on a road side's strip where one is, none on a steep face)
     // (hf: the height over the width scale, else a little either way at random; foot: the ground's lowest round the trunk;
     // a lidar tree (hf) by a road's coarse cells too: its own gap to the paving decided, fitTree)
-    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || HVEG.owns(x, z)) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z) || !KO.clear(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - 0.3, z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
+    // (11-12, owner shot 21: a trunk's foot is a flat ring at the root's height, so on a slope its downhill rim hung in the
+    // air. Sink each tree by its slope times its foot's radius (props.js trunks and the redwood flare, at its scale), 0.3 m
+    // at least as before, 1.1 m at most so no tree reads as sunk. Model and impostor share the height: nothing changes on approach.)
+    const FOOT_R = { redwood: 1.9, fir: 0.5, euc: 0.5, oak: 0.42, bay: 0.36, cypress: 0.6, pine: 0.45, cypressT: 0.9, eucS: 0.32, willow: 0.25 };
+    const footSink = (sp, x, z, s) => { const R = FOOT_R[sp]; if (!R) return 0.3; const a = hAt(x + 1, z), b = hAt(x - 1, z), c = hAt(x, z + 1), d = hAt(x, z - 1);
+      if (a == null || b == null || c == null || d == null) return 0.3; return Math.min(1.1, Math.max(0.3, Math.hypot((a - b) / 2, (c - d) / 2) * R * s + 0.1)); };
+    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || HVEG.owns(x, z)) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z) || !KO.clear(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - footSink(sp, x, z, s), z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];

@@ -502,6 +502,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   function material(src, geo, lo, hi, { round = false, fade = 0, meshNormals = false, prune = null, band = FADE, kind = fade > 0 ? 'm' : fade < 0 ? 'c' : 'k' } = {}) {
     const m0 = new THREE.MeshLambertMaterial({ color: src.color, map: src.map, alphaTest: src.map ? 0.5 : 0, side: THREE.DoubleSide, vertexColors: !!geo.attributes.color });
     const range = { value: new THREE.Vector3(lo, hi, band) }; ranges.push({ range, lo, hi, fade, kind });
+    const edge = /_(leaf|imp)$/.test(src.name || '') && !!src.transparent;
     m0.onBeforeCompile = sh => {
       sh.uniforms.jwVegCam = cam; sh.uniforms.jwVegRange = range;
       if (prune) { sh.uniforms.jwVegPrune = prune.u; sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + PRUNE_HEAD).replace('#include <begin_vertex>', '#include <begin_vertex>\n' + PRUNE_BODY); }
@@ -525,10 +526,18 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
           { float dn = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
             if (vJwFade < 0.999 && (${f} < -0.5 ? 1.0 - dn : dn) > vJwFade) discard; }`);
+      // (11-12, owner shot 20: a crown of square leaf cards, and the far crossed cards, seen close: every card turned near edge-on squashed
+      // its leaves into a long vertical streak, and a crossed card thinned to a sliver as the rider passed. A card fades out by a fixed
+      // screen dither as it turns edge-on (73 to 85 degrees), the cards facing the rider fill in: the standard card-foliage rule.
+      // Only the card leaves and the far cards: bark and the scanned plants' real leaves are untouched.)
+      if (edge) sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', `#include <alphatest_fragment>
+          { vec3 jfn = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))); float je = abs(dot(jfn, normalize(vViewPosition)));
+            float dn2 = fract(52.9829189 * fract(dot(gl_FragCoord.xy + 17.0, vec2(0.06711056, 0.00583715))));
+            if (je < 0.08 + 0.22 * dn2) discard; }`);
       // (cards and bent leaves: both faces keep the normal, no flip on the back; the scan's own mesh flips as usual)
       if (!meshNormals) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace(/normal \*= faceDirection;/g, '').replace(/normal = normal \* faceDirection;/g, ''));
     };
-    m0.customProgramCacheKey = () => 'jw-veg19f' + fade + (prune ? 'p' : '') + (meshNormals ? 'm' : '') + (round ? geo.uuid : ''); return lambert(m0);
+    m0.customProgramCacheKey = () => 'jw-veg19f' + fade + (prune ? 'p' : '') + (meshNormals ? 'm' : '') + (edge ? 'e' : '') + (round ? geo.uuid : ''); return lambert(m0);
   }
   // (streamed by stretch as loadHand: veg.json is the head (lod, own, groups: { file, at: chunk centres, species: { sp: count } }); a group's plants,
   // veg/g<k>.bin little-endian floats [x, y, z, rotY, sx, sy, sz] species after species, load when the rider comes within 1800 m of one of its chunks.

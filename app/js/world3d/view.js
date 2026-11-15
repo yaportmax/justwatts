@@ -440,6 +440,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (!G || G.key !== gk) {
       if (up > 1) G = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: upsample(t.hs, t.n, up, extOf(c)), n: (t.n - 1) * up + 1, step: 1, proj });
       else G = gridFromHeights({ z: c.z, x: c.x, y: c.y, hs: t.hs, n: t.n, step, proj });
+      if (fine) shoreSoften(G);
       G.key = gk; G.m = (up > 1 ? 1 / up : step) * GRID[c.z] / src;  // the grid's step over the coarse grid's (about 15 m)
       yield 't:grid';
     } else G = { ...G };
@@ -612,6 +613,23 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           mask[8 * v + 1] = 255;
         }
       }
+    }
+  }
+  // (Richardson Bay's calm water (sky.js calm): its shores drop from the levees to the mud within one cell of the grid, so
+  // the water's edge, where the sea's plane cuts the ground, ran in a saw's teeth a cell long along every shore not square
+  // to the grid, with no surf to hide it; top view 37.8764,-122.5098, Street View tn_marsh_s0's straight shore. The heights
+  // under 1.5 m there each averaged with their eight neighbours', twice, before the roads are carved: the edge along the
+  // shore's own line. North of Sausalito (from Gate 5 Road, the marsh's ground in materials.js), not its seawalls; the
+  // levees' crests, over 1.5 m, and the tile's edges (shared with the next tile) as they are)
+  function shoreSoften(G) {
+    const s = G.segs, n = s + 1, xs = G.xs, zs = G.zs, top = SEA + 0.6;
+    if (Math.max(xs[0], xs[s]) < 7500 || Math.min(zs[0], zs[s]) > 7500) return;
+    for (let pass = 0; pass < 2; pass++) {
+      const h0 = G.raw.slice();
+      for (let j = 1; j < s; j++) { if (zs[j] > 7500) continue;
+        for (let i = 1; i < s; i++) { const v = j * n + i; if (xs[i] < 7500 || h0[v] >= top || h0[v] < SEA - 6) continue;
+          let a = 0; for (let b = -1; b <= 1; b++) for (let k = -1; k <= 1; k++) a += h0[v + b * n + k];
+          G.raw[v] = Math.min(a / 9, top); } }
     }
   }
   // a clock for a build's slices: true once `ms` have gone since the slice began (yield then)

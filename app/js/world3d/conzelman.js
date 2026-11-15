@@ -375,8 +375,8 @@ export const RAILS = [
   [517860, 517965, 'L', 'wbeamg', ['tam_517875', 'tam_517925']],
 ];
 // CROSSWALKS: [station] the zebra across the road there (view.js draws it across the paved width): Battery Spencer's
-// (1316: 1300 ahead about 13 m on, 1325 behind about 5 m back) and the one at 1626 (1620 ahead, 4 to 5 m on)
-export const CROSSWALKS = [1316, 1626, 10061, 10968, 11070, 14272, 11575, 12925,
+// (1316: 1300 ahead about 13 m on, 1325 behind about 5 m back) and the one at 1623 (1620 ahead, 4 to 5 m on: that pano stands at 1617 on this line; OpenStreetMap's node at 1622.5)
+export const CROSSWALKS = [1316, 1623, 10061, 10968, 11070, 14272, 11575, 12925,
   31840, 32010, 100443, 100635, 50243, 280006, 320008, 320058, 320132, 70107];  // (A38: McCullough Road's zebra where the trail crosses, cz_70105_a)  // (A37: New Breitung Road's three, cz_320000_a, cz_320040_a, cz_320120_a)  // (A37: Bunker Road cz_31820_a, cz_32000_a; Mitchell Road cz_100435_a, cz_100620_a; Simmonds Road cz_50235_a; Center Road cz_280000_a)
 export const LOTS = [
   // the junction's mouth on the right at 1745 to 1752 and the road east to Fort Baker's way (Street View 1740 ahead), traced on USDA NAIP
@@ -507,7 +507,7 @@ export function specPaint(cen, out = { pos: [], col: [] }, walks = []) {
       }
     });
     // a zebra at each crosswalk's station: bars 0.6 m across and 3 m along, every 1.2 m across the paving (continental,
-    // as Street View shows them at Battery Spencer and 1626)
+    // as Street View shows them at Battery Spencer and 1623)
     for (const w of walks) for (const sw of [w - 1.5]) {
       const t0 = (sw - s0) / (s1 - s0), t1 = (sw + 3 - s0) / (s1 - s0); if (Math.max(t0, t1) < 0 || Math.min(t0, t1) >= 1) continue;
       const c = a.sp.c, at = (o, u) => lerp(pt(a, o), pt(b, o), Math.max(0, Math.min(1, u)));

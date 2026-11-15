@@ -1229,6 +1229,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const inTile = ([la, lo]) => { const [x, z] = proj.xz(la, lo), b = tileBox(c); return x >= b[0] && x < b[2] && z >= b[1] && z < b[3]; };
     for (const [la, lo, k] of (t.xings || []).concat(CROSSINGS.filter(inTile))) {
       const [x, z] = proj.xz(la, lo), hit = nearLine(x, z, 4); if (!hit) continue;
+      // (where the hand list paints a zebra itself, conzelman.js CROSSWALKS, OpenStreetMap's crossing there is the same one: drawn
+      // twice, two rows of bars a few metres apart, Street View 1600 ahead shows one at 1623; ten such, 1316, 1623, 11575, 12925, ...)
+      { const s = CZ.at(x, z); if (s && CZ.walks.some(w => Math.abs(w - s.s) < 6)) continue; }
       const [q, L, d] = hit, w = 2 * (q[3] ?? L.w / 2);
       put(k ? 'xlines' : 'xwalk', q[0], q[1] + 0.03, q[2], Math.atan2(d[0], d[1]), k ? w : w / 7.2);
     }

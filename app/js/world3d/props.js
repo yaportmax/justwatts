@@ -326,13 +326,15 @@ export function furnitureGeometries() {
     stop: merge([[C(0.035, 0.035, 2.3, 6), grey], [oct(0.412, 0.02, 0.01), white], [oct(0.392, 0.02, 0.03), red], [oct(0.412, 0.008, -0.004), grey], ...stopLetters().map(g => [g, white])]),
     // (A37, handlist.js SIGNS) a warning sign (MUTCD W-series, 30 in): a yellow diamond with a black border and a black
     // symbol, its centre 2.25 m up, on a grey post from 0.6 m under the ground (the hand ground may stand over the grid's);
-    // warnp: with a yellow plate (24 by 18 in) under it; board: a park's board, dark brown, on two timber posts
+    // warnp: with a yellow plate (24 by 18 in) under it; warnpt: the same mounted for a walking route, the plate's foot 2.1 m (7 ft)
+    // up, the diamond's centre 3.15 m (MUTCD 2A.18; Conzelman 1623, Street View 1600 shows it well over the rail); board: a park's board, dark brown, on two timber posts
     // (A37) a white regulatory sign (18 by 24 in) on a grey post, its centre 2.1 m up; a street-name blade (36 by 8 in, both
     // faces) on a brown timber post, Street View cz_50235_a (Bodsworth Road at Simmonds)
     reg: merge([[C(0.035, 0.035, 2.4 + 0.6, 6).translate(0, -0.6, 0), grey], [B(0.46, 0.61, 0.02, 0, 2.1, 0.02), white], [B(0.46, 0.61, 0.008, 0, 2.1, 0.005), grey]]),
     blade: merge([[B(0.1, 2.7, 0.1, 0, 0.75, 0), col(0x5e3f2a)], [B(0.92, 0.2, 0.025, 0, 2.2, 0), col(0x1f6b45)]]),
     warn: merge(warnSign(false)),
     warnp: merge(warnSign(true)),
+    warnpt: merge(warnSign(true, 3.15)),
     board: merge([[B(0.1, 2.3, 0.1, -0.55, 0.55, 0), wood], [B(0.1, 2.3, 0.1, 0.55, 0.55, 0), wood], [B(1.35, 0.85, 0.06, 0, 1.25, 0.06), col(0x3a2a1e)], [B(1.2, 0.7, 0.01, 0, 1.25, 0.095), col(0x4a3a2c)], [B(1.0, 0.06, 0.012, 0, 1.45, 0.1), col(0xd8cfb8)]]),
     limit: merge([[C(0.035, 0.035, 2.4, 6), grey], [B(0.6, 0.76, 0.03, 0, 2.15, 0.03), white], [B(0.5, 0.06, 0.035, 0, 2.38, 0.04), dark], [B(0.3, 0.26, 0.035, 0, 2.05, 0.04), dark]]),
     fence: merge([[B(0.12, 1.25, 0.12, 0, 0.62, 0), wood], [B(0.12, 1.25, 0.12, 3, 0.62, 0), wood], ...[0.45, 0.8, 1.12].map(y => [B(3, 0.1, 0.04, 1.5, y, 0.06), wood])]),
@@ -340,8 +342,8 @@ export function furnitureGeometries() {
     signal: merge([[C(0.1, 0.08, 4.4), grey], ...signalHead(3.55)]),
     signalHead: merge(signalHead(0)),
   };
-  function warnSign(plate) {
-    const yel = col(0xe6b41e), blk = col(0x1c1c1c), y = 2.25, dia = (r, d, z, c) => [new THREE.CylinderGeometry(r, r, d, 4).rotateX(Math.PI / 2).translate(0, y, z), c];
+  function warnSign(plate, y = 2.25) {
+    const yel = col(0xe6b41e), blk = col(0x1c1c1c), dia = (r, d, z, c) => [new THREE.CylinderGeometry(r, r, d, 4).rotateX(Math.PI / 2).translate(0, y, z), c];
     const out = [[C(0.035, 0.035, y + 0.6, 6).translate(0, -0.6, 0), grey], dia(0.54, 0.02, 0.01, blk), dia(0.5, 0.02, 0.025, yel), dia(0.54, 0.008, -0.004, grey),
       [B(0.07, 0.42, 0.004, -0.09, y, 0.037), blk], [B(0.07, 0.42, 0.004, 0.09, y, 0.037), blk], [B(0.17, 0.08, 0.004, -0.09, y + 0.2, 0.037), blk], [B(0.17, 0.08, 0.004, 0.09, y - 0.2, 0.037), blk]];
     if (plate) out.push([B(0.61, 0.46, 0.02, 0, y - 0.82, 0.02), yel], [B(0.61, 0.46, 0.008, 0, y - 0.82, 0.005), grey], [B(0.42, 0.05, 0.004, 0, y - 0.82, 0.032), blk]);

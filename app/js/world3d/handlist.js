@@ -327,7 +327,7 @@ export const SIGNS = [
   [37.836231, -122.502993, 47, 'warn', 1, 'ped', 'p_ahead'],        // Bunker Road at the Rodeo Lagoon crossing: pedestrian, AHEAD under it (cz_33225_a, HL46wXHW9bOsyuHGuhP2PQ; a plate over it too small to read)
   [37.836269, -122.502966, 47, 'board'],                             // and the park's board beyond it (cz_33225_a)
   [37.823122, -122.528772, 353, 'warn', 0, 'blank'],                 // Field Road north of the Point Bonita junction (cz_40260_a, Q5Q5Ma2w724gadRWYebD-w: too far to read)
-  [37.832138, -122.483488, 27, 'warn', 1, 'ped', 'p_arrow'],         // Conzelman Road at the trail's zebra (1623), going down: pedestrian, the arrow under it, behind the guardrail (cz_1600_a, k0HidJ58c8iNShsZRY2iTg: 13 degrees right, about 29 m on by its size and its foot)
+  [37.832138, -122.483488, 27, 'warn', 2, 'ped', 'p_arrow'],         // Conzelman Road at the trail's zebra (1623), going down: pedestrian, the arrow under it, behind the guardrail, mounted tall (2: warnpt) (cz_1600_a, k0HidJ58c8iNShsZRY2iTg: 13 degrees right, about 29 m on by its size and its foot)
   [37.835130, -122.477152, 106, 'warn', 1, 'ped', 'p_arrow'],        // New Breitung Road at Fort Baker's crossing: pedestrian, the down-left arrow under it (cz_320040_a, Fdi1g_fJOolhTkHRF_Bhew)
   [37.836956, -122.480802, 186, 'warn', 0, 'slow'],                  // McReynolds Road: a word sign, read as SLOW (cz_220110_a, xDQZMZrH8d5ScTp50wHznA)
   [37.839062, -122.484602, 304, 'warn', 0, 'blank'],                 // Bunker Road's bend above the bay, for the climb (its back seen from w_bunker0, nVjM6IkE4RR9WpRUKrobJQ)

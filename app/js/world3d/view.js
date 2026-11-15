@@ -1209,7 +1209,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const LL = c.lines.concat(c.handLines || []);
     const g = c.grid, hAt = hOf(c), raw = (x, z) => gridHeight(g, x, z, g.raw), R = 64, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, t.features, treeCode);
     const cls = (x, z) => { const [fi, fj] = gridIJ(g, x, z), k = R / g.segs, i = Math.round(fi * k), j = Math.round(fj * k); return i >= 0 && j >= 0 && i <= R && j <= R ? ras[j * (R + 1) + i] : 0; };
-    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], warn: [], warnp: [], board: [], reg: [], blade: [], fence: [], picket: [], pole: [], parm: [], rdelin: [], ubox: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
+    const items = { tpost: [], gpost: [], kpost: [], cpost: [], spost: [], lamp: [], stop: [], limit: [], warn: [], warnp: [], warnpt: [], board: [], reg: [], blade: [], fence: [], picket: [], pole: [], parm: [], rdelin: [], ubox: [], delin: [], wdelin: [], stopbar: [], stopword: [], xwalk: [], xlines: [] }, wires = [];
     const hlTile = inHeadlands(proj.lat((tileBox(c)[1] + tileBox(c)[3]) / 2), proj.lon((tileBox(c)[0] + tileBox(c)[2]) / 2));
     const put = (k, x, y, z, yaw, sx = 1) => items[k].push([x, y, z, yaw, 1, sx]);
     // a spatial hash of the lines' points (10 m), to find the road a crossing or a stop sign is on
@@ -1257,9 +1257,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // lidar's is not what is drawn)
     const handY = (x, z) => KO.groundY(x, z) ?? raw(x, z) ?? hAt(x, z);
     const faces = [];
-    for (const [la, lo, hd, kind, plate, sym, psym] of SIGNS.filter(inTile)) { const r = hd * Math.PI / 180, [x, z] = proj.xz(la, lo), y = handY(x, z); if (y == null) continue; const yaw = Math.atan2(-Math.sin(r), Math.cos(r)); put(kind === 'warn' && plate ? 'warnp' : kind, x, y - 0.05, z, yaw);
+    for (const [la, lo, hd, kind, plate, sym, psym] of SIGNS.filter(inTile)) { const r = hd * Math.PI / 180, [x, z] = proj.xz(la, lo), y = handY(x, z); if (y == null) continue; const yaw = Math.atan2(-Math.sin(r), Math.cos(r)); put(kind === 'warn' && plate ? (plate === 2 ? 'warnpt' : 'warnp') : kind, x, y - 0.05, z, yaw);
       // (A37 round 2: its face from the sign atlas, tex.js: the diamond's symbol, the plate's, a regulatory sign's words, a blade's name both sides)
-      const F = []; if (kind === 'warn') { F.push([SIGN_CELL[sym] ?? SIGN_CELL.blank, 0, 2.25, 1.1, 1.1, 0.04]); if (plate && psym) F.push([SIGN_CELL[psym], 0, 2.25 - 0.82, 0.651, 0.669, 0.036]); }
+      const F = []; if (kind === 'warn') { const H = plate === 2 ? 3.15 : 2.25; F.push([SIGN_CELL[sym] ?? SIGN_CELL.blank, 0, H, 1.1, 1.1, 0.04]); if (plate && psym) F.push([SIGN_CELL[psym], 0, H - 0.82, 0.651, 0.669, 0.036]); }
       else if (kind === 'reg') F.push([SIGN_CELL[sym], 0, 2.1, 0.669, 0.651, 0.034]);
       else if (kind === 'blade') F.push([SIGN_CELL[sym], 0, 2.2, 0.92, 0.2, 0.0135, 0.25], [SIGN_CELL[sym], 0, 2.2, 0.92, 0.2, -0.0135, 0.25]);
       if (F.length) faces.push([x, y - 0.05, z, yaw, F]); }
@@ -1338,7 +1338,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const POST = { wbeam: ['tpost', 0.8], wbeamg: ['gpost', 0.8], cable: ['kpost', 1], cablev: ['kpost', 1], fence: ['tpost', 1.15], beam: ['cpost', 0.62], chain: ['spost', 2.1] };
     for (const R of c.rails || []) { const P = POST[R.kind]; if (P) for (const [x, y, z, yaw] of R.posts) { const bot = Math.min(y, hAt(x, z) ?? y) - 0.3; items[P[0]].push([x, bot, z, yaw, y + P[1] - bot]); } }
     // (the feet of what stands on the ground: the seams check)
-    c.feet = ['pole', 'ubox', 'rdelin', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'board', 'reg', 'blade', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
+    c.feet = ['pole', 'ubox', 'rdelin', 'stop', 'lamp', 'limit', 'warn', 'warnp', 'warnpt', 'board', 'reg', 'blade', 'tpost', 'gpost', 'kpost', 'cpost', 'spost'].flatMap(k => items[k].map(([x, y, z]) => [x, y, z, k]));
     yield;
     const grp = new THREE.Group(), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3();
     // (A54: sa_0800/cxj_541000: a continuous bay promenade replaces grass to the white line.

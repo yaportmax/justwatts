@@ -46,10 +46,13 @@ const cadOn = () => settings.cadOn !== false;  // cadence off: no readout, targe
 let garminOn = false;
 const api = (path, body) => F(path, { method: 'POST', headers: { 'X-HW': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const apiJson = async (path, body) => { const r = await api(path, body); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || r.status); return j; };
+let saving = Promise.resolve();
 function saveSettings(keys, stamp = true) {
   store.set('hw.settings', settings); if (stamp) store.set('hw.settingsAt', Date.now());  // the time decides which device's settings win
   const patch = {}; for (const k of keys || Object.keys(settings)) patch[k] = settings[k];
-  api('/api/settings', patch).catch(() => {});
+  // (one at a time, in order: two quick changes sent together could land the wrong way round on the threaded local server,
+  // a setting turned off, on and off again saved on; tests/js/page_controls.mjs failed so now and then)
+  saving = saving.then(() => api('/api/settings', patch)).catch(() => {});
 }
 async function loadSettings() {
   try {

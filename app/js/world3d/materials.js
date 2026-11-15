@@ -249,7 +249,13 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     float bay = smoothstep(7500.0, 7200.0, p.y) * (1.0 - smoothstep(0.05, 0.3, sand));
     vec3 marsh = mix(srgb(vec3(0.38, 0.39, 0.24)), srgb(vec3(0.43, 0.32, 0.25)), smoothstep(0.5, 0.75, patch80) * 0.35) * (0.88 + 0.24 * fine);
     marsh = mix(srgb(vec3(0.36, 0.33, 0.27)), marsh, smoothstep(0.95, 1.25, h));
-    c = mix(c, mix(srgb(vec3(0.80, 0.74, 0.58)), marsh, bay), smoothstep(2.95, 1.5, h) * (1.0 - smoothstep(0.3, 0.5, slope)) * (1.0 - bay * town));
+    // (the mask's green edge broken by the ground's noise: the grid's triangles drew it as a saw's teeth; and the mud's
+    // own line by the water (1 to 1.5 m) where it reaches the shore: not the grid's teeth)
+    float lv = smoothstep(0.25, 0.85, green + (patch80 - 0.5) * 0.3 + (fine - 0.5) * 0.3) * smoothstep(1.05, 1.45, h);
+    c = mix(c, mix(srgb(vec3(0.80, 0.74, 0.58)), marsh, bay), smoothstep(2.95, 1.5, h) * (1.0 - smoothstep(0.3, 0.5, slope)) * (1.0 - bay * max(town, lv)));
+    // (the levee paths' mown grass (view.js leveeGrass) and the low shore's lawns: the verge's fresh green, Street View
+    // Alexander Avenue's #627739 to #778b49, over what the imagery read there: the levee's sides read as bare earth and dry gold)
+    c = mix(c, mix(srgb(vec3(0.38, 0.47, 0.22)), srgb(vec3(0.47, 0.55, 0.29)), smoothstep(0.3, 0.7, patch80 * 0.5 + fine * 0.5)), bay * lv * smoothstep(4.5, 3.5, h) * 0.9);
   }
   c = mix(c, srgb(vec3(0.20, 0.34, 0.38)), lake);
   c = mix(c, srgb(vec3(0.24, 0.30, 0.28)), smoothstep(0.5, -2.1, h));

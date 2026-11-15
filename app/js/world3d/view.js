@@ -533,7 +533,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // (A40: the quads left out for the hand ground keep a floor 12 m down, terrain.js gridMesh; __w3.noFloor: without, to compare)
     const m = gridMesh(G, { lu, skirt: c.z === FAR_Z ? 40 : 12, skip: hs && fs ? (i, j) => hs(i, j) || fs(i, j) : hs || fs, floor: globalThis.__w3?.noFloor ? null : hs }); yield 't:mesh';
     const nor = gridNormals(G); yield 't:normals';
-    const mask = classMasks(lu, G.cut); yield 't:masks';
+    const mask = classMasks(lu, G.cut); if (fine) leveeGrass(G, t.roads, lu, mask); yield 't:masks';
     const cv = gridCurvature(G, c.z === FAR_Z ? 400 : 25, c.z === FAR_Z ? 40 : 6); yield 't:curv';
     const nv = m.src.length, N = new Float32Array(nv * 3), A = new Uint8Array(nv * 4), B = new Uint8Array(nv * 4), CV = new Float32Array(nv);
     for (let i = 0; i < nv; i++) {
@@ -590,6 +590,30 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const r = f.rings[0], n = r.length - 1; let la = 0, lo = 0; for (let i = 0; i < n; i++) { la += r[i][0]; lo += r[i][1]; } la /= n; lo /= n;
     return { k: 'urban', rings: [r.map(([a, b]) => { const dy = (a - la) * 111195, dx = (b - lo) * 87800, d = Math.hypot(dx, dy) || 1, k = (d + 6) / d; return [la + (a - la) * k, lo + (b - lo) * k]; })] };
   }));
+  // (Richardson Bay's shore paths north of Sausalito run on levees mown to grass on both sides out to the marsh: Street View
+  // tn_marsh_s0, the Mill Valley-Sausalito path by Bothin Marsh, bright grass beside the path, the pickleweed beyond; the
+  // marsh's olive came up to the path's edge. The mask's green (grass whatever the class) on low ground, under 4 m, within
+  // 11 m of a path there, not on mapped water or sand, nor in a town (Marinship's sidewalks are footways too))
+  const LEVEE = new Set(['cycleway', 'path', 'footway']);
+  function leveeGrass(G, roads, lu, mask) {
+    const s = G.segs, n = s + 1, x0 = G.xs[0], z0 = G.zs[0], dx = (G.xs[s] - x0) / s, dz = (G.zs[s] - z0) / s, R = 11;
+    if (Math.max(G.xs[0], G.xs[s]) < 8000 || Math.min(G.zs[0], G.zs[s]) > 7500) return;
+    for (const r of roads) {
+      if (!LEVEE.has(r.hw)) continue;
+      const P = r.pts.map(([la, lo]) => proj.xz(la, lo));
+      for (let k = 1; k < P.length; k++) {
+        const [ax, az] = P[k - 1], [bx, bz] = P[k], ex = bx - ax, ez = bz - az, L = ex * ex + ez * ez;
+        if (Math.max(ax, bx) < 8000 || Math.min(az, bz) > 7500) continue;
+        const ia = Math.floor((Math.min(ax, bx) - R - x0) / dx) - 1, ib = Math.ceil((Math.max(ax, bx) + R - x0) / dx) + 1;
+        const ja = Math.floor((Math.min(az, bz) - R - z0) / dz) - 1, jb = Math.ceil((Math.max(az, bz) + R - z0) / dz) + 1;
+        for (let j = Math.max(0, Math.min(ja, jb)); j <= Math.min(s, Math.max(ja, jb)); j++) for (let i = Math.max(0, Math.min(ia, ib)); i <= Math.min(s, Math.max(ia, ib)); i++) {
+          const v = j * n + i, px = G.xs[i] - ax, pz = G.zs[j] - az, u = L ? Math.max(0, Math.min(1, (px * ex + pz * ez) / L)) : 0;
+          if (Math.hypot(px - ex * u, pz - ez * u) > R || G.hs[v] > 4 || lu[v] === 4 || lu[v] >= 8) continue;
+          mask[8 * v + 1] = 255;
+        }
+      }
+    }
+  }
   // a clock for a build's slices: true once `ms` have gone since the slice began (yield then)
   const slicer = (ms = 6) => { let t = performance.now(), fresh = false; return () => { const n = performance.now(); if (fresh) { t = n; fresh = false; return false; } if (n - t > ms) { fresh = true; return true; } return false; }; };
   function* buildRoads(c) {

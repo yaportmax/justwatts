@@ -380,6 +380,45 @@ export function species(k, lt, h, lat, lon, r) {
 }
 
 // the footprint's oriented box (along its longest edge): centre, direction, length, width, area
+// (A56: a ring less its jogs: Douglas-Peucker round a closed ring from its two farthest-apart corners)
+function ringLess(r, tol) {
+  const n = r.length; if (n < 5) return r; let b = 0, m = -1;
+  for (let i = 0; i < n; i++) { const d = Math.hypot(r[i][0] - r[0][0], r[i][1] - r[0][1]); if (d > m) { m = d; b = i; } }
+  const keep = new Uint8Array(n), st = [[0, b], [b, n]], P = i => r[i % n]; keep[0] = keep[b] = 1;
+  while (st.length) {
+    const [i0, i1] = st.pop(), A = P(i0), B = P(i1), dx = B[0] - A[0], dz = B[1] - A[1], L = Math.hypot(dx, dz); let bi = -1, bd = 0;
+    for (let i = i0 + 1; i < i1; i++) { const p = P(i), d = L ? Math.abs((p[0] - A[0]) * dz - (p[1] - A[1]) * dx) / L : Math.hypot(p[0] - A[0], p[1] - A[1]); if (d > bd) { bd = d; bi = i; } }
+    if (bi > 0 && bd > tol) { keep[bi % n] = 1; st.push([i0, bi], [bi, i1]); }
+  }
+  const o = r.filter((_, i) => keep[i]); return o.length >= 3 ? o : r;
+}
+// the walls' line moved in d (r is anticlockwise: the inside on the left of each wall), mitred at the corners
+function ringIn(r, d) {
+  const n = r.length, inn = [];
+  for (let i = 0; i < n; i++) {
+    const a = r[(i - 1 + n) % n], p = r[i], q = r[(i + 1) % n];
+    const l1 = Math.hypot(p[0] - a[0], p[1] - a[1]) || 1, l2 = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+    const n1 = [-(p[1] - a[1]) / l1, (p[0] - a[0]) / l1], n2 = [-(q[1] - p[1]) / l2, (q[0] - p[0]) / l2];
+    let mx = n1[0] + n2[0], mz = n1[1] + n2[1]; const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml;
+    const k = Math.min(3, 1 / Math.max(0.33, mx * n1[0] + mz * n1[1]));
+    inn.push([p[0] + mx * d * k, p[1] + mz * d * k]);
+  }
+  return inn;
+}
+// (A56: a pitched roof the lidar measured over a footprint too ragged for one gable: hipped from the walls toward a ridge,
+// as far in as the crown stays the walls' shape the same way round, up the lidar's rise (45 degrees at most). Its line is
+// the walls' less jogs under 0.4 m: on them the old 2.5 m band folded over, so a quarter of Mill Valley's surveyed pitched
+// roofs (721 of 2,946) were drawn flat, and the rest were a flat top inside a 2.5 m band. Street View cxmvl_570400:
+// Shelter Bay's townhouses under steep shingle roofs; the game's white boxes with flat grey tops)
+function hipCrown(r, area, W, rh) {
+  const sr = ringLess(r, 0.4), V = R => R.map(p => new THREE.Vector2(p[0], p[1]));
+  if (!simpleOutline(sr) || THREE.ShapeUtils.isClockWise(V(sr))) return null;
+  for (let d = W * 0.47; d >= 0.6; d *= 0.8) {
+    const inn = ringIn(sr, d);
+    if (simpleOutline(inn) && footprintContains(r, inn) && !THREE.ShapeUtils.isClockWise(V(inn)) && Math.abs(THREE.ShapeUtils.area(V(inn))) < area) return { sr, inn, d, ry: Math.min(rh, d * 0.9, 5.5) };
+  }
+  return null;
+}
 function orientedBox(r) {
   let best = null;
   for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length], l = Math.hypot(q[0] - p[0], q[1] - p[1]); if (!best || l > best.l) best = { l, u: [(q[0] - p[0]) / l, (q[1] - p[1]) / l] }; }
@@ -457,11 +496,11 @@ export function buildingGeometry(list) {
     // (a footprint too ragged for one roof over its box (an L, a T, the Fort Baker barracks) but pitched by the lidar: a
     // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
     // roof half way up its rise)
-    const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40;
+    const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40, hc = hipped ? hipCrown(r, area, ob.W, b.rh) : null;
     // (A55: OSM height is the whole building, not the eaves plus another random roof.
     // Surveyed roofs retain their rise within the surveyed top, including on slopes.)
     const roofRoom = b.minEave == null ? Infinity : Math.max(0, ceiling - b.minEave);
-    const rise = house ? Math.min(roofRoom, lid ? Math.min(5.5, b.rh) : Math.min(3.8, ob.W * (0.26 + 0.24 * h(7)))) : barn ? Math.min(roofRoom, lid ? Math.min(5, b.rh) : Math.min(5, ob.W * 0.42)) : hipped ? Math.min(b.rh, Math.min(2.5, b.rh * 1.3, Math.sqrt(area) * 0.18) * 0.9) : 0;
+    const rise = house ? Math.min(roofRoom, lid ? Math.min(5.5, b.rh) : Math.min(3.8, ob.W * (0.26 + 0.24 * h(7)))) : barn ? Math.min(roofRoom, lid ? Math.min(5, b.rh) : Math.min(5, ob.W * 0.42)) : hipped ? (hc ? hc.ry : 0.05) : 0;
     const hw = Math.min(lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, ceiling - b.base - rise), top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     // (A53: Miller shops and irregular hillside homes need their own wall scale even when their measured roof is flat or hipped.)
     const shop = /^(retail|commercial|office)$/.test(b.sourceType), domestic = !shop && (house || /^(house|detached|residential|bungalow|semidetached_house)$/.test(b.sourceType) || b.sourceType === 'yes' && bh <= 7 && ob.area < 450);
@@ -529,22 +568,11 @@ export function buildingGeometry(list) {
       }
       flat(top, wc, 2);  // the ceiling under the eaves (closes the box)
     } else if (hipped) {
-      // the walls' line moved in d (r is anticlockwise: the inside on the left of each wall), mitred at the corners
-      const d = Math.min(2.5, b.rh * 1.3, Math.sqrt(area) * 0.18), rr = Math.min(b.rh, d * 0.9), n = r.length, inn = [];
-      for (let i = 0; i < n; i++) {
-        const a = r[(i - 1 + n) % n], p = r[i], q = r[(i + 1) % n];
-        const l1 = Math.hypot(p[0] - a[0], p[1] - a[1]) || 1, l2 = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
-        const n1 = [-(p[1] - a[1]) / l1, (p[0] - a[0]) / l1], n2 = [-(q[1] - p[1]) / l2, (q[0] - p[0]) / l2];
-        let mx = n1[0] + n2[0], mz = n1[1] + n2[1]; const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml;
-        const k = Math.min(3, 1 / Math.max(0.33, mx * n1[0] + mz * n1[1]));
-        inn.push([p[0] + mx * d * k, p[1] + mz * d * k]);
-      }
-      // (the crown must still be the walls' shape the same way round: else the offset folded over, and a flat roof it is)
-      const ok = simpleOutline(inn) && footprintContains(r, inn) && !THREE.ShapeUtils.isClockWise(inn.map(p => new THREE.Vector2(p[0], p[1]))) && Math.abs(THREE.ShapeUtils.area(inn.map(p => new THREE.Vector2(p[0], p[1])))) < area;
-      const ins = ok ? inn : r, ry = ok ? rr : 0.05, sl = Math.hypot(d, ry);
-      if (ok) for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n, L = Math.hypot(r[j][0] - r[i][0], r[j][1] - r[i][1]);
-        const A = [r[i][0], top, r[i][1]], B = [r[j][0], top, r[j][1]], C = [ins[j][0], top + ry, ins[j][1]], D = [ins[i][0], top + ry, ins[i][1]];
+      // (A56: up from the walls' line less its jogs to the crown, hipCrown; none: a flat roof)
+      const ins = hc ? hc.inn : r, ry = hc ? hc.ry : 0.05, sr = hc ? hc.sr : r, n = sr.length, sl = hc ? Math.hypot(hc.d, ry) : 0;
+      if (hc) for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, L = Math.hypot(sr[j][0] - sr[i][0], sr[j][1] - sr[i][1]);
+        const A = [sr[i][0], top, sr[i][1]], B = [sr[j][0], top, sr[j][1]], C = [ins[j][0], top + ry, ins[j][1]], D = [ins[i][0], top + ry, ins[i][1]];
         tri(A, C, B, rc, [R(0, 0), R(L, sl), R(L, 0)]); tri(A, D, C, rc, [R(0, 0), R(0, sl), R(L, sl)]);
       }
       flat(top + ry, rc, 1, ins);

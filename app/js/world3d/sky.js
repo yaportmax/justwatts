@@ -207,8 +207,12 @@ export function createSky(scene, { far, quality = 0 }) {
         // the shallows: paler water over sand, then foam: lines of swash running in to the shore, a band at its edge
         float hf = seaFloor(p) - ${SEA.toFixed(2)}, nz = texture2D(tNoise, p / 23.0 + time * 0.01).r, nz2 = texture2D(tNoise, p / 7.0 - time * 0.02).g;
         c = mix(c, mix(c, vec3(0.16, 0.27, 0.25) * (0.4 + 0.6 * clamp(sunD.y * 3.0, 0.0, 1.0)), 0.5), smoothstep(-9.0, -1.0, hf) * (1.0 - fr) * (1.0 - smoothstep(500.0, 1100.0, dist)));
+        // (Richardson Bay, Sausalito north to Mill Valley and across to Tiburon, north of about 37.845 and east of the ocean
+        // side: sheltered water, no surf. Its mudflats lie within a metre of the sea's level, where the swash and the shore's
+        // foam band turned the whole bay white; Street View tn_marsh_s0 (the path by Bothin Marsh): calm grey-blue water)
+        float calm = smoothstep(9700.0, 9200.0, p.y) * smoothstep(7000.0, 8000.0, p.x);
         float swash = smoothstep(0.62, 0.95, sin(hf * 2.6 + time * 1.1 + nz * 4.0) * 0.5 + 0.5) * smoothstep(-4.0, -0.8, hf);
-        float foam = max(swash * 0.55, smoothstep(-1.1, -0.15, hf)) * (0.55 + 0.6 * nz2) * smoothstep(1.2, 0.2, hf);
+        float foam = max(swash * 0.55, smoothstep(-1.1, -0.15, hf)) * (0.55 + 0.6 * nz2) * smoothstep(1.2, 0.2, hf) * (1.0 - calm);
         c = mix(c, (hor * 1.15 + sunC * 0.06) * (0.9 + 0.1 * nz), clamp(foam, 0.0, 0.9) * (1.0 - smoothstep(500.0, 1100.0, dist)));
         #endif
         gl_FragColor = vec4(c, 1.0);

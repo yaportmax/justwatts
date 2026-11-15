@@ -242,7 +242,15 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // <<< A38 Tam cover (tam-veg) end
   // the shore and the sea floor (heights in the lidar's datum: mean sea level 0.9 m, sky.js SEA)
   // (A37: up to 2.95 m only: Rodeo Lagoon stands at 3.02 m, its banks are grass and reeds, not a beach: w_bunker2)
-  if (lake < 0.5) c = mix(c, srgb(vec3(0.80, 0.74, 0.58)), smoothstep(2.95, 1.5, h) * (1.0 - smoothstep(0.3, 0.5, slope)));
+  // (north of Sausalito (from about 37.864, Gate 5 Road) Richardson Bay's low shore is tidal marsh, not beach: pickleweed's
+  // olive, a little of its autumn red, grey-brown mud nearer the water, unless a beach is mapped; a town's low ground there keeps its
+  // own colour. Owner shot 19, the Mill Valley-Sausalito path by Bothin Marsh, its ground at 1.4 to 2.1 m: one beige plain)
+  if (lake < 0.5) {
+    float bay = smoothstep(7500.0, 7200.0, p.y) * (1.0 - smoothstep(0.05, 0.3, sand));
+    vec3 marsh = mix(srgb(vec3(0.38, 0.39, 0.24)), srgb(vec3(0.43, 0.32, 0.25)), smoothstep(0.5, 0.75, patch80) * 0.35) * (0.88 + 0.24 * fine);
+    marsh = mix(srgb(vec3(0.36, 0.33, 0.27)), marsh, smoothstep(0.95, 1.25, h));
+    c = mix(c, mix(srgb(vec3(0.80, 0.74, 0.58)), marsh, bay), smoothstep(2.95, 1.5, h) * (1.0 - smoothstep(0.3, 0.5, slope)) * (1.0 - bay * town));
+  }
   c = mix(c, srgb(vec3(0.20, 0.34, 0.38)), lake);
   c = mix(c, srgb(vec3(0.24, 0.30, 0.28)), smoothstep(0.5, -2.1, h));
   return c;

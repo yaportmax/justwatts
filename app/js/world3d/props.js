@@ -665,6 +665,13 @@ export function signFaceGeometry(list) {
 export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap }) {
   const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
   const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
+  // (A61: cxs_540900_0 and cxs_540900_180: Bridgeway's black lantern lamps on the house side's kerb: a base, the post, a pale lantern under its cap; [from, to, half width, colour])
+  const iron = new THREE.Color(0x2a2c2e), glass = new THREE.Color(0xe9e4cf);
+  const LANTERN = [[-0.2, 0.6, 0.15, iron], [0.6, 3.6, 0.06, iron], [3.6, 3.7, 0.11, iron], [3.7, 4.15, 0.17, glass], [4.15, 4.25, 0.22, iron], [4.25, 4.4, 0.04, iron]];
+  // (an upright square block, its sides and top facing out)
+  const block = (x, z, y0, y1, h, color) => { const p = [[x - h, z - h], [x + h, z - h], [x + h, z + h], [x - h, z + h]];
+    for (let j = 0; j < 4; j++) { const [ax, az] = p[j], [bx, bz] = p[(j + 1) % 4]; quad([ax, y0, az], [ax, y1, az], [bx, y1, bz], [bx, y0, bz], color); }
+    quad([p[0][0], y1, p[0][1]], [p[3][0], y1, p[3][1]], [p[2][0], y1, p[2][1]], [p[1][0], y1, p[1][1]], color); };
   const tri = (a, b, c, color) => { pos.push(...a, ...b, ...c); for (let i = 0; i < 3; i++) col.push(color.r, color.g, color.b); };
   const quad = (a, b, c, d, color) => { tri(a, b, c, color); tri(a, c, d, color); };
   const wall = (a,b,c,d,color) => { const key=[a,b,c,d].map(p=>p.map(v=>v.toFixed(3)).join(',')).sort().join('|');if(walls.has(key))walls.delete(key);else walls.set(key,[a,b,c,d,color]); };
@@ -681,7 +688,7 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
   let work = 0;
   for (const L of lines) {
     if (L.hand || L.br) continue;
-    const P = L.P;
+    const P = L.P, lampRun = [15, 15];
     for (let i = 1; i < P.length; i++) {
       const a = P[i - 1], b = P[i], dx = b[0] - a[0], dz = b[2] - a[2], len = Math.hypot(dx, dz);
       if (len < 0.1) continue;
@@ -713,6 +720,7 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
             return true;
           };
           if (kb) {
+            lampRun[right ? 0 : 1] += len / count;
             if (!fits(START, START + kb.lane, 0.1)) { evidence.rejected++; continue; }
             // (A60: cxs_540900_180: the sidewalk runs to the house fronts: a house within reach takes the walk up to its wall; open ground keeps the usual width)
             // (the walk paves over a mapped footway beside the lane, cxs_540900_180's sidewalk being one surface from the kerb to the doors)
@@ -734,6 +742,9 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
             quad(...top, concrete);
             for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red ? red : curb); }
             evidence.sections++;
+            // (a lamp about every 30 m, 0.45 m in from the kerb, where the walk is wide enough to pass it)
+            if (lampRun[right ? 0 : 1] >= 30 && w >= 1.2) { lampRun[right ? 0 : 1] = 0; const q = at((f0 + f1) / 2, W0 + 0.45), ty = Math.max(q[1] + 0.15, ground(q[0], q[2]) + 0.12);
+              for (const [y0, y1, h, c] of LANTERN) block(q[0], q[2], ty + y0, ty + y1, h, c); evidence.lamps = (evidence.lamps || 0) + 1; }
             continue;
           }
           if (!fits(START, START + width, 0.42)) { evidence.rejected++; continue; }

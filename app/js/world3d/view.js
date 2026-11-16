@@ -725,6 +725,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (due()) yield;
       if (r.fl & 2) continue;                          // tunnels: under the hill
       const st = roadStyle(r.hw, r.ln, r.fl, r.wd), tr = !(r.fl & 1) && isTrail(r);
+      // (A59: on Sausalito's waterfront a footway is the sidewalk, concrete in Street View cxs_540900_180, not a dirt trail)
+      if (r.hw === 'footway' && r.pts.some(([la, lo]) => la >= TOWN_WATERFRONT.south && la <= TOWN_WATERFRONT.north && lo > -122.482 && lo < -122.474)) st.surf = 1;
       // its rail (rail.js): the centre's height wherever the ribbon samples it (a deck over a tunnel is in it too)
       let rail = null; if (r.h) { const T = track(dense(r.pts).map(([la, lo]) => proj.xz(la, lo)), r.h); let hint = -1; rail = (x, z) => { const q = T.at(x, z, hint); hint = q?.k ?? -1; return q && q.h; }; }
       // (a road with a rail: its line the rail's own points, so the drawn top is the rail's line between them, the rider's)
@@ -1400,6 +1402,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         ground: (x, z) => drawnY(x, z), gap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z)), roadGap(x, z) ?? Infinity),
         // (A54: sa_0800/cxj_541000: the eastern bay promenade has a seawall down to the seabed.)
         shore: (x, z, east) => east > 0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.width : 0,
+        // (A59: cxs_540900_180 and cxs_540900_0: the west side is a parking lane, a red kerb and a sidewalk to the houses' doors, not grass and a dirt path)
+        kerb: (x, z, east) => east < -0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.west : null,
         blocked: (x, z) => inHandAll(x, z) || buildings.some(b => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && inRings(b.rings, x, z)),
       });
       if (geom) { const mesh = new THREE.Mesh(geom, mats.furn); mesh.name = 'town-sidewalks'; mesh.receiveShadow = true; grp.add(mesh); }

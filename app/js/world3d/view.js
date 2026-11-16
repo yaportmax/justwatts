@@ -1588,7 +1588,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if (!list.length) return setPart(c, 'bldg', null);
     const grp = new THREE.Group(), piers = [];
     for (const b of list) if (b.pier) {
-      const near = b.ring.map(([x, z]) => roadTopNear(x, z)).filter(y => y != null);
+      // (A58: Sausalito Yacht Club stands 18 m off Bridgeway, past the 12 m a pier's street is looked for, so its walls went down
+      // to the bay floor; cxs_540900_0 shows it on a pile deck at the sidewalk's height. Out to 30 m when nothing is nearer.)
+      const at = [0, 0, Infinity], seek = lim => b.ring.map(([x, z]) => { const a = [0, 0, Infinity], y = roadTopNear(x, z, lim, a); if (a[2] < at[2]) at.splice(0, 3, ...a); return y; }).filter(y => y != null);
+      let near = seek(12); if (!near.length) near = seek(30);
       if (!near.length) continue;
       // (A54: the pier's walk connects at the street, not at the lidar seabed. Preserve the roof elevation.)
       const y = Math.max(SEA + 0.6, Math.min(...near) + 0.15), top = b.base + b.h;
@@ -1598,8 +1601,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const ring = clear(wide) ? wide : clear(b.ring) ? b.ring : null;
       if (ring) {
         b.base = y; b.h = Math.max(2.4, top - y);
-        if (b.pier.flat) { b.rh = 0; b.paint = b.pier.paint; b.style = 0; }
-        piers.push({ring,y});
+        if (b.pier.flat) { b.rh = 0; b.style = 0; }
+        if (b.pier.paint != null) b.paint = b.pier.paint;
+        let deck = ring;
+        if (b.pier.walk && isFinite(at[2])) {  // (the deck runs ashore toward the street, stopping short of the road's keep-out)
+          const dx = at[0] - center[0], dz = at[1] - center[1], L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, shift = d => ring.map(p => [p[0] + ux * d, p[1] + uz * d]);
+          let d = 0; while (d < 30 && clear(shift(d + 0.5))) d += 0.5;
+          if (d > 0) deck = hull2(ring.concat(shift(d)));
+        }
+        piers.push({ring: deck, y});
       }
     }
     if (piers.length) { const geometry = townPierGeometry(piers, hAt), mesh = new THREE.Mesh(geometry, mats.furn);mesh.name='town-piers';mesh.receiveShadow=true;grp.add(mesh); }
@@ -1790,12 +1800,19 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   // how far a point is outside the nearest drawn road's edge (negative: on it), null with no road within 10 m
   // the height of the nearest drawn road's surface to a point (within 12 m), null without one
-  function roadTopNear(x, z) {
+  // convex hull of [x, z] points, closed (a pier's deck with its walk ashore)
+  function hull2(P) {
+    const Q = P.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], hi = [];
+    for (const p of Q) { while (lo.length >= 2 && cr(lo.at(-2), lo.at(-1), p) <= 0) lo.pop(); lo.push(p); }
+    for (const p of Q.reverse()) { while (hi.length >= 2 && cr(hi.at(-2), hi.at(-1), p) <= 0) hi.pop(); hi.push(p); }
+    const H = lo.slice(0, -1).concat(hi.slice(0, -1)); H.push(H[0]); return H;
+  }
+  function roadTopNear(x, z, lim = 12, at = null) {  // (at: [x, z, gap] of the nearest road's middle line, when asked)
     const [tx, ty] = tileOf(x, z), R = near.get(key(NEAR_Z, tx, ty))?.surf; if (!R) return null;
-    const S = R.S, cx = Math.floor(x / 10), cz = Math.floor(z / 10); let bd = 12, best = null;
-    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const k of R.cells.get(`${cx + a},${cz + b}`) || []) {
+    const S = R.S, cx = Math.floor(x / 10), cz = Math.floor(z / 10), rc = lim > 12 ? Math.ceil(lim / 10) : 1; let bd = lim, best = null;
+    for (let a = -rc; a <= rc; a++) for (let b = -rc; b <= rc; b++) for (const k of R.cells.get(`${cx + a},${cz + b}`) || []) {
       const ex = S[k + 3] - S[k], ez = S[k + 5] - S[k + 2], L2 = ex * ex + ez * ez, t = L2 ? Math.max(0, Math.min(1, ((x - S[k]) * ex + (z - S[k + 2]) * ez) / L2)) : 0;
-      const d = Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) - S[k + 6]; if (d < bd) { bd = d; best = S[k + 1] + (S[k + 4] - S[k + 1]) * t; } }
+      const d = Math.hypot(x - S[k] - ex * t, z - S[k + 2] - ez * t) - S[k + 6]; if (d < bd) { bd = d; best = S[k + 1] + (S[k + 4] - S[k + 1]) * t; if (at) { at[0] = S[k] + ex * t; at[1] = S[k + 2] + ez * t; at[2] = d; } } }
     return best;
   }
   function roadGap(x, z) {

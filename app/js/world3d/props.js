@@ -430,7 +430,9 @@ function orientedBox(r) {
 // Marin colours: whites and creams, butter yellow, sage, sky blue, blush, brown shingle; roofs: terracotta, slate,
 // weathered shake, grey composition
 const WALLS = [0xf4efe4, 0xf0e2c4, 0xe6dfd1, 0xf3e0a8, 0xcbd9c4, 0xcfdfec, 0xefd3c0, 0xd9cbb4, 0xfaf7f0, 0xe6cb98, 0xb9ccb6, 0xf0c6a4, 0x9c7a5c, 0x8a6a4e];
-const ROOFS = [0x55534f, 0x6b665e, 0xa4583c, 0x46484b, 0x786f62, 0x93503a, 0x5e4a3a];
+// (A57: one in eight terracotta: with Marin's unsurveyed houses roofed, two in seven read as a red town from the hills;
+// Street View round Tam Valley and Mill Valley, grey and brown shingle on most, cxmvl_610400, tam_shore3000)
+const ROOFS = [0x55534f, 0x6b665e, 0xa4583c, 0x46484b, 0x786f62, 0x5e4a3a, 0x4f4d4a, 0x6e6a63];
 // style (window atlas column + 4 * row): houses 0 sash, 1 shutters, 3 pairs, 5 siding, 7 arched; flats 0, 3, 4; shops
 // and offices 2, 6
 const HOUSE = [0, 1, 3, 5, 5, 7, 0, 3], FLATS = [0, 3, 4, 4, 1], BIG = [2, 6, 2, 4];
@@ -496,10 +498,17 @@ export function buildingGeometry(list) {
     // (a footprint too ragged for one roof over its box (an L, a T, the Fort Baker barracks) but pitched by the lidar: a
     // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
     // roof half way up its rise)
-    const hipped = lid && !house && b.rh >= 0.8 && r.length <= 40, hc = hipped ? hipCrown(r, area, ob.W, b.rh) : null;
     // (A55: OSM height is the whole building, not the eaves plus another random roof.
     // Surveyed roofs retain their rise within the surveyed top, including on slopes.)
     const roofRoom = b.minEave == null ? Infinity : Math.max(0, ceiling - b.minEave);
+    // (A57: a small Marin building with no survey and an outline too ragged for one gable: hipped as a surveyed one, its rise
+    // guessed from its width as a house's, inside its height. 22,541 of them round Mill Valley and Sausalito had a flat top and
+    // a parapet; Street View, cxmvl_570400, 610400, sa_2000: pitched roofs on nearly every house. Not San Francisco's, nor
+    // shops, sheds' kinds or anything over 10 m or 450 m2; none whose crown will not fit, flat as before)
+    const lidHip = lid && !house && b.rh >= 0.8 && r.length <= 40;
+    const guess = !lid && !house && !barn && !b.pier && !b.fort && b.marin && roofRoom >= 1 && bh <= 10 && area < 450 && r.length <= 40 && !/^(retail|commercial|office|industrial|warehouse|garages?|carport|roof)$/.test(b.sourceType ?? '');
+    const hc = lidHip ? hipCrown(r, area, ob.W, b.rh) : guess ? hipCrown(r, area, ob.W, Math.min(roofRoom, ob.W * (0.22 + 0.1 * h(7)))) : null;
+    const hipped = lidHip || !!(guess && hc);
     const rise = house ? Math.min(roofRoom, lid ? Math.min(5.5, b.rh) : Math.min(3.8, ob.W * (0.26 + 0.24 * h(7)))) : barn ? Math.min(roofRoom, lid ? Math.min(5, b.rh) : Math.min(5, ob.W * 0.42)) : hipped ? (hc ? hc.ry : 0.05) : 0;
     const hw = Math.min(lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, ceiling - b.base - rise), top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     // (A53: Miller shops and irregular hillside homes need their own wall scale even when their measured roof is flat or hipped.)

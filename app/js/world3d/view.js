@@ -1564,7 +1564,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         list.push({ ring, base, pier, maxTop: m + lb[1], h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         continue;
       }
-      list.push({ ring, base, pier, maxTop: base + (hb ? hb[2] : f.h || 6), h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295) });
+      list.push({ ring, base, pier, maxTop: base + (hb ? hb[2] : f.h || 6), h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295), marin: R0[0][0] > 37.815 });  // (A57: north of the Golden Gate, props.js)
       // (A53: cx-mvlook pairs 570400, 591200, 620400: cached lidar roof survey and OSM type, carried with each footprint.)
       if (f.bd) {
         const b = list.at(-1), d = f.bd; b.sourceType = d.kind;

@@ -662,7 +662,7 @@ export function signFaceGeometry(list) {
 // (A54: bay promenade from local OSM Bridgeway and the sa_0800/cxj_541000 pairs.
 // Pavement clears every drawn road/path, ride line and vehicle ribbon, on the existing ground, with closed sides.
 // No terrain edits, invented lanes, cars, or per-frame work.)
-export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null }) {
+export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap }) {
   const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
   const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
   const tri = (a, b, c, color) => { pos.push(...a, ...b, ...c); for (let i = 0; i < 3; i++) col.push(color.r, color.g, color.b); };
@@ -702,10 +702,10 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
           if (++work % 8 === 0) yield;
           const f0 = k / count, f1 = (k + 1) / count;
           // (every sample of the strip w0..w1: on ground, not over a drop or under a bank, clear of roads, paths and buildings)
-          const fits = (w0, w1, rise) => {
+          const fits = (w0, w1, rise, gp = gap) => {
             for (let u = 0; u <= 3; u++) for (let v = 0; v <= Math.ceil((w1 - w0) / 0.4); v++) {
               const p = at(f0 + (f1 - f0) * u / 3, w0 + (w1 - w0) * v / Math.ceil((w1 - w0) / 0.4));
-              const g = ground(p[0], p[2]), d = gap(p[0], p[2]); evidence.samples++;
+              const g = ground(p[0], p[2]), d = gp(p[0], p[2]); evidence.samples++;
               const curbEdge=v===0;
               if (g == null || (!bay && g < 0.9) || g > p[1] + (curbEdge?0.1:rise) || p[1] - g > (bay ? 6 : 1.5) || d < 0.015 || blocked(p[0], p[2])) return false;
               evidence.minGap = Math.min(evidence.minGap, d);
@@ -714,7 +714,10 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
           };
           if (kb) {
             if (!fits(START, START + kb.lane, 0.1)) { evidence.rejected++; continue; }
-            const w = [1, 0.8, 0.62, 0.46, 0.35, 0.23].map(k => kb.walk * k).find(w => fits(START + kb.lane, START + kb.lane + w, 0.42)), x0 = START, x1 = START + kb.lane;
+            // (A60: cxs_540900_180: the sidewalk runs to the house fronts: a house within reach takes the walk up to its wall; open ground keeps the usual width)
+            // (the walk paves over a mapped footway beside the lane, cxs_540900_180's sidewalk being one surface from the kerb to the doors)
+            const fw = w => fits(START + kb.lane, START + kb.lane + w, 0.42, walkGap), toHouse = kb.reach ? Array.from({length: Math.floor((kb.reach - kb.walk) / 0.3) + 1}, (_, i) => kb.reach - 0.3 * i).find(fw) : null;
+            const w = toHouse != null && toHouse < kb.reach ? toHouse : [1, 0.8, 0.62, 0.46, 0.35, 0.23].map(k => kb.walk * k).find(fw), x0 = START, x1 = START + kb.lane;
             const ln = [at(f0, x0), at(f1, x0), at(f1, x1), at(f0, x1)], low = p => [p[0], Math.min(p[1] - 0.25, ground(p[0], p[2]) - 0.15), p[2]];
             const lt = ln.map(p => [p[0], Math.max(p[1] + 0.02, ground(p[0], p[2]) + 0.05), p[2]]), lb = ln.map(low), lq = right ? [0, 3, 2, 1] : [0, 1, 2, 3];
             quad(...lq.map(i => lt[i]), tar);
@@ -727,7 +730,7 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
             const W0 = x1, W1 = x1 + w, A = at(f0, W0), B = at(f1, W0), C = at(f1, W1), D = at(f0, W1);
             const points = right ? [A, D, C, B] : [A, B, C, D];
             const bottom = points.map(p => [p[0], Math.min(p[1] - 0.25, ground(p[0], p[2]) - 0.15), p[2]]);
-            const top = points.map(p => [p[0], Math.max(p[1] + 0.15, ground(p[0], p[2]) + 0.05), p[2]]);
+            const top = points.map(p => [p[0], Math.max(p[1] + 0.15, ground(p[0], p[2]) + 0.12), p[2]]);
             quad(...top, concrete);
             for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red ? red : curb); }
             evidence.sections++;

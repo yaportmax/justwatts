@@ -1404,6 +1404,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         shore: (x, z, east) => east > 0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.width : 0,
         // (A59: cxs_540900_180 and cxs_540900_0: the west side is a parking lane, a red kerb and a sidewalk to the houses' doors, not grass and a dirt path)
         kerb: (x, z, east) => east < -0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.west : null,
+        // (A60: that sidewalk covers the footway OpenStreetMap maps along it, as the bay side's promenade does; still clear of every other road and ride line)
+        walkGap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z))),
         blocked: (x, z) => inHandAll(x, z) || buildings.some(b => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && inRings(b.rings, x, z)),
       });
       if (geom) { const mesh = new THREE.Mesh(geom, mats.furn); mesh.name = 'town-sidewalks'; mesh.receiveShadow = true; grp.add(mesh); }

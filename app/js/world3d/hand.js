@@ -552,6 +552,9 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     g.scene.updateMatrixWorld(true);
     g.scene.traverse(o => { if (!o.isMesh) return; parts[/lod1/.test(o.name) || /lod1/.test(o.parent?.name || '') ? 1 : 0].push({ geo: o.geometry.clone().applyMatrix4(o.matrixWorld), src: o.material }); });
     const near = parts[0].length ? near0 : 0;
+    // (A65: the rubble rows along Conzelman's kerb grey, as Street View 1a_0230's cobbles in the ditch (2025-03), not tan-brown clods on the grass)
+    if (sp === 'rock') for (const p of [...parts[0], ...parts[1]]) { const C = p.geo.attributes.color; if (!C) continue;
+      for (let i = 0; i < C.count; i++) { const l = 0.2126 * C.getX(i) + 0.7152 * C.getY(i) + 0.0722 * C.getZ(i); C.setXYZ(i, l * 0.97, l * 0.96, l * 0.93); } C.needsUpdate = true; }
     // (A39: the thinned near model out to R1, in two rings of cells (32 m ones to `split`, 128 m ones beyond: the same plant either way); the cards from R1 on)
     const W3 = globalThis.__w3 || {}, R1 = Math.min(far, near * (W3.vegX ?? 7)), band = Math.max(FADE, 0.07 * R1), split = Math.min(SPLIT, R1 * 0.5), mn = !!J.mesh_normals?.[sp];
     for (const p of parts[1]) p.mat = material(p.src, p.geo, near > 0 ? R1 - band : 0, far, { round: /brush|sage/.test(sp), fade: near > 0 ? -1 : 0, band });

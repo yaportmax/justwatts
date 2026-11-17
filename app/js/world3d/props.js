@@ -662,11 +662,17 @@ export function signFaceGeometry(list) {
 // (A54: bay promenade from local OSM Bridgeway and the sa_0800/cxj_541000 pairs.
 // Pavement clears every drawn road/path, ride line and vehicle ribbon, on the existing ground, with closed sides.
 // No terrain edits, invented lanes, cars, or per-frame work.)
-export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap }) {
+export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap, sea = -Infinity }) {
   const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
   const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
   // (A61: cxs_540900_0 and cxs_540900_180: Bridgeway's black lantern lamps on the house side's kerb: a base, the post, a pale lantern under its cap; [from, to, half width, colour])
-  const iron = new THREE.Color(0x2a2c2e), glass = new THREE.Color(0xe9e4cf);
+  const iron = new THREE.Color(0x2a2c2e), glass = new THREE.Color(0xe9e4cf), stone = new THREE.Color(0x7f7b74);
+  // (A63: a riprap boulder: four corners round (x, z) on the ground at their own feet, 0.2 m in, a narrower top 0.2 to 0.6 m up, grey in turn)
+  const boulder = (x, z, r, h) => { const B = [], T = [], a0 = h * 6.283, tone = stone.clone().multiplyScalar(0.82 + 0.36 * hash2(Math.round(x * 9), Math.round(z * 9)));
+    let gc = -Infinity; for (let q = 0; q < 4; q++) { const t = a0 + q * Math.PI / 2, rr = r * (0.85 + 0.3 * hash2(q * 17 + Math.round(x * 3), Math.round(z * 3))), bx = x + Math.cos(t) * rr, bz = z + Math.sin(t) * rr, g = ground(bx, bz); if (g == null) return false; gc = Math.max(gc, g); B.push([bx, g - 0.2, bz]); T.push([x + Math.cos(t + 0.3) * rr * 0.72, 0, z + Math.sin(t + 0.3) * rr * 0.72]); }
+    T.forEach((p, q) => { p[1] = gc + r * (0.5 + 0.35 * hash2(q * 29 + Math.round(x * 5), Math.round(z * 5))); });
+    for (let q = 0; q < 4; q++) { const e = (q + 1) % 4; quad(B[q], T[q], T[e], B[e], tone); }
+    quad(T[0], T[3], T[2], T[1], tone); return true; };
   const LANTERN = [[-0.2, 0.6, 0.15, iron], [0.6, 3.6, 0.06, iron], [3.6, 3.7, 0.11, iron], [3.7, 4.15, 0.17, glass], [4.15, 4.25, 0.22, iron], [4.25, 4.4, 0.04, iron]];
   // (an upright square block, its sides and top facing out)
   const block = (x, z, y0, y1, h, color) => { const p = [[x - h, z - h], [x + h, z - h], [x + h, z + h], [x - h, z + h]];
@@ -753,8 +759,17 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
           const bottom = points.map(p => [p[0], Math.min(p[1] - 0.25, ground(p[0], p[2]) - 0.15), p[2]]);
           const top = points.map(p => [p[0], Math.max(p[1] + 0.15, ground(p[0], p[2]) + 0.05), p[2]]);
           quad(...top, concrete);
-          for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red ? red : curb); }
+          // (the kerb on the road's side red where the street's is, the seawall's face to the bay concrete, cxs_540900_0)
+          for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red && j === (right ? 3 : 0) ? red : curb); }
           evidence.sections++;
+          // (A63: cxs_540900_0 and cxs_540900_180: riprap below the promenade's outer edge down into the water, boulders in rows
+          // about a metre apart out to where the ground goes under the bay, clear of every road, path and building)
+          for (let r = 0; r < 9; r++) {
+            const hz = hash2(Math.round((a[0] + b[0]) * 3) + k * 13 + r * 7, Math.round((a[2] + b[2]) * 3) + (right ? 5 : 0) + r * 11), w = START + width + 0.5 + r * 0.95 + 0.25 * hz;
+            const c0 = at(f0 + (f1 - f0) * (0.15 + 0.7 * hz), w), g0 = ground(c0[0], c0[2]); if (g0 == null || g0 < sea - 0.5) break;
+            if (gap(c0[0], c0[2]) < 0.6 || blocked(c0[0], c0[2])) continue;
+            if (boulder(c0[0], c0[2], 0.42 + 0.3 * hz, hz)) evidence.boulders = (evidence.boulders || 0) + 1;
+          }
         }
       }
     }

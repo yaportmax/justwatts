@@ -51,7 +51,11 @@ export function createBaked({ fetch = globalThis.fetch?.bind(globalThis), base =
           const { json, hs, n } = unpackTile(await unzip(r));
           const roads = decodeRoads(json.r || []); if (json.rh) roads.forEach((r, i) => { if (json.rh[i]) r.h = unpackH(json.rh[i]); });  // the roads' rails (rail.js)
           if (json.pm) roads.forEach((r, i) => { r.pm = json.pm[i] || 0; });  // (A54: optional paint-only source tags)
-          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), roads, places: json.p || [], power: json.w || [], rails: json.g || [], lots: json.pk || [], xings: json.x || [], stops: json.s || [] };
+          return { z, x, y, n, hs, features: decode(json.f || [], k + ':'), streetCrowns: json.mvCrowns,
+            gardenEdges: json.mvGarden,
+            mvEdges: json.mvEdges,
+            mvTurns: json.mvTurns,
+            roads, places: json.p || [], power: json.w || [], rails: json.g || [], lots: json.pk || [], xings: json.x || [], stops: json.s || [] };
         } catch { await new Promise(ok => setTimeout(ok, 500 * 2 ** i)); }
       }
       return null;

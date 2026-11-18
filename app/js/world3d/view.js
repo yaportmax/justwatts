@@ -8,6 +8,8 @@ import { GRID, gridAt } from './baked.js';
 import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSteps, pressUnderSteps, rasterClasses, rasterBy, gridMesh, upsample, gridNormals, gridCurvature, classMasks, overTunnels } from './terrain.js';
 import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } from './banks.js';
 import { bufferPaint } from './roadpaint.js';
+import { streetSections, sidewalkSupport } from './streetsection.js';
+import { roadCrossing, turnArrows } from './crosswalk.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impGrow } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths, setLaneHook } from './rail.js';
@@ -24,9 +26,9 @@ import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2, inRings } from './landuse.js';
 import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS } from '../../world/town-streets.js';
-import { loadMarshPath, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
+import { loadMarshPath, millValleyLots, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
-import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, townMastGeometry, townCanopyGeometry, townPierGeometry, townEdgeGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
+import { treeGeometries, treeDims, winterStreetTree, scrubGeometries, species, buildingGeometry, townMastGeometry, townCanopyGeometry, townPierGeometry, townEdgeGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { loadVeg, loadTrees, loadHandVeg, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
 import { createScrub, REACH, TOP } from './scrub.js';
 import { bakeImpostors, impostorMesh } from './impostor.js';
@@ -36,6 +38,7 @@ import { createPost } from './post.js';
 import { createGrass } from './grass.js';
 import { createLife } from './life.js';
 import { createAudio } from './audio.js';
+import { gardenBoundaries, athleticFence, athleticFenceMaterial } from './fieldfence.js';
 import { makeRider } from './rider.js';
 import { createLandmarks } from './marin.js';
 import { GGB, onDeck } from '../ggb.js';
@@ -178,6 +181,7 @@ uniform float lamps; varying vec2 vP; varying float vD; void main() {
 #include <logdepthbuf_fragment>
 float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * a * lamps * 0.5 * (1.0 - smoothstep(200.0, 500.0, vD)), 1.0); }` });
   const wireMat = new THREE.LineBasicMaterial({ color: 0x2c2d2e }), tunLampMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4.3, 3.2) });  // a tunnel's lamps
+  let fieldMaterial = null;
   const FURN = furnitureGeometries(), trees = treeGeometries(), DIMS = treeDims(trees), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog);
@@ -1052,6 +1056,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   // within 12 m of the Golden Gate Bridge's deck (no tree grows through it)
   const nearDeck = (x, z) => { const la = proj.lat(z), lo = proj.lon(x); if (la < 37.80 || la > 37.835 || lo < -122.486 || lo > -122.47) return false; for (const [a, b] of [[0, 0], [12, 0], [-12, 0], [0, 12], [0, -12]]) if (marks.deckAt(x + a, z + b) != null) return true; return false; };
   const occAt = (o, x, z) => { if (!o) return 0; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < OCC && b < OCC ? o.occ[b * OCC + a] : 0; };
+  let streetWinter = null;
   function* buildTrees(c) {
     const t = c.tile; if (!t || !c.grid) return setPart(c, 'trees', null);
     const share = QUALITY[q].trees, cap = CAP * share, g = c.grid, hAt = hOf(c), fine = true, box = tileBox(c);
@@ -1198,6 +1203,44 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       sets.push({ sp, list, fine, grp, low: sp === 'stone' || sp === 'fern', near: NEAR[sp] ?? 1, hi: null });
       yield;
     }
+    // (A64: measured street crowns missed by the older corridor pass. Their fixed
+    // instanced meshes stay the same from the foot of the climb to the near camera.)
+    if (t.streetCrowns && KOR) {
+      const byModel = new Map();
+      for (const [lat, lon, height, radius, winter] of t.streetCrowns) {
+        const [x, z] = proj.xz(lat / 1e6, lon / 1e6), ground = drawnY(x, z);
+        if (ground == null || inHandAll(x, z)) continue;
+        const gap = koGap(x, z);
+        if (gap < 1.5) continue;
+        const model = winter ? (streetWinter ??= winterStreetTree()) : trees.bay;
+        const bb = model.boundingBox, sy = height / 10 / bb.max.y;
+        const fullRadius = Math.max(Math.abs(bb.min.x), Math.abs(bb.max.x), Math.abs(bb.min.z), Math.abs(bb.max.z));
+        const sw = radius / 10 / fullRadius;
+        // Clearance uses the actual vertices below rider height, including the downward
+        // seating margin. Keep the widest safe crown at the measured trunk position.
+        const pos = model.attributes.position;
+        let lowRadius = 0;
+        for (let j = 0; j < pos.count; j++) if (pos.getY(j) * sy < 6)
+          lowRadius = Math.max(lowRadius, Math.hypot(pos.getX(j), pos.getZ(j)));
+        const sx = Math.min(sw, (gap - 0.6) / Math.max(0.01, lowRadius));
+        if (sx * fullRadius < 0.8) continue;
+        const foot = [ground, drawnY(x+0.25,z), drawnY(x-0.25,z), drawnY(x,z+0.25), drawnY(x,z-0.25)];
+        if (foot.some(y => y == null) || Math.max(...foot) - Math.min(...foot) > 1) continue;
+        const yaw = hash2(lat, lon) * Math.PI * 2;
+        const m = new THREE.Matrix4().makeRotationY(yaw).scale(new THREE.Vector3(sx, sy, sx));
+        m.setPosition(x, Math.min(...foot) - 0.18, z);
+        if (!byModel.has(model)) byModel.set(model, []);
+        byModel.get(model).push(m);
+      }
+      for (const [model, rows] of byModel) {
+        const mesh = new THREE.InstancedMesh(model, mats.prop, rows.length);
+        mesh.name = 'street-crowns'; mesh.userData.shared = true;
+        rows.forEach((m, i) => mesh.setMatrixAt(i, m));
+        mesh.computeBoundingSphere(); mesh.receiveShadow = true;
+        grp.add(mesh);
+      }
+    }
+
     let newImp = null;
     if (imp.length) {
       const cx = (box[0] + box[2]) / 2, cz = (box[1] + box[3]) / 2, sphere = new THREE.Sphere(new THREE.Vector3(cx, (y0 + y1) / 2, cz), Math.hypot(box[2] - box[0], box[3] - box[1], y1 - y0) / 2 + 30);
@@ -1278,7 +1321,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // road's width
     // (and the hand list's, Street View: those in the tile)
     const inTile = ([la, lo]) => { const [x, z] = proj.xz(la, lo), b = tileBox(c); return x >= b[0] && x < b[2] && z >= b[1] && z < b[3]; };
-    for (const [la, lo, k] of (t.xings || []).concat(CROSSINGS.filter(inTile))) {
+    const crossingPaint = [], yellowSpans = [];
+    for (const [la, lo, k, bearing, yellow] of (t.xings || []).concat(CROSSINGS.filter(inTile))) {
+      if (bearing != null) {
+        const [x, z] = proj.xz(la, lo);
+        const start = crossingPaint.length;
+        if (roadCrossing(c.lines, x, z, bearing, k, crossingPaint)) {
+          if (yellow) yellowSpans.push([start, crossingPaint.length]);
+          continue;
+        }
+      }
       const [x, z] = proj.xz(la, lo), hit = nearLine(x, z, 4); if (!hit) continue;
       // (where the hand list paints a zebra itself, conzelman.js CROSSWALKS, OpenStreetMap's crossing there is the same one: drawn
       // twice, two rows of bars a few metres apart, Street View 1600 ahead shows one at 1623; ten such, 1316, 1623, 11575, 12925, ...)
@@ -1395,8 +1447,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // (A54: sa_0800/cxj_541000: a continuous bay promenade replaces grass to the white line.
     // Generate with the furniture, outside all road/path ribbons; never touch terrain or road construction.)
     const tb = tileBox(c), la0 = proj.lat(tb[3]), la1 = proj.lat(tb[1]);
-    if (la1 > TOWN_WATERFRONT.south && la0 < TOWN_WATERFRONT.north && proj.lon(tb[2]) > -122.482 && proj.lon(tb[0]) < -122.474) {
-      const streets = TOWN_STREETS.filter(s => s.pts.some(([a, o]) => a >= la0 - 0.001 && a <= la1 + 0.001 && o >= proj.lon(tb[0]) - 0.001 && o <= proj.lon(tb[2]) + 0.001))
+    const sectionAt = streetSections(t.mvEdges, proj.xz);
+    if (sectionAt || (la1 > TOWN_WATERFRONT.south && la0 < TOWN_WATERFRONT.north && proj.lon(tb[2]) > -122.482 && proj.lon(tb[0]) < -122.474)) {
+      const streets = sectionAt ? [] : TOWN_STREETS.filter(s => s.pts.some(([a, o]) => a >= la0 - 0.001 && a <= la1 + 0.001 && o >= proj.lon(tb[0]) - 0.001 && o <= proj.lon(tb[2]) + 0.001))
         .map(s => ({ ...s, P: s.pts.map(p => proj.xz(...p)) }));
       const buildings = t.features.filter(f => f.k === 'building').map(f => {
         const rings = f.rings.map(r => r.map(p => proj.xz(...p))), P = rings.flat();
@@ -1405,9 +1458,33 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (A54: sa_0800/sa_1200: suppressed OSM sidewalk footways must receive paving, not block it as a solid object.
       // Retain all ride-line and vehicle-way exclusions, plus every actually drawn road and pedestrian path.)
       const pavementKeep = lineRibbons(t.roads.filter(r => r.hw !== 'footway'));
+      // (A64: source curb cuts are at driveway mouths and crossings. A ride or vehicle
+      // ribbon always wins. The sidewalk may cover its separately mapped pedestrian trace.)
+      const openings = sectionAt ? lineRibbons(t.roads.filter(r => r.hw === 'service')) : null;
+      if (openings) for (const [a, o] of t.xings) {
+        const [x, z] = proj.xz(a, o);
+        const hit = nearLine(x, z, 5);
+        if (!hit) continue;
+        const [q, , d] = hit, l = Math.hypot(...d) || 1, half = (q[3] || 3.5) + 3;
+        const nx = -d[1] / l * half, nz = d[0] / l * half;
+        openings.add(x - nx, z - nz, x + nx, z + nz, 1.4);
+      }
+      const blocks = new Map(), boxCell = n => Math.floor(n / 32);
+      if (sectionAt) for (const b of buildings) {
+        for (let i = boxCell(b.x0); i <= boxCell(b.x1); i++) for (let j = boxCell(b.z0); j <= boxCell(b.z1); j++) {
+          const key = i + ',' + j;
+          if (!blocks.has(key)) blocks.set(key, []);
+          blocks.get(key).push(b);
+        }
+      }
+      const support = sectionAt ? yield* sidewalkSupport(c.parts.roads?.children, (x, z) => {
+        const owner = near.get(key(NEAR_Z, ...tileOf(x, z)));
+        return owner?.grid ? gridHeight(owner.grid, x, z) : groundAt(x, z);
+      }, t.mvEdges, proj.xz) : null;
       const palms = PLAZA_PALMS.map(([lat, lon, h, radius]) => [...proj.xz(lat, lon), h, radius])
         .filter(([x, z]) => x >= tb[0] && x < tb[2] && z >= tb[1] && z < tb[3] && koGap(x, z) > 1.5);
       const geom = yield* townEdgeGeometry(c.lines, streets, { palms,
+        sectionAt, support: support || undefined, rampGap: openings && ((x, z) => openings.gap(x, z)),
         ground: (x, z) => drawnY(x, z), gap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z)), roadGap(x, z) ?? Infinity),
         // (A54: sa_0800/cxj_541000: the eastern bay promenade has a seawall down to the seabed.)
         shore: (x, z, east) => east > 0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.width : 0,
@@ -1417,9 +1494,30 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         walkGap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z))),
         // (A63: the bay promenade's riprap runs down to where the ground goes under the bay)
         sea: SEA,
-        blocked: (x, z) => inHandAll(x, z) || buildings.some(b => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && inRings(b.rings, x, z)),
+        blocked: (x, z) => inHandAll(x, z) || (sectionAt ? blocks.get(boxCell(x) + ',' + boxCell(z)) || [] : buildings).some(b => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && inRings(b.rings, x, z)),
       });
       if (geom) { const mesh = new THREE.Mesh(geom, mats.furn); mesh.name = 'town-sidewalks'; mesh.receiveShadow = true; grp.add(mesh); }
+    }
+    // (A64: Molino's front boundaries and Miller's school athletic field. Use
+    // terrain at both feet and discard segments in driveways or buildings.)
+    if (t.gardenEdges?.length) {
+      const footprints = t.features.filter(f => f.k === 'building').map(f => {
+        const rings = f.rings.map(r => r.map(p => proj.xz(...p))), points = rings.flat();
+        const xs = points.map(p => p[0]), zs = points.map(p => p[1]);
+        return { rings, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+      });
+      const blocked = (x,z) => inHandAll(x,z) || footprints.some(b => x>=b.x0 && x<=b.x1 && z>=b.z0 && z<=b.z1 && inRings(b.rings,x,z));
+      const garden = gardenBoundaries(t.gardenEdges, proj.xz, drawnY, koGap, blocked);
+      if (garden) {
+        const mesh = new THREE.Mesh(garden, mats.furn);
+        mesh.name = 'garden-boundaries'; mesh.receiveShadow = true; grp.add(mesh);
+      }
+      const fence = athleticFence(t.gardenEdges, proj.xz, drawnY, koGap, blocked);
+      if (fence) {
+        fieldMaterial ??= athleticFenceMaterial();
+        const mesh = new THREE.Mesh(fence, fieldMaterial);
+        mesh.name = 'athletic-field-fence'; mesh.receiveShadow = true; grp.add(mesh);
+      }
     }
     // (A54: a mapped fuel canopy is an open roof, not the nearby service building. Corner posts clear all ribbons.)
     const cb = tileBox(c), cp = TOWN_CANOPY.map(p => proj.xz(...p)), cc = cp.slice(0,-1).reduce((s,p)=>[s[0]+p[0]/4,s[1]+p[1]/4],[0,0]);
@@ -1427,6 +1525,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     if(cc[0]>=cb[0]&&cc[0]<cb[2]&&cc[1]>=cb[1]&&cc[1]<cb[3]&&cp.every(p=>KO.clear(...p,1.68)&&drawnY(...p)!=null)) {
       const geometry=townCanopyGeometry(cp,drawnY),mesh=new THREE.Mesh(geometry,mats.furn);mesh.name='town-fuel-canopy';mesh.receiveShadow=true;grp.add(mesh);
     }
+    millValleyLots(tb);
     // (A54: Tam's mapped directional approaches have mast arms in cxj_560630.
     // One head per approach, beyond a clear roadside pole. No added per-frame traffic simulation.)
     const signals=TOWN_SIGNALS.filter(inTile),masts=[],signalBuildings=signals.length?t.features.filter(f=>f.k==='building').map(f=>f.rings.map(r=>r.map(p=>proj.xz(...p)))):[];
@@ -1460,6 +1559,25 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if(clear)masts.push({x:sp[0],z:sp[1],foot:y-0.1,top:Math.max(y,q[1])+7.4,hx,hz,yaw:Math.atan2(-fx,-fz),id});
     }
     if(masts.length){const geometry=townMastGeometry(masts,FURN.signalHead),mesh=new THREE.Mesh(geometry,mats.furn);mesh.name='town-mast-signals';mesh.receiveShadow=true;grp.add(mesh);}
+    for (const [la,lo,bearing,lanes,opposite] of t.mvTurns || []) {
+      const [x,z]=proj.xz(la,lo);
+      turnArrows(c.lines,x,z,bearing,lanes,opposite,crossingPaint);
+    }
+    if (crossingPaint.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(crossingPaint, 3));
+      // (A64: at the school, the yellow signature crosses both OSM carriageways
+      // for over six metres in the aerial. The other marked crossings stay white.)
+      const colors = new Float32Array(crossingPaint.length).fill(0.82);
+      const schoolYellow = new THREE.Color(0xedb747);
+      for (const [start, end] of yellowSpans) {
+        for (let i = start; i < end; i += 3) schoolYellow.toArray(colors, i);
+      }
+      g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      g.computeVertexNormals();
+      const mesh = new THREE.Mesh(g, mats.paint);
+      mesh.name = 'road-crossings'; mesh.receiveShadow = true; grp.add(mesh);
+    }
     // every kind in one batched draw
     const kinds = Object.keys(items).filter(k => items[k].length), count = kinds.reduce((n, k) => n + items[k].length, 0);
     if (count) {
@@ -1593,6 +1711,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (A53: cx-mvlook pairs 570400, 591200, 620400: cached lidar roof survey and OSM type, carried with each footprint.)
       if (f.bd) {
         const b = list.at(-1), d = f.bd; b.sourceType = d.kind;
+        if (Number.isFinite(d.frontage)) {
+          const angle = d.frontage * Math.PI / 180;
+          b.shopFront = [Math.sin(angle), -Math.cos(angle)];
+          b.shopGap = koGap; b.shopGround = drawnY;
+          b.paint = [0xc6ac8e,0xd2c1aa,0xa08b74,0xaaa695][Math.floor(hash2(b.seed,14) * 4)];
+          b.style = 2;
+        }
         if (Number.isFinite(d.eave) && Number.isFinite(d.rise)) { b.h = Math.max(2.4, d.eave - b.base); b.hc = d.h; b.rh = d.rise; b.roof = d.roof; b.maxTop = d.eave + d.rise; }
       }
       // (A38: off the Headlands (no lidar table there) a building on a hillside as the Headlands' own: the eaves a storey (2.4 m)
@@ -2711,8 +2836,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   function dispose() {
     if (dead) return; dead = true; cancelAnimationFrame(raf);
     for (const m of [near, far]) for (const k of [...m.keys()]) dropChunk(m, k);
+    streetWinter?.dispose();
     me.dispose(); for (const e of others.values()) e.r.dispose();
     grass.dispose(); scrub.dispose(); post.dispose(); askRT?.dispose(); life.dispose(); audio.dispose(); document.removeEventListener('visibilitychange', onHide); hz.dispose(); if (tun.group) disposeObj(tun.group);
+    fieldMaterial?.map.dispose(); fieldMaterial?.dispose();
     renderer.dispose(); renderer.forceContextLoss?.(); canvas.remove(); tags.remove(); veil.remove();
   }
   raf = requestAnimationFrame(frame);

@@ -226,6 +226,29 @@ export function treeGeometries() {
 }
 // each model's size at scale 1 (veg.js fitTree): { H: its top, R: its crown's radius (half its mean width), base: its
 // lowest leaves (the lowest point a metre and more out from the trunk) }
+// (A64: the Miller commercial rows have open, fine-branched deciduous crowns in
+// the March photos. Share one winter mesh and fit each crown to the measured lidar return.)
+export function winterStreetTree() {
+  const parts = [], bark = col(0x65574b), twigs = col(0x75695a);
+  const branch = (a, b, radius, tint) => parts.push(limb(...a, ...b, radius, tint));
+  branch([0,-0.15,0],[0.15,3.1,0.08],0.20,bark);
+  for (let k = 0; k < 6; k++) {
+    const angle = k * 2.39996, reach = 1.25 + hash2(k,31), y = 4.8 + 1.3 * hash2(k,34);
+    const fork = [Math.cos(angle) * reach, y, Math.sin(angle) * reach];
+    branch([0.15,2.4 + 0.13 * k,0.08],fork,0.11,bark);
+    for (let j = 0; j < 3; j++) {
+      const a = angle + (j-1) * 0.72, d = 0.8 + hash2(k,j+7);
+      const tip = [fork[0]+Math.cos(a)*d,y+1.3+hash2(k,j+3),fork[2]+Math.sin(a)*d];
+      branch(fork,tip,0.052,twigs);
+      for (const side of [-1,1]) {
+        const t = a + side * 0.65, len = 0.55 + hash2(k+side,j+71);
+        branch(tip,[tip[0]+Math.cos(t)*len,tip[1]+1.0+0.75*hash2(j,k),tip[2]+Math.sin(t)*len],0.024,twigs);
+      }
+    }
+  }
+  return merge(parts);
+}
+
 export function treeDims(geos) {
   const out = {};
   for (const [sp, g] of Object.entries(geos)) {
@@ -584,6 +607,46 @@ export function buildingGeometry(list, deckPlants) {
         }
       }
       tri(A, C, B, k, [a, c, bb]); tri(A, D, C, k, [a, d, c]);
+      // (A64: Miller 591200 and 591500. Low street-facing retail bays have display
+      // glass, framed doors and shallow awnings. The upper wall and measured roof stay put.)
+      if (b.shopFront && L > 3.6 && hw > 2.9 && (q[1] - p[1]) * b.shopFront[0] - (q[0] - p[0]) * b.shopFront[1] > 0.67 * L) {
+        const ux = (q[0] - p[0]) / L, uz = (q[1] - p[1]) / L;
+        const at = (s, y, off = 0) => [p[0] + ux * s + uz * off, y, p[1] + uz * s - ux * off];
+        const wood = col(0x655346), frame = col(0x493b33), glass = col(0x424d4c), fabric = col([0x9b4540,0x68765c,0xa8885c][Math.floor(h(17) * 3)]);
+        const panel = (s, e, low, high, off, tint) => quad(at(e, low, off), at(s, low, off), at(s, high, off), at(e, high, off), tint, T);
+        const bays = Math.max(1, Math.round(L / 4.2)), step = L / bays;
+        for (let j = 0; j < bays; j++) {
+          const s = j * step + 0.12, end = (j + 1) * step - 0.12;
+          const mid = (s + end) / 2, foot = at(mid, 0, 0.08);
+          const floor = Math.max(b.base, b.shopGround(foot[0], foot[2]) ?? b.base);
+          const fascia = Math.min(top - 0.10, floor + 3.15), eave = fascia - 0.36;
+          if (eave - floor < 2.25) continue;
+          let clearance = Infinity;
+          const samples = Math.ceil((end - s) / 0.35);
+          for (let i = 0; i <= samples; i++) {
+            const point = at(s + (end - s) * i / samples, 0);
+            clearance = Math.min(clearance, b.shopGap(point[0], point[2]));
+          }
+          if (clearance < 0.35) continue;
+          const depth = Math.min(0.78, (end - s) / 5, clearance - 0.25);
+          // Two display panes and a transom under one cornice. Shallow trim is
+          // attached directly to the footprint wall and does not change its position.
+          panel(s, end, floor + 0.15, eave, 0.035, wood);
+          panel(s + 0.12, end - 0.12, floor + 0.42, eave - 0.25, 0.05, glass);
+          panel((s + end) / 2 - 0.045, (s + end) / 2 + 0.045, floor + 0.42, eave - 0.25, 0.058, frame);
+          panel(s + 0.12, end - 0.12, eave - 0.60, eave - 0.54, 0.06, frame);
+          if (j === Math.floor(bays / 2)) {
+            panel(mid - 0.46, mid + 0.46, floor + 0.04, floor + 2.17, 0.075, frame);
+            panel(mid - 0.36, mid + 0.36, floor + 0.10, floor + 2.07, 0.082, wood);
+            panel(mid - 0.27, mid + 0.27, floor + 0.78, floor + 1.98, 0.09, glass);
+          }
+          quad(at(s,fascia,0.025),at(end,fascia,0.025),at(end,eave,depth),at(s,eave,depth),fabric,T);
+          panel(s,end,eave-0.14,eave,depth,fabric);
+          tri(at(s,fascia,0.025),at(s,eave,depth),at(s,eave,0.025),fabric,[G,G,G]);
+          tri(at(end,eave,0.025),at(end,eave,depth),at(end,fascia,0.025),fabric,[G,G,G]);
+        }
+      }
+
       run += L;
     }
     const flat = (y, k, kind, rr = r) => {
@@ -726,7 +789,7 @@ export function signFaceGeometry(list) {
 // (A54: bay promenade from local OSM Bridgeway and the sa_0800/cxj_541000 pairs.
 // Pavement clears every drawn road/path, ride line and vehicle ribbon, on the existing ground, with closed sides.
 // No terrain edits, invented lanes, cars, or per-frame work.)
-export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap, sea = -Infinity, palms = [] }) {
+export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap, sectionAt, rampGap, support = ground, sea = -Infinity, palms = [] }) {
   const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
   const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
   // (A61: cxs_540900_0 and cxs_540900_180: Bridgeway's black lantern lamps on the house side's kerb: a base, the post, a pale lantern under its cap; [from, to, half width, colour])
@@ -745,6 +808,21 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
   const tri = (a, b, c, color) => { pos.push(...a, ...b, ...c); for (let i = 0; i < 3; i++) col.push(color.r, color.g, color.b); };
   const quad = (a, b, c, d, color) => { tri(a, b, c, color); tri(a, c, d, color); };
   const wall = (a,b,c,d,color) => { const key=[a,b,c,d].map(p=>p.map(v=>v.toFixed(3)).join(',')).sort().join('|');if(walls.has(key))walls.delete(key);else walls.set(key,[a,b,c,d,color]); };
+  // (A64: Miller 590950 return. A clipped section ends against the surrounding
+  // surface. Pair its transverse edges before emitting the faces so a driveway
+  // or a break in the mapped path cannot leave a raised rectangular end.)
+  const sectionEnds = new Map(), pavedSections = [];
+  function addSection(top, bottom, ends, tint) {
+    const keys = ends.map(([i, j]) => {
+      const p = top[i], q = top[j];
+      const vertex = v => Math.round(v[0] * 100) + ',' + Math.round(v[2] * 100);
+      const a = vertex(p), b = vertex(q);
+      const key = a < b ? a + '/' + b : b + '/' + a;
+      sectionEnds.set(key, (sectionEnds.get(key) || 0) + 1);
+      return key;
+    });
+    pavedSections.push({ top, bottom, ends, keys, tint });
+  }
   const closest = (x, z) => {
     let best = null, bd = 2.5 ** 2;
     for (const s of streets) for (let j = 1; j < s.P.length; j++) {
@@ -757,17 +835,30 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
   };
   let work = 0;
   for (const L of lines) {
-    if (L.hand || L.br) continue;
+    if (L.hand || L.br || (sectionAt && ['footway','path','cycleway','service'].includes(L.hw))) continue;
     const P = L.P, lampRun = [15, 15];
     for (let i = 1; i < P.length; i++) {
       const a = P[i - 1], b = P[i], dx = b[0] - a[0], dz = b[2] - a[2], len = Math.hypot(dx, dz);
       if (len < 0.1) continue;
-      const match = closest((a[0] + b[0]) / 2, (a[2] + b[2]) / 2); if (!match) continue;
+      const x = (a[0] + b[0]) / 2, z = (a[2] + b[2]) / 2;
+      const match = sectionAt ? sectionAt(x, z, dx / len, dz / len) : closest(x, z);
+      if (!match) continue;
       for (const right of [true, false]) {
         const off = right ? 4 : 7, count = Math.ceil(len / 1.5);
         const bay = match.s.name === 'Bridgeway' && shore((a[off]+b[off])/2,(a[off+2]+b[off+2])/2,(a[off]+b[off]-a[0]-b[0])/2);
         // (A59: the house side: a parking lane at the road's height, then a kerb and the sidewalk, narrower where a house is nearer)
-        const kb = !bay && match.s.name === 'Bridgeway' ? kerb((a[off]+b[off])/2,(a[off+2]+b[off+2])/2,(a[off]+b[off]-a[0]-b[0])/2) : null;
+        const sideX = (a[off] + b[off]) / 2 - x, sideZ = (a[off + 2] + b[off + 2]) / 2 - z;
+        const widthDm = sectionAt ? (match.dx * sideZ - match.dz * sideX > 0 ? match.s.right : match.s.left) : 0;
+        const kb = widthDm ? { lane: 0, walk: widthDm < 0 ? 0.20 : widthDm / 10 } : !bay && match.s.name === 'Bridgeway' ? kerb((a[off]+b[off])/2,(a[off+2]+b[off+2])/2,(a[off]+b[off]-a[0]-b[0])/2) : null;
+        // (A64: the mapped sidewalk centre averages several metres from the
+        // carriageway centre. Keep the strip between a detached walk and curb as ground.)
+        const sourceRight = match.dx * sideZ - match.dz * sideX > 0;
+        const traceOffset = sectionAt ? (sourceRight ? match.s.rightMid : match.s.leftMid) / 10 : 0;
+        const setback = widthDm > 0 ? Math.max(0, traceOffset - Math.hypot(sideX, sideZ) - kb.walk / 2) : 0;
+        // (A64: Miller 590950 return. Detached walk overlays break into slabs
+        // beside the mapped path. Let that path own its paving and keep its kerb.)
+        const band = setback > 0.75 ? { lane: 0, walk: 0.2, lip: true }
+          : setback > 0 ? { ...kb, walk: kb.walk + setback } : kb;
         const width = bay || (kb ? kb.lane + kb.walk : 0); if (!width) continue;
         const at = (f, w) => {
           const x = a[off] + (b[off] - a[off]) * f, z = a[off + 2] + (b[off + 2] - a[off + 2]) * f;
@@ -784,36 +875,52 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
               const p = at(f0 + (f1 - f0) * u / 3, w0 + (w1 - w0) * v / Math.ceil((w1 - w0) / 0.4));
               const g = ground(p[0], p[2]), d = gp(p[0], p[2]); evidence.samples++;
               const curbEdge=v===0;
-              if (g == null || (!bay && g < 0.9) || g > p[1] + (curbEdge?0.1:rise) || p[1] - g > (bay ? 6 : 1.5) || d < 0.015 || blocked(p[0], p[2])) return false;
+              if (g == null || (!bay && g < 0.9) || g > p[1] + (curbEdge ? 0.1 : rise) || p[1] - g > (bay ? 6 : 1.5) || d < 0.015 || blocked(p[0], p[2])) return false;
               evidence.minGap = Math.min(evidence.minGap, d);
             }
             return true;
           };
           if (kb) {
             lampRun[right ? 0 : 1] += len / count;
-            if (!fits(START, START + kb.lane, 0.1)) { evidence.rejected++; continue; }
+            const walkStart = START + band.lane;
+            if (band.lane && !fits(START, START + band.lane, 0.1)) { evidence.rejected++; continue; }
             // (A60: cxs_540900_180: the sidewalk runs to the house fronts: a house within reach takes the walk up to its wall; open ground keeps the usual width)
             // (the walk paves over a mapped footway beside the lane, cxs_540900_180's sidewalk being one surface from the kerb to the doors)
-            const fw = w => fits(START + kb.lane, START + kb.lane + w, 0.42, walkGap), toHouse = kb.reach ? Array.from({length: Math.floor((kb.reach - kb.walk) / 0.3) + 1}, (_, i) => kb.reach - 0.3 * i).find(fw) : null;
-            const w = toHouse != null && toHouse < kb.reach ? toHouse : [1, 0.8, 0.62, 0.46, 0.35, 0.23].map(k => kb.walk * k).find(fw), x0 = START, x1 = START + kb.lane;
-            const ln = [at(f0, x0), at(f1, x0), at(f1, x1), at(f0, x1)], low = p => [p[0], Math.min(p[1] - 0.25, ground(p[0], p[2]) - 0.15), p[2]];
-            const lt = ln.map(p => [p[0], Math.max(p[1] + 0.02, ground(p[0], p[2]) + 0.05), p[2]]), lb = ln.map(low), lq = right ? [0, 3, 2, 1] : [0, 1, 2, 3];
-            quad(...lq.map(i => lt[i]), tar);
-            // (the lane's own walls: its road side and, where no sidewalk follows, its outer side; the ends meet the next section's)
-            const lw = (i, j) => wall(lt[j], lt[i], lb[i], lb[j], tar);
-            if (right) { lw(1, 0); if (!w) lw(3, 2); } else { lw(0, 1); if (!w) lw(2, 3); }
-            lw(right ? 0 : 3, right ? 3 : 0); lw(right ? 2 : 1, right ? 1 : 2);
-            evidence.sections++;
+            const fw = w => fits(walkStart, walkStart + w, 0.42, walkGap), toHouse = band.reach ? Array.from({length: Math.floor((band.reach - band.walk) / 0.3) + 1}, (_, i) => band.reach - 0.3 * i).find(fw) : null;
+            const w = toHouse != null && toHouse < band.reach ? toHouse : [1, 0.8, 0.62, 0.46, 0.35, 0.23].map(k => band.walk * k).find(fw), x0 = START, x1 = walkStart;
+            if (band.lane) {
+              const ln = [at(f0, x0), at(f1, x0), at(f1, x1), at(f0, x1)], low = p => [p[0], Math.min(p[1] - 0.25, ground(p[0], p[2]) - 0.15), p[2]];
+              const lt = ln.map(p => [p[0], Math.max(p[1] + 0.02, ground(p[0], p[2]) + 0.05), p[2]]), lb = ln.map(low), lq = right ? [0, 3, 2, 1] : [0, 1, 2, 3];
+              quad(...lq.map(i => lt[i]), tar);
+              // (the lane's own walls: its road side and, where no sidewalk follows, its outer side; the ends meet the next section's)
+              const lw = (i, j) => wall(lt[j], lt[i], lb[i], lb[j], tar);
+              if (right) { lw(1, 0); if (!w) lw(3, 2); } else { lw(0, 1); if (!w) lw(2, 3); }
+              lw(right ? 0 : 3, right ? 3 : 0); lw(right ? 2 : 1, right ? 1 : 2);
+              evidence.sections++;
+            }
             if (!w) continue;
             const W0 = x1, W1 = x1 + w, A = at(f0, W0), B = at(f1, W0), C = at(f1, W1), D = at(f0, W1);
             const points = right ? [A, D, C, B] : [A, B, C, D];
-            const bottom = points.map(p => [p[0], Math.min(p[1] - 0.25, ground(p[0], p[2]) - 0.15), p[2]]);
-            const top = points.map(p => [p[0], Math.max(p[1] + 0.15, ground(p[0], p[2]) + 0.12), p[2]]);
-            quad(...top, concrete);
-            for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red ? red : curb); }
+            const seats = points.map(p => support(p[0], p[2]));
+            if (seats.some(y => y == null)) continue;
+            const bottom = points.map((p, j) => [p[0], Math.min(p[1] - 0.25, seats[j] - 0.15), p[2]]);
+            // (A64: the road edge drops flush at a mapped crossing or driveway. Use the same
+            // per-vertex height on both adjoining sections, including across a tile boundary.)
+            const top = points.map((p, j) => {
+              if (!rampGap) return [p[0], Math.max(p[1] + 0.15, ground(p[0], p[2]) + 0.12), p[2]];
+              const ramp = Math.min(1, Math.max(0, (rampGap(p[0], p[2]) - 0.2) / 1.5));
+              const rise = 0.02 + 0.13 * ramp;
+              return [p[0], Math.max(p[1] + rise, seats[j] + rise - 0.03), p[2]];
+            });
+            if (sectionAt) {
+              addSection(top, bottom, right ? [[0,1],[3,2]] : [[0,3],[1,2]], widthDm < 0 || band.lip ? curb : concrete);
+            } else {
+              quad(...top, concrete);
+              for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red ? red : curb); }
+            }
             evidence.sections++;
             // (a lamp about every 30 m, 0.45 m in from the kerb, where the walk is wide enough to pass it)
-            if (lampRun[right ? 0 : 1] >= 30 && w >= 1.2) { lampRun[right ? 0 : 1] = 0; const q = at((f0 + f1) / 2, W0 + 0.45), ty = Math.max(q[1] + 0.15, ground(q[0], q[2]) + 0.12);
+            if (!sectionAt && lampRun[right ? 0 : 1] >= 30 && w >= 1.2) { lampRun[right ? 0 : 1] = 0; const q = at((f0 + f1) / 2, W0 + 0.45), ty = Math.max(q[1] + 0.15, ground(q[0], q[2]) + 0.12);
               for (const [y0, y1, h, c] of LANTERN) block(q[0], q[2], ty + y0, ty + y1, h, c); evidence.lamps = (evidence.lamps || 0) + 1; }
             continue;
           }
@@ -865,6 +972,22 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
           if (side > 0) tri(a,tip,b,green); else tri(a,b,tip,green);
         }
       }
+    }
+  }
+  for (const { top, bottom, ends, keys, tint } of pavedSections) {
+    if (++work % 48 === 0) yield;
+    for (let end = 0; end < 2; end++) {
+      if (sectionEnds.get(keys[end]) !== 1) continue;
+      for (const i of ends[end]) {
+        const p = top[i];
+        p[1] = support(p[0], p[2]) + 0.012;
+      }
+      evidence.flushEnds = (evidence.flushEnds || 0) + 1;
+    }
+    quad(...top, tint);
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      wall(top[j], top[i], bottom[i], bottom[j], curb);
     }
   }
   for(const args of walls.values())quad(...args);

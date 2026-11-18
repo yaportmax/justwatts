@@ -24,6 +24,18 @@ export const VEG = { tex: { value: null }, box: { value: new THREE.Vector4(0, 0,
 // until a Tam plant group (veg g500 and up) loads (hand.js loadVeg calls tamCover): on a Headlands ride the file is never fetched and both ground
 // shaders' Tam blocks are skipped. Shared by this file's jwGround and hand.js groundMaterial.
 export const TAM = { tex: { value: null }, box: { value: new THREE.Vector4(0, 0, 1, 1) }, on: { value: 0 } };
+const LOTS = { tex: { value: null }, on: { value: 0 } };
+let lotsAsked = false;
+export function millValleyLots(box) {
+  if (box[2] < 6186 || box[0] > 9300 || box[3] < 2578 || box[1] > 4810) return;
+  if (lotsAsked) return;
+  lotsAsked = true;
+  const t = new THREE.TextureLoader().load('/world/mill-valley-lots.png', () => {
+    LOTS.tex.value = t; LOTS.on.value = 1;
+  }, undefined, () => { lotsAsked = false; });
+  t.flipY = false;
+  t.colorSpace = THREE.SRGBColorSpace;
+}
 let tamAsked = false;
 export function tamCover(base = '/world/hand/') {
   if (tamAsked) return; tamAsked = true;
@@ -75,7 +87,7 @@ export const GROUND_SUN = { value: new THREE.Vector3(0, 1, 0) };
 const GLSL_GROUND = /* glsl */`
 uniform vec3 jwSunG; uniform sampler2D tNoise;
 const float EARTH_SUN = 2.4; uniform vec4 rwBox[4]; uniform vec4 hlBox; uniform vec4 sfBox; uniform sampler2D tVeg; uniform vec4 vegBox;
-uniform sampler2D tTam; uniform vec4 tamBox; uniform float tamOn;
+uniform sampler2D tTam, tLots; uniform vec4 tamBox; uniform float tamOn, lotsOn;
 vec4 jwN(vec2 uv) { return texture2D(tNoise, uv); }
 vec4 jwVeg(vec2 p) {
   vec2 uv = (p - vegBox.xy) / (vegBox.zw - vegBox.xy);
@@ -284,6 +296,13 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     // Alexander Avenue's #627739 to #778b49, over what the imagery read there: the levee's sides read as bare earth and dry gold)
     c = mix(c, mix(srgb(vec3(0.38, 0.47, 0.22)), srgb(vec3(0.47, 0.55, 0.29)), smoothstep(0.3, 0.7, patch80 * 0.5 + fine * 0.5)), bay * lv * smoothstep(4.5, 3.5, h) * 0.9);
   }
+  // (A64: the right verge on Miller 591200 and the front gardens on Molino.
+  // Two-metre lidar and NAIP classes on observed lots and between opposed Miller carriageways.)
+  if (lotsOn > 0.5 && p.x > 6186.0 && p.x < 9300.0 && p.y > 2578.0 && p.y < 4810.0) {
+    vec2 uv = (p - vec2(6186.0, 2578.0)) / vec2(3114.0, 2232.0);
+    vec4 lot = texture2D(tLots, uv);
+    c = mix(c, lot.rgb / max(lot.a, 0.001) * (0.86 + 0.25 * nB.g), lot.a * 0.85);
+  }
   c = mix(c, srgb(vec3(0.20, 0.34, 0.38)), lake);
   c = mix(c, srgb(vec3(0.24, 0.30, 0.28)), smoothstep(0.5, -2.1, h));
   return c;
@@ -296,7 +315,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, marshUniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tamBox: TAM.box, tamOn: TAM.on, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, marshUniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tLots: LOTS.tex, lotsOn: LOTS.on, tamBox: TAM.box, tamOn: TAM.on, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv; attribute float gv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vGv = gv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
@@ -364,7 +383,7 @@ export function grassMaterial() {
   const T = textures(), U = { radius: { value: 60 }, centre: { value: new THREE.Vector2() } };
   m.userData.u = U;
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tamBox: TAM.box, tamOn: TAM.on, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
+    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tLots: LOTS.tex, lotsOn: LOTS.on, tamBox: TAM.box, tamOn: TAM.on, wTime: WIND.time, wGust: WIND.gust, radius: U.radius, centre: U.centre });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 gA; attribute vec4 gB; uniform float wTime, wGust, radius; uniform vec2 centre; varying vec3 vGc;\n' + GLSL_COMMON + GLSL_GROUND)
       .replace('#include <begin_vertex>', /* glsl */`

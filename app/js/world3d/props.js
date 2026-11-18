@@ -437,7 +437,7 @@ const ROOFS = [0x55534f, 0x6b665e, 0xa4583c, 0x46484b, 0x786f62, 0x5e4a3a, 0x4f4
 // and offices 2, 6
 const HOUSE = [0, 1, 3, 5, 5, 7, 0, 3], FLATS = [0, 3, 4, 4, 1], BIG = [2, 6, 2, 4];
 // list: [{ ring: [[x, z], ...] closed, base, h, seed }] -> geometry with position, colour, bw [along, up, style, kind]
-export function buildingGeometry(list) {
+export function buildingGeometry(list, deckPlants) {
   const pos = [], cl = [], bw = [], overhangs = [];
   let outline = null, ceiling = Infinity;
   // (A55: collapsed hip ridges and repeated footprint corners emitted zero-area
@@ -479,6 +479,41 @@ export function buildingGeometry(list) {
   for (const b of list) {
     let r = b.ring.slice(0, -1).filter((p, i, a) => !i || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 1e-5); if (r.length < 3) continue;
     if (THREE.ShapeUtils.isClockWise(r.map(p => new THREE.Vector2(p[0], p[1])))) r = r.reverse();
+    // (A67: the 221 mapped Waldo Point homes sit on dark hulls with a timber deck at the waterline.
+    // Keep the hull inside the baked footprint and inset the cabin where the outline allows it.)
+    if (b.sourceType === 'houseboat') {
+      const hull = r, deck = b.base, bottom = deck - 1.35;
+      const cabin = ringIn(hull, 0.65);
+      if (simpleOutline(cabin) && !THREE.ShapeUtils.isClockWise(cabin.map(p => new THREE.Vector2(...p))) && footprintContains(hull, cabin)) r = cabin;
+      outline = hull; ceiling = Infinity;
+      const side = col(0x504d48), timber = col(0x9a8670), rim = col(0xc0b6a6);
+      const at = (p, y) => [p[0], y, p[1]];
+      for (let i = 0; i < hull.length; i++) {
+        const j = (i + 1) % hull.length, a = hull[i], b = hull[j];
+        quad(at(a, bottom), at(a, deck - 0.13), at(b, deck - 0.13), at(b, bottom), side, T);
+        quad(at(a, deck - 0.13), at(a, deck), at(b, deck), at(b, deck - 0.13), rim, T);
+        if (r !== hull) quad(at(a, deck), at(r[i], deck), at(r[j], deck), at(b, deck), timber, T);
+      }
+      if (r !== hull && b.greenAt && deckPlants) {
+        let best = 2, planter;
+        for (let i = 0; i < hull.length; i++) {
+          const j = (i + 1) % hull.length, a = hull[i], b0 = hull[j];
+          const dx = b0[0] - a[0], dz = b0[1] - a[1], length = Math.hypot(dx, dz);
+          if (length < 3) continue;
+          const u = Math.max(0.15, Math.min(0.85, ((b.greenAt[0]-a[0])*dx + (b.greenAt[1]-a[1])*dz) / (length*length)));
+          const x = a[0]+dx*u, z = a[1]+dz*u, d = Math.hypot(x-b.greenAt[0], z-b.greenAt[1]);
+          if (d >= best) continue;
+          const cx = (x + r[i][0] + u*(r[j][0]-r[i][0]))/2, cz = (z + r[i][1] + u*(r[j][1]-r[i][1]))/2;
+          if (footprintGap(hull, cx, cz) > -0.22 || footprintGap(r, cx, cz) < 0.22) continue;
+          best = d; planter = [cx, cz, dx/length, dz/length];
+        }
+        if (planter) {
+          const [x, z, ux, uz] = planter;
+          box(x, deck, z, 0.34, 0.36, 0.19, ux, uz, col(0x865d45));
+          deckPlants.push([x, deck + 0.36, z]);
+        }
+      }
+    }
     outline = r; ceiling = b.maxTop ?? (b.rh == null ? Infinity : b.base + b.h + Math.max(0, b.rh));
     const h = (k) => hash2(b.seed, k), ob = orientedBox(r), area = Math.abs(THREE.ShapeUtils.area(r.map(p => new THREE.Vector2(p[0], p[1])))), fill = area / Math.max(1, ob.area);
     // houses: small and near enough a box for one roof over it (an L or a T takes a flat roof); a few barns with a
@@ -510,15 +545,44 @@ export function buildingGeometry(list) {
     const hc = lidHip ? hipCrown(r, area, ob.W, b.rh) : guess ? hipCrown(r, area, ob.W, Math.min(roofRoom, ob.W * (0.22 + 0.1 * h(7)))) : null;
     const hipped = lidHip || !!(guess && hc);
     const rise = house ? Math.min(roofRoom, lid ? Math.min(5.5, b.rh) : Math.min(3.8, ob.W * (0.26 + 0.24 * h(7)))) : barn ? Math.min(roofRoom, lid ? Math.min(5, b.rh) : Math.min(5, ob.W * 0.42)) : hipped ? (hc ? hc.ry : 0.05) : 0;
-    const hw = Math.min(lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, ceiling - b.base - rise), top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    const hw = Math.min(lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, ceiling - b.base - rise), top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.frontage?.[1] >= 0 ? col(b.frontage[1]) : b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     // (A53: Miller shops and irregular hillside homes need their own wall scale even when their measured roof is flat or hipped.)
     const shop = /^(retail|commercial|office)$/.test(b.sourceType), domestic = !shop && (house || /^(house|detached|residential|bungalow|semidetached_house)$/.test(b.sourceType) || b.sourceType === 'yes' && bh <= 7 && ob.area < 450);
     const style = b.style != null ? b.style : b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : shop ? (h(5) < 0.5 ? 2 : 6) : (domestic ? HOUSE : bh > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (domestic ? 8 : 4)];
+    const front = b.frontage && b.frontage[0] * Math.PI / 180;
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];
-      const A = [p[0], b.base - 1, p[1]], B = [q[0], b.base - 1, q[1]], C = [q[0], top, q[1]], D = [p[0], top, p[1]];
+      const foot = b.sourceType === 'houseboat' ? b.base : b.base - 1;
+      const A = [p[0], foot, p[1]], B = [q[0], foot, q[1]], C = [q[0], top, q[1]], D = [p[0], top, p[1]];
       const a = [run, -1, style, 0], bb = [run + L, -1, style, 0], c = [run + L, hw, style, 0], d = [run, hw, style, 0];
+      // (A67: sa_1200 and sa_2000. Set display windows into the street-facing wall. The awning ends
+      // at the original facade line, so neither fabric nor glass projects into the road or a neighbouring shop.)
+      const nx = (q[1] - p[1]) / L, nz = (p[0] - q[0]) / L;
+      if (b.frontage && L > 3 && hw > 3.4 && nx * Math.sin(front) - nz * Math.cos(front) > 0.65) {
+        const at = (t, inset, y) => [p[0] + (q[0] - p[0]) * t - nx * inset, b.base + y, p[1] + (q[1] - p[1]) * t - nz * inset];
+        const inset = 0.55, pad = Math.min(0.12, 0.5 / L), left = at(pad, inset, 0), right = at(1-pad, inset, 0);
+        if (footprintContains(r, [[left[0],left[2]], [right[0],right[2]]])) {
+          const wall = (u,v,y0,y1) => {
+            const uv = (t,y) => [run + L*t,y,style,0];
+            quad(at(u,0,y0),at(u,0,y1),at(v,0,y1),at(v,0,y0),k,[uv(u,y0),uv(u,y1),uv(v,y1),uv(v,y0)]);
+          };
+          wall(0,1,3.2,hw); wall(0,pad,-1,3.2); wall(1-pad,1,-1,3.2); wall(pad,1-pad,-1,0.38);
+          const pane = (t,y) => [run+L*t,y,style,3];
+          quad(at(pad,inset,.38),at(pad,inset,3.2),at(1-pad,inset,3.2),at(1-pad,inset,.38),k,
+            [pane(pad,.38),pane(pad,3.2),pane(1-pad,3.2),pane(1-pad,.38)]);
+          const cloth = col([0x803d36,0x355658,0xbbad92][Math.floor(h(91)*3)]);
+          quad(at(pad,0,2.82),at(pad,inset,3.2),at(1-pad,inset,3.2),at(1-pad,0,2.82),cloth,T);
+          quad(at(pad,0,2.68),at(pad,0,2.82),at(1-pad,0,2.82),at(1-pad,0,2.68),cloth,T);
+          quad(at(pad,0,.38),at(pad,inset,.38),at(1-pad,inset,.38),at(1-pad,0,.38),k,T);
+          for (const t of [pad,1-pad]) {
+            const jamb = [at(t,0,.38),at(t,0,3.2),at(t,inset,3.2),at(t,inset,.38)];
+            if (t === pad) jamb.reverse();
+            quad(...jamb,k,T);
+          }
+          run += L; continue;
+        }
+      }
       tri(A, C, B, k, [a, c, bb]); tri(A, D, C, k, [a, d, c]);
       run += L;
     }
@@ -662,7 +726,7 @@ export function signFaceGeometry(list) {
 // (A54: bay promenade from local OSM Bridgeway and the sa_0800/cxj_541000 pairs.
 // Pavement clears every drawn road/path, ride line and vehicle ribbon, on the existing ground, with closed sides.
 // No terrain edits, invented lanes, cars, or per-frame work.)
-export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap, sea = -Infinity }) {
+export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap, sea = -Infinity, palms = [] }) {
   const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
   const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
   // (A61: cxs_540900_0 and cxs_540900_180: Bridgeway's black lantern lamps on the house side's kerb: a base, the post, a pale lantern under its cap; [from, to, half width, colour])
@@ -774,6 +838,35 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
       }
     }
   }
+  // (A67: Vina del Mar's two date palms. Both use the same fronds at every distance and quality.)
+  for (const [x, z, height, radius] of palms) {
+    const y = ground(x, z);
+    if (y == null) continue;
+    const crown = y + height - radius * 0.5;
+    const bark = new THREE.Color(0x756c59), boot = new THREE.Color(0x665e49);
+    const trunk = [[y - 0.45, 0.42], [y + 0.4, 0.39], [crown - 1.2, 0.32], [crown - 0.6, 0.53], [crown, 0.32]];
+    const stem = (i, level) => [x + Math.cos(i*Math.PI/4)*level[1], level[0], z + Math.sin(i*Math.PI/4)*level[1]];
+    for (let k = 1; k < trunk.length; k++) for (let i = 0; i < 8; i++)
+      quad(stem(i,trunk[k-1]),stem(i,trunk[k]),stem(i+1,trunk[k]),stem(i+1,trunk[k-1]),k > 2 ? boot : bark);
+    const foliage = [0x52603c, 0x566640, 0x677347, 0x748256].map(c => new THREE.Color(c));
+    for (let j = 0; j < 29; j++) {
+      const angle = j*2.39996, dx = Math.cos(angle), dz = Math.sin(angle);
+      const layer = j % 3, reach = radius * (0.98 - layer*0.23);
+      const rise = radius*(0.38 + layer*0.13), droop = radius*(0.52 - layer*0.22);
+      const frond = (u,v,down=0) => [x+dx*reach*u-dz*v, crown+rise*Math.sin(Math.PI*u)-droop*u*u-down, z+dz*reach*u+dx*v];
+      for (let k = 0; k < 8; k++) {
+        const u = k/8, v = (k+1)/8, w = 0.045*(1-u)+0.012;
+        const green = foliage[(j+layer)%4];
+        quad(frond(u,-w), frond(u,w), frond(v,w*0.75), frond(v,-w*0.75), green);
+        const width = 0.46*Math.sin(Math.PI*(u+0.1)) + 0.07;
+        for (const side of [-1,1]) {
+          const tip = frond(Math.min(1,v+0.085),side*width,0.22);
+          const a = frond(u,0), b = frond(v,0);
+          if (side > 0) tri(a,tip,b,green); else tri(a,b,tip,green);
+        }
+      }
+    }
+  }
   for(const args of walls.values())quad(...args);
   if (!pos.length) return null;
   const g = new THREE.BufferGeometry();
@@ -786,7 +879,7 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
 
 // (A54: sa_0800/cxj_541000: the bay restaurants stand on decks with piles, not walls in open water.
 // Exact retained OSM footprints; the deck follows the street-side level and piles reach the existing seabed.)
-export function townPierGeometry(piers, ground) {
+export function townPierGeometry(piers, ground, entrances = []) {
   const pos = [], colors = [], supports = [], deck = new THREE.Color(0x9b9487), wood = new THREE.Color(0x51483c);
   const tri = (a, b, c, color) => { pos.push(...a, ...b, ...c); for (let i = 0; i < 3; i++) colors.push(color.r, color.g, color.b); };
   const quad = (a, b, c, d, color) => { tri(a, b, c, color); tri(a, c, d, color); };
@@ -800,6 +893,28 @@ export function townPierGeometry(piers, ground) {
       quad(p, [p[0], top, p[2]], [q[0], top, q[2]], q, wood);
     }
   };
+  // (A67: Liberty Dock, two masonry piers beside an open boardwalk, dark timber beams and a low cap.)
+  const brick = new THREE.Color(0x9b6f58), timber = new THREE.Color(0x614b3d);
+  for (const {x,z,dx,dz} of entrances) {
+    const at = (side, along, y) => [x - dz*side + dx*along, y, z + dx*side + dz*along];
+    const feet = [-1.8,1.8].map(side => {
+      const p = at(side, 0, 0);
+      return Math.max(1.55, ground(p[0],p[2]) ?? 1.55);
+    });
+    const eave = Math.max(...feet) + 2.65;
+    const solid = (s0,s1,a0,a1,y0,y1,color) => {
+      const base = [[s0,a0],[s1,a0],[s1,a1],[s0,a1]].map(([s,a]) => at(s,a,y0));
+      const cap = base.map(p => [p[0],y1,p[2]]);
+      for (let j=0; j<4; j++) { const k=(j+1)%4; quad(base[j],base[k],cap[k],cap[j],color); }
+      quad(cap[0],cap[1],cap[2],cap[3],color);
+    };
+    [-1.8,1.8].forEach((s,i) => {
+      solid(s-0.40,s+0.40,-0.64,0.64,feet[i]-0.6,eave-0.34,brick);
+      solid(s-0.19,s+0.19,-0.53,0.53,eave-0.34,eave,timber);
+    });
+    for (const along of [-0.52,0.52]) solid(-2.8,2.8,along-0.10,along+0.10,eave,eave+0.20,timber);
+    solid(-3.05,3.05,-0.93,0.93,eave+0.20,eave+0.32,timber);
+  }
   for (const {ring, y} of piers) {
     let R = ring.slice(0, -1); if (THREE.ShapeUtils.isClockWise(R.map(p => new THREE.Vector2(...p)))) R = R.reverse();
     for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(R.map(p => new THREE.Vector2(...p)), [])) {

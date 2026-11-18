@@ -4,3 +4,9 @@
 // cxs_540900_0: the yacht club (3785362) white, on a pile deck at the sidewalk's height that meets the sidewalk.
 // This landmark profile is observed in the cached pair, not inferred from the lidar percentile spread.
 export const TOWN_PIERS = new Map([['3785362,-12247855',{walk:true,paint:0xe4e1da}],['3785400,-12247869',{flat:true,paint:0x9db7b5}]]);
+
+// (A67: the timber canopy and masonry piers at Liberty Dock in cxs2_liberty.
+// Shore endpoint and its direction into the dock from OSM way 23783924.)
+export const DOCK_ENTRANCES = [
+  { shore: [37.8720897, -122.5022777], next: [37.8725407, -122.5015923] },
+];

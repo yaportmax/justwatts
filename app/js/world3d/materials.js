@@ -35,6 +35,33 @@ export function tamCover(base = '/world/hand/') {
 }
 export const BORES = { a: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, b: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) }, n: { value: 0 } };
 
+// (A67: tn_marsh_s0/b0/n0. A distance field from the baked asphalt centre lines
+// puts the shoulders on the actual levee surface without changing its grading or the riding rail.)
+const marshUniforms = { marshPath: { value: null }, marshReady: { value: 0 } };
+let marshRequested = false;
+export function loadMarshPath() {
+  if (marshRequested) return;
+  marshRequested = true;
+  const t = new THREE.TextureLoader().load('/world/marsh-path.png', () => {
+    marshUniforms.marshPath.value = t;
+    marshUniforms.marshReady.value = 1;
+  });
+  t.flipY = false;
+  t.colorSpace = THREE.NoColorSpace;
+  t.generateMipmaps = false;
+  t.minFilter = t.magFilter = THREE.LinearFilter;
+}
+const GLSL_MARSH = `
+uniform sampler2D marshPath;
+uniform float marshReady;
+vec2 jwMarsh(vec2 p) {
+  if (marshReady < 0.5 || p.y < 4839.139683) return vec2(0.0);
+  vec2 offset = p - vec2(10898.851512954, 6393.521384854);
+  vec2 uv = vec2(dot(offset, vec2(-0.000324289, -0.000311744)), dot(offset, vec2(0.024627753, -0.025618819)));
+  if (any(lessThan(uv,vec2(0.0))) || any(greaterThan(uv,vec2(1.0)))) return vec2(0.0);
+  return texture2D(marshPath, uv).rg;
+}
+`;
 const GLSL_COMMON = /* glsl */`
 vec3 srgb(vec3 c) { return pow(c, vec3(2.2)); }
 float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -269,12 +296,12 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const T = textures();
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tamBox: TAM.box, tamOn: TAM.on, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
+    Object.assign(sh.uniforms, marshUniforms, { jwSunG: GROUND_SUN, tNoise: { value: T.noise }, rwBox: REDWOOD, hlBox: HL, sfBox: SFB, tVeg: VEG.tex, vegBox: VEG.box, tTam: TAM.tex, tamBox: TAM.box, tamOn: TAM.on, scrubR: VEG.near, boreA: BORES.a, boreB: BORES.b, boreN: BORES.n });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 mk; attribute vec4 mk2; attribute float cv; attribute float gv;\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMk = mk; vMk2 = mk2; vCv = cv; vGv = gv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz; vNw = normalize(mat3(modelMatrix) * objectNormal);');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN; uniform float scrubR;\n' + GLSL_COMMON + GLSL_GROUND + '\n#define JW_SUN_MUL (1.0 + EARTH_SUN * jwEarth)\n')
+      .replace('#include <common>', '#include <common>\nvarying vec4 vMk; varying vec4 vMk2; varying float vCv; varying float vGv; varying vec3 vW; varying vec3 vNw;\nuniform vec4 boreA[12]; uniform vec4 boreB[12]; uniform int boreN; uniform float scrubR;\n' + GLSL_COMMON + GLSL_MARSH + GLSL_GROUND + '\n#define JW_SUN_MUL (1.0 + EARTH_SUN * jwEarth)\n')
       .replace('#include <color_fragment>', /* glsl */`
         bool inBore = false;
         ${bores ? `
@@ -314,10 +341,18 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
         vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.14 + rk * 0.1) * near;  /* (A33: gentler: at 0.55 it lit the hills in black blots and pixel speckle that crawled as the camera moved, user 2026-11-05) */
         if (abs(det) > 1e-9 && dot(bumpV, bumpV) > 1e-18) nW = normalize(bumpV);  // never a NaN (bloom would smear it)` : ''}
+        vec2 path = jwMarsh(vW.xz);
+        if (path.r > 0.29) {
+          float d = 4.0 * (1.0 - path.r), grit = jwN(vW.xz / 0.9).r;
+          vec3 gravel = srgb(mix(vec3(.51,.48,.42),vec3(.66,.62,.56),grit));
+          vec3 asphalt = mix(srgb(vec3(.50,.50,.48)), srgb(vec3(.60,.59,.56)), jwN(vW.xz / 31.0).g);
+          vec3 finish = mix(asphalt, gravel, smoothstep(1.70,1.80,d)) * (.92+.16*grit);
+          c = mix(c,finish,1.0-smoothstep(2.68,2.78,d));
+        }
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-13' + (detail ? 'd' : '') + (bores ? 'b' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-14' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 
@@ -401,12 +436,13 @@ export function roadMaterial() {
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
   const T = textures();
   m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, marshUniforms);
     sh.uniforms.tNoise = { value: T.noise };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec4 rd;\nattribute vec4 rd2;\nattribute vec4 rd3;\nattribute vec2 ruv;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying float vBw;\nvarying vec2 vRuv;\nvarying vec3 vW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRd = rd; vRd2 = rd2; vRd3 = rd3; vBw = rd3.z; vRuv = ruv; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying float vBw;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_BIKE)
+      .replace('#include <common>', '#include <common>\nuniform sampler2D tNoise;\nvarying vec4 vRd;\nvarying vec4 vRd2;\nflat varying vec4 vRd3;\nvarying float vBw;\nvarying vec2 vRuv;\nvarying vec3 vW;\n' + GLSL_COMMON + GLSL_MARSH + GLSL_BIKE)
       .replace('#include <color_fragment>', /* glsl */`
         float lm = floor(vRd.x + 0.5), surf = floor(vRd.y + 0.5), lanes = floor(vRd.z + 0.5), W = vRd.w;
         float along = vRuv.y, x = vRuv.x - W * 0.5, ax = abs(x);
@@ -421,6 +457,10 @@ export function roadMaterial() {
         c *= 1.0 - 0.07 * (smoothstep(0.12, 0.25, abs(lx - 0.28)) < 0.5 || smoothstep(0.12, 0.25, abs(lx - 0.72)) < 0.5 ? 1.0 : 0.0) * step(0.5, lanes);
         c = mix(c, srgb(vec3(0.66, 0.62, 0.54)), smoothstep(W * 0.5 - 0.6, W * 0.5, ax) * 0.55 * n2 * step(lm, 0.5));  // dust on the edges of unmarked lanes only (marked ones are clean to their edge, Street View)
         if (surf == 1.0) c = mix(srgb(vec3(0.50, 0.50, 0.48)), srgb(vec3(0.60, 0.59, 0.56)), n1) * (0.92 + 0.16 * n3);
+        if (surf == 1.0 && jwMarsh(vW.xz).g > 0.85) {
+          float stripe = 1.0 - smoothstep(0.045,0.055+fwidth(x),ax);
+          c = mix(c,srgb(vec3(.83,.65,.21)),stripe*(1.0-step(1.5,mod(along,4.5))));
+        }
         if (surf == 2.0) {
           // a dirt trail: packed earth with two worn lines, ragged grassy edges
           float edge = ax / max(W * 0.5, 0.1) + (n2 - 0.5) * 0.7 + (n3 - 0.5) * 0.25;
@@ -431,6 +471,12 @@ export function roadMaterial() {
         // a traced pad's gravel (pale grey-tan, speckled) or dirt (packed tan earth), Street View: Conzelman 0a_2030's
         // turnout, Field Road 0a_0130's path
         if (surf == 3.0) c = mix(srgb(vec3(0.55, 0.52, 0.46)), srgb(vec3(0.66, 0.62, 0.55)), n1 * 0.6 + n3 * 0.4) * (0.9 + 0.2 * n2);
+        // (A67: weathered transverse planks on the Waldo Point dock walks, in metres along the ribbon.)
+        if (surf == 5.0) {
+          float plank = abs(fract(along / 0.18) - 0.5) * 0.18;
+          float joint = 1.0 - smoothstep(0.002, 0.008 + fwidth(along), plank);
+          c = srgb(vec3(0.55, 0.49, 0.42)) * (0.93 + 0.14 * n2 - 0.2 * joint / (1.0 + 8.0 * fwidth(along)));
+        }
         if (surf == 4.0) c = mix(srgb(vec3(0.50, 0.46, 0.39)), srgb(vec3(0.60, 0.55, 0.46)), n1 * 0.7 + n3 * 0.3) * (0.9 + 0.2 * n2);
         if (lm < 0.0) c = srgb(vec3(0.62, 0.61, 0.58));
         // the markings across the road, r metres from its right edge: the travel lanes from a to W - b, bike lanes and
@@ -512,7 +558,7 @@ export function roadMaterial() {
         c = mix(c, srgb(vec3(0.88, 0.88, 0.85)), line * 0.92 * fade);
         diffuseColor.rgb *= c;`);
   };
-  m.customProgramCacheKey = () => 'jw-road-8';
+  m.customProgramCacheKey = () => 'jw-road-9';
   return m;
 }
 
@@ -680,6 +726,16 @@ export function buildingMaterial() {
           diffuseColor.rgb = mix(wall * w.rgb, glass, w.a);
           diffuseColor.rgb *= vBw.y < 0.5 ? 0.62 : 1.0;   // the foundation
           jwWin = w.a * lamps * step(0.68, fract(sin(dot(cell + floor(vW.xz * 0.05), vec2(12.9898, 78.233))) * 43758.5453));
+        } else if (kind == 3.0) {
+          // (cx-saus: continuous shop display glazing, narrow mullions, a solid stall riser and fascia.)
+          float x=fract(vBw.x/2.5),aa=max(fwidth(vBw.x/2.5),0.002);
+          float pane=smoothstep(0.055-aa,0.055+aa,x)*(1.0-smoothstep(0.945-aa,0.945+aa,x));
+          pane*=smoothstep(0.35,0.40,vBw.y)*(1.0-smoothstep(2.78,2.84,vBw.y));
+          vec3 trim=diffuseColor.rgb*(0.85+0.15*nz),glass=vec3(0.035,0.075,0.085);
+          #ifdef USE_FOG
+          glass=mix(glass,fogColor*0.3,0.20+0.12*sin(vBw.x*0.8));
+          #endif
+          diffuseColor.rgb=mix(trim,glass,pane);
         } else if (kind == 1.0) {
           float rows = fract(vBw.y / 0.32), tiles = fract(vBw.x / 0.45 + floor(vBw.y / 0.32) * 0.5);
           diffuseColor.rgb *= (0.86 + 0.14 * smoothstep(0.0, 0.25, rows)) * (0.95 + 0.05 * step(0.08, tiles)) * (0.9 + 0.2 * nz);
@@ -687,7 +743,7 @@ export function buildingMaterial() {
           diffuseColor.rgb *= 0.95 + 0.1 * nz;
         }`);
   };
-  m.customProgramCacheKey = () => 'jw-bldg-4';
+  m.customProgramCacheKey = () => 'jw-bldg-5';
   return m;
 }
 

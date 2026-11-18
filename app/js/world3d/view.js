@@ -19,12 +19,12 @@ import { POLES as FURN_POLES, PIECES as FURN_PIECES, LAMPS as FURN_LAMPS } from 
 import { LIDAR_BLDG } from './bldglidar.js';
 import { TOWN_SIGNALS } from '../../world/town-signals.js';
 import { TOWN_CANOPY } from '../../world/town-canopy.js';
-import { TOWN_PIERS } from '../../world/town-piers.js';
+import { TOWN_PIERS, DOCK_ENTRANCES } from '../../world/town-piers.js';
 import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2, inRings } from './landuse.js';
-import { TOWN_STREETS, TOWN_WATERFRONT } from '../../world/town-streets.js';
-import { terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
+import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS } from '../../world/town-streets.js';
+import { loadMarshPath, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, treeDims, scrubGeometries, species, buildingGeometry, townMastGeometry, townCanopyGeometry, townPierGeometry, townEdgeGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { loadVeg, loadTrees, loadHandVeg, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
@@ -428,6 +428,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   };
   function* buildTerrain(c) {
     const t = c.tile, Q = QUALITY[q];
+    if (c.z === 14 && ((c.x === 2616 && (c.y === 6326 || c.y === 6327)) ||
+        (c.x === 2615 && c.y === 6326))) loadMarshPath();
     if (!t) { c.grid = null; setPart(c, 'terrain', null); c.built = true; c.ver = (c.ver || 0) + 1; farDirty = true; return; }
     // the grid's side: NEAR_SEGS on every near tile, whatever its detail and the quality (upsampled from a coarse tile; the ground
     // and the roads the same seen from the outer ring as close up: nothing shifts when the rider comes nearer), a far
@@ -727,6 +729,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const st = roadStyle(r.hw, r.ln, r.fl, r.wd), tr = !(r.fl & 1) && isTrail(r);
       // (A59: on Sausalito's waterfront a footway is the sidewalk, concrete in Street View cxs_540900_180, not a dirt trail)
       if (r.hw === 'footway' && r.pts.some(([la, lo]) => la >= TOWN_WATERFRONT.south && la <= TOWN_WATERFRONT.north && lo > -122.482 && lo < -122.474)) st.surf = 1;
+      // (A67: the mapped dock footways between Waldo's rows, formerly dirt trails on the bed.)
+      const floatingDock = !!(r.fl & 65536);
+      if (floatingDock) { st.surf = 5; st.w = 1.8; }
       // its rail (rail.js): the centre's height wherever the ribbon samples it (a deck over a tunnel is in it too)
       let rail = null; if (r.h) { const T = track(dense(r.pts).map(([la, lo]) => proj.xz(la, lo)), r.h); let hint = -1; rail = (x, z) => { const q = T.at(x, z, hint); hint = q?.k ?? -1; return q && q.h; }; }
       // (a road with a rail: its line the rail's own points, so the drawn top is the rail's line between them, the rider's)
@@ -759,15 +764,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (a side road cut at the other road's edge: its corners rounded there (curb returns), 5 m: NAIP, Field Road 0a_0130's
       // T junction, both corners about 4 to 6 m; Street View: a flared mouth. Not a service way's)
       const fl = r.hw === 'service' ? null : [...(pts.fs ? [[...pts[0], 5]] : []), ...(pts.fe ? [[...pts.at(-1), 5]] : [])];
-      const BB = pts.hand ? builder() : B, i0 = BB.idx.length, centre = ribbon(BB, pts, { ...st, hAt: hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : inH ? 2.5 : 5, joints: t.joints.get(ri), drape: trail || inH, mk, flares: fl, wAt: RI?.widthOf && !trail ? RI.widthOf : null, xs: !trail && !dk ? CZ.edges : null });
+      const BB = pts.hand ? builder() : B, i0 = BB.idx.length, centre = ribbon(BB, pts, { ...st, hAt: floatingDock ? (x, z) => Math.max(SEA + 0.65 - lift, hOn(x, z) ?? SEA) : hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : inH ? 2.5 : 5, joints: t.joints.get(ri), drape: trail || inH, mk, flares: fl, wAt: RI?.widthOf && !trail ? RI.widthOf : null, xs: !trail && !dk ? CZ.edges : null });
       const spec = centre.some(q => q.sp); if (spec && !pts.hand) czPaint.push(centre);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
       if (pts.hand && !trail && centre.length > 1) handLines.push({ P: centre, w: st.w, hw: r.hw, lm: st.lm, hand: true });  // (A37: the hand-built stretch's centre for the stop signs on it: OpenStreetMap's highway=stop there had no road to stand by)
       if (pts.hand) { for (const v of BB.idx) handT.push(BB.pos[3 * v], BB.pos[3 * v + 1], BB.pos[3 * v + 2]); centre.forEach((q, i) => { mark(q[0], q[2], q[3] + 1.2); lanes.push(q[0], q[2], q[3]); if (i) { const p = centre[i - 1]; mark((p[0] + q[0]) / 2, (p[2] + q[2]) / 2, q[3] + 1.2); } }); continue; }
-      tops.push([i0, B.idx.length, trail]);
+      // (A67: a floating walk stays on its water datum during the later terrain redrape.)
+      if (!floatingDock) tops.push([i0, B.idx.length, trail]);
       if (!spec && !st.surf && !/path|footway|track|bridleway|cycleway|pedestrian/.test(r.hw) && centre.length > 1) lines.push({ P: centre, w: st.w, hw: r.hw, br: !!dk, lm: st.lm, b: st.b, park: !!(r.fl & 256), st });
       if (st.lm && st.lanes >= 2 && !st.surf && centre.length > 3) drive.push({ P: centre, w: st.w, lanes: st.lanes, one: !!(r.fl & 8), big: /motorway|trunk|primary/.test(r.hw) });
-      if (dk) {
+      if (floatingDock) deckSides(B, centre, st.w, 1.35, hAt, Infinity);
+      if (dk && !floatingDock) {
         const pl = deckSides(B, centre, st.w, 1.4, hAt); if (!pts.line) pillars.push(...pl);
         for (let i = 1; i < centre.length; i++) decks.push([centre[i - 1], centre[i], st.w / 2 + 0.6]);
       }
@@ -1398,7 +1405,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (A54: sa_0800/sa_1200: suppressed OSM sidewalk footways must receive paving, not block it as a solid object.
       // Retain all ride-line and vehicle-way exclusions, plus every actually drawn road and pedestrian path.)
       const pavementKeep = lineRibbons(t.roads.filter(r => r.hw !== 'footway'));
-      const geom = yield* townEdgeGeometry(c.lines, streets, {
+      const palms = PLAZA_PALMS.map(([lat, lon, h, radius]) => [...proj.xz(lat, lon), h, radius])
+        .filter(([x, z]) => x >= tb[0] && x < tb[2] && z >= tb[1] && z < tb[3] && koGap(x, z) > 1.5);
+      const geom = yield* townEdgeGeometry(c.lines, streets, { palms,
         ground: (x, z) => drawnY(x, z), gap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z)), roadGap(x, z) ?? Infinity),
         // (A54: sa_0800/cxj_541000: the eastern bay promenade has a seawall down to the seabed.)
         shore: (x, z, east) => east > 0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.width : 0,
@@ -1535,6 +1544,14 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (a height Street View shows, handlist.js BUILDINGS, where OpenStreetMap has none)
       { const R1 = f.rings[0], n1 = R1.length - 1; let a1 = 0, o1 = 0; for (let i = 0; i < n1; i++) { a1 += R1[i][0] / n1; o1 += R1[i][1] / n1; }
         if (HAND_BLDG.some(([R]) => { let ca = 0, co = 0; for (const [la, lo] of R) { ca += la / R.length; co += lo / R.length; } return Math.hypot((ca - a1) * 111195, (co - o1) * 88000) < 12; })) continue; }  // (A37: a hand-placed building there instead: OpenStreetMap's within 12 m of its middle left out)
+      // (A67: a floating home's floor follows the bay. Preserve source height, independent of the tidal bed.)
+      if (f.bd?.kind === 'houseboat') {
+        const floor = SEA + 0.65, height = f.h || 6;
+        list.push({ ring, base: floor, h: height, maxTop: floor + height, sourceType: 'houseboat', marin: true,
+          greenAt: f.bd.deckGreen && proj.xz(f.bd.deckGreen[0] / 1e6, f.bd.deckGreen[1] / 1e6),
+          seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7) });
+        continue;
+      }
       const R0 = f.rings[0], pier = (() => {
         const n = R0.length - 1; let a = 0, o = 0; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; }
         return TOWN_PIERS.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5));
@@ -1569,10 +1586,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const baker = R0[0][0] > 37.832 && R0[0][0] < 37.841 && R0[0][1] > -122.4825 && R0[0][1] < -122.474;
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
-        list.push({ ring, base, pier, maxTop: m + lb[1], h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        list.push({ ring, base, pier, frontage: f.bd?.frontage, maxTop: m + lb[1], h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         continue;
       }
-      list.push({ ring, base, pier, maxTop: base + (hb ? hb[2] : f.h || 6), h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295), marin: R0[0][0] > 37.815 });  // (A57: north of the Golden Gate, props.js)
+      list.push({ ring, base, pier, frontage: f.bd?.frontage, maxTop: base + (hb ? hb[2] : f.h || 6), h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295), marin: R0[0][0] > 37.815 });  // (A57: north of the Golden Gate, props.js)
       // (A53: cx-mvlook pairs 570400, 591200, 620400: cached lidar roof survey and OSM type, carried with each footprint.)
       if (f.bd) {
         const b = list.at(-1), d = f.bd; b.sourceType = d.kind;
@@ -1620,11 +1637,33 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         piers.push({ring: deck, y});
       }
     }
-    if (piers.length) { const geometry = townPierGeometry(piers, hAt), mesh = new THREE.Mesh(geometry, mats.furn);mesh.name='town-piers';mesh.receiveShadow=true;grp.add(mesh); }
+    const entrances = [];
+    for (const gate of DOCK_ENTRANCES) {
+      const [x,z] = proj.xz(...gate.shore), tb = tileBox(c);
+      if (x < tb[0] || x >= tb[2] || z < tb[1] || z >= tb[3]) continue;
+      const [nx,nz] = proj.xz(...gate.next), length = Math.hypot(nx-x, nz-z);
+      entrances.push({ x, z, dx: (nx-x)/length, dz: (nz-z)/length });
+    }
+    if (piers.length || entrances.length) { const geometry = townPierGeometry(piers, hAt, entrances), mesh = new THREE.Mesh(geometry, mats.furn);mesh.name='town-piers';mesh.receiveShadow=true;grp.add(mesh); }
 
+    const deckPlants = [];
     for (let i = 0; i < list.length; i += 60) {
       yield;
-      const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60)), mats.bldg); mesh.castShadow = true; mesh.receiveShadow = true; grp.add(mesh);
+      const mesh = new THREE.Mesh(buildingGeometry(list.slice(i, i + 60), deckPlants), mats.bldg); mesh.castShadow = true; mesh.receiveShadow = true; grp.add(mesh);
+    }
+    if (deckPlants.length) {
+      // (A67: strong near-infrared vegetation on mapped deck rims. Use the existing fern mesh at every quality.)
+      const plants = new THREE.InstancedMesh(trees.fern, mats.prop, deckPlants.length);
+      plants.name = 'deck-planters';
+      plants.userData.shared = true;
+      plants.receiveShadow = true;
+      const matrix = new THREE.Matrix4().makeScale(0.23, 0.38, 0.23);
+      deckPlants.forEach(([x, y, z], i) => {
+        plants.setMatrixAt(i, matrix.setPosition(x, y, z));
+        plants.setColorAt(i, new THREE.Color(0xffffff));
+      });
+      plants.computeBoundingSphere();
+      grp.add(plants);
     }
     setPart(c, 'bldg', grp);
   }

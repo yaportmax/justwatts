@@ -163,8 +163,7 @@ def test_a_tile_is_the_same_at_every_detail(out):
     d = out["lod"]
     assert d["same"] == ["terrain", "roads", "bldg", "tun"] and d["differ"] == ["trees", "furn"] and d["newRoads"]
     assert d["cards"]                                           # a far tile's cards: the very ones, as big, as the shader draws
-    assert d["shader"] == d["mirror"]                           # (the shader thins as stream.js says it does)
-    assert d["near"] == 1 and d["grow"] == 1                    # near the rider every card, its own size
+    assert d["sizes"] and d["band"] and d["fade"] == 32 and d["survivor"] < 0
     assert d["ease"] == [0, 0.5, 1, 1]                          # a tile eases in from the far ground, smooth at both ends
 
 

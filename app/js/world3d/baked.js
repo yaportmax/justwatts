@@ -55,7 +55,7 @@ export function createBaked({ fetch = globalThis.fetch?.bind(globalThis), base =
             gardenEdges: json.mvGarden,
             mvEdges: json.mvEdges,
             mvTurns: json.mvTurns,
-            roads, places: json.p || [], power: json.w || [], rails: json.g || [], lots: json.pk || [], xings: json.x || [], stops: json.s || [] };
+            roads, places: json.p || [], power: json.w || [], rails: json.g || [], climbBeams: json.climbBeams, apronGrades: json.apronGrades, lots: json.pk || [], xings: json.x || [], stops: json.s || [] };
         } catch { await new Promise(ok => setTimeout(ok, 500 * 2 ** i)); }
       }
       return null;

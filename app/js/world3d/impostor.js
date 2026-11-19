@@ -1,9 +1,10 @@
 // World 3D impostors: every tree species drawn once at start into an atlas, its colour and its normals (for the light),
 // seen from the side and from 50 degrees up. Trees past the full models' radius are cards facing the camera that show
 // it: one instanced draw a tile, every tree in it, the near ones (the full models' circle) left out in the vertex
-// shader, so moving the circle costs nothing on the CPU. Far away they thin out, the ones left a little bigger.
+// shader, so moving the circle costs nothing on the CPU. Far away they thin out, individual cards fading out at their original scale.
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { withSun, HORIZON } from './materials.js';
+import { impRank, impFadeStart, IMP_FADE } from './stream.js';
 import { FOG_SUN } from './sky.js';
 
 const CW = 256, CH = 512, TOP = 50 * Math.PI / 180;
@@ -70,19 +71,19 @@ export function impostorMaterial(imp) {
     sh.vertexShader = '#define JW_FOG_V\n' + sh.vertexShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D hzMap; uniform vec4 hzBox; varying float vJwVis;
-        attribute vec4 ia; attribute vec4 ib; uniform vec4 impCell[16]; uniform float impN; uniform vec2 nearC; uniform float nearR; uniform vec4 nearBox; uniform int nearBits; uniform float nearN;
-        varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
+        attribute vec4 ia; attribute vec4 ib; attribute float fadeStart; uniform vec4 impCell[16]; uniform float impN; uniform vec2 nearC; uniform float nearR; uniform vec4 nearBox; uniform int nearBits; uniform float nearN;
+        varying float vTreeCover; varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);')
       .replace('#include <begin_vertex>', /* glsl */`
         vec4 cell = impCell[int(ib.x + 0.5)];
         float s = ia.w, d = distance(ia.xz, cameraPosition.xz);
-        // thin out far away: keep a share, the kept ones grow to cover for the rest
-        float keep = ib.y < 0.0 ? 1.0 : mix(1.0, 0.3, clamp((d - 140.0) / 1500.0, 0.0, 1.0)), r = fract(ia.x * 0.1731 + ia.z * 0.2917), hs = abs(ib.y);
+        // (Owner shot 20: the retained crowns stay at their model scale. Each retiring crown fades over 32 m.)
+        float hs = abs(ib.y);
         float inBox = step(nearBox.x, ia.x) * step(ia.x, nearBox.z) * step(nearBox.y, ia.z) * step(ia.z, nearBox.w);
         if (inBox > 0.0) { int bi = int(clamp(floor((ia.x - nearBox.x) / (nearBox.z - nearBox.x) * nearN), 0.0, nearN - 1.0)), bj = int(clamp(floor((ia.z - nearBox.y) / (nearBox.w - nearBox.y) * nearN), 0.0, nearN - 1.0));
           inBox = float((nearBits >> (bj * int(nearN) + bi)) & 1); }
-        float on = step(r, keep) * step(nearR * cell.w, distance(ia.xz, nearC)) * (1.0 - step(14000.0, d)) * (1.0 - inBox);
-        s *= inversesqrt(keep) * 0.92 + 0.08;
+        vTreeCover = fadeStart < 0.0 ? 1.0 : 1.0 - smoothstep(fadeStart, fadeStart + ${IMP_FADE.toFixed(1)}, d);
+        float on = float(vTreeCover > 0.0) * step(nearR * cell.w, distance(ia.xz, nearC)) * (1.0 - step(14000.0, d)) * (1.0 - inBox);
         vec3 ctr = ia.xyz + vec3(0.0, cell.z * s * hs, 0.0);
         vec3 F = cameraPosition - ctr; F = normalize(F);
         vec3 R = normalize(cross(vec3(0.0, 1.0, 0.0), F)), U = cross(F, R);
@@ -97,8 +98,9 @@ export function impostorMaterial(imp) {
         vJwVis = hzBox.z > 0.0 && hzu.x > 0.0 && hzu.y > 0.0 && hzu.x < 1.0 && hzu.y < 1.0 ? texture2D(hzMap, hzu).r : 1.0;`);
     sh.fragmentShader = '#define JW_FOG_V\n#define JW_VIS_V\n' + sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D impColor, impNormal; varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
+        uniform sampler2D impColor, impNormal; varying float vTreeCover; varying vec2 vIu; varying vec3 vIR; varying vec3 vIU; varying vec3 vIF; varying vec3 vItint;`)
       .replace('#include <map_fragment>', /* glsl */`
+        if (vTreeCover < 1.0 && vTreeCover <= fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))) discard;
         vec2 iuv = vIu;
         vec4 ic = texture2D(impColor, iuv);
         // alpha thins in the mipmaps: scale it back up by the level (the trees keep their size far away)
@@ -110,7 +112,7 @@ export function impostorMaterial(imp) {
         vec3 jwImpN = normalize(vIR * inrm.x + vIU * inrm.y + vIF * inrm.z);`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(jwImpN, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-imp-2';
+  m.customProgramCacheKey = () => 'jw-imp-3-thin';
   return withSun(m);
 }
 
@@ -118,7 +120,12 @@ export function impostorMaterial(imp) {
 export function impostorMesh(imp, list, sphere) {
   const g = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(2, 2));
   const ia = new Float32Array(list.length * 4), ib = new Float32Array(list.length * 4);
-  list.forEach((t, i) => { ia.set(t.slice(0, 4), i * 4); ib.set(t.slice(4, 8), i * 4); });
+  const fadeStart = new Float32Array(list.length);
+  list.forEach((t, i) => {
+    fadeStart[i] = t[5] < 0 ? -1 : impFadeStart(impRank(t[0], t[2]));
+    ia.set(t.slice(0, 4), i * 4); ib.set(t.slice(4, 8), i * 4);
+  });
+  g.setAttribute('fadeStart', new THREE.InstancedBufferAttribute(fadeStart, 1));
   g.setAttribute('ia', new THREE.InstancedBufferAttribute(ia, 4)); g.setAttribute('ib', new THREE.InstancedBufferAttribute(ib, 4)); g.instanceCount = list.length;
   g.boundingSphere = sphere;
   const mesh = new THREE.Mesh(g, impostorMaterial(imp)); mesh.matrixAutoUpdate = false;

@@ -1,3 +1,4 @@
+import { loadTreeFeet, trunkProfile, footRow, fitTrunkSkirts } from './tree-foot.js';
 // World 3D: hand-built scenery (A17 pilot: Conzelman Road 930 to 1690 m, modelled in Blender against the Street View
 // survey; private tools/blender/build_conz.py). app/world/hand/conz.json lists its chunks ({ i, cx, cz }: glTF in the game
 // frame less (cx, 0, cz)) and the stations it covers; the generated road, banks and rails give way there (view.js), the
@@ -21,7 +22,7 @@ import { makeProj } from './geo.js';
 // (roadlines.js SHOULDERS by the nearest station and the verge's side) as attribute jwSh: x 1 at the edge to 0 at 8 m, y the
 // kind (0 grass, 0.5 tan gravel, 1 red dirt), z the width / 8. The hand terrain has none: no shoulder there.
 let SPEC_ = null; const PROJ_ = makeProj(37.93, -122.63), spec_ = () => SPEC_ ??= compileSpec(PROJ_);
-const SHK = { g: 0, t: 0.5, d: 1, o: 1.5, b: -1 }, CTK = { r: [1, 0], g: [1, 0.5], p: [1, 1], o: [0, -1], t: [1, -2], x: [-1, 0] };  // (jwCt: x 1 a cut face, -1 none; y its tone)  // (b: brush to the edge past a thin rocky lip, the cover forced on)
+const SHK = { g: 0, t: 0.5, d: 1, o: 1.5, b: -1 }, CTK = { r: [1, 0], g: [1, 0.5], p: [1, 1], o: [0, -1], t: [1, -2], x: [-1, 0], u: [-0.72, 2], v: [-0.88, 2], m: [0, 3] };  // (jwCt: x 1 a cut face, -1 none; y its tone)  // (b: brush to the edge past a thin rocky lip, the cover forced on)
 // (A37) the scrub shell over a brush shoulder ('b', Hawk Hill): its vertices tagged as the ground's are (jwSh: no band, the brush
 // forced on), so the bushes paint there too; the cover map's shrub mask (G) misses that slope (hawkR). Only vertices near a 'b' row.
 let BR_ = null;
@@ -425,10 +426,10 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
 // load: lod1 one InstancedMesh per species and primitive holding every plant; lod0 per 32 m cell, shown while the cell is
 // near. Which lod a plant draws in is decided on the GPU by its
 // distance to the camera (veg.json lod: { sp: [lod0 metres, last metres] }); update(x, z) only moves that uniform and
-// toggles near cells: no matrices are rewritten after load.
+// packs the instances inside each near ring after 3 m of travel.
 // (A39, the owner twice: the plants must not change as the rider nears them. The near model was swapped for crossed cards at 25 to 80 m, a tree 130 to 600 px tall
 // turning into another tree. Now the near model itself thins with distance and no swap happens while the plant is large: thin() cuts a part into clusters (a leaf
-// card, or a single triangle of a trunk) and ranks them so that any head of the list is spread over the whole plant; at a distance d a plant keeps the share
+// card or a piece of foliage) and ranks them so that any head of the list is spread over the whole plant; at a distance d a plant keeps the share
 // (D1 / d)^2 of its clusters, each grown about its own middle so the kept area stays the full model's (the last quarter of the kept ones shrinking to nothing, so
 // none pops out). A cluster so keeps the size on screen it has at D1. A cell draws only the head of the index buffer its nearest plant needs (the clusters lie in
 // rank order). The cards come in at about 7 times the old distance, the plant a seventh of the height it had at the old swap.)
@@ -448,7 +449,7 @@ function thin(g0) {
     for (let t = 0; t < nt; t++) { const r = find(idx[3 * t]); if (id[r] < 0) { id[r] = nc++; size.push(0); } cl[t] = id[r]; if (++size[id[r]] > max) max = size[id[r]]; }
     if (max > 8) cl = null;
   }
-  if (!cl) { if (idx) g = g.toNonIndexed(); idx = null; tri = true; nc = nt; cl = new Uint32Array(nt); for (let t = 0; t < nt; t++) cl[t] = t; }  // (a trunk: every triangle on its own)
+  if (!cl) { if (idx) g = g.toNonIndexed(); idx = null; tri = true; nc = nt; cl = new Uint32Array(nt); for (let t = 0; t < nt; t++) cl[t] = t; }  // (unconnected triangles or a part without small indexed clusters)
   const P = g.attributes.position, nv = P.count, vi = idx ? k => idx[k] : k => k;
   const cen = new Float64Array(nc * 3), cn = new Uint32Array(nc), lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
   for (let t = 0; t < nt; t++) { const c = cl[t]; for (let k = 0; k < 3; k++) { const v = vi(3 * t + k); cen[3 * c] += P.getX(v); cen[3 * c + 1] += P.getY(v); cen[3 * c + 2] += P.getZ(v); } cn[c] += 3; }
@@ -547,7 +548,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   const groups = [], models = new Map(), loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   let t0 = 0; const breath = async () => { if (performance.now() - t0 < 3) return; await new Promise(r => setTimeout(r, 6)); t0 = performance.now(); };
   // (a species' model and materials once, shared by its groups: no second shader compile when a group arrives)
-  const model = sp => models.get(sp) ?? models.set(sp, loader.loadAsync(base + `veg/${sp}.glb`).catch(() => null).then(g => { if (!g) return null;
+  const model = sp => models.get(sp) ?? models.set(sp, Promise.all([loader.loadAsync(base + `veg/${sp}.glb`).catch(() => null), loadTreeFeet()]).then(([g]) => { if (!g) return null;
     const [near0, far] = J.lod?.[sp] || [30, 450], parts = [[], []];
     g.scene.updateMatrixWorld(true);
     g.scene.traverse(o => { if (!o.isMesh) return; parts[/lod1/.test(o.name) || /lod1/.test(o.parent?.name || '') ? 1 : 0].push({ geo: o.geometry.clone().applyMatrix4(o.matrixWorld), src: o.material }); });
@@ -558,7 +559,13 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     // (A39: the thinned near model out to R1, in two rings of cells (32 m ones to `split`, 128 m ones beyond: the same plant either way); the cards from R1 on)
     const W3 = globalThis.__w3 || {}, R1 = Math.min(far, near * (W3.vegX ?? 7)), band = Math.max(FADE, 0.07 * R1), split = Math.min(SPLIT, R1 * 0.5), mn = !!J.mesh_normals?.[sp];
     for (const p of parts[1]) p.mat = material(p.src, p.geo, near > 0 ? R1 - band : 0, far, { round: /brush|sage/.test(sp), fade: near > 0 ? -1 : 0, band });
-    for (const p of parts[0]) { const T = thin(p.geo), d1 = near * (W3.vegD1 ?? 0.5) * (T.tri ? 1.5 : 1); p.geo = T.geo; p.ends = T.ends; p.nc = T.nc; p.prune = { u: { value: new THREE.Vector2(d1 * dk, Math.min(1, 40 / T.nc)) }, d0: d1, d1: d1 * dk }; prunes.push(p.prune); }
+    for (const p of parts[0]) {
+      // (Owner shot 21: at 33 to 55 m, shrinking individual redwood bark triangles split the trunk into strips.)
+      if (/_bark$/.test(p.src.name)) {
+        p.foot = trunkProfile('hand-' + sp);
+        continue;
+      }
+      const T = thin(p.geo), d1 = near * (W3.vegD1 ?? 0.5) * (T.tri ? 1.5 : 1); p.geo = T.geo; p.ends = T.ends; p.nc = T.nc; p.prune = { u: { value: new THREE.Vector2(d1 * dk, Math.min(1, 40 / T.nc)) }, d0: d1, d1: d1 * dk }; prunes.push(p.prune); }
     const out_ = { near, R1, band, split, parts, mats: parts[0].map(p => material(p.src, p.geo, 0, split, { meshNormals: mn, prune: p.prune, kind: 'n' })),
       mats2: parts[0].map(p => material(p.src, p.geo, split, R1 + band, { fade: 1, meshNormals: mn, prune: p.prune, band })) };
     // (A35: the bush-tree's leaves a muted olive: as the tall shrubs along Field, Bunker and McCullough they read cartoon lime against Street View's)
@@ -575,15 +582,58 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     if (sp === 'sage') for (const m of [...out_.mats, ...out_.mats2, ...parts[1].map(p => p.mat)]) m.color.multiply(new THREE.Color(0.5, 0.58, 0.45));
     return out_;
   })).get(sp);
+  // (A68: Panoramic and the Mill Valley climbs. Lidar returns above the carriageway
+  // and around the crown support wider branches on these existing stems. The fit
+  // keeps the lower six metres clear of all road ribbons. Both detail levels use
+  // the same instance transform, fitted once before either level is drawn.)
+  let climbCrowns;
+  function fitsForGroup(file) {
+    const match = /^veg[/]g(5[1239][0-9]|6[0-3][0-9])[.]bin$/.exec(file);
+    if (!match) return null;
+    climbCrowns ??= fetch(base + '../tam-climb-crowns.json')
+      .then(response => response.ok ? response.json() : null).catch(() => null);
+    return climbCrowns.then(data => data?.[match[1]]);
+  }
   async function addGroup(G, x, z) {
     /* (A38 Tam cover: the mountain's ground cover with its first plant group, materials.js TAM; never on a Headlands ride) */
     if (/veg\/g5\d\d\.bin$/.test(G.file)) tamCover(base);
     const buf = await fetch(base + G.file).then(r => r.ok ? r.arrayBuffer() : null).catch(() => null); if (!buf) return;
+    const crownFits = await fitsForGroup(G.file);
     let off = 0; t0 = performance.now();
     for (const [sp, n0] of Object.entries(G.species)) {
       const st = J.stride?.[sp] || 7, a0 = new Float32Array(buf, off, n0 * st); off += n0 * st * 4;
-      let a = a0, n = n0; { let k = 0; for (let i = 0; i < n0; i++) if (!boreIn(a0[st * i], a0[st * i + 2])) k++;
-        if (k < n0) { a = new Float32Array(k * st); n = 0; for (let i = 0; i < n0; i++) if (!boreIn(a0[st * i], a0[st * i + 2])) a.set(a0.subarray(st * i, st * i + st), st * n++); state.boreVeg = (state.boreVeg || 0) + n0 - k; } }
+      const canopy = crownFits?.[sp] ? await model(sp) : null;
+      const targets = canopy?.parts[0].length ? crownFits[sp] : [];
+      const fitted = targets.length ? new Set() : null;
+      for (const [index, x, z, width, height, angle, percent, vertical = 100] of targets) {
+        const k = index * st;
+        // A later vegetation bake may reorder the group or refit this tree.
+        if (Math.round(a0[k] * 100) !== x || Math.round(a0[k + 2] * 100) !== z ||
+            Math.round(a0[k + 4] * 1000) !== width || Math.round(a0[k + 5] * 1000) !== height ||
+            Math.round(a0[k + 6] * 1000) !== width || Math.round(a0[k + 3] * 1000) !== angle) continue;
+        if (boreIn(a0[k], a0[k + 2])) continue;
+        fitted.add(index);
+        a0[k + 4] *= percent / 100;
+        a0[k + 6] *= percent / 100;
+        a0[k + 5] *= vertical / 100;
+      }
+      // These measured overhanging crowns stay one full mesh all the way down
+      // the approach. Each batch shares the original textured bark and leaves.
+      if (fitted?.size) {
+        for (const part of canopy.parts[0]) {
+          part.climbMaterial ??= material(part.src, part.geo, 0, 1e6, {meshNormals: !!J.mesh_normals?.[sp]});
+          const mesh = new THREE.InstancedMesh(part.geo, part.climbMaterial, fitted.size);
+          let index = 0;
+          for (const id of fitted) mesh.setMatrixAt(index++, matAt(a0, id, st));
+          mesh.computeBoundingSphere();
+          mesh.name = 'climb-crown-' + sp;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          group.add(mesh);
+        }
+      }
+      let a = a0, n = n0; { let k = 0; for (let i = 0; i < n0; i++) if (!fitted?.has(i) && !boreIn(a0[st * i], a0[st * i + 2])) k++;
+        if (k < n0) { a = new Float32Array(k * st); n = 0; for (let i = 0; i < n0; i++) if (!fitted?.has(i) && !boreIn(a0[st * i], a0[st * i + 2])) a.set(a0.subarray(st * i, st * i + st), st * n++); state.boreVeg = (state.boreVeg || 0) + n0 - k - (fitted?.size || 0); } }
       if (!n) continue;
       if (DROP.has(sp)) continue;  // (A33: the round brush domes by the road dropped, user 2026-11-05: 'these bushes so bad just remove them')
       const M = await model(sp); if (!M) continue;
@@ -630,11 +680,26 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
     if (at) pump();
   }).catch(() => {}).finally(() => { if (!at || !J || !wanted()) state.busy = false; if (!J) state.first = true; });
   function build(S, T, c) {
+    const matrices = new THREE.InstancedBufferAttribute(new Float32Array(16 * c.ids.length), 16);
+    c.ids.forEach((i, j) => matAt(S.a, i, S.st).toArray(matrices.array, 16 * j));
+
+    const bark = S.parts.find(p => p.foot);
+    if (bark) {
+      const rows = Float32Array.from(c.ids, i => footRow(bark.foot, S.a[i * S.st], S.a[i * S.st + 2]));
+      if (rows.some(row => row > 0)) {
+        c.footRows = rows;
+        c.footAttribute = new THREE.InstancedBufferAttribute(rows.slice(), 1);
+      }
+    }
+    c.order = Int32Array.from(c.ids, (_, j) => j);
     c.meshes = S.parts.map((p, k) => {
       const im = new THREE.InstancedMesh(shallow(p.geo), T.mats[k], c.ids.length);
-      c.ids.forEach((i, j) => im.setMatrixAt(j, matAt(S.a, i, S.st)));
+      im.instanceMatrix = matrices;
       im.computeBoundingSphere(); im.boundingSphere.radius += 3;  /* (a thinned plant's clusters are larger) */
-      im.castShadow = T.cast && CAST.test(S.sp); if (im.castShadow) im.customDepthMaterial = depthFor(p.src, p.prune); im.receiveShadow = true; im.visible = false; im.name = 'veg0_' + S.sp; group.add(im); return im;
+      im.castShadow = T.cast && CAST.test(S.sp);
+      if (im.castShadow) im.customDepthMaterial = depthFor(p.src, p.prune);
+      if (p.foot && c.footRows) fitTrunkSkirts(im, p.geo, p.foot, c.footAttribute);
+      im.receiveShadow = true; im.visible = false; im.name = 'veg0_' + S.sp; group.add(im); return im;
     });
     show(S, T, c, lx, lz);
   }
@@ -642,14 +707,42 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
   function show(S, T, c, x, z) {
     const full = forced === 0, h = T.size * 0.7072 + 3, dc = Math.hypot(c.cx - x, c.cz - z);
     let near = dc - h, far = dc + h;
-    if (S.batch && near < T.hi && far >= T.lo) {
-      let n2 = Infinity, f2 = 0;
-      for (const i of c.ids) { const dx = S.a[S.st * i] - x, dz = S.a[S.st * i + 2] - z, d2 = dx * dx + dz * dz; n2 = Math.min(n2, d2); f2 = Math.max(f2, d2); }
-      near = Math.sqrt(n2) - 3; far = Math.sqrt(f2) + 3;
+    // (Owner shot 21: spend the bark budget on whole stems. The shader rejects plants outside its ring;
+    // pack only the instances that can reach it before the next 3 m update, sharing one buffer across parts.)
+    const outer = full && T.lo > 0 ? Infinity : T.hi;
+    let count = 0, closest = Infinity, hasSkirt = false;
+    if (near < outer && far >= T.lo) {
+      const inner2 = Math.max(0, T.lo - 3) ** 2, outer2 = (outer + 3) ** 2;
+      const buffer = c.meshes[0].instanceMatrix;
+      let changed = false;
+      for (let j = 0; j < c.ids.length; j++) {
+        const i = c.ids[j] * S.st, d2 = (S.a[i] - x) ** 2 + (S.a[i + 2] - z) ** 2;
+        if (d2 < inner2 || d2 >= outer2) continue;
+        closest = Math.min(closest, d2);
+        if (c.footRows?.[j]) hasSkirt = true;
+        if (c.order[count] !== j) {
+          if (c.footRows) c.footAttribute.setX(count, c.footRows[j]);
+          matAt(S.a, c.ids[j], S.st).toArray(buffer.array, count * 16);
+          c.order[count] = j;
+          changed = true;
+        }
+        count++;
+      }
+      if (changed) {
+        buffer.needsUpdate = true;
+        if (c.footAttribute) c.footAttribute.needsUpdate = true;
+      }
     }
-    const on = full && T.lo > 0 ? true : near < T.hi && far >= T.lo;
-    for (let k = 0; k < c.meshes.length; k++) { const m = c.meshes[k]; m.visible = on; if (!on) continue;
-      const p = S.parts[k], d = Math.max(1, near, T.lo - 3), fr = full ? 1 : Math.max((p.prune.d1 / d) ** 2, p.prune.u.value.y), nk = Math.min(p.nc, Math.ceil(Math.min(1, fr) * p.nc) + 1);
+    near = Math.sqrt(closest) - 3;
+    for (let k = 0; k < c.meshes.length; k++) {
+      const m = c.meshes[k]; m.visible = count > 0; m.count = count;
+      if (!count) continue;
+      const p = S.parts[k];
+      if (!p.prune) {
+        if (p.foot && c.footRows) m.geometry.setDrawRange(0, hasSkirt ? Infinity : p.geo.index.count);
+        continue;
+      }
+      const d = Math.max(1, near, T.lo - 3), fr = full ? 1 : Math.max((p.prune.d1 / d) ** 2, p.prune.u.value.y), nk = Math.min(p.nc, Math.ceil(Math.min(1, fr) * p.nc) + 1);
       m.geometry.setDrawRange(0, p.ends[nk - 1]); }
   }
   // every frame: the camera uniform; near cells shown (only after 3 m of travel: the extra 3 m in R covers it)
@@ -884,7 +977,30 @@ function groundMaker(base) {
           vec3 tCan = mix(JW_TS(0.15, 0.21, 0.12), JW_TS(0.25, 0.32, 0.17), smoothstep(0.3, 0.7, t8)) * (1.0 - 0.35 * smoothstep(0.55, 0.8, t17));
           float tNear = 1.0 - smoothstep(90.0, 142.0, length(vGdW - cameraPosition));
           vec3 tc = mix(mix(mix(tGrass, tBrush, kB), tBare, kE), mix(tCan, tDuff, tNear), kT);
-          c = mix(c, tc, tIn * (1.0 - jwBand)); jwSW *= 1.0 - tIn; }
+          jwSW *= 1.0 - tIn;
+          #ifdef JW_SH
+          // (A68: 517260 and 532300. Low returns and green near-infrared pixels
+          // cover parts of both the open cuts and the forest floor. Reuse the
+          // existing terrain grain and lighting for the leaves and gaps.)
+          float growth = smoothstep(0.08, 0.7, -vCt.x) * smoothstep(0.4, 1.8, vCt.y);
+          float foliage = smoothstep(0.24, 0.73, t2 * 0.35 + t03 * 0.65);
+          float cover = tIn * growth * (1.0 - jwBand) * tNear;
+          vec3 leaves = mix(tBrush, JW_TS(0.43, 0.49, 0.27) * gG, foliage * 0.75);
+          tc = mix(tc, leaves, growth * foliage * tNear);
+          float relief = foliage * 0.42;
+          float rx = dFdx(relief), ry = dFdy(relief);
+          float det = dPx.x * dPy.y - dPx.y * dPy.x;
+          if (cover > 0.01 && abs(det) > 0.000001) {
+            jwSG = clamp(vec2(rx * dPy.y - ry * dPx.y, ry * dPx.x - rx * dPy.x) / det, vec2(-1.0), vec2(1.0));
+            jwSW = cover * aaS;
+          }
+          // (A68: t2_532000_f. The pale mineral beyond the turnout breaks up
+          // between shrubs. The local bare-ground band and grain limit its paint.)
+          vec3 gravel = mix(JW_TS(0.60, 0.55, 0.48), JW_TS(0.74, 0.68, 0.59), t2) * gD;
+          float mineral = smoothstep(2.1, 2.95, vCt.y) * (0.15 + 0.38 * kE) * (0.3 + 0.7 * foliage);
+          tc = mix(tc, gravel, mineral);
+          #endif
+          c = mix(c, tc, tIn * (1.0 - jwBand)); }
         // <<< A38 Tam cover (tam-veg) end
         #ifdef JW_SH
         // (A37: the shoulder's own surface: short saturated grass, or tan gravel, or red-brown dirt with a few tufts, the dirt

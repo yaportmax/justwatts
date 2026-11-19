@@ -14,7 +14,8 @@ import { builder, ribbon, resample, roadStyle, clipLine, deckSides, chainWays, r
 import { parseVeg, makeVeg, parseTrees, fitTree, inPoly, CLEAR, SCRUB, GRASS, PAVED, BARE } from '../../app/js/world3d/veg.js';
 import { cellBushes, SIZE as SCRUB_CELL } from '../../app/js/world3d/scrub.js';
 import { parseLanduse, encode, decode, clipRing, encodeRoads, decodeRoads, scatter, buildingHeight, inRings } from '../../app/js/world3d/landuse.js';
-import { wanted, plan, jobQueue, childrenOf, parentOf, sigs, easeW, EASE, FAR_D, FAR_KEEP, impKeep, impGrow } from '../../app/js/world3d/stream.js';
+import { wanted, plan, jobQueue, childrenOf, parentOf, sigs, easeW, EASE, FAR_D, FAR_KEEP, IMP_FADE, impRank, impFadeStart } from '../../app/js/world3d/stream.js';
+import { impostorMesh } from '../../app/js/world3d/impostor.js';
 import { packTile, unpackTile, gridAt } from '../../app/js/world3d/baked.js';
 import { makeProj, tileX, tileY, latOf, lonOf } from '../../app/js/world3d/geo.js';
 import { knee, BIKE, stance, newStance, ik } from '../../app/js/world3d/rider.js';
@@ -150,16 +151,22 @@ out.jobs = { first, left, ran };
 
 /* ---------- detail (LOD): a tile's ground and roads the same at every detail, its far trees the shader's own ---------- */
 { const a = sigs(1, 0, 3, true), b = sigs(0, 0, 3, true), shader = [], cpu = [];
-  // the cards a far (detail 1) tile keeps and their size against what the shader draws of the full set past FAR_D
-  for (let i = 0; i < 2000; i++) { const x = i * 7.31, z = i * 3.17, r = (x * 0.1731 + z * 0.2917) % 1;
-    for (const d of [FAR_D, 1930, 3870]) { const k = impKeep(d); if (r <= k) shader.push([i, d, +(impGrow(k)).toFixed(4)]); }
-    if (r <= FAR_KEEP) for (const d of [FAR_D, 1930, 3870]) cpu.push([i, d, +(impGrow(FAR_KEEP)).toFixed(4)]); }
+  const rows = Array.from({ length: 2000 }, (_, i) => [i * 7.31 - 8000, 0, i * 3.17, 0.9 + i % 3, 0, 1, 1, 0]);
+  const imp = { cells: [[1, 1, 1, 1]], n: 1 };
+  const fine = impostorMesh(imp, rows, null).geometry.attributes;
+  const far = impostorMesh(imp, rows.filter(t => impRank(t[0], t[2]) <= FAR_KEEP).map(t => t.map((v, i) => i === 5 ? -v : v)), null).geometry.attributes;
+  let band = true, sizes = true;
+  for (let i = 0; i < rows.length; i++) {
+    const t = rows[i], start = fine.fadeStart.getX(i);
+    sizes &&= Math.abs(fine.ia.getW(i) - t[3]) < 1e-6;
+    if (start < 0) shader.push([fine.ia.getX(i), fine.ia.getW(i)]);
+    else band &&= start >= 140 && start + IMP_FADE <= FAR_D + 1e-4;
+  }
+  for (let i = 0; i < far.ia.count; i++) { if (far.fadeStart.getX(i) < 0) cpu.push([far.ia.getX(i), far.ia.getW(i)]); }
   out.lod = { same: ['terrain', 'roads', 'bldg', 'tun'].filter(k => a[k] === b[k]), differ: ['trees', 'furn'].filter(k => a[k] !== b[k]),
-    newRoads: sigs(1, 0, 3, false).roads !== a.roads, cards: JSON.stringify(shader) === JSON.stringify(cpu), near: impKeep(100), grow: +impGrow(1).toFixed(6),
+    newRoads: sigs(1, 0, 3, false).roads !== a.roads, cards: JSON.stringify(shader) === JSON.stringify(cpu), sizes, band, fade: IMP_FADE, survivor: impFadeStart(FAR_KEEP),
     ease: [easeW(-5), +easeW(EASE / 2).toFixed(3), easeW(EASE), easeW(EASE * 2)] };
-  // (the shader's thinning (impostor.js) is the one stream.js mirrors: from 140 m, to FAR_KEEP at FAR_D)
-  const m = readFileSync(new URL('../../app/js/world3d/impostor.js', import.meta.url), 'utf8').match(/mix\(1\.0, ([\d.]+), clamp\(\(d - 140\.0\) \/ ([\d.]+), 0\.0, 1\.0\)\)/);
-  out.lod.shader = m ? [+m[1], 140 + +m[2]] : null; out.lod.mirror = [FAR_KEEP, FAR_D]; }
+}
 
 /* ---------- baked tiles ---------- */
 const hs = new Float32Array(17 * 17).map((_, i) => 100 + (i % 17) * 1.25 - Math.floor(i / 17) * 0.75 + (i === 40 ? -150.3 : 0));

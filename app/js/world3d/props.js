@@ -16,7 +16,12 @@ const col = (hex, f = 1) => { const c = new THREE.Color(hex); return [c.r * f, c
 // parts always); opts.tag: a number in the `tag` attribute (what a part is, for a material)
 export function merge(parts) {
   const pos = [], nor = [], cl = [], uvs = [], sks = [], tags = [], plain = leafCell(LEAF.plain), pu = (plain[0] + plain[2]) / 2, pv = (plain[1] + plain[3]) / 2;
+  const footCaps = [];
   for (const [g0, c, mtx, o = {}] of parts) {
+    if (o.trunkFoot) {
+      const cap = g0.groups.find(group => group.materialIndex === 2);
+      if (cap) footCaps.push([pos.length / 3 + cap.start, cap.count]);
+    }
     const g = (g0.index ? g0.toNonIndexed() : g0.clone()); if (mtx) g.applyMatrix4(mtx); if (!o.card) g.computeVertexNormals();
     const p = g.attributes.position.array, n = g.attributes.normal.array, uv = g.attributes.uv?.array, ao = g.attributes.ao?.array, sk = g.attributes.sk?.array, cell = o.cell != null ? leafCell(o.cell) : null;
     for (let i = 0, v = 0; i < p.length; i += 3, v++) {
@@ -37,6 +42,7 @@ export function merge(parts) {
     g.dispose();
   }
   const out = new THREE.BufferGeometry();
+  if (footCaps.length) out.userData.footCaps = footCaps;
   out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   out.setAttribute('color', new THREE.Float32BufferAttribute(cl, 3));
@@ -140,11 +146,11 @@ function fronds(n, len, seed) {
   return quads(list, c => V(c.x, 1.2, c.z).normalize());
 }
 const trunkG = (r0, r1, h, s = 6) => new THREE.CylinderGeometry(r1, r0, h, s, 3).translate(0, h / 2, 0);
-const limb = (x0, y0, z0, x1, y1, z1, r, c) => {
+const limb = (x0, y0, z0, x1, y1, z1, r, c, trunkFoot = false) => {
   const d = new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0), L = d.length(), q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
-  return [new THREE.CylinderGeometry(r * 0.6, r, L, 5, 1).translate(0, L / 2, 0), c, new THREE.Matrix4().compose(new THREE.Vector3(x0, y0, z0), q, new THREE.Vector3(1, 1, 1)), { shade: [0, y1], cell: LEAF.bark }];
+  return [new THREE.CylinderGeometry(r * 0.6, r, L, 5, 1).translate(0, L / 2, 0), c, new THREE.Matrix4().compose(new THREE.Vector3(x0, y0, z0), q, new THREE.Vector3(1, 1, 1)), { shade: [0, y1], cell: LEAF.bark, trunkFoot }];
 };
-const bark = (g, c, m = null, shade = null) => [g, c, m, { cell: LEAF.bark, shade }];
+const bark = (g, c, m = null, shade = null) => [g, c, m, { cell: LEAF.bark, shade, trunkFoot: true }];
 const leaves = (g, c, soft = null) => [g, c, null, { card: true, soft }];
 // the dense heart of a crown: an opaque lumpy blob under the cards (a cone round a conifer's trunk), darker, so a crown
 // never shows the sky through its middle
@@ -199,7 +205,7 @@ export function treeGeometries() {
     pine: merge([bark(trunkG(0.45, 0.28, 9, 7), brownD), limb(0, 7.5, 0, 2, 10, 0.5, 0.18, brownD), limb(0, 8, 0, -1.6, 10.6, -0.4, 0.16, brownD),
       core(0, 11, 0, 2.8, 1.8, 2.6, F.pine, 15), ...lumps(0, 11, 0, 3.8, 2.6, 3.6, 6, 10, 2.9, LEAF.pine, 14).map(g => leaves(g, F.pine))]),
     // arroyo willow: many slender stems from the ground fanning out, a dense rounded thicket about 6 m tall and as wide
-    willow: merge([...[[1.6, 0.3], [-1.4, 0.6], [0.4, -1.5], [-0.5, 1.5], [1.2, -1.0]].map(([x, z], i) => limb(x * 0.15, 0, z * 0.15, x, 3.6 + 0.3 * i, z, 0.11, brownD)),
+    willow: merge([...[[1.6, 0.3], [-1.4, 0.6], [0.4, -1.5], [-0.5, 1.5], [1.2, -1.0]].map(([x, z], i) => limb(x * 0.15, 0, z * 0.15, x, 3.6 + 0.3 * i, z, 0.11, brownD, true)),
       core(0, 3.8, 0, 2.5, 1.9, 2.4, F.willow, 19), ...lumps(0, 3.7, 0, 3.0, 2.3, 2.9, 8, 11, 2.2, LEAF.willow, 18, { lift: 0.4 }).map(g => leaves(g, F.willow))]),
     // a young or cut-back blue gum (Street View: Alexander Avenue's cut, Center Road's avenue): a short pale trunk forking
     // about 2.6 m up into upright stems, blue-grey hanging leaves in an open dome from about 3 m, about 13 m tall; no solid

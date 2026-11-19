@@ -79,9 +79,11 @@ export function jobQueue(now = () => performance.now()) {
 // FAR_D, as the shader would draw them) and the street furniture (detail 0 only). A detail change rebuilds neither the
 // ground nor the roads, and nor does a quality change (A49). sigs: the build signatures of a tile's parts (a part is rebuilt when its signature changes).
 export const FAR_D = 1640, FAR_KEEP = 0.3;
-// the impostors' thinning by distance (impostor.js): the share kept and how much the kept ones grow
-export const impKeep = d => 1 + (FAR_KEEP - 1) * Math.min(1, Math.max(0, (d - 140) / (FAR_D - 140)));
-export const impGrow = keep => 0.92 / Math.sqrt(keep) + 0.08;
+// (Owner shot 20: a fixed 32 m fade for each retiring tree. Rank it before buffer quantization so the CPU
+// tile filter and the shader agree on all trees that survive to the outer ring.)
+export const IMP_FADE = 32;
+export const impRank = (x, z) => { const t = x * 0.1731 + z * 0.2917; return t - Math.floor(t); };
+export const impFadeStart = rank => rank <= FAR_KEEP ? -1 : 140 + (1 - rank) * (FAR_D - 140 - IMP_FADE) / (1 - FAR_KEEP);
 export function sigs(lod, q, ver, rails, pads = false) {
   // (A49: the quality is in the trees' signature only: the ground, the roads, the buildings, the tunnels and the street furniture are the same at every level)
   const ts = 'g', ds = `${ver}`, rs = ds + (rails ? '|r' : '') + (pads ? '|p' : '');

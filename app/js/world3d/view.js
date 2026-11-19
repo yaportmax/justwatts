@@ -1,3 +1,4 @@
+import { loadTreeFeet, trunkProfile, footRow, fitTrunkSkirts, omitBuriedCaps } from './tree-foot.js';
 // World 3D view: the Marin world in three.js around an open-world rider. Terrain, roads, trees and buildings stream
 // in by Web Mercator tile from the baked world (baked.js), finest around the rider; a chase camera follows the road.
 // Rendering runs on its own requestAnimationFrame loop and never touches the ride: any error, a lost context or a
@@ -11,7 +12,7 @@ import { bufferPaint } from './roadpaint.js';
 import { streetSections, sidewalkSupport } from './streetsection.js';
 import { roadCrossing, turnArrows } from './crosswalk.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
-import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impGrow } from './stream.js';
+import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impRank } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths, setLaneHook } from './rail.js';
 import { compileSpec, specPaint, SECTIONS as CZ_SECTIONS, RAILS as CZ_RAILS, LOTS as CZ_LOTS, CROSSWALKS as CZ_WALKS } from './conzelman.js';
 import { createEdit } from './edit.js';
@@ -183,6 +184,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   const wireMat = new THREE.LineBasicMaterial({ color: 0x2c2d2e }), tunLampMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(5, 4.3, 3.2) });  // a tunnel's lamps
   let fieldMaterial = null;
   const FURN = furnitureGeometries(), trees = treeGeometries(), DIMS = treeDims(trees), IMP = bakeImpostors(renderer, trees, SPECIES, textures().leaves, NEAR), pillarGeo = new THREE.BoxGeometry(1.6, 1, 1.6).translate(0, 0.5, 0);
+  loadTreeFeet().then(loaded => {
+    if (!loaded || dead) return;
+    for (const sp of SPECIES) omitBuriedCaps(trees[sp]);
+    for (const c of near.values()) c.partAt = null;
+  });
   const marks = createLandmarks({ THREE, scene, proj, sky, mats, baked });
   const post = createPost(renderer, scene, camera, sky.fog);
   const life = lifeOn ? createLife({ THREE, scene, proj, marks, quality: q }) : { update() {}, show() {}, setLamps() {}, dispose() {}, counts: null }, audio = createAudio({ on: sound });
@@ -365,6 +371,20 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
 
   /* ---------- streaming ---------- */
   const near = new Map(), far = new Map(), jobs = jobQueue();
+  const apronSurfaces = new Map(), apronRay = new THREE.Ray(), apronHit = new THREE.Vector3();
+  apronRay.direction.set(0, -1, 0);
+
+  function apronHeight(x, z, y) {
+    let top = y;
+    for (const { bounds, faces } of apronSurfaces.values()) {
+      if (x < bounds.min.x || x > bounds.max.x || z < bounds.min.z || z > bounds.max.z) continue;
+      apronRay.origin.set(x, y + 0.4, z);
+      for (const { a, b, c } of faces) {
+        if (apronRay.intersectTriangle(a, b, c, false, apronHit)) top = Math.max(top, apronHit.y);
+      }
+    }
+    return top;
+  }
   const easing = new Set(), leaving = new Map();  // near tiles easing in from the far ground; dropped ones drawn until their far tile covers them again
   if (globalThis.__w3?.prof) globalThis.__w3.slowJobs = jobs.slow;  // profiling: the jobs that took over 6 ms
   const tileOf = (x, z) => { const lat = proj.lat(z), lon = proj.lon(x); return [Math.floor(tileX(lon, NEAR_Z)), Math.floor(tileY(lat, NEAR_Z))]; };
@@ -1007,12 +1027,48 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
     }
     yield;
+    // (A68: Panoramic 515477 to 515499. Opposing photographs resolve the beam
+    // over the lidar road edge. Its posts and corrugated section share the existing barrier batches.)
+    for (const points of t.climbBeams || []) {
+      const edge = points.map(([lat, lon, elevation, nx, nz]) => {
+        const [x, z] = proj.xz(lat / 1e6, lon / 1e6);
+        return [x, elevation / 100, z, nx / 1000, nz / 1000];
+      });
+      const beam = railLine(edge, 0, edge.length - 1, 0, 1.9);
+      if (beam) rails.push({ ...beam, kind: 'wbeamg' });
+    }
     c.rails = rails; c.bankRuns = bankRuns; c.bankH = bankH; c.bankS = bankS; c.bankG = bankG;  // (the runs: the seams check, debug().seamData)
     { const T = []; for (const [a, b, trail] of tops) if (trail === true) for (let k = a; k < b; k++) { const v = B.idx[k]; T.push(B.pos[3 * v], B.pos[3 * v + 1], B.pos[3 * v + 2]); } c.trailPts = T; }
     c.surf = roadIndex(surf); c.decks = decks; c.occ = { occ, ox, oz, ow, oh }; c.lanes = new Float32Array(lanes); c.drive = drive; c.lines = lines; c.handLines = handLines; grass.invalidate(tileBox(c)); scrub.invalidate(tileBox(c));  // no grass or scrub on the roads
     if (!B.n) return setPart(c, 'roads', null);
     yield;
     const d = B.done(), geo = new THREE.BufferGeometry();
+    // (A68: Sequoia Valley at Panoramic. The continuous side-road paving crosses
+    // a surveyed verge up to 17 cm above the original ribbon. These road grades
+    // clear the overlapping triangles by 12 mm, preserving the adjoining banks.)
+    if (t.apronGrades) {
+      const grades = new Map(t.apronGrades.map(([x, z, y, rise]) => [x + ',' + z, [y, rise]]));
+      const raised = new Set();
+      for (let i = 0; i < d.pos.length; i += 3) {
+        const grade = grades.get(Math.round(d.pos[i] * 100) + ',' + Math.round(d.pos[i + 2] * 100));
+        if (grade && Math.abs(d.pos[i + 1] * 1000 - grade[0]) < 2) {
+          d.pos[i + 1] += grade[1] / 1000;
+          raised.add(i / 3);
+        }
+      }
+      // The wheels follow the same faces. A cached box avoids triangle tests outside the junction.
+      const bounds = new THREE.Box3(), faces = [], point = i => new THREE.Vector3().fromArray(d.pos, 3 * i);
+      for (let i = 0; i < d.idx.length && raised.size; i += 3) {
+        const a = d.idx[i], b = d.idx[i + 1], c = d.idx[i + 2];
+        if (!raised.has(a) && !raised.has(b) && !raised.has(c)) continue;
+        const face = new THREE.Triangle(point(a), point(b), point(c));
+        faces.push(face);
+        bounds.expandByPoint(face.a).expandByPoint(face.b).expandByPoint(face.c);
+      }
+      const apronKey = key(t.z, t.x, t.y);
+      if (faces.length) apronSurfaces.set(apronKey, { bounds, faces });
+      else apronSurfaces.delete(apronKey);
+    }
     geo.setAttribute('position', new THREE.BufferAttribute(d.pos, 3)); geo.setAttribute('ruv', new THREE.BufferAttribute(d.uv, 2));
     geo.setAttribute('rd', new THREE.BufferAttribute(d.code, 4)); geo.setAttribute('rd2', new THREE.BufferAttribute(d.code2, 4)); geo.setAttribute('rd3', new THREE.BufferAttribute(d.code3, 4)); geo.setIndex(new THREE.BufferAttribute(d.idx, 1)); geo.computeVertexNormals(); geo.computeBoundingSphere();
     const grp = new THREE.Group(), mesh = new THREE.Mesh(geo, mats.road); mesh.receiveShadow = true; grp.add(mesh); yield;
@@ -1190,13 +1246,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     for (const [sp, list] of Object.entries(out)) {
       const ci = SPECIES.indexOf(sp);
       // the same trees at every detail; the ring of tiles further out (2 km and more) keeps the cards the shader keeps
-      // past 1.6 km (FAR_KEEP), as big as it draws them there, once and for all (thinning in the shader would still cost
+      // past 1.6 km (FAR_KEEP), at their full-model scale (thinning in the shader would still cost
       // the GPU every one of them): the same picture when the tile comes nearer. In the dense groves of redwood and fir
       // fewer cards, no bigger: there a card mostly covers others, and every layer costs the GPU
-      const thin = c.lod > 0, own = sp === 'redwood' ? 0.5 : sp === 'fir' ? 0.7 : 1, keep = thin ? Math.min(own, FAR_KEEP) : own, grow = thin ? impGrow(FAR_KEEP) : 1;
+      const thin = c.lod > 0, own = sp === 'redwood' ? 0.5 : sp === 'fir' ? 0.7 : 1, keep = thin ? Math.min(own, FAR_KEEP) : own;
       if (ci >= 0) for (const [x, y, z, s, r, nearOnly, hf] of list) {
-        if (nearOnly || (x * 0.1731 + z * 0.2917) - Math.floor(x * 0.1731 + z * 0.2917) > keep) continue;
-        imp.push([x, y, z, s * grow, ci, (thin ? -1 : 1) * (hf ?? 0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
+        if (nearOnly || impRank(x, z) > keep) continue;
+        imp.push([x, y, z, s, ci, (thin ? -1 : 1) * (hf ?? 0.85 + 0.3 * r), 0.86 + 0.28 * hash2(Math.round(x), Math.round(z)), (hash2(Math.round(z), Math.round(x)) - 0.5) * 0.12]);
         y0 = Math.min(y0, y); y1 = Math.max(y1, y + 50 * s);
       }
       list.sort((u, w) => u[0] - w[0]);  // by x: a split looks at the strip round the rider only
@@ -1281,6 +1337,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       c.hiCount += a; m.count = a; m.userData.cast = k;
       m.computeBoundingSphere();
       // (a low crown by a road: its clip in the matrices' bottom rows, after the bounds; materials.js CLIP_GLSL, A15)
+      const profile = trunkProfile('gen-' + set.sp);
+      if (profile) {
+        let rows;
+        for (let i = 0; i < items.length; i++) {
+          const t = items[i][1], row = footRow(profile, t[0], t[2]);
+          if (row) { rows ??= new Float32Array(items.length); rows[i] = row; }
+        }
+        if (rows) fitTrunkSkirts(m, trees[set.sp], profile, new THREE.InstancedBufferAttribute(rows, 1), true);
+      }
       const IM = m.instanceMatrix.array; a = 0;
       for (const [, t] of items) { const cl = t[7]; if (cl) { IM[16 * a + 3] = cl[0]; IM[16 * a + 7] = cl[1]; IM[16 * a + 11] = cl[2] + 1 + 1000 * Math.round((cl[3] || 0) * 10); } a++; }
     };
@@ -1818,7 +1883,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       lidarTrees.each(proj.lat(b[3]), proj.lon(b[0]), proj.lat(b[1]), proj.lon(b[2]), (la, lo, hh, rr, sp) => {
         if (sp === 'euc' && hh < EUC_YOUNG) sp = 'eucS'; else if (sp === 'cypress' && hh >= CYP_TALL) sp = 'cypressT';
         if (i++ % 2 || !DIMS[sp]) return; const [x, z] = proj.xz(la, lo), h = gridHeight(c.grid, x, z); if (h == null || h < 2) return;
-        const f = fitTree(DIMS[sp], hh, rr), s = f.s * 1.41;
+        const f = fitTree(DIMS[sp], hh, rr), s = f.s;
         list.push([x, h - 0.5, z, s, SPECIES.indexOf(sp), -f.hf, 0.86 + 0.28 * hash2(Math.round(x * 3), 7), (hash2(7, Math.round(z * 3)) - 0.5) * 0.12]); y0 = Math.min(y0, h); y1 = Math.max(y1, h + hh);
       });
       yield; }
@@ -2495,9 +2560,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   function yAt(x, z, d, e = null) {
     // (the deck only for a course on it: Fort Baker's roads run under its north end)
     const k = marks.deckAt(x, z), ce = d != null ? eleAt(d) : e; if (k != null && (ce == null || Math.abs(ce - k) < 8)) return k;
-    if (d != null) { const y = profY(d); if (y != null) return Math.max(y, RI.topMax(x, z, y) ?? y) + TYRE; }
-    else if (RI) { const y = RI.top(x, z, e); if (y != null) return y; }
-    return yDrawn(x, z, d);
+    const rail = d != null ? profY(d) : RI?.top(x, z, e);
+    if (rail == null) return yDrawn(x, z, d);
+    const surface = d != null ? Math.max(rail, RI.topMax(x, z, rail) ?? rail) : rail;
+    const y = apronSurfaces.size ? apronHeight(x, z, surface) : surface;
+    return d != null ? y + TYRE : y;
   }
   function yDrawn(x, z, d) {
     const e = d == null ? null : eleAt(d), k = deckAt(x, z), tn = tunnelAt(x, z, e), b = tn ? tn.y + 0.05 : null;
@@ -2862,7 +2929,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     setQuality(n) { q = Math.max(0, Math.min(QUALITY.length - 1, n)); applyQuality(); },
     dispose, alive: () => !dead,
     // for checks and screenshots: the scene, the rider, what is under a point
-    debug: () => ({ warmLow, scene, camera, THREE, renderer, horizon: hz, sky, post, gpuMs: gpuTime.ms, me: me.group.position.toArray(), hand: (x, z) => ({ y: HAND.yAt?.(x, z) ?? null, hy: handY(x, z), inAll: inHandAll(x, z), inH: inHand(x, z), drawn: drawnY(x, z) }), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), raw: (c => c?.grid ? gridHeight(c.grid, x, z, c.grid.raw) : null)(near.get(key(NEAR_Z, ...tileOf(x, z)))), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null }), prof: () => st?.P ? { d: dShown, y: profY(dShown) == null ? null : profY(dShown) + TYRE, lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z), press: () => [...near.values()].map(c => ({ k: c.k, segs: c.grid?.segs, ...c.grid?.press })), quad: (x, z) => { const c = near.get(key(NEAR_Z, ...tileOf(x, z))), G = c?.grid; if (!G) return null; const [fi, fj] = gridIJ(G, x, z), s = G.segs, i = Math.min(s - 1, Math.floor(fi)), j = Math.min(s - 1, Math.floor(fj)), n = s + 1, k = j * n + i; return { k: c.k, segs: s, i, j, full: G.full ? G.full[j * s + i] : null, skip: !!handSkip(G)?.(i, j), hs: [G.hs[k], G.hs[k + 1], G.hs[k + n], G.hs[k + n + 1]].map(v => +v.toFixed(2)), raw: [G.raw[k], G.raw[k + 1], G.raw[k + n], G.raw[k + n + 1]].map(v => +v.toFixed(2)), x: [G.xs[i], G.xs[i + 1]].map(v => +v.toFixed(1)), z: [G.zs[j], G.zs[j + 1]].map(v => +v.toFixed(1)) }; },
+    debug: () => ({ warmLow, scene, camera, THREE, renderer, horizon: hz, sky, post, gpuMs: gpuTime.ms, me: me.group.position.toArray(), hand: (x, z) => ({ y: HAND.yAt?.(x, z) ?? null, hy: handY(x, z), inAll: inHandAll(x, z), inH: inHand(x, z), drawn: drawnY(x, z) }), probe: (x, z, e = null) => ({ tunnel: tunnelAt(x, z, e), ground: groundAt(x, z), raw: (c => c?.grid ? gridHeight(c.grid, x, z, c.grid.raw) : null)(near.get(key(NEAR_Z, ...tileOf(x, z)))), deck: deckAt(x, z), road: roadAt(x, z, e), rail: RI?.top(x, z, e) ?? null, rideSurface: yAt(x, z, null, e) }), prof: () => st?.P ? { d: dShown, y: profY(dShown) == null ? null : profY(dShown) + TYRE, lane: laneAt(dShown) } : null, tunRail: (x, z) => tunRail(x, z), press: () => [...near.values()].map(c => ({ k: c.k, segs: c.grid?.segs, ...c.grid?.press })), quad: (x, z) => { const c = near.get(key(NEAR_Z, ...tileOf(x, z))), G = c?.grid; if (!G) return null; const [fi, fj] = gridIJ(G, x, z), s = G.segs, i = Math.min(s - 1, Math.floor(fi)), j = Math.min(s - 1, Math.floor(fj)), n = s + 1, k = j * n + i; return { k: c.k, segs: s, i, j, full: G.full ? G.full[j * s + i] : null, skip: !!handSkip(G)?.(i, j), hs: [G.hs[k], G.hs[k + 1], G.hs[k + n], G.hs[k + n + 1]].map(v => +v.toFixed(2)), raw: [G.raw[k], G.raw[k + 1], G.raw[k + n], G.raw[k + n + 1]].map(v => +v.toFixed(2)), x: [G.xs[i], G.xs[i + 1]].map(v => +v.toFixed(1)), z: [G.zs[j], G.zs[j + 1]].map(v => +v.toFixed(1)) }; },
       // the drawn road's top under a point (a ray down onto the roads' and the bores' road surfaces), the nearest under y + 1
       // what is seen from above at a point: the top of the ground, the banks, the roads and lots, the bores' floors
       // ({ y, kind: 'ground' | 'bank' | 'road' }), null where nothing is drawn

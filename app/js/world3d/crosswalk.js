@@ -60,6 +60,33 @@ export function roadCrossing(lines,x,z,bearing,twoLines,positions) {
   return paint(s,shapes,positions);
 }
 
+export function stopStrokes() {
+  const L = { S: [[0, 0, 1, 0], [0, 0, 0, 0.5], [0, 0.5, 1, 0.5], [1, 0.5, 1, 1], [0, 1, 1, 1]], T: [[0, 0, 1, 0], [0.5, 0, 0.5, 1]],
+      O: [[0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 0, 1]], P: [[0, 0, 1, 0], [1, 0, 1, 0.5], [0, 0.5, 1, 0.5], [0, 0, 0, 1]] };
+  const strokes = [];
+  for (const [i, ch] of [...'STOP'].entries()) {
+    const left = (i - 1.5) * 0.75 - 0.275;
+    for (const [a, b, c, d] of L[ch]) {
+      strokes.push([left + 0.55*a, 2.4*b - 1.2, left + 0.55*c, 2.4*d - 1.2]);
+    }
+  }
+  return strokes;
+}
+
+// (A70: triangular yield markings at Miller 592200 and elongated STOP lettering
+// at Molino 610000. Clip every stroke to the same crossfall as the crossing.)
+export function streetMark(lines, x, z, bearing, kind, positions) {
+  const s = section(lines, x, z, bearing);
+  if (!s) return false;
+  const side = s.dx * (z - s.cz) - s.dz * (x - s.cx);
+  const along = s.dx * (x - s.cx) + s.dz * (z - s.cz);
+  const shapes = kind === 1
+    ? [[[-0.33, 0], [0.33, -0.27], [0.33, 0.27]]]
+    : stopStrokes().map(([a, b, c, d]) =>
+      rect(-Math.max(b,d)-0.06, -Math.min(b,d)+0.06, Math.min(a,c)-0.06, Math.max(a,c)+0.06));
+  return paint(s, shapes.map(shape => shape.map(([u,v]) => [u+along,v+side])), positions);
+}
+
 export function turnArrows(lines,x,z,bearing,lanes,opposite,positions) {
   const s=section(lines,x,z,bearing);
   if(!s)return false;

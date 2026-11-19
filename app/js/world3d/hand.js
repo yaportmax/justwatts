@@ -75,6 +75,62 @@ function grain(m, amp, scales) {
   return m;
 }
 
+// (A69: measured yellow-line contrast against adjacent asphalt in the Panoramic
+// and Pantoll photos. Each row gives the first surveyed metre and lost paint in
+// percent. Unobserved pavement keeps its original line.)
+const wornCentres = [
+  [511966,[42,43,36,38,31,24]],
+  [515157,[97,97,95,95,42,38,34,34,33,36,41,33,36,37]],
+  [520104,[54,55,57,52,51,43,42,39,36,46,57,60]],
+  [520609,[34,55,67,67,70,82,83,81]],
+  [520618,[76,79,80]],
+  [521400,[26,25,25,30,36,41,40,40,44,47,48]],
+  [531124,[40,35,49,54,56,37]],
+  [531132,[24,59,73,65,45]]
+];
+
+function fadeSurveyedPaint(mesh, chunk, material) {
+  if (mesh.material.name !== 'paint_yellow') return material;
+  const runs = wornCentres.filter(([start, losses]) =>
+    start <= chunk.s1 + 1 && start + losses.length >= chunk.s0);
+  if (!runs.length) return material;
+  const begin = Math.floor(chunk.s0) - 2, count = Math.ceil(chunk.s1) - begin + 3;
+  const ink = new Uint8Array(count);
+  for (const [start, losses] of runs) for (let i = 0; i < losses.length; i++) {
+    const index = start + i - begin;
+    if (index >= 0 && index < count) ink[index] = Math.round(losses[i] * 2.55);
+  }
+  const tex = new THREE.DataTexture(ink, count, 1, THREE.RedFormat);
+  tex.minFilter = tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  const positions = mesh.geometry.attributes.position, uv = new Float32Array(positions.count);
+  mesh.updateWorldMatrix(true, false);
+  const point = new THREE.Vector3(), roads = spec_();
+  for (let i = 0; i < uv.length; i++) {
+    point.fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld);
+    const station = roads.at(point.x, point.z)?.s;
+    uv[i] = ((station ?? begin) - begin + 0.5) / count;
+  }
+  mesh.geometry.setAttribute('paintStation', new THREE.BufferAttribute(uv, 1));
+  const m = material.clone(), prior = material.onBeforeCompile;
+  m.transparent = true;
+  m.depthWrite = false;
+  m.onBeforeCompile = (sh, renderer) => {
+    prior.call(m, sh, renderer);
+    sh.uniforms.wornLine = { value: tex };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>',
+      '#include <common>\nattribute float paintStation; varying float vPaintStation;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvPaintStation = paintStation;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>',
+      '#include <common>\nuniform sampler2D wornLine; varying float vPaintStation;')
+      .replace('#include <alphamap_fragment>',
+        '#include <alphamap_fragment>\ndiffuseColor.a *= 1.0 - texture2D(wornLine, vec2(vPaintStation, 0.5)).r;');
+  };
+  m.customProgramCacheKey = () => material.customProgramCacheKey() + '|surveyed-paint';
+  m.addEventListener('dispose', () => tex.dispose());
+  return m;
+}
+
 // (A37 theme 8: each road's asphalt tone against Conzelman's, from Street View: the asphalt's pixel median in each pair
 // (low saturation, no paint, the bottom middle of the view) over the game's at the same pose, as a ratio to Conzelman's own
 // (its surface the reference), linear RGB, damped to 0.6 of the measured step (two to seven pairs a road, auto exposure):
@@ -366,7 +422,7 @@ export function loadHand({ scene, base = '/world/hand/', lambert = m => m, onLoa
           // (A34: the dark information boards near black, 0.5 %, read as holes cut in the view, lv2 0:29 and 1:40: a painted dark brown-green, still dark)
           if (/^(sign_board|a31_bo_board)/.test(s.name)) m.color.setRGB(0.045, 0.055, 0.045);
           m = lambert(m); mats.set(mk, m); }
-        o.material = m;
+        o.material = fadeSurveyedPaint(o, c, m);
       });
       if (hasVerge) addShoulders(g.scene, lambert);
       into.add(g.scene); into.updateMatrixWorld(true); box.expandByObject(g.scene);
@@ -605,7 +661,7 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
       const canopy = crownFits?.[sp] ? await model(sp) : null;
       const targets = canopy?.parts[0].length ? crownFits[sp] : [];
       const fitted = targets.length ? new Set() : null;
-      for (const [index, x, z, width, height, angle, percent, vertical = 100] of targets) {
+      for (const [index, x, z, width, height, angle, percent, vertical = 100, depth = percent] of targets) {
         const k = index * st;
         // A later vegetation bake may reorder the group or refit this tree.
         if (Math.round(a0[k] * 100) !== x || Math.round(a0[k + 2] * 100) !== z ||
@@ -614,7 +670,8 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
         if (boreIn(a0[k], a0[k + 2])) continue;
         fitted.add(index);
         a0[k + 4] *= percent / 100;
-        a0[k + 6] *= percent / 100;
+        // (A69: direction-specific lidar reach of crowns over the narrow climbs.)
+        a0[k + 6] *= depth / 100;
         a0[k + 5] *= vertical / 100;
       }
       // These measured overhanging crowns stay one full mesh all the way down
@@ -632,8 +689,15 @@ export function loadVeg({ scene, renderer = null, base = '/world/hand/', lambert
           group.add(mesh);
         }
       }
-      let a = a0, n = n0; { let k = 0; for (let i = 0; i < n0; i++) if (!fitted?.has(i) && !boreIn(a0[st * i], a0[st * i + 2])) k++;
-        if (k < n0) { a = new Float32Array(k * st); n = 0; for (let i = 0; i < n0; i++) if (!fitted?.has(i) && !boreIn(a0[st * i], a0[st * i + 2])) a.set(a0.subarray(st * i, st * i + st), st * n++); state.boreVeg = (state.boreVeg || 0) + n0 - k - (fitted?.size || 0); } }
+      // (A70: Miller 591200 and 591250 reverse. The tile's measured
+      // deciduous street crowns replace these lidar stems at both qualities.
+      // Check the stem position in case a future bake reorders the group.)
+      let omit = fitted;
+      for (const [i, x, z] of crownFits?.streetReplacements?.[sp] || []) {
+        if (Math.round(a0[i * st] * 100) === x && Math.round(a0[i * st + 2] * 100) === z) (omit ??= new Set()).add(i);
+      }
+      let a = a0, n = n0; { let k = 0; for (let i = 0; i < n0; i++) if (!omit?.has(i) && !boreIn(a0[st * i], a0[st * i + 2])) k++;
+        if (k < n0) { a = new Float32Array(k * st); n = 0; for (let i = 0; i < n0; i++) if (!omit?.has(i) && !boreIn(a0[st * i], a0[st * i + 2])) a.set(a0.subarray(st * i, st * i + st), st * n++); state.boreVeg = (state.boreVeg || 0) + n0 - k - (omit?.size || 0); } }
       if (!n) continue;
       if (DROP.has(sp)) continue;  // (A33: the round brush domes by the road dropped, user 2026-11-05: 'these bushes so bad just remove them')
       const M = await model(sp); if (!M) continue;
@@ -986,7 +1050,11 @@ function groundMaker(base) {
           float foliage = smoothstep(0.24, 0.73, t2 * 0.35 + t03 * 0.65);
           float cover = tIn * growth * (1.0 - jwBand) * tNear;
           vec3 leaves = mix(tBrush, JW_TS(0.43, 0.49, 0.27) * gG, foliage * 0.75);
-          tc = mix(tc, leaves, growth * foliage * tNear);
+          // (A69: Panoramic 516360 and 518260. Continuous foliage over the
+          // measured bank, with litter still showing through small breaks.)
+          float matCover = growth * tNear * (0.58 + 0.38 * foliage);
+          vec3 bank = mix(JW_TS(0.22,0.29,0.15) * gL, leaves, foliage);
+          tc = mix(tc, bank, matCover);
           float relief = foliage * 0.42;
           float rx = dFdx(relief), ry = dFdy(relief);
           float det = dPx.x * dPy.y - dPx.y * dPy.x;

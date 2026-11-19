@@ -95,7 +95,7 @@ vec4 jwVeg(vec2 p) {
 }
 // set by jwGround: how much of the point is coastal scrub from the aerial imagery, and whether there is any there; set
 // before it: how near the point is (1: among the scrub's drawn bushes, its ground the litter and grass under them)
-float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0, jwGv = 0.0, jwEarth = 0.0;
+float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0, jwGv = 0.0, jwEarth = 0.0, jwBank = 0.0;
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
   // (the small noise on a steep face laid across the face, along it and up it, not projected from above: no streaks
@@ -302,6 +302,11 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
     vec2 uv = (p - vec2(6186.0, 2578.0)) / vec2(3114.0, 2232.0);
     vec4 lot = texture2D(tLots, uv);
     c = mix(c, lot.rgb / max(lot.a, 0.001) * (0.86 + 0.25 * nB.g), lot.a * 0.85);
+    // (A69: Molino 610250 and Edgewood 621050. Three darker olive palette entries
+    // mark banks with low lidar returns, a measured slope and a green aerial signal.)
+    jwBank = lot.a * smoothstep(0.002, 0.018, lot.g - 4.0 * lot.b)
+             * smoothstep(0.001, 0.011, lot.g - 1.6 * lot.r);
+
   }
   c = mix(c, srgb(vec3(0.20, 0.34, 0.38)), lake);
   c = mix(c, srgb(vec3(0.24, 0.30, 0.28)), smoothstep(0.5, -2.1, h));
@@ -356,6 +361,11 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         // (A33: the scrub's and rock's relief laid across a steep face too, gentler, and gone where a pixel spans more than a metre: projected from above it stretched into a fine crosshatch on the banks, user 2026-11-05)
         float bmpK = 1.0 - smoothstep(0.25, 1.0, length(fwidth(vW.xz)));
         float hb = ((f1 * 0.35 + f2 * 0.3) * (1.0 - jwPav * 0.8) + rk * JWF(/ 3.5).b * 0.25 + jwScrub * (1.0 - jwNear) * JWF(/ 3.1 + 0.37).g * 0.6) * bmpK;
+        // The existing two ground-grain scales break the ivy mat into lit leaves
+        // and shaded hollows. Fade its fine relief when the leaves are subpixel.
+        float leaves = smoothstep(0.25, 0.72, 0.35 * f1 + 0.65 * f2);
+        c *= 1.0 + jwBank * near * (leaves - 0.5) * 0.58;
+        hb += jwBank * leaves * 0.36 * bmpK;
         vec3 dpx = dFdx(vW), dpy = dFdy(vW); float dhx = dFdx(hb), dhy = dFdy(hb);
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
         vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.14 + rk * 0.1) * near;  /* (A33: gentler: at 0.55 it lit the hills in black blots and pixel speckle that crawled as the camera moved, user 2026-11-05) */
@@ -673,7 +683,7 @@ export function tunnelMaterial() {
   return m;
 }
 // A portal's headwall: concrete in courses with a coping, an arch ring round the opening (lighter), weathered lower down
-export function portalMaterial() {
+export function portalMaterial(bank = false) {
   const m = new THREE.MeshLambertMaterial({ color: 0xc4bfb3 });
   m.onBeforeCompile = sh => {
     sh.uniforms.tNoise = { value: textures().noise };
@@ -685,8 +695,25 @@ export function portalMaterial() {
         float board = step(0.97, fract(vPl.y / 0.3)) * 0.06, streak = texture2D(tNoise, vec2(vPl.x / 1.3, vPl.y / 14.0)).g;
         float n = texture2D(tNoise, vPl.xy / 4.0).g, f = texture2D(tNoise, vPl.xy / 0.8).r;
         diffuseColor.rgb *= (0.86 + 0.16 * n + 0.06 * f) * (1.0 - board) * (1.0 - 0.18 * smoothstep(0.55, 0.85, streak)) * mix(0.78, 1.0, smoothstep(-1.0, 3.0, vPl.y));`);
+    // (A69: Edgewood 620400 staggered courses and Molino 610150 timber sleepers.
+    // The existing retaining-wall coordinates follow the face in metres.)
+    if (bank) sh.fragmentShader = sh.fragmentShader.replace('#include <alphamap_fragment>', `
+      float timber = step(8.5, vPl.z) * (1.0 - step(9.5, vPl.z));
+      float coarse = step(9.5, vPl.z);
+      float rowH = mix(0.22, 0.16, coarse);
+      vec2 uvWall = vec2(vPl.x / mix(0.43, 0.3, coarse), vPl.y / rowH);
+      uvWall.x += 0.5 * mod(floor(uvWall.y), 2.0);
+      vec2 edge = min(fract(uvWall), 1.0 - fract(uvWall));
+      vec2 aa = max(fwidth(uvWall), vec2(0.002));
+      vec2 face = smoothstep(vec2(0.018) - aa, vec2(0.018) + aa, edge);
+      float course = mix(min(face.x, face.y), face.y, timber);
+      float shade = texture2D(tNoise, floor(uvWall) * 0.039).g;
+      vec3 stone = mix(vec3(0.46,0.39,0.32), vec3(0.69,0.63,0.53), shade);
+      vec3 wood = vec3(0.49,0.40,0.32) * (0.72 + 0.37 * texture2D(tNoise, vPl.xy * vec2(0.23,6.0)).r);
+      if (vPl.z < 10.5) diffuseColor.rgb *= mix(stone,wood,timber) * mix(0.68,1.0,course);
+      #include <alphamap_fragment>`);
   };
-  m.customProgramCacheKey = () => 'jw-portal-2';
+  m.customProgramCacheKey = () => bank ? 'jw-bank-wall-1' : 'jw-portal-2';
   return m;
 }
 

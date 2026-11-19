@@ -14,5 +14,7 @@ export async function activePlants(APP){
  if(!ranges||!drop)throw Error('Runtime plant exclusion source not found');
  const bore=Function('PROJ_','spec_',source.slice(start,end)+'; return boreZone('+ranges+');')(PROJ,()=>spec);
  const dropped=new Set([...Function('return '+drop)(),...flatDecals(APP)]);
- return (sp,x,z)=>!dropped.has(sp)&&!bore(x,z);
+ // (A70: hand.js omits the stems a tile's measured street crowns replace, tam-climb-crowns.json streetReplacements)
+ const replaced=new Set();try{const fits=JSON.parse(read(APP+'/world/tam-climb-crowns.json','utf8'));for(const g of Object.values(fits))for(const [sp,list] of Object.entries(g?.streetReplacements||{}))for(const [,x,z] of list)replaced.add(sp+'|'+x+'|'+z);}catch(e){if(e.code!=='ENOENT')throw e;}
+ return (sp,x,z)=>!dropped.has(sp)&&!bore(x,z)&&!replaced.has(sp+'|'+Math.round(x*100)+'|'+Math.round(z*100));
 }

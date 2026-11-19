@@ -30,11 +30,15 @@ export function streetSections(rows, xz) {
 // (A64: Miller 590950. The prop-placement bank cells can differ from the
 // visible triangle by several centimetres. Sample the emitted paving and bank
 // triangles for sidewalk corners, and use the terrain grid everywhere else.)
-export function* sidewalkSupport(roadMeshes, floor, rows, project) {
+export function* sidewalkSupport(roadMeshes, floor, rows, project, walk) {
   const cell = v => Math.floor(v / 8);
   const key = (i, j) => i * 65536 + j;
   const nearby = new Set(), buckets = new Map();
-  for (const [lat, lon, da, dO] of rows) {
+  if (walk) for (const [dx, dz] of walk.points) {
+    const x = (walk.origin[0] + dx) / 100, z = (walk.origin[1] + dz) / 100;
+    nearby.add(key(cell(x), cell(z)));
+  }
+  for (const [lat, lon, da, dO] of rows || []) {
     const a = project(lat / 1e6, lon / 1e6);
     const b = project((lat + da) / 1e6, (lon + dO) / 1e6);
     for (let i = cell(Math.min(a[0], b[0]) - 24); i <= cell(Math.max(a[0], b[0]) + 24); i++) {

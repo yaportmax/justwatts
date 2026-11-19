@@ -5,6 +5,7 @@
 import * as THREE from '../../vendor/three-0.180.0/three.module.min.js';
 import { hash2 } from './landuse.js';
 import { LEAF, leafCell } from './tex.js';
+import { stopStrokes } from './crosswalk.js';
 import { footprintGap, footprintContains, simpleOutline } from './footprint.js';
 
 const col = (hex, f = 1) => { const c = new THREE.Color(hex); return [c.r * f, c.g * f, c.b * f]; };
@@ -305,12 +306,10 @@ export function furnitureGeometries() {
   };
   // STOP in block strokes: each letter 0.55 m wide and 2.4 m long (its top toward -z), 0.12 m strokes, 0.2 m apart
   function stopWord() {
-    const L = { S: [[0, 0, 1, 0], [0, 0, 0, 0.5], [0, 0.5, 1, 0.5], [1, 0.5, 1, 1], [0, 1, 1, 1]], T: [[0, 0, 1, 0], [0.5, 0, 0.5, 1]],
-      O: [[0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 0, 1]], P: [[0, 0, 1, 0], [1, 0, 1, 0.5], [0, 0.5, 1, 0.5], [0, 0, 0, 1]] };
-    const w = 0.55, h = 2.4, t = 0.12, out = [];
-    [...'STOP'].forEach((ch, k) => { const x0 = (k - 1.5) * (w + 0.2) - w / 2;
-      for (const [a, b, c, d] of L[ch]) { const xa = x0 + a * w, xb = x0 + c * w, za = -h / 2 + b * h, zb = -h / 2 + d * h;
-        out.push(B(Math.abs(xb - xa) + t, 0.012, Math.abs(zb - za) + t, (xa + xb) / 2, 0, (za + zb) / 2)); } });
+    const out = [];
+    for (const [xa, za, xb, zb] of stopStrokes()) {
+      out.push(B(Math.abs(xb-xa) + 0.12, 0.012, Math.abs(zb-za) + 0.12, (xa+xb)/2, 0, (za+zb)/2));
+    }
     return out;
   }
   return {
@@ -795,7 +794,7 @@ export function signFaceGeometry(list) {
 // (A54: bay promenade from local OSM Bridgeway and the sa_0800/cxj_541000 pairs.
 // Pavement clears every drawn road/path, ride line and vehicle ribbon, on the existing ground, with closed sides.
 // No terrain edits, invented lanes, cars, or per-frame work.)
-export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, walkGap = gap, sectionAt, rampGap, support = ground, sea = -Infinity, palms = [] }) {
+export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, surveyedWalk, walkGap = gap, sectionAt, rampGap, support = ground, sea = -Infinity, palms = [] }) {
   const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
   const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
   // (A61: cxs_540900_0 and cxs_540900_180: Bridgeway's black lantern lamps on the house side's kerb: a base, the post, a pale lantern under its cap; [from, to, half width, colour])
@@ -811,7 +810,10 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
   const block = (x, z, y0, y1, h, color) => { const p = [[x - h, z - h], [x + h, z - h], [x + h, z + h], [x - h, z + h]];
     for (let j = 0; j < 4; j++) { const [ax, az] = p[j], [bx, bz] = p[(j + 1) % 4]; quad([ax, y0, az], [ax, y1, az], [bx, y1, bz], [bx, y0, bz], color); }
     quad([p[0][0], y1, p[0][1]], [p[3][0], y1, p[3][1]], [p[2][0], y1, p[2][1]], [p[1][0], y1, p[1][1]], color); };
-  const tri = (a, b, c, color) => { pos.push(...a, ...b, ...c); for (let i = 0; i < 3; i++) col.push(color.r, color.g, color.b); };
+  const tri = (a, b, c, ca, cb = ca, cc = ca) => {
+    pos.push(...a, ...b, ...c);
+    col.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+  };
   const quad = (a, b, c, d, color) => { tri(a, b, c, color); tri(a, c, d, color); };
   const wall = (a,b,c,d,color) => { const key=[a,b,c,d].map(p=>p.map(v=>v.toFixed(3)).join(',')).sort().join('|');if(walls.has(key))walls.delete(key);else walls.set(key,[a,b,c,d,color]); };
   // (A64: Miller 590950 return. A clipped section ends against the surrounding
@@ -979,6 +981,48 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
         }
       }
     }
+  }
+  // (A70: sa_1200, sa_2000 and cxs_544100_180. Bridgeway widths follow the
+  // emitted carriageway edges, the separate sidewalk trace and the shop fronts.
+  // The survey cuts those sections at actual road mouths and lots. Seat each
+  // shared corner once, including the lowered vertices at driveway ramps.)
+  if (surveyedWalk) {
+    const { origin, points, faces, walls: exposed } = surveyedWalk;
+    const tops = [], feet = [], tints = [concrete, curb, red,
+      // (A70: 590400 planted bed, 591200 grass mall and 590000 mineral nose.
+      // Classes come from the local near-infrared survey between paired kerbs.)
+      ...[0x81934d, 0x758448, 0x626941, 0x867457, 0xb5ab94].map(rgb => new THREE.Color(rgb))];
+    // (A70: the continuous grass mall at Miller 591200. Each shared corner
+    // carries the sampled ground colour, interpolated across the planted bed.)
+    const shades = points[0]?.length > 5 ? [] : null;
+    const palette = shades && new Map();
+    for (const [dx, dz, edgeCm, rampPercent, outerPercent, rgb] of points) {
+      if (shades) {
+        if (!palette.has(rgb)) palette.set(rgb, new THREE.Color(rgb));
+        shades.push(palette.get(rgb));
+      }
+      if (++work % 96 === 0) yield;
+      const x = (origin[0] + dx) / 100, z = (origin[1] + dz) / 100;
+      const floor = support(x, z);
+      if (floor == null) { tops.push(null); feet.push(null); continue; }
+      const rise = 0.018 + 0.125 * rampPercent / 100;
+      const road = edgeCm / 100;
+      const outer = outerPercent / 100;
+      const y = Math.max(floor + 0.025, (1 - outer) * Math.max(road, floor) + outer * floor + rise);
+      tops.push([x, y, z]);
+      feet.push([x, Math.min(y - 0.18, floor - 0.08, road - 0.08), z]);
+    }
+    for (const [a, b, c, tint] of faces) {
+      if (++work % 192 === 0) yield;
+      if (!tops[a] || !tops[b] || !tops[c]) continue;
+      if (shades) tri(tops[a], tops[b], tops[c], shades[a], shades[b], shades[c]);
+      else tri(tops[a], tops[b], tops[c], tints[tint]);
+    }
+    for (const [a, b, tint] of exposed) {
+      if (++work % 192 === 0) yield;
+      if (tops[a] && tops[b]) quad(tops[b], tops[a], feet[a], feet[b], tint > 2 ? tints[tint] : tint === 2 ? red : curb);
+    }
+    evidence.surveyedFaces = faces.length;
   }
   for (const { top, bottom, ends, keys, tint } of pavedSections) {
     if (++work % 48 === 0) yield;

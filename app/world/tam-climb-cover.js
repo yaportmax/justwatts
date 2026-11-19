@@ -184,12 +184,42 @@ const climbCover = [
     0xff80180, 0x3f00180, 0x1f001c0,
   ]],
 ];
+// (A69: Panoramic 516560, 517860 and 518260. Two-metre cells project onto green ground
+// photographed on sloping lidar terrain, with matching near-infrared vegetation.)
+const photographedBanks = new Map([
+  [258193, 0x7000000],
+  [258194, 0xe000000],
+  [258195, 0x18000000],
+  [258283, 0x300000],
+  [258284, 0x600000],
+  [258286, 0x100000],
+  [258931, 0x180000],
+  [258932, 0x180000],
+  [258933, 0x180000],
+  [258934, 0x180000],
+  [258935, 0x200000],
+  [258936, 0x280000],
+  [258937, 0x180000],
+  [259035, 0x700000],
+  [259036, 0xe80000],
+  [259037, 0xe80000],
+  [259038, 0xe80000],
+  [259040, 0x780000],
+  [259041, 0x780000],
+  [259042, 0x780000],
+  [259043, 0x200000],
+  [259045, 0x400000],
+  [259046, 0x100000],
+]);
+
 export function hasClimbUnderstory(s, side, distance) {
   if (s < 511360 || s >= 535000 || distance < 0 || distance >= 32) return false;
   const grid = climbCover[Math.floor(s / 10000) - 51];
   const bits = grid[1][Math.floor((s - grid[0]) / 8)] || 0;
   const bit = Math.floor(distance / 2) + (side === 'R' ? 16 : 0);
-  return !!(bits & (1 << bit));
+  const mask = 1 << bit;
+  if (bits & mask) return true;
+  return s >= 516360 && s < 518320 && !!((photographedBanks.get(Math.floor(s / 2)) || 0) & mask);
 }
 
 // Pale exposed mineral on East Ridgecrest, including the gravel beyond the paved

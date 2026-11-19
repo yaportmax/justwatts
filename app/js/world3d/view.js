@@ -10,7 +10,7 @@ import { gridFromHeights, gridHeight, gridIJ, carveSteps, pushUnder, pushUnderSt
 import { ribbonEdge, sideKinds, sideRunsSteps, bankGeometry, railLine, CUT } from './banks.js';
 import { bufferPaint } from './roadpaint.js';
 import { streetSections, sidewalkSupport } from './streetsection.js';
-import { roadCrossing, turnArrows } from './crosswalk.js';
+import { roadCrossing, turnArrows, streetMark } from './crosswalk.js';
 import { builder, ribbon, deckSides, roadStyle, roadLift, resample, clipLine, chainWays, roundCorners, tapers, markCode, YB } from './ribbon.js';
 import { wanted, plan, jobQueue, childrenOf, parentOf, NEAR_Z, FAR_Z, sigs, easeW, EASE, FAR_KEEP, impRank } from './stream.js';
 import { dense, track, railIndex, profileOf, profileAt, railLift, oneLane, ONE_LANE, handBarriers, setWidths, setLaneHook } from './rail.js';
@@ -39,7 +39,7 @@ import { createPost } from './post.js';
 import { createGrass } from './grass.js';
 import { createLife } from './life.js';
 import { createAudio } from './audio.js';
-import { gardenBoundaries, athleticFence, athleticFenceMaterial } from './fieldfence.js';
+import { gardenBoundaries, gardenWallRuns, athleticFence, athleticFenceMaterial } from './fieldfence.js';
 import { makeRider } from './rider.js';
 import { createLandmarks } from './marin.js';
 import { GGB, onDeck } from '../ggb.js';
@@ -752,6 +752,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (r.fl & 2) continue;                          // tunnels: under the hill
       const st = roadStyle(r.hw, r.ln, r.fl, r.wd), tr = !(r.fl & 1) && isTrail(r);
       // (A59: on Sausalito's waterfront a footway is the sidewalk, concrete in Street View cxs_540900_180, not a dirt trail)
+      if (r.paved) st.surf = 1;
       if (r.hw === 'footway' && r.pts.some(([la, lo]) => la >= TOWN_WATERFRONT.south && la <= TOWN_WATERFRONT.north && lo > -122.482 && lo < -122.474)) st.surf = 1;
       // (A67: the mapped dock footways between Waldo's rows, formerly dirt trails on the bed.)
       const floatingDock = !!(r.fl & 65536);
@@ -1513,7 +1514,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // Generate with the furniture, outside all road/path ribbons; never touch terrain or road construction.)
     const tb = tileBox(c), la0 = proj.lat(tb[3]), la1 = proj.lat(tb[1]);
     const sectionAt = streetSections(t.mvEdges, proj.xz);
-    if (sectionAt || (la1 > TOWN_WATERFRONT.south && la0 < TOWN_WATERFRONT.north && proj.lon(tb[2]) > -122.482 && proj.lon(tb[0]) < -122.474)) {
+    if (sectionAt || t.townWalk || (la1 > TOWN_WATERFRONT.south && la0 < TOWN_WATERFRONT.north && proj.lon(tb[2]) > -122.482 && proj.lon(tb[0]) < -122.474)) {
       const streets = sectionAt ? [] : TOWN_STREETS.filter(s => s.pts.some(([a, o]) => a >= la0 - 0.001 && a <= la1 + 0.001 && o >= proj.lon(tb[0]) - 0.001 && o <= proj.lon(tb[2]) + 0.001))
         .map(s => ({ ...s, P: s.pts.map(p => proj.xz(...p)) }));
       const buildings = t.features.filter(f => f.k === 'building').map(f => {
@@ -1542,13 +1543,13 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           blocks.get(key).push(b);
         }
       }
-      const support = sectionAt ? yield* sidewalkSupport(c.parts.roads?.children, (x, z) => {
+      const support = sectionAt || t.townWalk ? yield* sidewalkSupport(c.parts.roads?.children, (x, z) => {
         const owner = near.get(key(NEAR_Z, ...tileOf(x, z)));
         return owner?.grid ? gridHeight(owner.grid, x, z) : groundAt(x, z);
-      }, t.mvEdges, proj.xz) : null;
+      }, t.mvEdges, proj.xz, t.townWalk) : null;
       const palms = PLAZA_PALMS.map(([lat, lon, h, radius]) => [...proj.xz(lat, lon), h, radius])
         .filter(([x, z]) => x >= tb[0] && x < tb[2] && z >= tb[1] && z < tb[3] && koGap(x, z) > 1.5);
-      const geom = yield* townEdgeGeometry(c.lines, streets, { palms,
+      const geom = yield* townEdgeGeometry(c.lines, streets, { palms, surveyedWalk: t.townWalk,
         sectionAt, support: support || undefined, rampGap: openings && ((x, z) => openings.gap(x, z)),
         ground: (x, z) => drawnY(x, z), gap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z)), roadGap(x, z) ?? Infinity),
         // (A54: sa_0800/cxj_541000: the eastern bay promenade has a seawall down to the seabed.)
@@ -1565,13 +1566,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     // (A64: Molino's front boundaries and Miller's school athletic field. Use
     // terrain at both feet and discard segments in driveways or buildings.)
+    let gardenWalls;
     if (t.gardenEdges?.length) {
       const footprints = t.features.filter(f => f.k === 'building').map(f => {
         const rings = f.rings.map(r => r.map(p => proj.xz(...p))), points = rings.flat();
         const xs = points.map(p => p[0]), zs = points.map(p => p[1]);
         return { rings, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
       });
-      const blocked = (x,z) => inHandAll(x,z) || footprints.some(b => x>=b.x0 && x<=b.x1 && z>=b.z0 && z<=b.z1 && inRings(b.rings,x,z));
+      const blocked = (x,z, surveyed = false) => (!surveyed && inHandAll(x,z)) || footprints.some(b => x>=b.x0 && x<=b.x1 && z>=b.z0 && z<=b.z1 && inRings(b.rings,x,z));
+      gardenWalls = gardenWallRuns(t.gardenEdges, proj.xz, drawnY, koGap, blocked);
       const garden = gardenBoundaries(t.gardenEdges, proj.xz, drawnY, koGap, blocked);
       if (garden) {
         const mesh = new THREE.Mesh(garden, mats.furn);
@@ -1624,6 +1627,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if(clear)masts.push({x:sp[0],z:sp[1],foot:y-0.1,top:Math.max(y,q[1])+7.4,hx,hz,yaw:Math.atan2(-fx,-fz),id});
     }
     if(masts.length){const geometry=townMastGeometry(masts,FURN.signalHead),mesh=new THREE.Mesh(geometry,mats.furn);mesh.name='town-mast-signals';mesh.receiveShadow=true;grp.add(mesh);}
+    // (A70: the measured teeth before the Miller 592200 crossing and the
+    // STOP legends on Molino and Edgewood sit on their own road triangles.)
+    for (const [la, lo, heading, kind] of t.streetMarks || []) {
+      const [x, z] = proj.xz(la / 1e6, lo / 1e6);
+      streetMark(c.lines, x, z, heading, kind, crossingPaint);
+    }
     for (const [la,lo,bearing,lanes,opposite] of t.mvTurns || []) {
       const [x,z]=proj.xz(la,lo);
       turnArrows(c.lines,x,z,bearing,lanes,opposite,crossingPaint);
@@ -1669,7 +1678,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // tall, its top 0.79 m up (Caltrans A77: 31 in), its two ridges toward the road; a white concrete beam on its blocks; a
     // K-rail (the New Jersey shape, 32 in tall, 24 in at its foot); a cable fence's wire, a rail fence's two rails, a
     // chain-link fence's top rail and its mesh (a see-through sheet)
-    if (c.rails?.length) {
+    if (c.rails?.length || gardenWalls?.length) {
       const SEC = {
         wbeam: [mats.rail, [[0.47, 0.16], [0.54, 0.22], [0.63, 0.16], [0.72, 0.22], [0.79, 0.16]], false],
         wbeamg: [mats.rail, [[0.47, 0.16], [0.54, 0.22], [0.63, 0.16], [0.72, 0.22], [0.79, 0.16]], false],
@@ -1681,6 +1690,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         chain: [mats.wire, [[2.05, 0.03], [2.1, 0.03], [2.1, -0.03], [2.05, -0.03]], true],
         mesh: [mats.mesh, [[0.05, 0], [2.05, 0]], false],
         wall: [mats.portal, [], true],
+        bankWall: [gardenWalls?.length ? (mats.bankWall ??= withSun(portalMaterial(true))) : null, [], true],
         // (a curb's foot 0.45 m under the edge: in the ground however it falls behind it; its ends closed)
         curb: [mats.curb, [[-0.45, 0.075], [0.15, 0.075], [0.15, -0.075], [-0.45, -0.075]], true, null, true], red: [mats.redCurb, [[-0.45, 0.075], [0.15, 0.075], [0.15, -0.075], [-0.45, -0.075]], true, null, true],
         low: [mats.curb, [[-0.45, 0.075], [0.07, 0.075], [0.07, -0.075], [-0.45, -0.075]], true, null, true],
@@ -1692,14 +1702,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (caps && N === 4) for (const k of [0, pts.length - 1]) { const a = b0 + N * k; g.idx.push(...(k ? [a, a + 1, a + 2, a, a + 2, a + 3] : [a, a + 2, a + 1, a, a + 3, a + 2])); }
       };
       // (a retaining wall: its top per point, its foot under the ground; cast concrete as the portals' (pl: along it, up it))
-      for (const { pts, kind, wh } of c.rails) if (kind === 'wall') {
-        const g = sweep.get('wall') ?? sweep.set('wall', { pos: [], idx: [], pl: [] }).get('wall'), b0 = g.pos.length / 3; let s = 0;
+      const wallRuns = gardenWalls?.length ? [...(c.rails || []), ...gardenWalls] : c.rails;
+      for (const { pts, kind, wh, finish } of wallRuns) if (kind === 'wall') {
+        const wallKey = finish ? 'bankWall' : 'wall';
+        const g = sweep.get(wallKey) ?? sweep.set(wallKey, { pos: [], idx: [], pl: [] }).get(wallKey), b0 = g.pos.length / 3; let s = 0;
         pts.forEach(([x, y, z, nx, nz], k) => { const h = Math.max(0, wh[k]); if (k) s += Math.hypot(x - pts[k - 1][0], z - pts[k - 1][2]);
-          for (const [hh, o] of [[-0.6, 0.125], [h, 0.125], [h, -0.125], [-0.6, -0.125]]) { g.pos.push(x - nx * o, y + hh, z - nz * o); g.pl.push(s + o, hh, 0); } });
+          for (const [hh, o] of [[-0.6, 0.125], [h, 0.125], [h, -0.125], [-0.6, -0.125]]) { g.pos.push(x - nx * o, y + hh, z - nz * o); g.pl.push(s + o, hh, finish || 0); } });
         for (let k = 1; k < pts.length; k++) for (let m = 0; m < 4; m++) { const a = b0 + 4 * (k - 1) + m, a1 = b0 + 4 * (k - 1) + (m + 1) % 4; g.idx.push(a, a + 4, a1, a1, a + 4, a1 + 4); }
         for (const k of [0, pts.length - 1]) { const a = b0 + 4 * k; g.idx.push(...(k ? [a, a + 1, a + 2, a, a + 2, a + 3] : [a, a + 2, a + 1, a, a + 3, a + 2])); }  // its ends closed
       }
-      for (const { pts, kind } of c.rails) { const S = SEC[kind]; if (!S || kind === 'wall') continue; add(kind, pts, S[1], S[2], S[4]); if (S[3]) add(kind, pts, S[3], true); if (kind === 'chain') add('mesh', pts, SEC.mesh[1], false); }
+      for (const { pts, kind } of c.rails || []) { const S = SEC[kind]; if (!S || kind === 'wall') continue; add(kind, pts, S[1], S[2], S[4]); if (S[3]) add(kind, pts, S[3], true); if (kind === 'chain') add('mesh', pts, SEC.mesh[1], false); }
       for (const [key, { pos, idx, pl }] of sweep) {
         let g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); if (pl) g.setAttribute('pl', new THREE.Float32BufferAttribute(pl, 3)); g.setIndex(idx);
         // (a curb's faces each lit flat: its face to the road a lit band below its top, not a dark line (A11's deep foot

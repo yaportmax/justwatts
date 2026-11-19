@@ -3,11 +3,11 @@
 export function streetSections(rows, xz) {
   if (!rows?.length) return null;
   const cells = new Map(), cell = v => Math.floor(v / 24);
-  for (const [lat, lon, dLat, dLon, left, right, leftMid = 0, rightMid = 0] of rows) {
+  for (const [lat, lon, dLat, dLon, left, right, leftMid = 0, rightMid = 0, leftFront = 0, rightFront = 0] of rows) {
     const a = xz(lat / 1e6, lon / 1e6), b = xz((lat + dLat) / 1e6, (lon + dLon) / 1e6);
     const dx = b[0] - a[0], dz = b[1] - a[1], l2 = dx * dx + dz * dz;
     if (l2 < 0.01) continue;
-    const s = { a, dx, dz, l2, left, right, leftMid, rightMid };
+    const s = { a, dx, dz, l2, left, right, leftMid, rightMid, leftFront, rightFront };
     for (let i = cell(Math.min(a[0], b[0]) - 3); i <= cell(Math.max(a[0], b[0]) + 3); i++)
       for (let j = cell(Math.min(a[1], b[1]) - 3); j <= cell(Math.max(a[1], b[1]) + 3); j++) {
         const key = i + ',' + j;

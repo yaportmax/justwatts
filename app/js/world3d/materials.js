@@ -95,6 +95,7 @@ vec4 jwVeg(vec2 p) {
 }
 // set by jwGround: how much of the point is coastal scrub from the aerial imagery, and whether there is any there; set
 // before it: how near the point is (1: among the scrub's drawn bushes, its ground the litter and grass under them)
+vec4 jwMiller = vec4(0.0);
 float jwScrub = 0.0, jwKnown = 0.0, jwNear = 0.0, jwPav = 0.0, jwGv = 0.0, jwEarth = 0.0, jwBank = 0.0;
 vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) {
   float slope = 1.0 - n.y;
@@ -300,7 +301,17 @@ vec3 jwGround(vec2 p, vec3 n, vec4 m, vec4 m2, float cv, float h, out float rk) 
   // Two-metre lidar and NAIP classes on observed lots and between opposed Miller carriageways.)
   if (lotsOn > 0.5 && p.x > 6186.0 && p.x < 9300.0 && p.y > 2578.0 && p.y < 4810.0) {
     vec2 uv = (p - vec2(6186.0, 2578.0)) / vec2(3114.0, 2232.0);
-    vec4 lot = texture2D(tLots, uv);
+    // (A71: Miller 591600 at Montford and 590250 by the field. The outer
+    // cross-sections use the same ground and bank triangles as the wider lots.
+    // The atlas stores two 1500 m strips below the original two-metre map.)
+    vec4 lot = texture2D(tLots, uv * vec2(1.0, 1116.0 / 1924.0));
+    vec2 st = vec2(p.x + p.y, p.x - p.y) * 0.7071067812 - vec2(6900.0, 3120.0);
+    if (st.x >= 0.0 && st.x < 3000.0 && st.y >= 0.0 && st.y < 300.0) {
+      float strip = floor(st.x / 1500.0);
+      vec2 edgeUV = vec2(4.0 + st.x - strip * 1500.0, 1120.0 + strip * 402.0 + st.y / 0.75);
+      vec4 edge = texture2D(tLots, edgeUV / vec2(1557.0, 1924.0));
+      jwMiller = vec4(edge.rgb / max(edge.a, 0.001), edge.a);
+    }
     c = mix(c, lot.rgb / max(lot.a, 0.001) * (0.86 + 0.25 * nB.g), lot.a * 0.85);
     // (A69: Molino 610250 and Edgewood 621050. Three darker olive palette entries
     // mark banks with low lidar returns, a measured slope and a green aerial signal.)
@@ -370,6 +381,28 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         vec3 r1 = cross(dpy, nW), r2 = cross(nW, dpx); float det = dot(dpx, r1);
         vec3 bumpV = abs(det) * nW - sign(det) * (dhx * r1 + dhy * r2) * (0.14 + rk * 0.1) * near;  /* (A33: gentler: at 0.55 it lit the hills in black blots and pixel speckle that crawled as the camera moved, user 2026-11-05) */
         if (abs(det) > 1e-9 && dot(bumpV, bumpV) > 1e-18) nW = normalize(bumpV);  // never a NaN (bloom would smear it)` : ''}
+        // (A71: scored concrete at Montford 591600, the contrasting parking
+        // apron at 591350 reverse and the planted walk at 592150 reverse.)
+        if (jwMiller.a > 0.01) {
+          float walk = jwMiller.r * jwMiller.g;
+          float parking = (1.0 - jwMiller.r) * jwMiller.g;
+          float paving = max(jwMiller.r,jwMiller.g);
+          float angle = jwMiller.b * 3.14159265;
+          vec2 along = vec2(cos(angle),sin(angle));
+          float station = dot(vW.xz,along) / 1.65;
+          float joint = abs(fract(station + 0.5) - 0.5) * 1.65;
+          float footprint = max(length(fwidth(vW.xz)),0.004);
+          float score = (1.0 - smoothstep(0.008,0.019+footprint,joint))
+            * (1.0-smoothstep(0.035,0.13,footprint)) * walk;
+          float grain = jwN(vW.xz / 1.3).r;
+          vec3 hard = mix(srgb(vec3(.64,.62,.58)),srgb(vec3(.78,.76,.71)),walk);
+          hard = mix(hard,srgb(vec3(.46,.46,.45)),parking);
+          hard *= (.97+.06*grain) * (1.0-.30*score);
+          vec3 bed = srgb(vec3(.38,.44,.26)) * (.84+.27*grain);
+          c = mix(c,mix(bed,hard,paving),jwMiller.a);
+          nW = normalize(mix(nW,normalize(vNw),paving*jwMiller.a*.91));
+          jwEarth *= 1.0 - jwMiller.a*paving;
+        }
         vec2 path = jwMarsh(vW.xz);
         if (path.r > 0.29) {
           float d = 4.0 * (1.0 - path.r), grit = jwN(vW.xz / 0.9).r;
@@ -381,7 +414,7 @@ export function terrainMaterial({ detail = true, bores = false } = {}) {
         diffuseColor.rgb *= c;`)
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);');
   };
-  m.customProgramCacheKey = () => 'jw-terrain-14' + (detail ? 'd' : '') + (bores ? 'b' : '');
+  m.customProgramCacheKey = () => 'jw-terrain-15' + (detail ? 'd' : '') + (bores ? 'b' : '');
   return m;
 }
 
@@ -735,15 +768,29 @@ export function furnitureMaterial() {
 // floor its own row) by bw = [metres along the wall, metres up, style, 0 wall / 1 roof / 2 trim]. Glass reflects
 // the haze colour; at dusk some windows are lit (LAMPS). A darker band at the foot of the walls. Roofs: tiles or
 // shingles in rows.
+// (A71: the fascia at Lytton Square and the named storefronts along Miller.
+ // The mipmapped lettering uses the existing building batch at every quality.)
+const shopSigns = { value: null };
+let signsPending = false;
+export function loadShopSigns() {
+  if (signsPending) return;
+  signsPending = true;
+  const map = new THREE.TextureLoader().load('/world/mill-valley-signs.png', () => {
+    shopSigns.value = map;
+  }, undefined, () => { signsPending = false; });
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.flipY = false;
+}
+
 export function buildingMaterial() {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true });
   const T = textures();
   m.onBeforeCompile = sh => {
-    sh.uniforms.tWin = { value: T.windows };
+    sh.uniforms.tWin = { value: T.windows }; sh.uniforms.shopSigns = shopSigns;
     sh.uniforms.tNoise = { value: T.noise }; sh.uniforms.lamps = LAMPS;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 bw;\nvarying vec4 vBw;\nvarying vec3 vW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBw = bw; vW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tWin, tNoise; uniform float lamps;\nvarying vec4 vBw;\nvarying vec3 vW;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tWin, tNoise, shopSigns; uniform float lamps;\nvarying vec4 vBw;\nvarying vec3 vW;')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.7, 0.38) * jwWin * 0.75 + jwFill;')
       .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
         float kind = floor(vBw.w + 0.5), style = floor(vBw.z + 0.5), jwWin = 0.0; vec3 jwFill = vec3(0.0);
@@ -772,6 +819,8 @@ export function buildingMaterial() {
           diffuseColor.rgb = mix(wall * w.rgb, glass, w.a);
           diffuseColor.rgb *= vBw.y < 0.5 ? 0.62 : 1.0;   // the foundation
           jwWin = w.a * lamps * step(0.68, fract(sin(dot(cell + floor(vW.xz * 0.05), vec2(12.9898, 78.233))) * 43758.5453));
+        } else if (kind == 4.0) {
+          diffuseColor.rgb = texture2D(shopSigns, vBw.xy).rgb;
         } else if (kind == 3.0) {
           // (cx-saus: continuous shop display glazing, narrow mullions, a solid stall riser and fascia.)
           float x=fract(vBw.x/2.5),aa=max(fwidth(vBw.x/2.5),0.002);
@@ -789,7 +838,7 @@ export function buildingMaterial() {
           diffuseColor.rgb *= 0.95 + 0.1 * nz;
         }`);
   };
-  m.customProgramCacheKey = () => 'jw-bldg-5';
+  m.customProgramCacheKey = () => 'jw-bldg-6';
   return m;
 }
 

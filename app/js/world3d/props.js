@@ -578,6 +578,15 @@ export function buildingGeometry(list, deckPlants) {
     const shop = /^(retail|commercial|office)$/.test(b.sourceType), domestic = !shop && (house || /^(house|detached|residential|bungalow|semidetached_house)$/.test(b.sourceType) || b.sourceType === 'yes' && bh <= 7 && ob.area < 450);
     const style = b.style != null ? b.style : b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : shop ? (h(5) < 0.5 ? 2 : 6) : (domestic ? HOUSE : bh > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (domestic ? 8 : 4)];
     const front = b.frontage && b.frontage[0] * Math.PI / 180;
+    // (A71: the named sign belongs over the entrance on the longest street-facing wall.)
+    let signWall = -1, signLength = 0;
+    if (b.shopDetail?.[0]) for (let i = 0; i < r.length; i++) {
+      const p = r[i], q = r[(i + 1) % r.length];
+      const dx = q[0] - p[0], dz = q[1] - p[1], length = Math.hypot(dx, dz);
+      if (length > signLength && dz * b.shopFront[0] - dx * b.shopFront[1] > 0.67 * length) {
+        signWall = i; signLength = length;
+      }
+    }
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];
@@ -617,7 +626,10 @@ export function buildingGeometry(list, deckPlants) {
       if (b.shopFront && L > 3.6 && hw > 2.9 && (q[1] - p[1]) * b.shopFront[0] - (q[0] - p[0]) * b.shopFront[1] > 0.67 * L) {
         const ux = (q[0] - p[0]) / L, uz = (q[1] - p[1]) / L;
         const at = (s, y, off = 0) => [p[0] + ux * s + uz * off, y, p[1] + uz * s - ux * off];
-        const wood = col(0x655346), frame = col(0x493b33), glass = col(0x424d4c), fabric = col([0x9b4540,0x68765c,0xa8885c][Math.floor(h(17) * 3)]);
+        const detail = b.shopDetail, trim = detail?.[2], cloth = detail?.[3];
+        const wood = col(trim ?? 0x655346), frame = col(trim ?? 0x493b33), glass = col(0x424d4c);
+        const fabric = col(cloth ?? [0x9b4540,0x68765c,0xa8885c][Math.floor(h(17) * 3)]);
+        const opening = detail?.[4] ?? 1;
         const panel = (s, e, low, high, off, tint) => quad(at(e, low, off), at(s, low, off), at(s, high, off), at(e, high, off), tint, T);
         const bays = Math.max(1, Math.round(L / 4.2)), step = L / bays;
         for (let j = 0; j < bays; j++) {
@@ -636,15 +648,43 @@ export function buildingGeometry(list, deckPlants) {
           const depth = Math.min(0.78, (end - s) / 5, clearance - 0.25);
           // Two display panes and a transom under one cornice. Shallow trim is
           // attached directly to the footprint wall and does not change its position.
-          panel(s, end, floor + 0.15, eave, 0.035, wood);
-          panel(s + 0.12, end - 0.12, floor + 0.42, eave - 0.25, 0.05, glass);
+          const inset = (1 - opening) * (end - s) / 2;
+          if (detail?.length > 1) panel(s, end, floor, fascia, 0.012, k);
+          panel(s + inset, end - inset, floor + 0.15, eave, 0.035, wood);
+          const left = s + inset + 0.12, right = end - inset - 0.12;
+          // (A71: Throckmorton 592950 reverse. The shaded display glazing sits
+          // inside timber jambs and catches sky above the solid stall riser.)
+          const glazing = (u,y) => [u, y - floor, 0, 3];
+          quad(at(right,floor+.42,.05), at(left,floor+.42,.05), at(left,eave-.25,.05), at(right,eave-.25,.05),
+            glass, [glazing(right,floor+.42),glazing(left,floor+.42),glazing(left,eave-.25),glazing(right,eave-.25)]);
           panel((s + end) / 2 - 0.045, (s + end) / 2 + 0.045, floor + 0.42, eave - 0.25, 0.058, frame);
-          panel(s + 0.12, end - 0.12, eave - 0.60, eave - 0.54, 0.06, frame);
+          panel(left, right, eave - 0.60, eave - 0.54, 0.06, frame);
           if (j === Math.floor(bays / 2)) {
             panel(mid - 0.46, mid + 0.46, floor + 0.04, floor + 2.17, 0.075, frame);
             panel(mid - 0.36, mid + 0.36, floor + 0.10, floor + 2.07, 0.082, wood);
             panel(mid - 0.27, mid + 0.27, floor + 0.78, floor + 1.98, 0.09, glass);
           }
+          if (detail?.[5] === 9 && top > fascia + 1.4) {
+            // (A71: the dark posts and diagonal braces at the Lytton corner,
+            // 593065 forward. The surveyed eave bounds the ends of the timbers.)
+            panel(s,s+0.13,fascia,top-.08,.042,frame);
+            panel(s,end,fascia,fascia+.17,.044,frame);
+            const x0 = j % 2 ? end-.17 : s+.05, x1 = j % 2 ? s+.05 : end-.17;
+            quad(at(x0,fascia+.15,.046),at(x1,top-.12,.046),at(x1+.10,top-.12,.046),at(x0+.10,fascia+.15,.046),frame,T);
+          }
+          if (i === signWall && j === Math.floor(bays / 2)) {
+            const sign = detail[0] - 1, pad = Math.min(.20,(end-s)*.06);
+            const onValance = cloth !== 0 && top - fascia < .53;
+            const high = onValance ? eave : Math.min(top-.035,fascia+.55);
+            const bottom = high - (onValance ? .23 : .48);
+            // Raised fascia when there is headroom, otherwise on the valance.
+            const off = onValance ? depth + .004 : .029;
+            if (onValance) panel(s,end,bottom,eave,depth,fabric);
+            const uv = (u,v) => [u,(sign+v)/64,0,4];
+            quad(at(end-pad,bottom,off),at(s+pad,bottom,off),at(s+pad,high,off),at(end-pad,high,off),wood,
+              [uv(.005,.97),uv(.995,.97),uv(.995,.03),uv(.005,.03)]);
+          }
+          if (cloth === 0) continue;
           quad(at(s,fascia,0.025),at(end,fascia,0.025),at(end,eave,depth),at(s,eave,depth),fabric,T);
           panel(s,end,eave-0.14,eave,depth,fabric);
           tri(at(s,fascia,0.025),at(s,eave,depth),at(s,eave,0.025),fabric,[G,G,G]);
@@ -865,7 +905,10 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
         const setback = widthDm > 0 ? Math.max(0, traceOffset - Math.hypot(sideX, sideZ) - kb.walk / 2) : 0;
         // (A64: Miller 590950 return. Detached walk overlays break into slabs
         // beside the mapped path. Let that path own its paving and keep its kerb.)
-        const band = setback > 0.75 ? { lane: 0, walk: 0.2, lip: true }
+        // (A71: Miller 591600 and 591350 reverse. Only extend the attached
+        // pavement where the measured outer strip is hard through its width.)
+        const frontWalk = sourceRight ? match.s.rightFront : match.s.leftFront;
+        const band = frontWalk > 0 ? { lane: 0, walk: frontWalk / 10 } : setback > 0.75 ? { lane: 0, walk: 0.2, lip: true }
           : setback > 0 ? { ...kb, walk: kb.walk + setback } : kb;
         const width = bay || (kb ? kb.lane + kb.walk : 0); if (!width) continue;
         const at = (f, w) => {

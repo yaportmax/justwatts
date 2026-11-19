@@ -27,7 +27,7 @@ import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2, inRings } from './landuse.js';
 import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS } from '../../world/town-streets.js';
-import { loadMarshPath, millValleyLots, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
+import { loadMarshPath, loadShopSigns, millValleyLots, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, treeDims, winterStreetTree, scrubGeometries, species, buildingGeometry, townMastGeometry, townCanopyGeometry, townPierGeometry, townEdgeGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
 import { loadVeg, loadTrees, loadHandVeg, fitTree, SCRUB, CYPRESS, EUC, PAVED, BARE } from './veg.js';
@@ -752,7 +752,11 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (r.fl & 2) continue;                          // tunnels: under the hill
       const st = roadStyle(r.hw, r.ln, r.fl, r.wd), tr = !(r.fl & 1) && isTrail(r);
       // (A59: on Sausalito's waterfront a footway is the sidewalk, concrete in Street View cxs_540900_180, not a dirt trail)
-      if (r.paved) st.surf = 1;
+      // (A71: at the Miller path junction, six rider samples on a marked
+      // bicycle crossing fell in the trail suppression margin. Clip the
+      // crossing to the actual wider pavement, preserving the paved approach.)
+      const cycleCrossing = (r.fl & 131072) !== 0;
+      if (r.paved || cycleCrossing) st.surf = 1;
       if (r.hw === 'footway' && r.pts.some(([la, lo]) => la >= TOWN_WATERFRONT.south && la <= TOWN_WATERFRONT.north && lo > -122.482 && lo < -122.474)) st.surf = 1;
       // (A67: the mapped dock footways between Waldo's rows, formerly dirt trails on the bed.)
       const floatingDock = !!(r.fl & 65536);
@@ -761,7 +765,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       let rail = null; if (r.h) { const T = track(dense(r.pts).map(([la, lo]) => proj.xz(la, lo)), r.h); let hint = -1; rail = (x, z) => { const q = T.at(x, z, hint); hint = q?.k ?? -1; return q && q.h; }; }
       // (a road with a rail: its line the rail's own points, so the drawn top is the rail's line between them, the rider's)
       const all = rail ? dense(r.pts).map(([la, lo]) => proj.xz(la, lo)) : (r.fl & 1 ? (p => p) : roundCorners)(r.pts.map(([la, lo]) => proj.xz(la, lo))), runs = [[]];
-      for (const p of tr && side.size ? resample(all, 3) : all) { if ((r.fl & 16 && marks.deckAt(p[0], p[1]) != null) || (tr && byRoad(p[0], p[1]))) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(p); }  // the bridge's own deck; a trail on a road's shoulder
+      for (const p of tr && side.size ? resample(all, 3) : all) { if ((r.fl & 16 && marks.deckAt(p[0], p[1]) != null) || (tr && !cycleCrossing && byRoad(p[0], p[1]))) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(p); }  // the bridge's own deck; a trail on a road's shoulder
       // (over a tunnel: a deck across the lidar's gap, straight between the ground at its ends)
       // (found on the whole way, not this tile's piece of it: a deck's ends may lie in the next tile; its line from the
       // lidar there, its piece in this tile on that line)
@@ -770,7 +774,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const deep = line && line[0] != null && line[1] != null && Math.min(...line) - Math.min(...resample(run, 2).map(p => rawAt(...p) ?? 1e9)) > 2.5;
         return clipLine(run, tbox).map(pts => { if (deep) { const f = p => arcAlong(run, p) / (L || 1); pts.line = [line[0] + (line[1] - line[0]) * f(pts[0]), line[0] + (line[1] - line[0]) * f(pts.at(-1))]; } return pts; });
       });
-      const cutP0 = tr || !RI || r.fl & 19 ? pieces : pieces.flatMap(p => p.line ? [p] : offRails(p, r, st.w / 2)); if (cutP0 !== pieces) yield;
+      const cutP0 = (tr && !cycleCrossing) || !RI || r.fl & 19 ? pieces : pieces.flatMap(p => p.line ? [p] : offRails(p, r, st.w / 2)); if (cutP0 !== pieces) yield;
       // (the hand-built stretch, hand.js: its pieces of the way not drawn, only indexed (the paving's index, the ground's
       // and the grass's masks), a metre's overlap at its ends)
       const cutP = cutP0.flatMap(p => handSplit(p)).flatMap(p => p.hand || p.line || rail ? [p] : handInSplit(p));
@@ -788,7 +792,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const rl = rail && r.hw === 'service' ? (x, z) => onto(x, z, rail(x, z), lift, hint, st.w / 2) : rail;
       // (a side road cut at the other road's edge: its corners rounded there (curb returns), 5 m: NAIP, Field Road 0a_0130's
       // T junction, both corners about 4 to 6 m; Street View: a flared mouth. Not a service way's)
-      const fl = r.hw === 'service' ? null : [...(pts.fs ? [[...pts[0], 5]] : []), ...(pts.fe ? [[...pts.at(-1), 5]] : [])];
+      const fl = r.hw === 'service' || cycleCrossing ? null : [...(pts.fs ? [[...pts[0], 5]] : []), ...(pts.fe ? [[...pts.at(-1), 5]] : [])];
       const BB = pts.hand ? builder() : B, i0 = BB.idx.length, centre = ribbon(BB, pts, { ...st, hAt: floatingDock ? (x, z) => Math.max(SEA + 0.65 - lift, hOn(x, z) ?? SEA) : hOn, lift, deck: rail ? null : dk || null, rail: rl, step: trail ? 3 : inH ? 2.5 : 5, joints: t.joints.get(ri), drape: trail || inH, mk, flares: fl, wAt: RI?.widthOf && !trail ? RI.widthOf : null, xs: !trail && !dk ? CZ.edges : null });
       const spec = centre.some(q => q.sp); if (spec && !pts.hand) czPaint.push(centre);
       for (let i = 1; i < centre.length; i++) { const a = centre[i - 1], b = centre[i]; surf.push(a[0], a[1], a[2], b[0], b[1], b[2], Math.max(a[3], b[3])); }
@@ -1793,7 +1797,15 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           b.shopFront = [Math.sin(angle), -Math.cos(angle)];
           b.shopGap = koGap; b.shopGround = drawnY;
           b.paint = [0xc6ac8e,0xd2c1aa,0xa08b74,0xaaa695][Math.floor(hash2(b.seed,14) * 4)];
-          b.style = 2;
+          b.shopDetail = d.shopDetail;
+          if (b.shopDetail?.[0]) loadShopSigns();
+          if (b.shopDetail?.length > 1) b.paint = b.shopDetail[1];
+          b.style = b.shopDetail?.[5] === 5 ? 5 : b.shopDetail?.[5] === 9 ? 0 : 2;
+        } else if (d.shopDetail?.length > 1) {
+          // (A71: the red siding at Miller 592500/592550 and the white wall at
+          // 593050 have measured roofs, but no surveyed storefront direction.)
+          b.paint = d.shopDetail[1];
+          b.style = d.shopDetail[5];
         }
         if (Number.isFinite(d.eave) && Number.isFinite(d.rise)) { b.h = Math.max(2.4, d.eave - b.base); b.hc = d.h; b.rh = d.rise; b.roof = d.roof; b.maxTop = d.eave + d.rise; }
       }

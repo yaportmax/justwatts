@@ -1,4 +1,5 @@
 import { NORTH_TREES } from '../../world/north-trees.js';
+import { MV_TREES } from '../../world/mv-trees.js';
 // World 3D ground cover of the Marin Headlands (tools/veg_bake.py: from USDA NAIP aerial imagery and OpenStreetMap):
 // one grid over VEG's box, linear in latitude and longitude, a class per cell of about 3.3 by 3.8 m: 0 none (sea,
 // water, sand, buildings, outside the Headlands), 1 grass, 2 coastal scrub, 3 cypress or pine, 4 bare earth or rock,
@@ -160,10 +161,11 @@ export function loadTrees({ fetch = globalThis.fetch?.bind(globalThis), url = '/
       const each = trees.each;
       trees.each = (la0, lo0, la1, lo1, fn) => {
         each(la0, lo0, la1, lo1, fn);
-        if (la1 < 37.8741 || la0 > 37.8895 || lo1 < -122.5328 || lo0 > -122.5101) return;
-        for (const t of NORTH_TREES) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(...t);
+        if (!(la1 < 37.8741 || la0 > 37.8895 || lo1 < -122.5328 || lo0 > -122.5101)) for (const t of NORTH_TREES) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(...t);
+        // (A72: Mill Valley's hillsides, world/mv-trees.js: the lidar canopy's crowns where trees.bin has none)
+        if (!(la1 < 37.884 || la0 > 37.914 || lo1 < -122.566 || lo0 > -122.521)) for (const t of MV_TREES) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(t[0], t[1], t[2], t[3], t[4], 1);
       };
-      trees.n += NORTH_TREES.length;
+      trees.n += NORTH_TREES.length + MV_TREES.length;
       return trees;
     } catch { return null; }
   })();

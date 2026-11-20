@@ -470,7 +470,7 @@ export function buildingGeometry(list, deckPlants) {
   let outline = null, ceiling = Infinity;
   // (A55: collapsed hip ridges and repeated footprint corners emitted zero-area
   // faces. Do the test at output precision, which is the geometry the GPU draws.)
-  const tri = (a, b, c, k, w) => {
+  const tri = (a, b, c, k, w, keep = false) => {
     const sx = b[0] - a[0], sy = Math.min(b[1], ceiling) - Math.min(a[1], ceiling), sz = b[2] - a[2], tx = c[0] - a[0], ty = Math.min(c[1], ceiling) - Math.min(a[1], ceiling), tz = c[2] - a[2];
     // (A55: packing a collinear zero-rise gable can manufacture a tiny triangle.
     // It must have area both before and after packing, including height clipping.)
@@ -491,10 +491,10 @@ export function buildingGeometry(list, deckPlants) {
       }
     }
     const roofFace = w[0][3] === 1 || Math.abs(upArea) > 1e-7;
-    if ((roofFace && ny < 0) || inward) { [p[1], p[2]] = [p[2], p[1]]; w = [w[0], w[2], w[1]]; }
+    if (!keep && ((roofFace && ny < 0) || inward)) { [p[1], p[2]] = [p[2], p[1]]; w = [w[0], w[2], w[1]]; }
     pos.push(...p[0], ...p[1], ...p[2]); cl.push(...k, ...k, ...k); bw.push(...w[0], ...w[1], ...w[2]);
   };
-  const quad = (a, b, c, d, k, w) => { tri(a, b, c, k, [w[0], w[1], w[2]]); tri(a, c, d, k, [w[0], w[2], w[3]]); };
+  const quad = (a, b, c, d, k, w, keep = false) => { tri(a, b, c, k, [w[0], w[1], w[2]], keep); tri(a, c, d, k, [w[0], w[2], w[3]], keep); };
   const G = [0, 0, 0, 2], T = [G, G, G, G];
   // a box standing on y0 (no floor), sides along (ux, uz) and across, in one colour as trim
   const box = (cx, y0, cz, sl, sh, sw, ux, uz, k) => {
@@ -557,7 +557,7 @@ export function buildingGeometry(list, deckPlants) {
     // box boundary before drawing a rectangular roof over the actual walls.)
     const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) => [ob.c[0] + ob.u[0] * s * ob.L / 2 - ob.u[1] * t * ob.W / 2, ob.c[1] + ob.u[1] * s * ob.L / 2 + ob.u[0] * t * ob.W / 2]);
     const fits = fill > 0.85 && footprintContains(r, corners, 0.35), pitched = !lid || b.rh >= 0.4;
-    const house = !b.pier && pitched && fits && (b.fort ? b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : bh <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9), barn = !b.pier && !b.fort && !house && pitched && fits && (b.sourceType == null || /^(barn|farm_auxiliary)$/.test(b.sourceType)) && bh <= 10 && ob.area > 120 && ob.area < 900 && h(11) < 0.22;
+    const house = b.handRoof ? b.handRoof === 'gable' && !b.pier && fits : !b.pier && pitched && fits && (b.fort ? b.h <= 16 && r.length <= 20 && ob.area < 3200 && fill > 0.9 : bh <= 10 && r.length <= 12 && ob.area < 450 && fill > 0.9), barn = !b.handRoof && !b.pier && !b.fort && !house && pitched && fits && (b.sourceType == null || /^(barn|farm_auxiliary)$/.test(b.sourceType)) && bh <= 10 && ob.area > 120 && ob.area < 900 && h(11) < 0.22;
     // (a footprint too ragged for one roof over its box (an L, a T, the Fort Baker barracks) but pitched by the lidar: a
     // hipped roof along its own walls up to a flat crown, held in 2.5 m of every wall, A37 w_murray0; one barely pitched: a flat
     // roof half way up its rise)
@@ -568,12 +568,12 @@ export function buildingGeometry(list, deckPlants) {
     // guessed from its width as a house's, inside its height. 22,541 of them round Mill Valley and Sausalito had a flat top and
     // a parapet; Street View, cxmvl_570400, 610400, sa_2000: pitched roofs on nearly every house. Not San Francisco's, nor
     // shops, sheds' kinds or anything over 10 m or 450 m2; none whose crown will not fit, flat as before)
-    const lidHip = lid && !house && b.rh >= 0.8 && r.length <= 40;
+    const lidHip = lid && !house && (b.handRoof ? b.handRoof !== 'flat' && b.rh >= 0.3 : b.rh >= 0.8) && r.length <= 40;
     const guess = !lid && !house && !barn && !b.pier && !b.fort && b.marin && roofRoom >= 1 && bh <= 10 && area < 450 && r.length <= 40 && !/^(retail|commercial|office|industrial|warehouse|garages?|carport|roof)$/.test(b.sourceType ?? '');
     const hc = lidHip ? hipCrown(r, area, ob.W, b.rh) : guess ? hipCrown(r, area, ob.W, Math.min(roofRoom, ob.W * (0.22 + 0.1 * h(7)))) : null;
     const hipped = lidHip || !!(guess && hc);
     const rise = house ? Math.min(roofRoom, lid ? Math.min(5.5, b.rh) : Math.min(3.8, ob.W * (0.26 + 0.24 * h(7)))) : barn ? Math.min(roofRoom, lid ? Math.min(5, b.rh) : Math.min(5, ob.W * 0.42)) : hipped ? (hc ? hc.ry : 0.05) : 0;
-    const hw = Math.min(lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, ceiling - b.base - rise), top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.frontage?.[1] >= 0 ? col(b.frontage[1]) : b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
+    const hw = Math.min(lid && !house && !hipped ? b.h + 0.5 * b.rh : b.h, ceiling - b.base - rise), top = b.base + hw, wi = Math.floor(h(1) * WALLS.length), wc = b.frontage?.[1] >= 0 ? col(b.frontage[1]) : b.paint != null ? col(b.paint) : b.metal ? col(0x63676a, 0.95 + 0.1 * h(1)) : b.fort ? col(0xefebe1, 0.94 + 0.08 * h(1)) : barn ? col(h(12) < 0.6 ? 0x8a3226 : 0xd8d0c0) : col(WALLS[wi]), rc = col(b.roofColor != null ? b.roofColor : b.roof ? [0, 0x9a4a33, 0x5c5a55, 0x8e8b84][b.roof] : b.fort ? (!b.grey && h(2) < 0.75 ? 0x9a4a33 : 0x66625b) : barn ? 0x5a5650 : ROOFS[Math.floor(h(2) * ROOFS.length)]);
     // (A53: Miller shops and irregular hillside homes need their own wall scale even when their measured roof is flat or hipped.)
     const shop = /^(retail|commercial|office)$/.test(b.sourceType), domestic = !shop && (house || /^(house|detached|residential|bungalow|semidetached_house)$/.test(b.sourceType) || b.sourceType === 'yes' && bh <= 7 && ob.area < 450);
     const style = b.style != null ? b.style : b.metal ? 8 : b.fort ? 5 : barn ? 5 : wi >= 12 ? 5 : shop ? (h(5) < 0.5 ? 2 : 6) : (domestic ? HOUSE : bh > 16 || ob.area > 1500 ? BIG : FLATS)[Math.floor(h(5) * 8) % (domestic ? 8 : 4)];
@@ -693,6 +693,46 @@ export function buildingGeometry(list, deckPlants) {
       }
 
       run += L;
+    }
+    // (A72: hand-built street fronts, world/town-hand.js: bay windows and balconies on the wall facing b.face, as Sausalito's
+    // Edwardian flats and 1960s blocks on Bridgeway show them, svs_540950_L, svs_541000_L. Outside the footprint, over the sidewalk.)
+    if (b.face != null && (b.bays || b.balconies)) {
+      const fx = Math.sin(b.face * Math.PI / 180), fz = -Math.cos(b.face * Math.PI / 180), shade = [wc[0] * 0.96, wc[1] * 0.96, wc[2] * 0.96];
+      let run2 = 0;
+      // both windings: seen from the street and from under the bay
+      const dq = (a, b2, c, d, k, w) => { quad(a, b2, c, d, k, w, true); quad(a, d, c, b2, k, [w[0], w[3], w[2], w[1]], true); };
+      for (let i = 0; i < r.length; i++) {
+        const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]); if (L < 1e-6) continue;
+        const ux = (q[0] - p[0]) / L, uz = (q[1] - p[1]) / L, nx = uz, nz = -ux;
+        if (L < 4 || nx * fx + nz * fz < 0.7) { run2 += L; continue; }
+        const at = (t, y, off) => [p[0] + ux * t + nx * off, y, p[1] + uz * t + nz * off];
+        const wuv = (t, y) => [run2 + t, y - b.base, style, 0];
+        const lo = b.base + Math.min(3.3, hw - 2.2), hi = top - 0.3;
+        if (b.bays && hi - lo > 2) {
+          const n = Math.max(1, Math.floor(L / 4.6)), dep = 0.7, half = Math.min(1.25, L / n / 2 - 0.4);
+          for (let k = 0; k < n; k++) {
+            const m = (k + 0.5) * L / n, s0 = m - half, s1 = m + half;
+            dq(at(s1, lo, dep), at(s1, hi, dep), at(s0, hi, dep), at(s0, lo, dep), shade, [wuv(s1, lo), wuv(s1, hi), wuv(s0, hi), wuv(s0, lo)]);
+            dq(at(s0, lo, 0), at(s0, lo, dep), at(s0, hi, dep), at(s0, hi, 0), shade, [wuv(s0 - dep, lo), wuv(s0, lo), wuv(s0, hi), wuv(s0 - dep, hi)]);
+            dq(at(s1, lo, dep), at(s1, lo, 0), at(s1, hi, 0), at(s1, hi, dep), shade, [wuv(s1, lo), wuv(s1 + dep, lo), wuv(s1 + dep, hi), wuv(s1, hi)]);
+            dq(at(s0, hi, 0), at(s0, hi, dep), at(s1, hi, dep), at(s1, hi, 0), shade, T);
+            dq(at(s0, lo, 0), at(s1, lo, 0), at(s1, lo, dep), at(s0, lo, dep), shade, T);
+          }
+        }
+        if (b.balconies) {
+          const rail = col(b.balconies), dep = 1.25;
+          for (let y = lo; y < hi - 1.6; y += 3.0) {
+            const a0 = 0.3, a1 = L - 0.3;
+            dq(at(a0, y + 0.18, 0), at(a0, y + 0.18, dep), at(a1, y + 0.18, dep), at(a1, y + 0.18, 0), rail, T);
+            dq(at(a0, y, 0), at(a1, y, 0), at(a1, y, dep), at(a0, y, dep), rail, T);
+            dq(at(a1, y, dep), at(a1, y + 1.15, dep), at(a0, y + 1.15, dep), at(a0, y, dep), rail, T);
+            dq(at(a0, y, dep), at(a0, y + 1.15, dep), at(a1, y + 1.15, dep), at(a1, y, dep), [rail[0] * 0.8, rail[1] * 0.8, rail[2] * 0.8], T);
+            dq(at(a1, y, dep), at(a1, y, 0), at(a1, y + 1.15, 0), at(a1, y + 1.15, dep), rail, T);
+            dq(at(a0, y, 0), at(a0, y, dep), at(a0, y + 1.15, dep), at(a0, y + 1.15, 0), rail, T);
+          }
+        }
+        run2 += L;
+      }
     }
     const flat = (y, k, kind, rr = r) => {
       const tris = THREE.ShapeUtils.triangulateShape(rr.map(p => new THREE.Vector2(p[0], p[1])), []);

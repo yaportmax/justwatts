@@ -27,6 +27,7 @@ import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2, inRings } from './landuse.js';
 import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS } from '../../world/town-streets.js';
+import { TOWN_HAND } from '../../world/town-hand.js';
 import { loadMarshPath, loadShopSigns, millValleyLots, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
 import { treeGeometries, treeDims, winterStreetTree, scrubGeometries, species, buildingGeometry, townMastGeometry, townCanopyGeometry, townPierGeometry, townEdgeGeometry, furnitureGeometries, signFaceGeometry, SPECIES, NEAR, EUC_YOUNG, CYP_TALL, REDWOODS, HEADLANDS, SF_CITY, inHeadlands } from './props.js';
@@ -1131,7 +1132,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const FOOT_R = { redwood: 1.9, fir: 0.5, euc: 0.5, oak: 0.42, bay: 0.36, cypress: 0.6, pine: 0.45, cypressT: 0.9, eucS: 0.32, willow: 0.25 };
     const footSink = (sp, x, z, s) => { const R = FOOT_R[sp]; if (!R) return 0.3; const a = hAt(x + 1, z), b = hAt(x - 1, z), c = hAt(x, z + 1), d = hAt(x, z - 1);
       if (a == null || b == null || c == null || d == null) return 0.3; return Math.min(1.1, Math.max(0.3, Math.hypot((a - b) / 2, (c - d) / 2) * R * s + 0.1)); };
-    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || HVEG.owns(x, z)) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z) || !KO.clear(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - footSink(sp, x, z, s), z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
+    let addFree = 0;  // (A72: Mill Valley's hillside crowns, mv-trees.js: kept clear of the hand trees, so they stand inside the hand list's corridor too)
+    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || (!addFree && HVEG.owns(x, z))) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z) || !KO.clear(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - footSink(sp, x, z, s), z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
@@ -1164,12 +1166,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // and crown (the model scaled to them, fitTree), clear of the roads; its trunk on the lowest ground round its foot
     if (lidarTrees) {
       const T = [];
-      lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp) => { if (!veg?.handAt(la, lo, 'notrees')) T.push([la, lo, h, r, sp]); });
+      lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp, free) => { if (!veg?.handAt(la, lo, 'notrees')) T.push([la, lo, h, r, sp, free]); });
       // (and the hand list's, A18: Street View's own trees where the lidar's are wrong or missing)
       for (const t of veg?.handTrees || []) { const [la, lo] = t.at; if (la <= proj.lat(box[1]) && la > proj.lat(box[3]) && lo >= proj.lon(box[0]) && lo < proj.lon(box[2])) T.push([la, lo, t.h, t.r, t.sp]); }
       for (let i = 0; i < T.length; i++) {
         if (i % 400 === 399) yield;
-        const [la, lo, h, r, sp0] = T[i], sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0 === 'cypress' && h >= CYP_TALL ? 'cypressT' : sp0, dim = DIMS[sp]; if (!dim) continue;
+        const [la, lo, h, r, sp0, free] = T[i]; addFree = free ? 1 : 0; const sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0 === 'cypress' && h >= CYP_TALL ? 'cypressT' : sp0, dim = DIMS[sp]; if (!dim) continue;
         let [x, z] = proj.xz(la, lo);
         // (a trunk on a road bank's steep face: moved out from the road till it is off it, up to 8 m; else none)
         if (c.bankH?.size && c.bankH.get(bkey(x, z)) < -1e8) {
@@ -1190,6 +1192,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     }
     // the groves where the aerial imagery has them and the lidar does not cover (veg.js): Monterey cypress and pine, blue
     // gum eucalyptus, a tree every 10 m or so, tall (the planted groves are 15 to 40 m)
+    addFree = 0;
     if (veg) { const st = 8.5, [s0, w0, n0, e0] = veg.box, bx0 = Math.max(box[0], proj.x(w0)), bx1 = Math.min(box[2], proj.x(e0)), bz0 = Math.max(box[1], proj.z(n0)), bz1 = Math.min(box[3], proj.z(s0));
       for (let x = Math.ceil(bx0 / st) * st; x < bx1; x += st) {
         if (Math.round(x / st) % 4 === 0) yield;
@@ -1751,6 +1754,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7) });
         continue;
       }
+      const handLook = (R0, b) => { const n = R0.length - 1; let a = 0, o = 0; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; }
+        const d = TOWN_HAND.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5)); if (!d) return;
+        if (d.eave != null) b.h = d.eave;
+        const rise = d.roof === 'flat' ? 0 : d.rise ?? 2.5;
+        b.rh = rise; b.hc = null; b.minEave = null; b.maxTop = b.base + b.h + rise; b.handRoof = d.roof ?? 'gable'; b.fort = false; b.metal = false;
+        if (d.wall != null) { b.paint = d.wall; if (b.frontage) b.frontage = [b.frontage[0], d.wall]; }
+        if (d.face != null) { b.face = d.face; b.bays = d.bays; b.balconies = d.balconies; }
+        if (d.style != null) b.style = d.style;
+        if (d.roofColor != null) b.roofColor = d.roofColor;
+        if (d.front != null) { const g = d.front * Math.PI / 180; b.shopFront = [Math.sin(g), -Math.cos(g)]; b.shopGap = koGap; b.shopGround = drawnY;
+          b.shopDetail = [b.shopDetail?.[0] ?? 0, d.wall ?? b.paint, d.trim ?? 0x493b33, d.awning ?? 0, d.opening ?? 1, d.style ?? b.style ?? 2]; if (b.shopDetail[0]) loadShopSigns(); } };
       const R0 = f.rings[0], pier = (() => {
         const n = R0.length - 1; let a = 0, o = 0; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; }
         return TOWN_PIERS.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5));
@@ -1786,6 +1800,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
         list.push({ ring, base, pier, frontage: f.bd?.frontage, maxTop: m + lb[1], h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        handLook(R0, list.at(-1));
         continue;
       }
       list.push({ ring, base, pier, frontage: f.bd?.frontage, maxTop: base + (hb ? hb[2] : f.h || 6), h: (low ? Math.min(hb ? hb[2] : f.h || 6, 4.2) : hb ? hb[2] : f.h || 6) + 0.1 * hash2(Math.round(ring[0][0]), 3), seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, grey: low && (R0[0][0] < 37.8240 || R0[0][1] < -122.5295), marin: R0[0][0] > 37.815 });  // (A57: north of the Golden Gate, props.js)
@@ -1819,6 +1834,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // foundation. Preserve A38's exposed storey; absolute survey tops stay fixed.)
         if (b.rh == null && Number.isFinite(gx)) { const ht = hb ? hb[2] : f.h || 6; b.maxTop = Math.max(b.maxTop, gx + ht); b.minEave = Math.min(b.base + b.h, gx + Math.min(2.4, ht)); }
       }
+      // (A72: a hand-built look, world/town-hand.js, set by eye from the building's Street View photo; last, so it wins)
+      handLook(R0, list.at(-1));
     }
     // (A37: the hand list's buildings, HAND_BLDG: on the lidar's ground round them, the tile's own)
     { const tb = tileBox(c); for (const [R, e, r, fl] of HAND_BLDG) { const ring = R.concat([R[0]]).map(([la, lo]) => proj.xz(la, lo)); let cx = 0, cz = 0; for (const p of R) { const [x, z] = proj.xz(...p); cx += x / R.length; cz += z / R.length; }

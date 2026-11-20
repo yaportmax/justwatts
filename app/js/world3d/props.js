@@ -697,7 +697,7 @@ export function buildingGeometry(list, deckPlants) {
     // (A72: hand-built street fronts, world/town-hand.js: bay windows and balconies on the wall facing b.face, as Sausalito's
     // Edwardian flats and 1960s blocks on Bridgeway show them, svs_540950_L, svs_541000_L. Outside the footprint, over the sidewalk.)
     if (b.face != null && (b.bays || b.balconies)) {
-      const fx = Math.sin(b.face * Math.PI / 180), fz = -Math.cos(b.face * Math.PI / 180), shade = [wc[0] * 0.96, wc[1] * 0.96, wc[2] * 0.96];
+      const fx = Math.sin(b.face * Math.PI / 180), fz = -Math.cos(b.face * Math.PI / 180), shade = b.bayColor != null ? col(b.bayColor) : [wc[0] * 0.96, wc[1] * 0.96, wc[2] * 0.96];
       let run2 = 0;
       // both windings: seen from the street and from under the bay
       const dq = (a, b2, c, d, k, w) => { quad(a, b2, c, d, k, w, true); quad(a, d, c, b2, k, [w[0], w[3], w[2], w[1]], true); };

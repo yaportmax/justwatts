@@ -1760,7 +1760,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const rise = d.roof === 'flat' ? 0 : d.rise ?? 2.5;
         b.rh = rise; b.hc = null; b.minEave = null; b.maxTop = b.base + b.h + rise; b.handRoof = d.roof ?? 'gable'; b.fort = false; b.metal = false;
         if (d.wall != null) { b.paint = d.wall; if (b.frontage) b.frontage = [b.frontage[0], d.wall]; }
-        if (d.face != null) { b.face = d.face; b.bays = d.bays; b.balconies = d.balconies; }
+        if (d.face != null) { b.face = d.face; b.bays = d.bays; b.balconies = d.balconies; b.bayColor = d.bayColor; }
         if (d.style != null) b.style = d.style;
         if (d.roofColor != null) b.roofColor = d.roofColor;
         if (d.front != null) { const g = d.front * Math.PI / 180; b.shopFront = [Math.sin(g), -Math.cos(g)]; b.shopGap = koGap; b.shopGround = drawnY;

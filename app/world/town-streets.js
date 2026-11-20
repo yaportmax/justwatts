@@ -7,4 +7,7 @@ export const TOWN_STREETS = [{"id":28102889,"name":"Bridgeway","pts":[[37.855143
 
 // (A67: cxs_541200_0 and cxs_541300_180 identify these two lidar crowns as date palms.
 // Position and height are from CHM8. Their original trees.bin records classified both as oak.)
-export const PLAZA_PALMS = [[37.8561526,-122.4795190,7.3,4.1],[37.8560398,-122.4794295,18.7,3.8]];
+export const PLAZA_PALMS = [[37.8561526,-122.4795190,7.3,4.1],[37.8560398,-122.4794295,18.7,3.8],[37.856115,-122.479321,19.5,3.4],[37.855977,-122.479232,19.3,3.4]];
+// (A73: svs_541250_R and svs_541300_R: the plaza's two tall fan palms behind the date palms (their lidar crowns drawn as palms, not oaks)
+// and the big cypresses at its north corner and over Bridgeway. [lat, lon, species or null: none, the palm list draws it])
+export const TREE_FIX = [[37.856115,-122.479321,null],[37.855977,-122.479232,null],[37.856002,-122.479125,'cypress'],[37.856316,-122.479608,'cypress']];

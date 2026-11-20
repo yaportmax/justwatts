@@ -88,4 +88,10 @@ export const TOWN_HAND = new Map(Object.entries({
   "3785750,-12248155": { roof: 'flat', eave: 10, wall: 0xc8c4b8 },  // grey stucco villa with arched windows, svs_541500_L
   "3785815,-12248255": { roof: 'flat', eave: 10, wall: 0xe6dcc4, face: 45, bays: 1 },  // cream flats, svs_541600_L
   "3785362,-12247855": { roof: 'hip', rise: 2.2, eave: 6, wall: 0xf3f1ea, roofColor: 0x7c7a75 },  // the white pier building with arches
+  // Bridgeway east side, the 600 block, svs_541200_R (north to south)
+  "3785574,-12247919": { roof: 'flat', eave: 10.5, wall: 0xe4dac4, trim: 0x3a3a38, front: 245, awning: 0x5a6a60 },  // cream Victorian with the scrolled parapet
+  "3785568,-12247910": { roof: 'flat', eave: 8, bayColor: 0xf4f2ec, wall: 0xf2f0ea, trim: 0x4a4a48, front: 248, awning: 0, face: 248, bays: 1 },  // white clapboard, one bay over the shop
+  "3785555,-12247913": { roof: 'flat', eave: 7.6, bayColor: 0xf0ede6, wall: 0xa8705c, trim: 0xf0ede6, front: 239, awning: 0, face: 245, bays: 1 },  // brick with white bay windows
+  "3785546,-12247905": { roof: 'flat', eave: 7.6, bayColor: 0xf0ede6, wall: 0xa8705c, trim: 0xf0ede6, front: 246, awning: 0, face: 246, bays: 1 },
+  "3785540,-12247891": { roof: 'flat', eave: 8, wall: 0xc89a8a, trim: 0xece8e0, front: 249, awning: 0x2c4a6a },  // pink brick, blue awning
 }));

@@ -163,7 +163,7 @@ export function loadTrees({ fetch = globalThis.fetch?.bind(globalThis), url = '/
       trees.each = (la0, lo0, la1, lo1, fn) => {
         // (A73: hand-set lidar crowns, world/town-streets.js TREE_FIX: Street View's species, or none where a palm stands)
         if (la1 < 37.8555 || la0 > 37.8585 || lo1 < -122.4835 || lo0 > -122.4785) each(la0, lo0, la1, lo1, fn);
-        else each(la0, lo0, la1, lo1, (la, lo, h, r, sp) => { const f = TREE_FIX.find(t => Math.abs(t[0] - la) < 1.5e-5 && Math.abs(t[1] - lo) < 1.9e-5), zn = TREE_ZONES.find(q => la >= q[0] && la <= q[2] && lo >= q[1] && lo <= q[3] && la - q[6] >= (lo - q[7]) * q[5]); if (!f) fn(la, lo, h, r, zn ? zn[4] : sp, undefined, zn ? 1 : 0); else if (f[2]) fn(la, lo, h, r, f[2]); });
+        else each(la0, lo0, la1, lo1, (la, lo, h, r, sp) => { const f = TREE_FIX.find(t => Math.abs(t[0] - la) < 1.5e-5 && Math.abs(t[1] - lo) < 1.9e-5), zn = TREE_ZONES.find(q => la >= q[0] && la <= q[2] && lo >= q[1] && lo <= q[3] && la - q[6] >= (lo - q[7]) * q[5]); if (!f) fn(la, lo, h, r, zn ? zn[4] : sp, undefined, zn ? 1 : 0); else if (f[2]) fn(la, lo, f[3] ?? h, f[4] ?? r, f[2]); });
         if (!(la1 < 37.8741 || la0 > 37.8895 || lo1 < -122.5328 || lo0 > -122.5101)) for (const t of NORTH_TREES) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(...t);
         // (A72: Mill Valley's hillsides, world/mv-trees.js: the lidar canopy's crowns where trees.bin has none)
         if (!(la1 < 37.884 || la0 > 37.914 || lo1 < -122.566 || lo0 > -122.521)) for (const t of MV_TREES) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(t[0], t[1], t[2], t[3], t[4], 1);

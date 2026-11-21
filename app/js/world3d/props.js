@@ -162,19 +162,19 @@ const cone = (y0, y1, r, c, seed) => [bumpy(new THREE.ConeGeometry(r, y1 - y0, 8
 
 // trees at a typical size in metres (scaled per instance). Names: oak, bay, fir, redwood, euc, cypress, pine (trees),
 // bush, shrub (low), fern, stone (near the rider only)
-export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub', 'willow', 'eucS', 'cypressT'];
+export const SPECIES = ['oak', 'bay', 'fir', 'redwood', 'euc', 'cypress', 'pine', 'bush', 'shrub', 'willow', 'eucS', 'cypressT', 'spine'];
 // a blue gum the lidar has under this height (metres) is a young or cut-back one, leafy nearly to the ground (eucS)
 export const EUC_YOUNG = 22;
 // a Monterey cypress the lidar has this tall or more grew sheltered in a stand or an old planting: a big full crown to near
 // the ground (cypressT), not the wind-cut coastal table (Street View user_fortbaker_stop: the cypress right of the stop)
 export const CYP_TALL = 15;
 // the share of the full models' radius each is drawn in full (the tall dense ones cost the most; impostors past it)
-export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, willow: 0.8, eucS: 0.8, cypressT: 0.8, stone: 0.45, fern: 0.25 };
+export const NEAR = { oak: 1, bay: 1, fir: 0.45, redwood: 0.2, euc: 0.8, cypress: 1, pine: 0.8, bush: 0.5, shrub: 0.5, willow: 0.8, eucS: 0.8, cypressT: 0.8, spine: 0.8, stone: 0.45, fern: 0.25 };
 export function treeGeometries() {
   const brown = col(0x6e5a44, 1.5), brownD = col(0x574634, 1.5), red = col(0x7e4a36, 1.45), pale = col(0xd8cdb8, 1.15), paleS = col(0xd8caa6, 3.2);
   // foliage colours; the atlas's own light (about 0.6 to 1) darkens them
   const F = { oak: col(0x51693a, 1.2), bay: col(0x3e5838, 1.12), fir: col(0x34552f, 1.35), red: col(0x264a32, 1.2),
-    euc: col(0x8f836b, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), willow: col(0x6d7d48, 1.25), fern: col(0x4f7a2c, 1.4) };
+    euc: col(0x8f836b, 1.3), cyp: col(0x35552f, 1.4), pine: col(0x3a5a30, 1.4), bush: col(0x6a7a42, 1.3), shrub: col(0x4a6234, 1.3), willow: col(0x6d7d48, 1.25), fern: col(0x4f7a2c, 1.4), spine: col(0x3b5832, 1.4) };
   const ico = (r, d = 0) => new THREE.IcosahedronGeometry(r, d);
   return {
     stone: merge([[bumpy(ico(0.45, 1), 0.12, 21), col(0x8d867a), M(0, 0.12, 0, 1, 0.6, 1)]]),
@@ -205,6 +205,13 @@ export function treeGeometries() {
     // Monterey / bishop pine: a rounded, irregular dark crown high on a bare trunk
     pine: merge([bark(trunkG(0.45, 0.28, 9, 7), brownD), limb(0, 7.5, 0, 2, 10, 0.5, 0.18, brownD), limb(0, 8, 0, -1.6, 10.6, -0.4, 0.16, brownD),
       core(0, 11, 0, 2.8, 1.8, 2.6, F.pine, 15), ...lumps(0, 11, 0, 3.8, 2.6, 3.6, 6, 10, 2.9, LEAF.pine, 14).map(g => leaves(g, F.pine))]),
+    // (A76: Italian stone pine, svs_541550_R and svs_541500_R: Bridgeway's bay lot. A bare leaning trunk to about 6.5 m,
+    // four limbs spreading out and up, a broad flat umbrella of dark clumps from about 9 m to the top, near as wide as tall)
+    spine: merge([bark(trunkG(0.55, 0.36, 6, 7), brownD, M(0, 0, 0, 1, 1, 1, 0, 0.2)),
+      limb(0.9, 5.2, 0, 2.8, 8.2, 0.6, 0.24, brownD), limb(0.8, 5.5, 0, -1.8, 8.6, -0.8, 0.22, brownD), limb(1, 5.6, 0.1, 1.2, 8.8, 2.6, 0.2, brownD), limb(1, 5.4, 0, 1.6, 8.4, -2.5, 0.2, brownD),
+      core(0.9, 10, 0, 5.6, 2.4, 5.3, F.spine, 51),
+      ...[[0.9, 11.2, 0, 4.8, 2.6, 4.6, 9, 52], ...[0, 1, 2, 3, 4, 5, 6].map(k => [0.9 + Math.cos(k * 0.9 + 0.3) * 4.9, 8.9 + 1.0 * hash2(k, 57), Math.sin(k * 0.9 + 0.3) * 4.6, 3.1, 2.4, 2.9, 6, 53 + k])]
+        .flatMap(([x, y, z, rx, ry, rz, nl, sd]) => lumps(x, y, z, rx, ry, rz, nl, 13, 3.0, LEAF.pine, sd, { lump: 0.62 })).map(g => leaves(g, F.spine))]),
     // arroyo willow: many slender stems from the ground fanning out, a dense rounded thicket about 6 m tall and as wide
     willow: merge([...[[1.6, 0.3], [-1.4, 0.6], [0.4, -1.5], [-0.5, 1.5], [1.2, -1.0]].map(([x, z], i) => limb(x * 0.15, 0, z * 0.15, x, 3.6 + 0.3 * i, z, 0.11, brownD, true)),
       core(0, 3.8, 0, 2.5, 1.9, 2.4, F.willow, 19), ...lumps(0, 3.7, 0, 3.0, 2.3, 2.9, 8, 11, 2.2, LEAF.willow, 18, { lift: 0.4 }).map(g => leaves(g, F.willow))]),
@@ -876,7 +883,7 @@ export function signFaceGeometry(list) {
 // No terrain edits, invented lanes, cars, or per-frame work.)
 export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore = () => false, kerb = () => null, surveyedWalk, walkGap = gap, sectionAt, rampGap, support = ground, sea = -Infinity, palms = [] }) {
   const pos = [], col = [], walls = new Map(), START = 0.08, evidence = { sections: 0, medians: 0, rejected: 0, samples: 0, minGap: Infinity };
-  const concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
+  const bedC = new THREE.Color(0x4f5c36), concrete = new THREE.Color(0xb8b2a6), curb = new THREE.Color(0xa39e94), red = new THREE.Color(0x9b483d), tar = new THREE.Color(0x7b7b7c);
   // (A61: cxs_540900_0 and cxs_540900_180: Bridgeway's black lantern lamps on the house side's kerb: a base, the post, a pale lantern under its cap; [from, to, half width, colour])
   const iron = new THREE.Color(0x2a2c2e), glass = new THREE.Color(0xe9e4cf), stone = new THREE.Color(0x7f7b74);
   // (A63: a riprap boulder: four corners round (x, z) on the ground at their own feet, 0.2 m in, a narrower top 0.2 to 0.6 m up, grey in turn)
@@ -1010,6 +1017,13 @@ export function* townEdgeGeometry(lines, streets, { ground, gap, blocked, shore 
               for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(top[h], top[j], bottom[j], bottom[h], match.s.red ? red : curb); }
             }
             evidence.sections++;
+            // (A76: svs_541500_R: behind the bay lot's sidewalk a planted bed to the lot, its shrubs and the stone pines' feet, 0.1 m over the ground)
+            if (!sectionAt && band.bed && fits(W1, W1 + band.bed, 0.42, walkGap)) {
+              const E0 = at(f0, W1), E1 = at(f1, W1), E2 = at(f1, W1 + band.bed), E3 = at(f0, W1 + band.bed), bp = right ? [E0, E3, E2, E1] : [E0, E1, E2, E3];
+              const bt = bp.map(p => [p[0], Math.max(p[1] + 0.1, ground(p[0], p[2]) + 0.1), p[2]]), bb = bp.map(p => [p[0], ground(p[0], p[2]) - 0.15, p[2]]);
+              quad(...bt, bedC.clone().multiplyScalar(0.82 + 0.36 * hash2(Math.round(E0[0] * 2), Math.round(E0[2] * 2))));
+              for (let j = 0; j < 4; j++) { const h = (j + 1) % 4; wall(bt[h], bt[j], bb[j], bb[h], curb); }
+            }
             // (a lamp about every 30 m, 0.45 m in from the kerb, where the walk is wide enough to pass it)
             if (!sectionAt && lampRun[right ? 0 : 1] >= 30 && w >= 1.2) { lampRun[right ? 0 : 1] = 0; const q = at((f0 + f1) / 2, W0 + 0.45), ty = Math.max(q[1] + 0.15, ground(q[0], q[2]) + 0.12);
               for (const [y0, y1, h, c] of LANTERN) block(q[0], q[2], ty + y0, ty + y1, h, c); evidence.lamps = (evidence.lamps || 0) + 1; }

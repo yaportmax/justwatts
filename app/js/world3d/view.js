@@ -758,7 +758,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // crossing to the actual wider pavement, preserving the paved approach.)
       const cycleCrossing = (r.fl & 131072) !== 0;
       if (r.paved || cycleCrossing) st.surf = 1;
-      if (r.hw === 'footway' && r.pts.some(([la, lo]) => la >= TOWN_WATERFRONT.south && la <= TOWN_WATERFRONT.north && lo > -122.482 && lo < -122.474)) st.surf = 1;
+      if (r.hw === 'footway' && r.pts.some(([la, lo]) => la >= TOWN_WATERFRONT.south && la <= (TOWN_WATERFRONT.east?.north ?? TOWN_WATERFRONT.north) && lo > -122.482 && lo < -122.474)) st.surf = 1;
       // (A67: the mapped dock footways between Waldo's rows, formerly dirt trails on the bed.)
       const floatingDock = !!(r.fl & 65536);
       if (floatingDock) { st.surf = 5; st.w = 1.8; }
@@ -884,7 +884,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // traced on NAIP; each drawn by the tile its middle is in, its surface the road shader's: 0 asphalt, 3 gravel, 4 dirt)
     // (the spec's lots are drawn by the hand-built stretch, hand.js: not again as pads (two pavings z-fighting))
     const pads = (veg?.pads || []).filter(([, P]) => { const [x, z] = proj.xz(P.reduce((s, q) => s + q[0], 0) / P.length, P.reduce((s, q) => s + q[1], 0) / P.length); return x >= tbox[0] && x < tbox[2] && z >= tbox[1] && z < tbox[3]; });
-    const lotRings = [];
+    const lotRings = []; c.lotRings = lotRings;
     for (const [ring, surf, pad] of [...(t.lots || []).map(r => [r, 0, false]), ...pads.map(([sf, P]) => [P, sf, true])]) {
       const r = ring.map(([la, lo]) => proj.xz(la, lo)); if (r.length > 3 && r[0][0] === r.at(-1)[0] && r[0][1] === r.at(-1)[1]) r.pop();
       if (r.length < 3) continue;
@@ -1117,6 +1117,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
   }
   // within 12 m of the Golden Gate Bridge's deck (no tree grows through it)
   const nearDeck = (x, z) => { const la = proj.lat(z), lo = proj.lon(x); if (la < 37.80 || la > 37.835 || lo < -122.486 || lo > -122.47) return false; for (const [a, b] of [[0, 0], [12, 0], [-12, 0], [0, 12], [0, -12]]) if (marks.deckAt(x + a, z + b) != null) return true; return false; };
+  // (A76: in a car park's outline or within m of its edge: the occupancy mask's 3.8 m cells spread a lot 3 m past its edge, onto the planter strip by Bridgeway where its stone pines stand, svs_541550_R)
+  const lotNear = (rings, x, z, m) => (rings || []).some(r => { let c = false; for (let i = 0, j = r.length - 1; i < r.length; j = i++) { if ((r[i][1] > z) !== (r[j][1] > z) && x < (r[j][0] - r[i][0]) * (z - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c; const dx = r[i][0] - r[j][0], dz = r[i][1] - r[j][1], l2 = dx * dx + dz * dz, t = l2 ? Math.max(0, Math.min(1, ((x - r[j][0]) * dx + (z - r[j][1]) * dz) / l2)) : 0; if ((x - r[j][0] - dx * t) ** 2 + (z - r[j][1] - dz * t) ** 2 < m * m) return true; } return c; });
   const occAt = (o, x, z) => { if (!o) return 0; const a = Math.floor((x - o.ox) / o.ow), b = Math.floor((z - o.oz) / o.oh); return a >= 0 && b >= 0 && a < OCC && b < OCC ? o.occ[b * OCC + a] : 0; };
   let streetWinter = null;
   function* buildTrees(c) {
@@ -1183,7 +1185,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const g00 = roadGap(x, z), ry = g00 != null && g00 < 12 ? roadTopNear(x, z) : null, foot0 = hAt(x, z), lift = ry != null && foot0 != null ? Math.max(0, Math.min(20, ry - foot0)) : 0;
         const f = fitTree(dim, h, r, g00, lift); if (!f) continue;
         // (A74: a tree on a car park's paving, its crown and a sidewalk's width clear of the road, else none: by the street its crown hung over the riding lanes)
-        if (g00 != null && occAt(c.occ, x, z) === 2) continue;  // (a car park's: none within 10 m of a road, its paving by the street is ridden over; A75: a species zone's trees on the ground keep the gap fitTree gives every tree: the lot's own aisles are roads too, and its edge pines all went, svs_541500_R)
+        if (g00 != null && occAt(c.occ, x, z) === 2 && lotNear(c.lotRings, x, z, 1)) continue;  // (a car park's: none within 10 m of a road, its paving by the street is ridden over; A75: a species zone's trees on the ground keep the gap fitTree gives every tree: the lot's own aisles are roads too, and its edge pines all went, svs_541500_R)
         const tr = 0.5 * f.s; let lo2 = Infinity; for (const [dx, dz] of [[tr, 0], [-tr, 0], [0, tr], [0, -tr]]) { const q = hAt(x + dx, z + dz); if (q != null) lo2 = Math.min(lo2, q); }
         // (a low crown reaching the paving: the way to the road, down the gap's slope; its leaves under the clearance end
         // f.clip metres out that way, A15)
@@ -1564,7 +1566,10 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // (A54: sa_0800/cxj_541000: the eastern bay promenade has a seawall down to the seabed.)
         shore: (x, z, east) => east > 0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.width : 0,
         // (A59: cxs_540900_180 and cxs_540900_0: the west side is a parking lane, a red kerb and a sidewalk to the houses' doors, not grass and a dirt path)
-        kerb: (x, z, east) => east < -0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= (TOWN_WATERFRONT.west.north ?? TOWN_WATERFRONT.north) ? TOWN_WATERFRONT.west : null,
+        kerb: (x, z, east) => { const la = proj.lat(z), E = TOWN_WATERFRONT.east;
+          if (east < -0.5) return la >= TOWN_WATERFRONT.south && la <= (TOWN_WATERFRONT.west.north ?? TOWN_WATERFRONT.north) ? TOWN_WATERFRONT.west : null;
+          // (A76: svs_541550_R and svs_541500_R: north of the plaza the bay side too is a parking lane, a kerb and a sidewalk with the lot's meters, not grass and a dirt path)
+          return east > 0.5 && E && la >= E.south && la <= E.north ? E : null; },
         // (A60: that sidewalk covers the footway OpenStreetMap maps along it, as the bay side's promenade does; still clear of every other road and ride line)
         walkGap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z))),
         // (A63: the bay promenade's riprap runs down to where the ground goes under the bay)

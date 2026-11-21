@@ -1183,7 +1183,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         const g00 = roadGap(x, z), ry = g00 != null && g00 < 12 ? roadTopNear(x, z) : null, foot0 = hAt(x, z), lift = ry != null && foot0 != null ? Math.max(0, Math.min(20, ry - foot0)) : 0;
         const f = fitTree(dim, h, r, g00, lift); if (!f) continue;
         // (A74: a tree on a car park's paving, its crown and a sidewalk's width clear of the road, else none: by the street its crown hung over the riding lanes)
-        if (g00 != null && (occAt(c.occ, x, z) === 2 || zoned && g00 < f.s * dim.R + 3.5)) continue;  // (a car park's: none within 10 m of a road, its paving by the street is ridden over)
+        if (g00 != null && occAt(c.occ, x, z) === 2) continue;  // (a car park's: none within 10 m of a road, its paving by the street is ridden over; A75: a species zone's trees on the ground keep the gap fitTree gives every tree: the lot's own aisles are roads too, and its edge pines all went, svs_541500_R)
         const tr = 0.5 * f.s; let lo2 = Infinity; for (const [dx, dz] of [[tr, 0], [-tr, 0], [0, tr], [0, -tr]]) { const q = hAt(x + dx, z + dz); if (q != null) lo2 = Math.min(lo2, q); }
         // (a low crown reaching the paving: the way to the road, down the gap's slope; its leaves under the clearance end
         // f.clip metres out that way, A15)
@@ -1523,7 +1523,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // Generate with the furniture, outside all road/path ribbons; never touch terrain or road construction.)
     const tb = tileBox(c), la0 = proj.lat(tb[3]), la1 = proj.lat(tb[1]);
     const sectionAt = streetSections(t.mvEdges, proj.xz);
-    if (sectionAt || t.townWalk || (la1 > TOWN_WATERFRONT.south && la0 < TOWN_WATERFRONT.north && proj.lon(tb[2]) > -122.482 && proj.lon(tb[0]) < -122.474)) {
+    if (sectionAt || t.townWalk || (la1 > TOWN_WATERFRONT.south && la0 < (TOWN_WATERFRONT.west.north ?? TOWN_WATERFRONT.north) && proj.lon(tb[2]) > -122.482 && proj.lon(tb[0]) < -122.474)) {
       const streets = sectionAt ? [] : TOWN_STREETS.filter(s => s.pts.some(([a, o]) => a >= la0 - 0.001 && a <= la1 + 0.001 && o >= proj.lon(tb[0]) - 0.001 && o <= proj.lon(tb[2]) + 0.001))
         .map(s => ({ ...s, P: s.pts.map(p => proj.xz(...p)) }));
       const buildings = t.features.filter(f => f.k === 'building').map(f => {
@@ -1564,7 +1564,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // (A54: sa_0800/cxj_541000: the eastern bay promenade has a seawall down to the seabed.)
         shore: (x, z, east) => east > 0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.width : 0,
         // (A59: cxs_540900_180 and cxs_540900_0: the west side is a parking lane, a red kerb and a sidewalk to the houses' doors, not grass and a dirt path)
-        kerb: (x, z, east) => east < -0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= TOWN_WATERFRONT.north ? TOWN_WATERFRONT.west : null,
+        kerb: (x, z, east) => east < -0.5 && proj.lat(z) >= TOWN_WATERFRONT.south && proj.lat(z) <= (TOWN_WATERFRONT.west.north ?? TOWN_WATERFRONT.north) ? TOWN_WATERFRONT.west : null,
         // (A60: that sidewalk covers the footway OpenStreetMap maps along it, as the bay side's promenade does; still clear of every other road and ride line)
         walkGap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z))),
         // (A63: the bay promenade's riprap runs down to where the ground goes under the bay)
@@ -1758,6 +1758,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }
       const handLook = (R0, b) => { const n = R0.length - 1; let a = 0, o = 0; for (let i = 0; i < n; i++) { a += R0[i][0]; o += R0[i][1]; }
         const d = TOWN_HAND.get(Math.round(a / n * 1e5) + ',' + Math.round(o / n * 1e5)); if (!d) return;
+        // (A75: street: its ground floor at the sidewalk (the street's height at its corners), the hill's bank inside it, svs_541500_L)
+        if (d.street) { let y = Infinity; for (const p of b.ring) { const t = roadTopNear(p[0], p[1], 14); if (t != null) y = Math.min(y, t); } if (y < b.base) b.base = y + 0.1; }
         if (d.eave != null) b.h = d.eave;
         const rise = d.roof === 'flat' ? 0 : d.rise ?? 2.5;
         b.rh = rise; b.hc = null; b.minEave = null; b.maxTop = b.base + b.h + rise; b.handRoof = d.roof ?? 'gable'; b.fort = false; b.metal = false;

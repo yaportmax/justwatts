@@ -81,11 +81,11 @@ export const TOWN_HAND = new Map(Object.entries({
   "3785659,-12248040": { roof: 'flat', eave: 6, wall: 0xe4e2dc },
   "3785669,-12248056": { roof: 'flat', eave: 10, wall: 0xb8bcbc },  // grey metal-sided, svs_541400_L
   "3785682,-12248079": { roof: 'flat', eave: 13, wall: 0xa4b4c4, face: 45, balconies: 0xf0f0f0 },  // pale blue hotel, white balconies
-  "3785708,-12248110": { roof: 'flat', eave: 10, wall: 0x5a5e62 },
-  "3785718,-12248120": { roof: 'gable', rise: 3, eave: 6, wall: 0xb8c4cc, roofColor: 0x6b665e, style: 5 },  // blue-grey clapboard house, svs_541450_L
-  "3785730,-12248128": { roof: 'hip', rise: 1.2, eave: 5, wall: 0xc8d0d8, roofColor: 0x6b665e },
-  "3785739,-12248144": { roof: 'hip', rise: 1.2, eave: 5, wall: 0xe8d4b8, roofColor: 0x6b7680 },
-  "3785750,-12248155": { roof: 'flat', eave: 10, wall: 0xc8c4b8 },  // grey stucco villa with arched windows, svs_541500_L
+  "3785708,-12248110": { street: 1, roof: 'flat', eave: 10, wall: 0x5a5e62 },
+  "3785718,-12248120": { street: 1, roof: 'gable', rise: 3, eave: 6, wall: 0xb8c4cc, roofColor: 0x6b665e, style: 5 },  // blue-grey clapboard house, svs_541450_L
+  "3785730,-12248128": { street: 1, roof: 'hip', rise: 1.2, eave: 5, wall: 0xc8d0d8, roofColor: 0x6b665e },
+  "3785739,-12248144": { street: 1, roof: 'hip', rise: 1.2, eave: 5, wall: 0xe8d4b8, roofColor: 0x6b7680 },
+  "3785750,-12248155": { street: 1, roof: 'flat', eave: 10, wall: 0xc8c4b8 },  // grey stucco villa with arched windows, svs_541500_L
   "3785815,-12248255": { roof: 'flat', eave: 10, wall: 0xe6dcc4, face: 45, bays: 1 },  // cream flats, svs_541600_L
   "3785362,-12247855": { roof: 'hip', rise: 2.2, eave: 6, wall: 0xf3f1ea, roofColor: 0x7c7a75 },  // the white pier building with arches
   // Bridgeway east side, the 600 block, svs_541200_R (north to south)

@@ -911,7 +911,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const r = f.rings[0].map(([la, lo]) => proj.xz(la, lo)); let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
       for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
       if ((x1 - x0) * (z1 - z0) > 4000) continue;
-      for (let x = x0; x <= x1; x += ow) for (let z = z0; z <= z1; z += oh) mark(x, z, 1.5, 2);
+      for (let x = x0; x <= x1; x += ow) for (let z = z0; z <= z1; z += oh) mark(x, z, 1.5, 3);  // (A73: 3 a building, 2 a car park's paving)
     }
     yield;
     // (a car park's or a pad's paving within 3 m of a road's edge eased up to it: flush at the edge, on the ground 3 m out
@@ -1133,7 +1133,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     const footSink = (sp, x, z, s) => { const R = FOOT_R[sp]; if (!R) return 0.3; const a = hAt(x + 1, z), b = hAt(x - 1, z), c = hAt(x, z + 1), d = hAt(x, z - 1);
       if (a == null || b == null || c == null || d == null) return 0.3; return Math.min(1.1, Math.max(0.3, Math.hypot((a - b) / 2, (c - d) / 2) * R * s + 0.1)); };
     let addFree = 0;  // (A72: Mill Valley's hillside crowns, mv-trees.js: kept clear of the hand trees, so they stand inside the hand list's corridor too)
-    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || (!addFree && HVEG.owns(x, z))) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 1) || nearDeck(x, z) || !KO.clear(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - footSink(sp, x, z, s), z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
+    const add = (sp, x, z, s, r, nearOnly = 0, hf = null, foot = null, clip = null) => { if (x < box[0] || z < box[1] || x >= box[2] || z >= box[3] || (!addFree && HVEG.owns(x, z))) return; const y0 = hAt(x, z), y = y0 == null ? null : standOn(c, x, z, y0); if (y == null || y < SEA + 0.3 || occAt(c.occ, x, z) > (hf == null ? 0 : 2) || nearDeck(x, z) || !KO.clear(x, z)) return; (out[sp] ??= []).push([x, Math.min(y, foot ?? y) - footSink(sp, x, z, s), z, s, r, nearOnly, hf, clip]); if (!nearOnly && sp !== 'fern') n++; };  // ferns and ring trees: not in the cap
     // woods, scrub, parks and towns by a raster of the tile's polygons: spots on a jittered grid in each cell, the
     // class of the nearest raster vertex deciding (no point in polygon tests)
     const R = 128, ras = rasterBy({ z: c.z, x: c.x, y: c.y, segs: R }, withGardens(t), treeCode), xs = [], zs = [];
@@ -1166,12 +1166,12 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // and crown (the model scaled to them, fitTree), clear of the roads; its trunk on the lowest ground round its foot
     if (lidarTrees) {
       const T = [];
-      lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp, free) => { if (!veg?.handAt(la, lo, 'notrees')) T.push([la, lo, h, r, sp, free]); });
+      lidarTrees.each(proj.lat(box[3]), proj.lon(box[0]), proj.lat(box[1]), proj.lon(box[2]), (la, lo, h, r, sp, free, zoned) => { if (!veg?.handAt(la, lo, 'notrees')) T.push([la, lo, h, r, sp, free, zoned]); });
       // (and the hand list's, A18: Street View's own trees where the lidar's are wrong or missing)
       for (const t of veg?.handTrees || []) { const [la, lo] = t.at; if (la <= proj.lat(box[1]) && la > proj.lat(box[3]) && lo >= proj.lon(box[0]) && lo < proj.lon(box[2])) T.push([la, lo, t.h, t.r, t.sp]); }
       for (let i = 0; i < T.length; i++) {
         if (i % 400 === 399) yield;
-        const [la, lo, h, r, sp0, free] = T[i]; addFree = free ? 1 : 0; const sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0 === 'cypress' && h >= CYP_TALL ? 'cypressT' : sp0, dim = DIMS[sp]; if (!dim) continue;
+        const [la, lo, h, r, sp0, free, zoned] = T[i]; addFree = free ? 1 : 0; const sp = sp0 === 'euc' && h < EUC_YOUNG ? 'eucS' : sp0 === 'cypress' && h >= CYP_TALL ? 'cypressT' : sp0, dim = DIMS[sp]; if (!dim) continue;
         let [x, z] = proj.xz(la, lo);
         // (a trunk on a road bank's steep face: moved out from the road till it is off it, up to 8 m; else none)
         if (c.bankH?.size && c.bankH.get(bkey(x, z)) < -1e8) {
@@ -1182,6 +1182,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // (A33: a road over the tree's foot raises the clearance by as much: on Simmonds Road a tree below the road hung its leaves at the rider's height)
         const g00 = roadGap(x, z), ry = g00 != null && g00 < 12 ? roadTopNear(x, z) : null, foot0 = hAt(x, z), lift = ry != null && foot0 != null ? Math.max(0, Math.min(20, ry - foot0)) : 0;
         const f = fitTree(dim, h, r, g00, lift); if (!f) continue;
+        // (A74: a tree on a car park's paving, its crown and a sidewalk's width clear of the road, else none: by the street its crown hung over the riding lanes)
+        if (g00 != null && (occAt(c.occ, x, z) === 2 || zoned && g00 < f.s * dim.R + 3.5)) continue;  // (a car park's: none within 10 m of a road, its paving by the street is ridden over)
         const tr = 0.5 * f.s; let lo2 = Infinity; for (const [dx, dz] of [[tr, 0], [-tr, 0], [0, tr], [0, -tr]]) { const q = hAt(x + dx, z + dz); if (q != null) lo2 = Math.min(lo2, q); }
         // (a low crown reaching the paving: the way to the road, down the gap's slope; its leaves under the clearance end
         // f.clip metres out that way, A15)
@@ -2199,7 +2201,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       const d = 0.6 * sc * REACH * w + 0.25 - gap; if (L < 0.2 || d > 3) return { skip: true };
       const nx = x + gx / L * d, nz = z + gz / L * d, r = scrubGround(nx, nz, w); return r && !r.skip ? { ...r, x: nx, z: nz } : r;
     }
-    if (occAt(c.occ, x, z) === 2) return { skip: true };  // (a car park, a building: the road itself by its gap above, not its coarse cells (bushes were cleared 5 m out, A11: Conzelman 0a_2030, 3a_0430))
+    if (occAt(c.occ, x, z) >= 2) return { skip: true };  // (a car park, a building: the road itself by its gap above, not its coarse cells (bushes were cleared 5 m out, A11: Conzelman 0a_2030, 3a_0430))
     const g = c.grid, n = g.segs + 1, [fi, fj] = gridIJ(g, x, z), v = Math.round(fj) * n + Math.round(fi), h0 = gridHeight(g, x, z);
     if (h0 == null || !(v >= 0 && v < n * n)) return null;
     // (on a strip's steep face too where the lidar has scrub (cellBushes decides): Street View Conzelman 0a_1030, the cut

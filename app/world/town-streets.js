@@ -11,3 +11,6 @@ export const PLAZA_PALMS = [[37.8561526,-122.4795190,7.3,4.1],[37.8560398,-122.4
 // (A73: svs_541250_R and svs_541300_R: the plaza's two tall fan palms behind the date palms (their lidar crowns drawn as palms, not oaks)
 // and the big cypresses at its north corner and over Bridgeway. [lat, lon, species or null: none, the palm list draws it])
 export const TREE_FIX = [[37.856115,-122.479321,null],[37.855977,-122.479232,null],[37.856002,-122.479125,'cypress'],[37.856316,-122.479608,'cypress']];
+// (A73: svs_541400_R to svs_541600_R: the car parks on the bay side of Bridgeway north of the plaza stand under Italian stone pines.
+// [s, w, n, e, species, k, lat0, lon0]: the box's part with lat - lat0 >= (lon - lon0) * k, the bay side of Bridgeway through svs_541500)
+export const TREE_ZONES = [[37.8566, -122.4822, 37.8590, -122.4798, 'pine', -0.8, 37.85761, -122.48142]];

@@ -26,7 +26,7 @@ import { TOWN_PIERS, DOCK_ENTRANCES } from '../../world/town-piers.js';
 import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2, inRings } from './landuse.js';
-import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS } from '../../world/town-streets.js';
+import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS, TOWN_LEVEL } from '../../world/town-streets.js';
 import { TOWN_HAND } from '../../world/town-hand.js';
 import { loadMarshPath, loadShopSigns, millValleyLots, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -494,6 +494,8 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         // not over a tunnel (the deck)
         for (const run of gp.length ? P.reduce((rs, p) => { if (gp.some(([a, b]) => p[3] >= a && p[3] <= b)) { if (rs.at(-1).length) rs.push([]); } else rs.at(-1).push(p); return rs; }, [[]]) : [P])
           if (run.length > 1) under.push(lidar || rl ? { pts: run, r0: w / 2 + 2.5, r1: w / 2 + 7, rc: w / 2 + 18, half: w / 2 } : { pts: run, r0: w / 2 + Math.max(2.5, 8 * ms), r1: w / 2 + Math.max(9, 22 * ms) });
+        // (A76: TOWN_LEVEL: Bridgeway's town stretch level out to its shopfronts, the bank's slope inside their walls)
+        if (rl && r.hw === 'secondary') for (const [s0, n0, a0, a1] of TOWN_LEVEL) { const run = P.filter(p => { const la = proj.lat(p[1]), lo = proj.lon(p[0]); return la >= s0 && la <= n0 && lo > -122.4835 && lo < -122.4785; }); if (run.length > 1) { const k = a0 / 2, pts = run.map((p, i) => { const q = run[Math.max(0, i - 1)], w = run[Math.min(run.length - 1, i + 1)], dx = w[0] - q[0], dz = w[1] - q[1], L = Math.hypot(dx, dz) || 1; let nx = -dz / L, nz = dx / L; if (nx > 0) { nx = -nx; nz = -nz; } return [p[0] + nx * k, p[1] + nz * k, p[2]]; }); under.push({ pts, r0: k, r1: k + a1 - a0 }); } }  /* (the shopfront side only: the line moved half the width west, the bay side's lots keep their ground) */
         if (under.length % 12 === 0) yield 't:roads';
       }
       // the Golden Gate Bridge's ends: the ground meets the deck (just under it) where the land comes up to it
@@ -948,7 +950,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       // (past it the next near tile's own fine grid when that is in: clamped heights there stood the strips' outer sides sheer, slabs along the tile edges, user 2026-11-05)
       const nb = (x, z, w) => { const [tx, ty] = tileOf(x, z), n = near.get(key(NEAR_Z, tx, ty)); return n && n !== c && n.lod === 0 && n.grid ? gridHeight(n.grid, x, z, w ? n.grid.raw : n.grid.hs) : null; };
       // (A39: in the hand corridor the ground a strip runs down or up to is the hand ground, handY: on the tile's grid there the strips lay in and over it)
-      const ground = (x, z) => handY(x, z) ?? gridHeight(g, x, z) ?? nb(x, z, false) ?? gridHeight(g, ...cl(x, z)), raw = (x, z) => handY(x, z) ?? gridHeight(g, x, z, g.raw) ?? nb(x, z, true) ?? gridHeight(g, ...cl(x, z), g.raw), n1 = g.segs + 1;
+      const ground = (x, z) => handY(x, z) ?? gridHeight(g, x, z) ?? nb(x, z, false) ?? gridHeight(g, ...cl(x, z)), raw = (x, z) => handY(x, z) ?? (townLevel(x, z) ? gridHeight(g, x, z) ?? nb(x, z, false) : null) ?? gridHeight(g, x, z, g.raw) ?? nb(x, z, true)  /* (A76: TOWN_LEVEL: the strips run to the levelled ground, not the lidar's bank) */ ?? gridHeight(g, ...cl(x, z), g.raw), n1 = g.segs + 1;
       const osm = new Map(), ok = (x, z) => `${Math.floor(x / 4)},${Math.floor(z / 4)}`;
       for (const line of t.rails || []) for (const [x, z] of resample(line.map(([la, lo]) => proj.xz(la, lo)), 2)) (osm.get(ok(x, z)) ?? osm.set(ok(x, z), []).get(ok(x, z))).push([x, z]);
       // (a mapped rail beside this edge: from a metre and a half inside it to 6 m out, within 4 m along)
@@ -1802,13 +1804,16 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         { let cx = 0, cz = 0; for (const p of ring.slice(0, -1)) { cx += p[0]; cz += p[1]; } pts.push([cx / (ring.length - 1), cz / (ring.length - 1)]); }
         for (const p of pts) { const h = hAt(p[0], p[1]); if (h != null) { m += h; k++; gx = Math.max(gx, h); base = Math.min(base, h); } } m = k ? m / k : base;
         const top = Math.max(m + lb[0], gx + Math.min(2.4, lb[0]));
+        // (A76: downtown Sausalito's hillside, svs_541450_L to 541600_L: houses of two and three storeys stepping up the hill, their backs in it; the rule above
+        // ran a downhill wall the whole drop under the footprint, 12 to 16 m towers of windows over Bridgeway)
+        const townHill = R0[0][0] > 37.8545 && R0[0][0] < 37.86 && R0[0][1] > -122.486 && R0[0][1] < -122.479 && top - base > 9.5;
         // (A37: its front: toward the nearest named road within 40 m, bldglidar.js, for its porch or veranda, props.js)
         // (Fort Baker's: toward its parade ground, the middle of Murray Circle (cache/roads lines.json): its barracks' verandas
         // face the parade, a lane behind them, murraycircle_0a_0230)
         const baker = R0[0][0] > 37.832 && R0[0][0] < 37.841 && R0[0][1] > -122.4825 && R0[0][1] < -122.474;
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
-        list.push({ ring, base, pier, frontage: f.bd?.frontage, maxTop: m + lb[1], h: top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        list.push({ ring, base, pier, frontage: f.bd?.frontage, maxTop: townHill ? base + 9.5 + lb[1] - lb[0] : m + lb[1], h: townHill ? 9.5 : top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
         handLook(R0, list.at(-1));
         continue;
       }
@@ -2163,6 +2168,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     return false; };
   // (A39: the hand-built ground's own height where it is the ground drawn (inside the corridor), hand.js yAt; null elsewhere. One height there for every
   // generated thing in the corridor: before it they stood on the tile's 7.5 m grid, over or under the hand ground by up to a metre. __w3.noHandY: as before)
+  const townLevel = (x, z) => { const la = proj.lat(z), lo = proj.lon(x); const ex = (lo + 122.481976) * 88000, ny = (la - 37.858007) * 111195; return lo > -122.4835 && lo < -122.4785 && (109.5 * ny + 100.1 * ex) / 148.4 < -4 && (109.5 * ny + 100.1 * ex) / 148.4 > -27 && TOWN_LEVEL.some(([s0, n0]) => la >= s0 && la <= n0); };  // (A76: the shopfront side of Bridgeway's line only, 4 m past it)
   const HY = !globalThis.__w3?.noHandY, handY = (x, z) => { if (!HY || !HAND.ready || !HAND.yAt) return null; const y = HAND.yAt(x, z); return y == null || !inHandAll(x, z) ? null : y; };
   // the height of the surface drawn at a point: inside the hand-built corridor the lidar's ground (the hand terrain is
   // built from it; there is no height lookup of that mesh itself, hand/ground.json holds its texture only), else the

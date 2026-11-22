@@ -15,5 +15,8 @@ export const PLAZA_PALMS = [[37.8561526,-122.4795190,7.3,4.1],[37.8560398,-122.4
 export const TREE_FIX = [[37.857908,-122.481435,'spine',13,7.5],[37.857831,-122.481362,'spine',14.5,8.5],[37.857757,-122.481416,'spine',14.5,8.5],[37.857581,-122.481184,'spine',13,8],[37.856115,-122.479321,null],[37.855977,-122.479232,null],[37.856002,-122.479125,'cypress'],[37.856316,-122.479608,'cypress']];
 // (A73: svs_541400_R to svs_541600_R: the car parks on the bay side of Bridgeway north of the plaza stand under Italian stone pines.
 // [s, w, n, e, species, k, lat0, lon0]: the box's part with lat - lat0 >= (lon - lon0) * k, the bay side of Bridgeway through svs_541500)
+// (A76: Bridgeway's shopfronts north of the plaza stand at the sidewalk 10 to 14 m from its centre, svs_541450_L; the
+// lidar's 7.5 m grid ran a grass bank from the kerb up to them: [south, north, level to m, eased back by m] from the centre)
+export const TOWN_LEVEL = [[37.8566, 37.858, 20, 25]];
 export const TREE_ZONES = [[37.8566, -122.4822, 37.8590, -122.4798, 'spine', -0.8, 37.85761, -122.48142]];
 

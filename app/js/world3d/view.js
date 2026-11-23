@@ -1562,6 +1562,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       }, t.mvEdges, proj.xz, t.townWalk) : null;
       const palms = PLAZA_PALMS.map(([lat, lon, h, radius]) => [...proj.xz(lat, lon), h, radius])
         .filter(([x, z]) => x >= tb[0] && x < tb[2] && z >= tb[1] && z < tb[3] && koGap(x, z) > 1.5);
+      // (A78: svs_541550_L: the hand walls of TOWN_WALLS stand at the sidewalk's back: the walk runs to their face, as it does a house's, and no further)
+      const townWalls = TOWN_WALLS.map(([a, o, da, dn]) => [...proj.xz(a / 1e6, o / 1e6), ...proj.xz((a + da) / 1e6, (o + dn) / 1e6)]);
+      const byWall = (x, z) => townWalls.some(([ax, az, bx, bz]) => { const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz, t = l2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2)) : 0; return Math.hypot(x - ax - dx * t, z - az - dz * t) < 0.3; });
       const geom = yield* townEdgeGeometry(c.lines, streets, { palms, surveyedWalk: t.townWalk,
         sectionAt, support: support || undefined, rampGap: openings && ((x, z) => openings.gap(x, z)),
         ground: (x, z) => drawnY(x, z), gap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z)), roadGap(x, z) ?? Infinity),
@@ -1576,7 +1579,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         walkGap: (x, z) => Math.min(KOR?.gap(x,z,drawnY(x,z)) ?? Infinity, pavementKeep.gap(x,z,drawnY(x,z))),
         // (A63: the bay promenade's riprap runs down to where the ground goes under the bay)
         sea: SEA,
-        blocked: (x, z) => inHandAll(x, z) || (sectionAt ? blocks.get(boxCell(x) + ',' + boxCell(z)) || [] : buildings).some(b => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && inRings(b.rings, x, z)),
+        blocked: (x, z) => inHandAll(x, z) || byWall(x, z) || (sectionAt ? blocks.get(boxCell(x) + ',' + boxCell(z)) || [] : buildings).some(b => x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1 && inRings(b.rings, x, z)),
       });
       if (geom) { const mesh = new THREE.Mesh(geom, mats.furn); mesh.name = 'town-sidewalks'; mesh.receiveShadow = true; grp.add(mesh); }
     }

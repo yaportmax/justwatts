@@ -91,8 +91,8 @@ export const TOWN_HAND = new Map(Object.entries({
   "3785730,-12248334": { roof: 'flat', eave: 7, wall: 0xece8e0 },
   "3785718,-12248120": { street: 1, roof: 'gable', rise: 3, eave: 6, wall: 0xb0c4d6, roofColor: 0x6b665e, style: 5 },  // blue-grey clapboard house, svs_541450_L
   "3785730,-12248128": { street: 1, roof: 'hip', rise: 1.2, eave: 5, wall: 0xc8d0d8, roofColor: 0x6b665e },
-  "3785739,-12248144": { street: 1, roof: 'hip', rise: 1.2, eave: 5, wall: 0xe8d4b8, roofColor: 0x6b7680 },
-  "3785750,-12248155": { roof: 'hip', rise: 1.6, eave: 7, wall: 0xbcc0b4, roofColor: 0x6b665e },  // grey stucco villa with arched windows, svs_541500_L
+  "3785739,-12248144": { street: 1, roof: 'gable', rise: 2, eave: 4, wall: 0xdfe6de, roofColor: 0x6f8a80 },  // the low shop under a green metal roof, svs_541500_L,
+  "3785750,-12248155": { roof: 'flat', eave: 10, wall: 0xbcc0b4, roofColor: 0x6b665e },  // grey stucco villa with arched windows, svs_541500_L
   "3785815,-12248255": { roof: 'flat', eave: 10, wall: 0xe6dcc4, face: 45, bays: 1 },  // cream flats, svs_541600_L
   "3785362,-12247855": { roof: 'hip', rise: 2.2, eave: 6, wall: 0xf3f1ea, roofColor: 0x7c7a75 },  // the white pier building with arches
   // Bridgeway east side, the 600 block, svs_541200_R (north to south)

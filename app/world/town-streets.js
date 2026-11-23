@@ -18,5 +18,11 @@ export const TREE_FIX = [[37.857908,-122.481435,'spine',13,7.5],[37.857831,-122.
 // (A76: Bridgeway's shopfronts north of the plaza stand at the sidewalk 10 to 14 m from its centre, svs_541450_L; the
 // lidar's 7.5 m grid ran a grass bank from the kerb up to them: [south, north, level to m, eased back by m] from the centre)
 export const TOWN_LEVEL = [[37.8566, 37.858, 20, 25]];
+// (A77: the lidar canopy (chm8) peaks on the slope west of Bridgeway, 3 m clear of any building, where trees.bin has no crown within 5 m:
+// svs_541500_L and svs_541550_L show the hillside over the shops wooded. [lat, lon, height, crown radius, species])
+export const TREE_ADD = [[37.85792,-122.482276,11.2,6,'oak'],[37.857757,-122.48276,26.4,4,'oak'],[37.857418,-122.483368,18.7,6,'oak'],[37.857343,-122.48165,9.6,5,'oak'],[37.857205,-122.482616,18.5,6,'oak'],[37.857168,-122.482688,19.2,6,'oak'],[37.857155,-122.4819,10.7,4.2,'oak'],[37.85703,-122.4819,10.7,3.5,'oak'],[37.856905,-122.481739,8.1,2.8,'oak']];
+// (A77: svs_541550_L: at the foot of the slope west of Bridgeway a timber crib wall about 1.7 m tall, then north of it a mossy stone wall about 1.4 m,
+// 11.5 m off the straight through svs_541500. Rows as the baked mvGarden walls: [lat e6, lon e6, dlat e6, dlon e6, height dm, 9 timber or 10 stone])
+export const TOWN_WALLS = [[37857931,-122482064,-19,25,14,10],[37857912,-122482039,-18,25,14,10],[37857894,-122482014,-18,25,14,10],[37857876,-122481989,-18,25,14,10],[37857858,-122481964,-18,26,14,10],[37857840,-122481938,-19,25,17,9],[37857821,-122481913,-18,25,17,9],[37857803,-122481888,-18,25,17,9],[37857785,-122481863,-18,25,17,9],[37857767,-122481838,-18,25,17,9],[37857749,-122481813,-18,26,17,9],[37857731,-122481787,-19,25,17,9],[37857712,-122481762,-18,25,17,9],[37857694,-122481737,-18,25,17,9],[37857676,-122481712,-18,25,17,9]];
 export const TREE_ZONES = [[37.8566, -122.4822, 37.8590, -122.4798, 'spine', -0.8, 37.85761, -122.48142]];
 

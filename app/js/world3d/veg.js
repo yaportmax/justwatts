@@ -1,6 +1,6 @@
 import { NORTH_TREES } from '../../world/north-trees.js';
 import { MV_TREES } from '../../world/mv-trees.js';
-import { TREE_FIX, TREE_ZONES } from '../../world/town-streets.js';
+import { TREE_FIX, TREE_ZONES, TREE_ADD } from '../../world/town-streets.js';
 // World 3D ground cover of the Marin Headlands (tools/veg_bake.py: from USDA NAIP aerial imagery and OpenStreetMap):
 // one grid over VEG's box, linear in latitude and longitude, a class per cell of about 3.3 by 3.8 m: 0 none (sea,
 // water, sand, buildings, outside the Headlands), 1 grass, 2 coastal scrub, 3 cypress or pine, 4 bare earth or rock,
@@ -164,6 +164,7 @@ export function loadTrees({ fetch = globalThis.fetch?.bind(globalThis), url = '/
         // (A73: hand-set lidar crowns, world/town-streets.js TREE_FIX: Street View's species, or none where a palm stands)
         if (la1 < 37.8555 || la0 > 37.8585 || lo1 < -122.4835 || lo0 > -122.4785) each(la0, lo0, la1, lo1, fn);
         else each(la0, lo0, la1, lo1, (la, lo, h, r, sp) => { const f = TREE_FIX.find(t => Math.abs(t[0] - la) < 1.5e-5 && Math.abs(t[1] - lo) < 1.9e-5), zn = TREE_ZONES.find(q => la >= q[0] && la <= q[2] && lo >= q[1] && lo <= q[3] && la - q[6] >= (lo - q[7]) * q[5]); if (!f) fn(la, lo, h, r, zn ? zn[4] : sp, undefined, zn ? 1 : 0); else if (f[2]) fn(la, lo, f[3] ?? h, f[4] ?? r, f[2]); });
+        if (!(la1 < 37.8555 || la0 > 37.8585 || lo1 < -122.4835 || lo0 > -122.4785)) for (const t of TREE_ADD) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(...t);
         if (!(la1 < 37.8741 || la0 > 37.8895 || lo1 < -122.5328 || lo0 > -122.5101)) for (const t of NORTH_TREES) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(...t);
         // (A72: Mill Valley's hillsides, world/mv-trees.js: the lidar canopy's crowns where trees.bin has none)
         if (!(la1 < 37.884 || la0 > 37.914 || lo1 < -122.566 || lo0 > -122.521)) for (const t of MV_TREES) if (t[0] >= la0 && t[0] <= la1 && t[1] >= lo0 && t[1] <= lo1) fn(t[0], t[1], t[2], t[3], t[4], 1);

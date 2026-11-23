@@ -26,7 +26,7 @@ import { TOWN_PIERS, DOCK_ENTRANCES } from '../../world/town-piers.js';
 import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2, inRings } from './landuse.js';
-import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS, TOWN_LEVEL } from '../../world/town-streets.js';
+import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS, TOWN_LEVEL, TOWN_WALLS } from '../../world/town-streets.js';
 import { TOWN_HAND } from '../../world/town-hand.js';
 import { loadMarshPath, loadShopSigns, millValleyLots, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -1583,20 +1583,22 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
     // (A64: Molino's front boundaries and Miller's school athletic field. Use
     // terrain at both feet and discard segments in driveways or buildings.)
     let gardenWalls;
-    if (t.gardenEdges?.length) {
+    // (A77: the hand walls of world/town-streets.js TOWN_WALLS, each drawn by the tile its start lies in)
+    const tbw = tileBox(c), gEdges = (t.gardenEdges || []).concat(TOWN_WALLS.filter(([a, o]) => a / 1e6 <= proj.lat(tbw[1]) && a / 1e6 > proj.lat(tbw[3]) && o / 1e6 >= proj.lon(tbw[0]) && o / 1e6 < proj.lon(tbw[2])));
+    if (gEdges.length) {
       const footprints = t.features.filter(f => f.k === 'building').map(f => {
         const rings = f.rings.map(r => r.map(p => proj.xz(...p))), points = rings.flat();
         const xs = points.map(p => p[0]), zs = points.map(p => p[1]);
         return { rings, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
       });
       const blocked = (x,z, surveyed = false) => (!surveyed && inHandAll(x,z)) || footprints.some(b => x>=b.x0 && x<=b.x1 && z>=b.z0 && z<=b.z1 && inRings(b.rings,x,z));
-      gardenWalls = gardenWallRuns(t.gardenEdges, proj.xz, drawnY, koGap, blocked);
-      const garden = gardenBoundaries(t.gardenEdges, proj.xz, drawnY, koGap, blocked);
+      gardenWalls = gardenWallRuns(gEdges, proj.xz, drawnY, koGap, blocked);
+      const garden = gardenBoundaries(gEdges, proj.xz, drawnY, koGap, blocked);
       if (garden) {
         const mesh = new THREE.Mesh(garden, mats.furn);
         mesh.name = 'garden-boundaries'; mesh.receiveShadow = true; grp.add(mesh);
       }
-      const fence = athleticFence(t.gardenEdges, proj.xz, drawnY, koGap, blocked);
+      const fence = athleticFence(gEdges, proj.xz, drawnY, koGap, blocked);
       if (fence) {
         fieldMaterial ??= athleticFenceMaterial();
         const mesh = new THREE.Mesh(fence, fieldMaterial);

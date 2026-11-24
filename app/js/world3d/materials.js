@@ -804,7 +804,7 @@ export function buildingMaterial() {
           vec2 org = vec2(mod(s, 4.0), floor(s / 4.0) + ground * 2.0);
           vec2 uv = (org + vec2(f.x, 1.0 - f.y)) / 4.0;
           vec4 w = textureGrad(tWin, uv, dFdx(q) / 4.0 * vec2(1.0, -1.0), dFdy(q) / 4.0 * vec2(1.0, -1.0));
-          if (style == 8.0) w = vec4(1.0, 1.0, 1.0, 0.0);  // (A37: a metal shed: no windows, its corrugations below, review2 w_east1)
+          if (style == 8.0 || vBw.y < 0.0) w = vec4(1.0, 1.0, 1.0, 0.0);  // (A78: and none in a foundation, props.js under)  // (A37: a metal shed: no windows, its corrugations below, review2 w_east1)
           vec3 wall = diffuseColor.rgb * (0.92 + 0.12 * nz);
           if (style == 5.0) wall *= 0.9 + 0.1 * step(0.5, fract(vBw.y / 0.22));   // clapboard / shingle siding
           if (style == 8.0) wall *= 0.86 + 0.14 * smoothstep(0.2, 0.8, abs(fract(vBw.x / 0.2) - 0.5) * 2.0) * (1.0 - smoothstep(0.02, 0.08, fwidth(vBw.x)));

@@ -594,12 +594,14 @@ export function buildingGeometry(list, deckPlants) {
         signWall = i; signLength = length;
       }
     }
+    // (A78: a hillside house: its windows in its own storeys under the eaves, below them the slope's plain foundation, materials.js)
+    const under = b.upper != null && !b.frontage ? Math.max(0, hw - Math.max(6, b.upper - rise)) : 0;
     let run = h(6) * 3;
     for (let i = 0; i < r.length; i++) {
       const p = r[i], q = r[(i + 1) % r.length], L = Math.hypot(q[0] - p[0], q[1] - p[1]), f = 0.9 + 0.1 * h(i + 20), k = [wc[0] * f, wc[1] * f, wc[2] * f];
       const foot = b.sourceType === 'houseboat' ? b.base : b.base - 1;
       const A = [p[0], foot, p[1]], B = [q[0], foot, q[1]], C = [q[0], top, q[1]], D = [p[0], top, p[1]];
-      const a = [run, -1, style, 0], bb = [run + L, -1, style, 0], c = [run + L, hw, style, 0], d = [run, hw, style, 0];
+      const a = [run, -1 - under, style, 0], bb = [run + L, -1 - under, style, 0], c = [run + L, hw - under, style, 0], d = [run, hw - under, style, 0];
       // (A67: sa_1200 and sa_2000. Set display windows into the street-facing wall. The awning ends
       // at the original facade line, so neither fabric nor glass projects into the road or a neighbouring shop.)
       const nx = (q[1] - p[1]) / L, nz = (p[0] - q[0]) / L;

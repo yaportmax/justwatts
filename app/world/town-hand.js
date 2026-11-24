@@ -36,12 +36,20 @@ export const TOWN_HAND = new Map(Object.entries({
   "3790056,-12254008": { roof: 'gable', rise: 2.0, eave: 4.0, wall: 0x7c5c44, roofColor: 0x55534f, style: 5, front: 230, awning: 0 },
   "3790385,-12254472": { roof: 'gable', rise: 2.2, eave: 3.4, wall: 0x8c3a2e, roofColor: 0x5c5a55, style: 5 },  // red clapboard, grey shingle gable, mv2_592600_f
   // Lytton Square approach, mv2_593000_f: cream stucco with arches, red tile
-  "3790566,-12254831": { roof: 'hip', rise: 1.5, eave: 6.4, wall: 0xe9dcc0, roofColor: 0x9a4a33, front: 55, trim: 0x4a3a30, awning: 0 },
+  "3790566,-12254831": { roof: 'hip', rise: 2.6, style: 7, eave: 6.4, wall: 0xe9dcc0, roofColor: 0x9a4a33, front: 55, trim: 0x4a3a30, awning: 0 },
   "3790580,-12254837": { roof: 'hip', rise: 1.5, eave: 6.4, wall: 0xe9dcc0, roofColor: 0x9a4a33 },
-  "3790590,-12254848": { roof: 'hip', rise: 1.2, eave: 6.4, wall: 0xe4d6bc, roofColor: 0x9a4a33, front: 317, trim: 0x4a3a30, awning: 0 },
+  "3790590,-12254848": { roof: 'hip', rise: 2.4, style: 7, eave: 6.4, wall: 0xe4d6bc, roofColor: 0x9a4a33, front: 317, trim: 0x4a3a30, awning: 0 },
   "3790620,-12254798": { roof: 'hip', rise: 1.8, eave: 6.0, wall: 0xeee6d6, roofColor: 0x9a4a33, front: 324, trim: 0x4a3a30, awning: 0 },
   "3790623,-12254862": { roof: 'hip', rise: 1.4, eave: 6.8, wall: 0xf0ead8, roofColor: 0x9a4a33 },
   "3790630,-12254858": { roof: 'hip', rise: 1.6, eave: 6.8, wall: 0xf3efe6, roofColor: 0x9a4a33, front: 91, trim: 0x4a3a30, awning: 0 },
+  // (A78: Lytton Square by eye, mv2_593065_f, mv2_593000_f and mv2_592900_f)
+  "3790657,-12254832": { roof: 'gable', rise: 4, eave: 6, wall: 0xeeebe2, roofColor: 0x6a4a3a, trim: 0x3a2e26, front: 168, awning: 0 },  // the Tudor corner: white with dark timbers under a steep brown tile roof, mv2_593065_f
+  "3790659,-12254849": { roof: 'gable', rise: 3, eave: 5.5, wall: 0xeeebe2, roofColor: 0x6a4a3a },
+  "3790621,-12254753": { roof: 'hip', rise: 1.5, eave: 4.5, wall: 0xe8dcc4, roofColor: 0x9a4a33, front: 245, trim: 0x5a4030, awning: 0 },  // low cream shops under red tile across the square, mv2_593000_f
+  "3790542,-12254798": { roof: 'gable', rise: 2.5, eave: 4.5, wall: 0xf0eee8, roofColor: 0x55534f },  // white house under a dark gable, mv2_592900_f left
+  "3790548,-12254804": { roof: 'gable', rise: 2.5, eave: 4.5, wall: 0xf0eee8, roofColor: 0x55534f },
+  "3790547,-12254703": { roof: 'gable', rise: 2, eave: 4.5, wall: 0x4e4036, roofColor: 0x4a4744, style: 5 },  // dark timber under the redwoods, mv2_592900_f right
+  "3790636,-12254686": { roof: 'hip', rise: 2, eave: 7, wall: 0xe6dfcf, roofColor: 0x6a5a4c },  // two storeys behind the trees, not a block; mv2_592900_f right
   "3790620,-12254870": { roof: 'hip', rise: 1.4, eave: 6.6, wall: 0xece2cc, roofColor: 0x9a4a33, front: 140, trim: 0x4a3a30, awning: 0 },
   "3790614,-12254876": { roof: 'hip', rise: 1.4, eave: 6.6, wall: 0xf0ead8, roofColor: 0x9a4a33, front: 139, trim: 0x4a3a30, awning: 0 },
   "3790611,-12254889": { roof: 'hip', rise: 1.2, eave: 6.6, wall: 0xe6dac2, roofColor: 0x9a4a33, front: 140, trim: 0x4a3a30, awning: 0 },

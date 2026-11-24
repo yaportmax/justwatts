@@ -26,7 +26,7 @@ import { TOWN_PIERS, DOCK_ENTRANCES } from '../../world/town-piers.js';
 import { KEEP, ribbons, rule } from './keepout.js';
 import { PLANE, MOUTH, portalFrames, portalAt, courtSkip } from './portals.js';
 import { hash2, inRings } from './landuse.js';
-import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS, TOWN_LEVEL, TOWN_WALLS } from '../../world/town-streets.js';
+import { TOWN_STREETS, TOWN_WATERFRONT, PLAZA_PALMS, TOWN_LEVEL, TOWN_WALLS, TREE_FIX } from '../../world/town-streets.js';
 import { TOWN_HAND } from '../../world/town-hand.js';
 import { loadMarshPath, loadShopSigns, millValleyLots, terrainMaterial, roadMaterial, propMaterial, buildingMaterial, grassMaterial, furnitureMaterial, tunnelMaterial, portalMaterial, withSun, GROUND_SUN, WIND, BORES, REDWOOD, HL, SFB, LAMPS, VEG } from './materials.js';
 import { createHorizon, HZ_LAYER } from './horizon.js';
@@ -1183,12 +1183,17 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
           let moved = false; if (L > 0.2) for (const d of [2, 4, 6, 8]) { const nx = x + gx / L * d, nz = z + gz / L * d; if (!(c.bankH.get(bkey(nx, nz)) < -1e8)) { x = nx; z = nz; moved = true; break; } }
           if (!moved) continue;
         }
+        // (A78: a crown the lidar centres over a roof: its trunk beside the house, on the nearest clear ground up to 6.5 m. Street View's
+        // trees overhang the houses on the hill over Bridgeway, svs_541500_L; 10 of its 28 lidar crowns stood none, a bare hill of houses)
+        let offRoof = false;
+        if (occAt(c.occ, x, z) === 3) { let to = null; for (const d of [2, 3.5, 5, 6.5]) { for (let k = 0; k < 8 && !to; k++) { const q = k * Math.PI / 4 + 0.3, nx = x + Math.cos(q) * d, nz = z + Math.sin(q) * d; if (occAt(c.occ, nx, nz) <= 1 && KO.clear(nx, nz)) to = [nx, nz]; } if (to) break; } if (!to) continue; [x, z] = to; offRoof = true; }
         // (A33: a road over the tree's foot raises the clearance by as much: on Simmonds Road a tree below the road hung its leaves at the rider's height)
         const g00 = roadGap(x, z), ry = g00 != null && g00 < 12 ? roadTopNear(x, z) : null, foot0 = hAt(x, z), lift = ry != null && foot0 != null ? Math.max(0, Math.min(20, ry - foot0)) : 0;
         const f = fitTree(dim, h, r, g00, lift); if (!f) continue;
         // (A74: a tree on a car park's paving, its crown and a sidewalk's width clear of the road, else none: by the street its crown hung over the riding lanes)
-        if (g00 != null && occAt(c.occ, x, z) === 2 && lotNear(c.lotRings, x, z, 1)) continue;  // (a car park's: none within 10 m of a road, its paving by the street is ridden over; A75: a species zone's trees on the ground keep the gap fitTree gives every tree: the lot's own aisles are roads too, and its edge pines all went, svs_541500_R)
+        if (g00 != null && zoned !== 2 && occAt(c.occ, x, z) === 2 && lotNear(c.lotRings, x, z, 1)) continue;  // (A78: not a tree set by hand from Street View, TREE_ADD: Lytton Square's redwoods stand in its lot, mv2_592900_f)  // (a car park's: none within 10 m of a road, its paving by the street is ridden over; A75: a species zone's trees on the ground keep the gap fitTree gives every tree: the lot's own aisles are roads too, and its edge pines all went, svs_541500_R)
         const tr = 0.5 * f.s; let lo2 = Infinity; for (const [dx, dz] of [[tr, 0], [-tr, 0], [0, tr], [0, -tr]]) { const q = hAt(x + dx, z + dz); if (q != null) lo2 = Math.min(lo2, q); }
+        if (offRoof && (foot0 == null || foot0 - lo2 > 0.4 || (() => { let lo = foot0, hi = foot0; for (const [dx, dz] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) { const h = hAt(x + dx, z + dz); if (h == null) return true; lo = Math.min(lo, h); hi = Math.max(hi, h); } return hi - lo > 0.8; })())) continue;  // (and not where its foot would sink under the slope: 2 to 4 m on Bridgeway north, cx-loose50)
         // (a low crown reaching the paving: the way to the road, down the gap's slope; its leaves under the clearance end
         // f.clip metres out that way, A15)
         let clip = null;
@@ -1280,6 +1285,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       for (const [lat, lon, height, radius, winter] of t.streetCrowns) {
         const [x, z] = proj.xz(lat / 1e6, lon / 1e6), ground = drawnY(x, z);
         if (ground == null || inHandAll(x, z)) continue;
+        if (TREE_FIX.some(f => f[2] === null && Math.hypot((f[0] - lat / 1e6) * 111195, (f[1] - lon / 1e6) * 88000) < 4)) continue;  // (A78: none there by hand, or another tree by hand)
         const gap = koGap(x, z);
         if (gap < 1.5) continue;
         const model = winter ? (streetWinter ??= winterStreetTree()) : trees.bay;
@@ -1774,7 +1780,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         if (d.street) { let y = Infinity; for (const p of b.ring) { const t = roadTopNear(p[0], p[1], 14); if (t != null) y = Math.min(y, t); } if (y < b.base) b.base = y + 0.1; }
         if (d.eave != null) b.h = d.eave;
         const rise = d.roof === 'flat' ? 0 : d.rise ?? 2.5;
-        b.rh = rise; b.hc = null; b.minEave = null; b.maxTop = b.base + b.h + rise; b.handRoof = d.roof ?? 'gable'; b.fort = false; b.metal = false;
+        b.rh = rise; b.hc = null; b.minEave = null; b.upper = null; b.maxTop = b.base + b.h + rise; b.handRoof = d.roof ?? 'gable'; b.fort = false; b.metal = false;
         if (d.wall != null) { b.paint = d.wall; if (b.frontage) b.frontage = [b.frontage[0], d.wall]; }
         if (d.face != null) { b.face = d.face; b.bays = d.bays; b.balconies = d.balconies; b.bayColor = d.bayColor; }
         if (d.style != null) b.style = d.style;
@@ -1819,6 +1825,7 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
         let front = lb[3] == null ? null : [Math.sin(lb[3] * Math.PI / 180), -Math.cos(lb[3] * Math.PI / 180)];
         if (baker) { const [px, pz] = proj.xz(37.83614, -122.47913); let cx = 0, cz = 0; const n = ring.length - 1; for (let i = 0; i < n; i++) { cx += ring[i][0]; cz += ring[i][1]; } front = [px - cx / n, pz - cz / n]; }
         list.push({ ring, base, pier, frontage: f.bd?.frontage, maxTop: townHill ? base + 9.5 + lb[1] - lb[0] : m + lb[1], h: townHill ? 9.5 : top - base, rh: lb[1] - lb[0], roof: lb[2], seed: Math.round(ring[0][0] * 13 + ring[0][1] * 7), fort, front: fort ? front : null, baker, metal: !!(lb[6] & 1), gy: (() => { let m = 0, k = 0; for (const p of ring) { const h = gridHeight(c.grid, p[0], p[1], c.grid.raw); if (h != null) { m += h; k++; } } return k ? m / k : null; })() })  /* (gy: the lidar's ground round it, where its porch stands: the grid's carved ground near a road lies metres under it, porches sank to their roofs, fieldroad_0b_0830_tg5) */;
+        { const b = list.at(-1); if (!fort && lb[0] <= 10 && b.h > lb[0] + 1.5) b.upper = lb[1]; }  // (A78: its own storeys under the eaves, the slope below a plain foundation, props.js under)
         handLook(R0, list.at(-1));
         continue;
       }
@@ -1851,7 +1858,9 @@ float a = max(0.0, 1.0 - length(vP) / 7.0); gl_FragColor = vec4(vec3(1.0, 0.78, 
       if (!fort) { const b = list.at(-1); let gx = -Infinity; for (const p of ring) { const g = hAt(p[0], p[1]); if (g != null) gx = Math.max(gx, g); } const up = gx - b.base + 2.4; if (up > b.h) b.h = b.h <= 10 ? Math.min(10, up) : up;
         // (A55: a relative height tag is above the uphill ground, not the downhill
         // foundation. Preserve A38's exposed storey; absolute survey tops stay fixed.)
-        if (b.rh == null && Number.isFinite(gx)) { const ht = hb ? hb[2] : f.h || 6; b.maxTop = Math.max(b.maxTop, gx + ht); b.minEave = Math.min(b.base + b.h, gx + Math.min(2.4, ht)); }
+        if (b.rh == null && Number.isFinite(gx)) { const ht = hb ? hb[2] : f.h || 6; b.maxTop = Math.max(b.maxTop, gx + ht); b.minEave = Math.min(b.base + b.h, gx + Math.min(2.4, ht));
+          // (A78: its own storeys at the top, the slope below them a plain foundation: houses on the hill over Bridgeway stood 10 m of windows, apartment blocks, svs_541500_L)
+          if (ht <= 10 && up > ht + 1.5) b.upper = ht; }
       }
       // (A72: a hand-built look, world/town-hand.js, set by eye from the building's Street View photo; last, so it wins)
       handLook(R0, list.at(-1));
